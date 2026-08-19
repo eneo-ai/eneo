@@ -531,6 +531,154 @@ async def test_runtime_classifies_corrective_text_sent_with_structured_answer(
     ]
 
 
+@pytest.mark.asyncio
+async def test_runtime_applies_exact_structured_answer_without_model_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classify = AsyncMock(
+        return_value=SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(),
+        )
+    )
+    monkeypatch.setattr(runtime, "classify_slots", classify)
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="assistant-output",
+                role="assistant",
+                content="Which output should the flow deliver?",
+                metadata={"question_id": "terminal_output"},
+            ),
+            ConversationMessage(
+                message_id="user-output",
+                role="user",
+                content="pdf_document",
+                metadata={
+                    "question_answer": {
+                        "question_id": "terminal_output",
+                        "selected_option_id": "pdf_document",
+                        "selected_value": "pdf_document",
+                    }
+                },
+            ),
+        ],
+        litellm_client=AsyncMock(),
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+    )
+
+    terminal_output = context.planning_state.resolved_slots["terminal_output"]
+    assert terminal_output.value == "pdf_document"
+    assert terminal_output.source == "structured_answer"
+    classify.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_retains_named_results_until_structured_output_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cited = (
+        ClassifiedEvidence(
+            source_id="user_message:user-requirements",
+            quote="case_id and status",
+        ),
+    )
+    classify = AsyncMock(
+        return_value=SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    names=("case_id", "status"),
+                    confidence="high",
+                    reason="The user explicitly named required result content.",
+                    evidence=cited,
+                    evidence_by_name=(
+                        ClassifiedNamedResultEvidence(
+                            name="case_id",
+                            evidence=cited,
+                        ),
+                        ClassifiedNamedResultEvidence(
+                            name="status",
+                            evidence=cited,
+                        ),
+                    ),
+                )
+            ),
+        )
+    )
+    monkeypatch.setattr(runtime, "classify_slots", classify)
+    first_message = ConversationMessage(
+        message_id="user-requirements",
+        role="user",
+        content="The result must include case_id and status.",
+    )
+
+    first_context = await build_runtime_discovery_context(
+        [first_message],
+        litellm_client=AsyncMock(),
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+    )
+
+    assert "terminal_output" not in first_context.planning_state.resolved_slots
+    assert first_context.planning_state.named_result_obligations == (
+        "case_id",
+        "status",
+    )
+    assert first_context.slot_classification_metadata is not None
+    persisted_metadata = metadata_with_slot_classification(
+        None,
+        first_context.slot_classification_metadata,
+    )
+    assert persisted_metadata is not None
+
+    second_context = await build_runtime_discovery_context(
+        [
+            first_message.model_copy(update={"metadata": persisted_metadata}),
+            ConversationMessage(
+                message_id="assistant-output",
+                role="assistant",
+                content="Which output should the flow deliver?",
+                metadata={"question_id": "terminal_output"},
+            ),
+            ConversationMessage(
+                message_id="user-output",
+                role="user",
+                content="structured_json",
+                metadata={
+                    "question_answer": {
+                        "question_id": "terminal_output",
+                        "selected_option_id": "structured_json",
+                        "selected_value": "structured_json",
+                    }
+                },
+            ),
+        ],
+        litellm_client=AsyncMock(),
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+    )
+
+    assert second_context.planning_state.named_result_obligations == (
+        "case_id",
+        "status",
+    )
+    assert (
+        second_context.planning_state.resolved_slots["terminal_output"].value
+        == "structured_json"
+    )
+    classify.assert_awaited_once()
+
+
 def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
     classification_input = _classification_input(
         [

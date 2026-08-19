@@ -6,9 +6,6 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from eneo.flows.ai_builder.ai_builder_action_policy import (
-    build_planner_action_policy,
-)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
     AI_BUILDER_MAX_ATTACHMENTS,
@@ -561,26 +558,36 @@ async def build_runtime_discovery_context(
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
         )
-    current_user_message_id = classification_input.current_user_message_id
-    current_turn_has_semantic_text = any(
-        source.kind == "user_message" and source.message_id == current_user_message_id
+    latest_classification_index = next(
+        (
+            index
+            for index in range(len(conversation) - 1, -1, -1)
+            if slot_classification_from_metadata(conversation[index].metadata)
+            is not None
+        ),
+        -1,
+    )
+    unclassified_message_ids = {
+        message.message_id
+        for message in conversation[latest_classification_index + 1 :]
+    }
+    has_unclassified_semantic_text = any(
+        source.kind == "user_message" and source.message_id in unclassified_message_ids
         for source in classification_input.sources
     )
-    # User text may correct model-derived slots; structured controls and their
-    # localized labels are already authoritative server-known evidence.
-    if not current_turn_has_semantic_text:
-        action_policy = build_planner_action_policy(
-            session_state=state,
-            selected_discovery_question_ids=(),
-            is_edit_mode=flow is not None,
+    # Exact controls are already validated and replayed into PlanningState. A
+    # classifier call here would reinterpret an authoritative user choice and
+    # repeat free text that an earlier classification already read. A legacy or
+    # degraded conversation can still contain unclassified free text, so the
+    # persisted classification boundary, rather than the latest message alone,
+    # decides whether one understanding call remains necessary.
+    if not has_unclassified_semantic_text:
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
         )
-        if action_policy.allowed_action_kinds == ("refuse_architecture_commit",):
-            return _complete_runtime_discovery_context(
-                state,
-                attachment_context=attachment_context,
-                schema_candidates=schema_candidates,
-                schema_direction_pending=schema_direction_pending,
-            )
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
     model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(
@@ -723,11 +730,6 @@ async def build_runtime_discovery_context(
         model_blocked_slots=model_blocked_slots,
         settled_by_acceptance=settled_by_acceptance,
     )
-    if (
-        not _named_result_classification_is_relevant(candidate_state)
-        and result.named_result_evidence is not None
-    ):
-        result = replace(result, named_result_evidence=None)
     named_result_evidence_snapshot = _materialized_named_result_snapshot(
         candidate_state,
         classified_evidence=result.named_result_evidence,
