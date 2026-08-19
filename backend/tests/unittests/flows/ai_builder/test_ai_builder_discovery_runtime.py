@@ -2471,7 +2471,10 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
         ui_language="sv",
     ).decision
     assert isinstance(confirmation, ConfirmRequirements)
-    assert "sokta_insatser" in confirmation.payload.summary
+    assert [field.id for field in confirmation.payload.named_content_fields] == [
+        "sokta_insatser",
+        "status",
+    ]
 
     proposal_prompt = build_plan_proposal_system_prompt(
         planning_state=replayed,

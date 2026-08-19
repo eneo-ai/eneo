@@ -117,6 +117,7 @@ def build_requirements_disclosure(
         discovery_assumptions,
         render_value=_whole_evidence_value,
         is_edit_mode=is_edit_mode,
+        include_named_content_details=True,
     )
     display = _disclosure_content(
         session_state,
@@ -124,6 +125,7 @@ def build_requirements_disclosure(
         discovery_assumptions,
         render_value=render_ai_builder_evidence_value,
         is_edit_mode=is_edit_mode,
+        include_named_content_details=False,
     )
     return RequirementsSummaryPayload(
         **display.model_dump(),
@@ -175,13 +177,12 @@ def _named_content_fields(
     *,
     render_value: RenderEvidenceValue,
 ) -> list[NamedContentFieldPayload]:
-    """The obligations the summary sentence names, as items rather than prose.
+    """The named result obligations as readable, editable items.
 
-    Order and membership follow `_named_result_summary_line` exactly, weak
-    names included: a reader who compares the list with the sentence must not
-    find a name in one and not the other. Only the display rendering and the
-    origin marker exist here, because this projection is outside the hashed
-    disclosure content — what the result must carry is the same either way.
+    The display summary omits this potentially long identifier list, while the
+    confirmation identity renders every obligation in full. This projection
+    therefore remains outside the hash: it is another view of facts already
+    present in the identity, plus display-only origin provenance.
     """
 
     return [
@@ -201,6 +202,7 @@ def _disclosure_content(
     *,
     render_value: RenderEvidenceValue,
     is_edit_mode: bool,
+    include_named_content_details: bool,
 ) -> RequirementsDisclosureContent:
     resolved = session_state.resolved_slots
     key_decisions = [
@@ -228,7 +230,11 @@ def _disclosure_content(
     output_description = _output_description(resolved, locale)
     summary = _summary_text(resolved, locale)
     schema_summary_lines = _schema_summary_lines(
-        session_state, locale, render_value=render_value, is_edit_mode=is_edit_mode
+        session_state,
+        locale,
+        render_value=render_value,
+        is_edit_mode=is_edit_mode,
+        include_named_content_details=include_named_content_details,
     )
     if schema_summary_lines:
         summary = f"{summary} {' '.join(schema_summary_lines)}"
@@ -625,6 +631,7 @@ def _schema_summary_lines(
     *,
     render_value: RenderEvidenceValue,
     is_edit_mode: bool,
+    include_named_content_details: bool,
 ) -> list[str]:
     lines: list[str] = []
     input_evidence = session_state.input_schema_evidence
@@ -645,7 +652,11 @@ def _schema_summary_lines(
             )
         )
     named_result_line = _named_result_summary_line(
-        session_state, locale, render_value=render_value, is_edit_mode=is_edit_mode
+        session_state,
+        locale,
+        render_value=render_value,
+        is_edit_mode=is_edit_mode,
+        include_details=include_named_content_details,
     )
     if named_result_line is not None:
         lines.append(named_result_line)
@@ -663,6 +674,7 @@ def _named_result_summary_line(
     *,
     render_value: RenderEvidenceValue,
     is_edit_mode: bool,
+    include_details: bool,
 ) -> str | None:
     # Every obligation with the shape the user wrote next to it. The old line
     # showed eight bare names and then claimed structure was not fixed, which
@@ -670,6 +682,20 @@ def _named_result_summary_line(
     obligations = session_state.named_result_evidence
     if not obligations:
         return None
+    projection = named_result_projection(session_state, is_edit_mode=is_edit_mode)
+    if not include_details:
+        if projection is None:
+            return None
+        if locale == "sv":
+            return (
+                "De namngivna delarna byggs på översta nivån, sida vid sida. "
+                "Bifoga ett uttryckligt utdataschema om någon del ska ligga inuti "
+                "en annan."
+            )
+        return (
+            "The named content is built at the top level, side by side. Attach "
+            "an explicit output schema if any part belongs inside another."
+        )
     names = ", ".join(
         _named_result_text(obligation, locale, render_value=render_value)
         for obligation in obligations
@@ -682,7 +708,7 @@ def _named_result_summary_line(
         preserved = (
             f"The user named content that the final result must preserve: {names}."
         )
-    if named_result_projection(session_state, is_edit_mode=is_edit_mode) is None:
+    if projection is None:
         # Nothing is being projected — an edit has no create schema to project
         # into, an exact declared schema owns the shape, or this is not a
         # structured result at all — so describing flat placement would

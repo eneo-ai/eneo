@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    NamedContentFieldPayload,
     RequirementsDisclosureContent,
     RequirementsSummaryPayload,
 )
@@ -203,6 +204,15 @@ class TestRenderConfirmedRequirementsBlocks:
                     "Koppla standardmodellen för textsteg.",
                 ],
             }
+        ).model_copy(
+            update={
+                "named_content_fields": [
+                    NamedContentFieldPayload(
+                        id="beslut",
+                        label="beslut",
+                    )
+                ]
+            }
         )
         version = payload.requirements_version
         conversation = [
@@ -234,6 +244,7 @@ class TestRenderConfirmedRequirementsBlocks:
         assert "Användaren ska kunna granska" not in prompt_block
         assert "Översätt text till text" in prompt_block
         assert "Koppla standardmodellen för textsteg" in prompt_block
+        assert "### Innehåll som resultatet ska bevara\n- beslut" in prompt_block
 
     def test_confirmed_requirements_proposal_block_uses_user_relevant_fields_only(
         self,
@@ -252,6 +263,15 @@ class TestRenderConfirmedRequirementsBlocks:
                 ],
                 "manual_setup_notes": ["Koppla transkriberingsmodellen."],
             }
+        ).model_copy(
+            update={
+                "named_content_fields": [
+                    NamedContentFieldPayload(
+                        id="beslut",
+                        label="beslut",
+                    )
+                ]
+            }
         )
 
         prompt_block = render_confirmed_requirements_proposal_prompt_block(payload)
@@ -262,6 +282,8 @@ class TestRenderConfirmedRequirementsBlocks:
                 "- output_description: DOCX-protokoll.",
                 "- key_decisions:",
                 "  - Indata: Mötesljud vid körning.",
+                "- named_content_fields:",
+                "  - beslut",
                 "- assumptions:",
                 "  - Inga extra fält.",
             )
