@@ -75,21 +75,17 @@ deployment, do not enable or perform raw export. Redacted export remains the
 default. Never place encryption keys, super API keys, or exported evidence in
 incident tickets or command history.
 
-## Stored HTTP credential inventory (M2.9)
+## Stored HTTP credential review (M2.9)
 
 Authored HTTP credentials are encrypted before they are stored, and both saving
 a step and publishing a version refuse a credential that cannot be protected.
 Rows written before that enforcement can still hold an unprotected value, and a
 published version keeps whatever the draft held when it was published.
 
-```bash
-python backend/scripts/flow_http_secret_inventory.py
-```
-
-The scan is read-only across every tenant. It reports each draft step and each
-published version whose declared credential fields are unprotected, and exits
-non-zero when it finds anything. It never rewrites, re-encrypts, or deletes a
-row: what to do about a reported row is an operator decision.
+Review legacy draft steps and published versions through an approved,
+tenant-scoped database support procedure. The application no longer ships a
+cross-tenant inventory command. The review must never rewrite, re-encrypt, or
+delete a row automatically: remediation remains an operator decision.
 
 Two findings are possible. `UNPROTECTED` names the credential fields; the value
 is never printed. It covers a plaintext value, a stored sentinel, and a value

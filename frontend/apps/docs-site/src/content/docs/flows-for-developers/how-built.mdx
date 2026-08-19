@@ -44,16 +44,16 @@ Import-linter enforces package dependency boundaries. Runtime policies enforce t
 
 This is the coarse module index. Use [Reviewing Flows code](/docs/flows-for-developers/reviewing-flows-code) for the ordered procedure and validation sequence.
 
-| Change type                          | Start in                             | Then check                                             |
-| ------------------------------------ | ------------------------------------ | ------------------------------------------------------ |
-| API router or response schema        | `api`                                | `application`, error metadata, generated consumer docs |
-| Runtime executor or worker behavior  | `application`, `runtime`             | `domain`, persistence owner, lifecycle docs            |
-| Step handler or output mode          | `runtime`                            | capability manifest, parser, output processing, tests  |
-| Runtime file or upload binding       | `application`, `infrastructure`      | file services, run contract, consumer files guide      |
-| Schema, migration, or JSONB boundary | `infrastructure`                     | SQLAlchemy table, JSONB owner registry, schema docs    |
-| FlowApiErrorCode or failure path     | `api`                                | error metadata, localization, consumer error reference |
-| Review checkpoint lifecycle          | `application`, `infrastructure`      | checkpoint repository, service, lifecycle docs         |
-| Developer docs or guarded contract   | `backend/scripts`, docs-site content | docs generator, docs contract test, `make docs:regen`  |
+| Change type                          | Start in                        | Then check                                             |
+| ------------------------------------ | ------------------------------- | ------------------------------------------------------ |
+| API router or response schema        | `api`                           | `application`, error metadata, generated consumer docs |
+| Runtime executor or worker behavior  | `application`, `runtime`        | `domain`, persistence owner, lifecycle docs            |
+| Step handler or output mode          | `runtime`                       | capability manifest, parser, output processing, tests  |
+| Runtime file or upload binding       | `application`, `infrastructure` | file services, run contract, consumer files guide      |
+| Schema, migration, or JSONB boundary | `infrastructure`                | SQLAlchemy table, JSONB owner registry, schema docs    |
+| FlowApiErrorCode or failure path     | `api`                           | error metadata, localization, consumer error reference |
+| Review checkpoint lifecycle          | `application`, `infrastructure` | checkpoint repository, service, lifecycle docs         |
+| Developer docs or guarded contract   | docs-site content               | hand-maintained page and docs contract test            |
 
 ## Module ownership
 

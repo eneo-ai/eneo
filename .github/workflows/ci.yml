@@ -174,14 +174,6 @@ jobs:
       - name: Pyright type check
         run: uv run pyright
 
-      - name: Check generated Flow docs
-        working-directory: .
-        run: |
-          make docs:regen
-          git diff --exit-code -- \
-            frontend/apps/docs-site/src/content/docs/flows-for-developers \
-            frontend/apps/docs-site/src/content/guides/flows
-
   backend-tests:
     name: Backend tests
     needs: changes

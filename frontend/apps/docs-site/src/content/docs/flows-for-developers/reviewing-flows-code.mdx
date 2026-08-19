@@ -70,7 +70,7 @@ Update repository writes only through the canonical persistence owner, not ad ho
 
 <h4>Test lifecycle behavior</h4>
 
-Add lifecycle behavior tests, then run `make docs:regen` and the Flow docs contract test.
+Add lifecycle behavior tests, then update the affected Flow documentation and its contract test.
 
 </Steps>
 
@@ -92,7 +92,7 @@ Update parser or output ownership in `backend/src/eneo/flows/runtime/step_defini
 
 <h4>Test and regenerate docs</h4>
 
-Add behavior tests for the capability and run `make docs:regen` plus the Flow docs contract test.
+Add behavior tests for the capability and update the affected Flow documentation plus its contract test.
 
 </Steps>
 
@@ -114,7 +114,7 @@ Parse and validate the envelope at the application or API boundary that first ac
 
 <h4>Test corruption behavior</h4>
 
-Add corruption and migration behavior tests, then run `make docs:regen` and the Flow docs contract test.
+Add corruption and migration behavior tests, then update the affected Flow documentation and its contract test.
 
 </Steps>
 
@@ -136,7 +136,7 @@ Add or update localization in `frontend/apps/web/messages/en.json` and the match
 
 <h4>Test the failure path</h4>
 
-Prove the failure path with a behavior test, then run `make docs:regen` and the Flow docs contract test.
+Prove the failure path with a behavior test, then update the affected Flow documentation and its contract test.
 
 </Steps>
 
@@ -155,11 +155,11 @@ Prove the failure path with a behavior test, then run `make docs:regen` and the 
 
 ## Validation commands
 
-| Category                         | Workdir     | Command                                                                                                                                                          | Checked refs                                                                                                                     | When                                                                                                               |
-| -------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Flow docs regeneration           | `repo root` | `make docs:regen`                                                                                                                                                | `backend/scripts/generate_flow_docs.py`                                                                                          | Run after changing Flow docs generators, source catalogs, schemas, error codes, lifecycle states, or guarded docs. |
-| Docs contract and package layout | `backend`   | `set -a; source .env.template; set +a; uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py tests/unittests/flows/test_flow_package_layout.py -q` | `backend/tests/unittests/flows/test_flow_docs_site_contract.py`<br />`backend/tests/unittests/flows/test_flow_package_layout.py` | Run after changing guarded developer docs, error codes, tables, lifecycle states, or root modules.                 |
-| Import boundary                  | `backend`   | `uv run lint-imports --no-cache`                                                                                                                                 | `backend/.importlinter`                                                                                                          | Run after changing Flow package layout or dependency boundaries.                                                   |
+| Category                         | Workdir     | Command                                                                                                                                                          | Checked refs                                                                                                                     | When                                                                                               |
+| -------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Flow docs review                 | `repo root` | Review changed Flow contracts against the docs site                                                                                                              | `frontend/apps/docs-site/src/content/docs/flows-for-developers`                                                                  | Run after changing schemas, error codes, lifecycle states, or guarded docs.                        |
+| Docs contract and package layout | `backend`   | `set -a; source .env.template; set +a; uv run pytest tests/unittests/flows/test_flow_docs_site_contract.py tests/unittests/flows/test_flow_package_layout.py -q` | `backend/tests/unittests/flows/test_flow_docs_site_contract.py`<br />`backend/tests/unittests/flows/test_flow_package_layout.py` | Run after changing guarded developer docs, error codes, tables, lifecycle states, or root modules. |
+| Import boundary                  | `backend`   | `uv run lint-imports --no-cache`                                                                                                                                 | `backend/.importlinter`                                                                                                          | Run after changing Flow package layout or dependency boundaries.                                   |
 
 ## Debugging a stuck run
 

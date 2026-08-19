@@ -58,9 +58,8 @@ provenance value instead of creating another omission model.
 
 ## Where each root entry goes
 
-The table is read by `backend/scripts/flow_developer_architecture_docs.py` to
-generate the developer docs site, so its header and column order are a
-contract: change the rows freely, keep the shape.
+The table is the hand-maintained review record for the Flow package boundary.
+Update it whenever a root entry moves or is removed.
 
 | Entry | Kind | Target home | Rationale |
 | --------------------------------- | ------- | -------------- | ------------------------------------------------------------------------------------- |

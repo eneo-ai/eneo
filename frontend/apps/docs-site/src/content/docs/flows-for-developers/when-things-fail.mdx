@@ -34,7 +34,7 @@ flowchart LR
 - `run.error.retryable` means a consumer may safely submit a new logical run after terminalization. Neither retryable field starts work automatically.
 - For create-run backpressure, branch on HTTP `429` plus `flow_run_concurrency_limit_reached`, honor `Retry-After`, and do not branch on legacy numeric code `9007`.
 - Use `/guides/flows-api-guide` for the polling, review, rerun, evidence, and artifact API paths.
-- Run `make docs:regen` from the repository root after changing Flow error codes, metadata, or localization.
+- Update this page when Flow error codes, metadata, or localization change.
 - End users should see the user action, not backend internals or invariant names.
 
 ## Failure triage
