@@ -2188,6 +2188,30 @@ async def test_classification_cache_separates_active_checkpoint_producers() -> N
 
 
 @pytest.mark.asyncio
+async def test_classifier_targets_the_reviewed_value_before_a_document_artifact() -> (
+    None
+):
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(json.dumps({}))
+
+    result = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(model="gpt-test"),
+        classification_input=_classification_input(
+            "Let me correct the extracted fields before filling the DOCX template."
+        ),
+        allowed_slot_values={"terminal_output": {"docx_document"}},
+        tenant_id=uuid4(),
+    )
+
+    assert result.result is not None
+    prompt = litellm_client.acompletion.await_args.kwargs["messages"][0]["content"]
+    assert "Choose the producer whose value the person reviews" in prompt
+    assert "use structured_result" in prompt
+    assert "does not turn that upstream field review into report_text" in prompt
+
+
+@pytest.mark.asyncio
 async def test_classification_cache_ignores_credential_only_differences() -> None:
     litellm_client = AsyncMock()
     text = f"credential-target-{uuid4()}"
