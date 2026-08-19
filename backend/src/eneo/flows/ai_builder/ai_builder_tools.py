@@ -428,9 +428,33 @@ def _rehome_misplaced_create_children(
         admitted_steps.append(candidate_map or cast(object, candidate))
         pending.extendleft(reversed(nested_steps))
 
-    if not changed:
-        return arguments
-    return {**arguments, "steps": admitted_steps}
+    admitted = {**arguments, "steps": admitted_steps} if changed else arguments
+
+    # A non-strict tool implementation can also close the final step object
+    # before its optional tail. Rehome only keys that the prepared schema says
+    # are optional step properties and never valid at the root. If the final
+    # step already carries the key, leave the duplicate invalid rather than
+    # guessing which value should win.
+    root_keys = frozenset(properties)
+    step_tail_keys = allowed_step_keys - root_keys - required_step_keys
+    misplaced_tail = step_tail_keys.intersection(admitted)
+    admitted_tail_steps = admitted.get("steps")
+    if not misplaced_tail or not isinstance(admitted_tail_steps, list):
+        return admitted
+    tail_steps = list(cast(list[object], admitted_tail_steps))
+    if not tail_steps or not isinstance(tail_steps[-1], dict):
+        return admitted
+    final_step = cast(dict[str, object], tail_steps[-1])
+    movable_tail = tuple(key for key in misplaced_tail if key not in final_step)
+    if not movable_tail:
+        return admitted
+    updated = {key: value for key, value in admitted.items() if key not in movable_tail}
+    tail_steps[-1] = {
+        **final_step,
+        **{key: admitted[key] for key in movable_tail},
+    }
+    updated["steps"] = tail_steps
+    return updated
 
 
 def _actionable_validation_error(

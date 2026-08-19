@@ -3958,6 +3958,130 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     assert validate_spec(compiled).valid
 
 
+def test_document_reader_with_corpus_fields_stays_one_single_call() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Granska dokument tillsammans",
+            "plan_rationale": "Läs dokumenten och leverera en samlad matris.",
+            "steps": [
+                {
+                    "name": "Granska underlagen",
+                    "instructions": "Läs alla dokument och jämför dem.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "children": [
+                                {
+                                    "name": "document_type",
+                                    "field_type": "string",
+                                    "description": "Dokumenttyp.",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "comparisons",
+                            "field_type": "array",
+                            "description": "Jämförelser mellan dokumenten.",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.JSON,
+            runtime_max_files=99,
+            aggregation_intent="linear",
+            ui_language="sv",
+        ),
+    )
+
+    reader = compiled.steps[0]
+    runtime_input = (reader.input_config or {}).get("runtime_input") or {}
+    assert runtime_input.get("execution_mode", "single_call") == "single_call"
+    assert set((reader.output_contract or {})["properties"]) == {
+        "documents",
+        "comparisons",
+    }
+    assert validate_spec(compiled).valid
+
+
+def test_compare_fan_in_follows_a_localized_document_container_rename() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Jämför upphandlingsunderlag",
+            "plan_rationale": "Läs varje dokument och jämför strukturerade fakta.",
+            "steps": [
+                {
+                    "name": "Läs dokumenten",
+                    "instructions": "Extrahera fakta ur varje dokument.",
+                    "output_fields": [
+                        {
+                            "name": "dokument",
+                            "field_type": "array",
+                            "description": "En post per dokument.",
+                            "children": [
+                                {
+                                    "name": "titel",
+                                    "field_type": "string",
+                                    "description": "Dokumentets titel.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Analysera dokumenten",
+                    "instructions": "Analysera dokumentens fakta.",
+                    "output_fields": [
+                        {
+                            "name": "risker",
+                            "field_type": "array",
+                            "description": "Identifierade risker.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Sammanställ jämförelsen",
+                    "instructions": "Sammanställ den strukturerade jämförelsen.",
+                    "output_fields": [
+                        {
+                            "name": "sammanfattning",
+                            "field_type": "string",
+                            "description": "Sammanfattning av jämförelsen.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.JSON,
+            runtime_max_files=4,
+            aggregation_intent="compare",
+            ui_language="sv",
+        ),
+    )
+
+    assert "documents" in (compiled.steps[0].output_contract or {})["properties"]
+    assert compiled.steps[-1].input_bindings is not None
+    assert {
+        (ref["step_ref"], ref["field_path"])
+        for ref in compiled.steps[-1].input_bindings["source_refs"]
+    } >= {("step_a", "documents"), ("step_b", "risker")}
+    assert validate_spec(compiled).valid
+
+
 def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
     outline = parse_create_flow_intent_arguments(
         {
@@ -6636,6 +6760,58 @@ def test_compare_json_terminal_compiles_with_typed_fan_in() -> None:
     refs = (terminal.input_bindings or {}).get("source_refs") or []
     assert {ref["step_ref"] for ref in refs} == {"step_a", "step_b"}
     assert all(ref["output"] == "structured" for ref in refs)
+    assert validate_spec(compiled).valid
+
+
+def test_compare_json_terminal_uses_the_latest_duplicate_projection_field() -> None:
+    def field(name: str) -> dict[str, object]:
+        return {
+            "name": name,
+            "field_type": "string",
+            "description": f"{name} från jämförelsen.",
+            "required": True,
+        }
+
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Jämförelse med förfinade nyckelfakta",
+            "plan_rationale": "Senare analys förfinar tidigare extraktion.",
+            "steps": [
+                {
+                    "name": "Extrahera underlag",
+                    "instructions": "Extrahera nyckelfakta och källtyp.",
+                    "output_fields": [field("nyckelfakta"), field("kalltyp")],
+                },
+                {
+                    "name": "Analysera underlag",
+                    "instructions": "Förfina nyckelfakta och identifiera risker.",
+                    "output_fields": [field("nyckelfakta"), field("risker")],
+                },
+                {
+                    "name": "Sammanställ resultat",
+                    "instructions": "Sammanställ den förfinade jämförelsen.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.JSON,
+            aggregation_intent="compare",
+            ui_language="sv",
+        ),
+    )
+
+    terminal = compiled.steps[-1]
+    refs = (terminal.input_bindings or {}).get("source_refs") or []
+    assert [(ref["step_ref"], ref["field_path"]) for ref in refs] == [
+        ("step_a", "kalltyp"),
+        ("step_b", "nyckelfakta"),
+        ("step_b", "risker"),
+    ]
     assert validate_spec(compiled).valid
 
 

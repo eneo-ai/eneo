@@ -14,6 +14,7 @@ from pydantic import (
     model_validator,
 )
 
+from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     BuilderFormFieldType,
     FlowInputFieldProvenance,
@@ -112,13 +113,10 @@ def build_result_keys_schema(
     `field_type` is a single-value enum wherever the user declared a shape, so
     the shape the user attested to is the only legal answer and the server
     materializes it from the projection either way. Where the user declared no
-    shape the model chooses a leaf type: `object` is excluded, because an
-    object with no way to declare children could never compile.
+    shape the model chooses the semantic type. An object becomes an open map:
+    the result key is user-owned, while its members were never declared.
     """
 
-    unshaped_leaf_types = [
-        value for value in _STRUCTURED_FIELD_TYPE_VALUES if value != "object"
-    ]
     properties: dict[str, Any] = {
         key.name: {
             "type": "object",
@@ -130,7 +128,7 @@ def build_result_keys_schema(
                     "enum": (
                         [key.declared_shape]
                         if key.declared_shape is not None
-                        else unshaped_leaf_types
+                        else list(_STRUCTURED_FIELD_TYPE_VALUES)
                     ),
                 },
                 "description": {"type": "string"},
@@ -302,10 +300,6 @@ class CreateStructuredFieldIntent(BaseModel):
 
     @model_validator(mode="after")
     def _validate_children(self) -> "CreateStructuredFieldIntent":
-        if self.field_type == "object" and not self.children:
-            raise ValueError(
-                f"Object field {self.name!r} must declare non-empty children."
-            )
         if self.field_type not in ("object", "array") and self.children is not None:
             raise ValueError(
                 f"Only object or array fields may declare children ({self.name!r})."
@@ -329,6 +323,9 @@ class CreateStructuredFieldIntent(BaseModel):
             required=self.required,
             fields=children if self.field_type == "object" else None,
             item_fields=children if self.field_type == "array" else None,
+            allow_additional_properties=(
+                self.field_type == "object" and children is None
+            ),
         )
 
 
@@ -336,7 +333,7 @@ def _validate_create_semantic_step(value: object) -> dict[str, object]:
     step = _CreateSemanticStepArguments.model_validate(value)
     lowered = step.model_dump(exclude={"output_fields"})
     lowered["output_fields"] = (
-        [field.to_structured_field_draft().model_dump() for field in step.output_fields]
+        [field.to_structured_field_draft() for field in step.output_fields]
         if step.output_fields
         else None
     )
@@ -513,6 +510,11 @@ def parse_create_flow_intent_arguments(
         if obligation_projection is not None
         else None
     )
+    if obligation_projection is not None:
+        remaining = _without_obligated_terminal_field_copies(
+            remaining,
+            projection=obligation_projection,
+        )
     try:
         intent = CreateFlowIntent.model_validate(remaining)
         if obligation_projection is not None:
@@ -529,6 +531,88 @@ def parse_create_flow_intent_arguments(
             (f"{RESULT_KEYS_ARGUMENT}: {error} [value_error]",)
         ) from error
     return intent
+
+
+def _without_obligated_terminal_field_copies(
+    arguments: dict[str, Any],
+    *,
+    projection: ProposalObligationProjection,
+) -> dict[str, Any]:
+    """Discard terminal field copies whose placement the server owns.
+
+    The projected result keys are always materialized as terminal roots. A
+    model-authored copy therefore cannot affect the compiled contract, so
+    validating that dead copy would only create repair work. Prune it while the
+    payload is still raw because a redundant copy can itself be structurally
+    invalid and fail before the typed compiler sees the useful fields that
+    remain.
+    """
+
+    raw_steps_value: object = arguments.get("steps")
+    if not isinstance(raw_steps_value, list) or not raw_steps_value:
+        return arguments
+    raw_steps = cast(list[object], raw_steps_value)
+    terminal_step_value = raw_steps[-1]
+    if not isinstance(terminal_step_value, dict):
+        return arguments
+    terminal_step = cast(dict[str, object], terminal_step_value)
+    raw_fields_value = terminal_step.get("output_fields")
+    if not isinstance(raw_fields_value, list):
+        return arguments
+    raw_fields = cast(list[object], raw_fields_value)
+
+    obligated_identities = {fold_result_field_name(key.name) for key in projection.keys}
+    surviving_fields, changed = _prune_raw_obligated_field_copies(
+        raw_fields,
+        obligated_identities=obligated_identities,
+    )
+    if not changed:
+        return arguments
+
+    admitted_step: dict[str, object] = {
+        **terminal_step,
+        "output_fields": surviving_fields or None,
+    }
+    return {
+        **arguments,
+        "steps": [*raw_steps[:-1], admitted_step],
+    }
+
+
+def _prune_raw_obligated_field_copies(
+    fields: list[object],
+    *,
+    obligated_identities: set[str],
+) -> tuple[list[object], bool]:
+    surviving: list[object] = []
+    changed = False
+    for field in fields:
+        if not isinstance(field, dict):
+            surviving.append(field)
+            continue
+        raw_field = cast(dict[str, object], field)
+        name = raw_field.get("name")
+        if (
+            isinstance(name, str)
+            and fold_result_field_name(name) in obligated_identities
+        ):
+            changed = True
+            continue
+
+        children = raw_field.get("children")
+        field_type = raw_field.get("field_type")
+        if field_type in ("object", "array") and isinstance(children, list):
+            surviving_children, children_changed = _prune_raw_obligated_field_copies(
+                cast(list[object], children),
+                obligated_identities=obligated_identities,
+            )
+            if children_changed:
+                changed = True
+                if not surviving_children:
+                    continue
+                raw_field = {**raw_field, "children": surviving_children}
+        surviving.append(raw_field)
+    return surviving, changed
 
 
 def _materialize_obligated_output_fields(
@@ -559,16 +643,19 @@ def _materialize_obligated_output_fields(
         raise ValueError(f"missing records for {', '.join(missing)}")
     staged = {name: _StagedObligatedField.model_validate(raw[name]) for name in names}
 
-    return tuple(
-        StructuredFieldDraft(
-            name=key.name,
-            field_type=key.declared_shape or staged[key.name].field_type,
-            description=staged[key.name].description,
-            required=staged[key.name].required,
-            allow_additional_properties=key.declared_shape == "object",
+    fields: list[StructuredFieldDraft] = []
+    for key in projection.keys:
+        field_type = key.declared_shape or staged[key.name].field_type
+        fields.append(
+            StructuredFieldDraft(
+                name=key.name,
+                field_type=field_type,
+                description=staged[key.name].description,
+                required=staged[key.name].required,
+                allow_additional_properties=field_type == "object",
+            )
         )
-        for key in projection.keys
-    )
+    return tuple(fields)
 
 
 class ProposalIntentArgumentError(ValueError):

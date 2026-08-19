@@ -615,6 +615,8 @@ def _field_name_match_key(value: str) -> str:
 
 
 def _source_capture_field_key(value: str) -> str:
+    if _field_name_is_source_document_container(value):
+        return "documents"
     normalized = normalize_discovery_text(value.replace("_", " ").replace("-", " "))
     tokens = tuple(
         _SOURCE_CAPTURE_FIELD_TOKEN_ALIASES.get(token, token)

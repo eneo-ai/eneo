@@ -560,6 +560,27 @@ def test_a_declared_group_compiles_as_an_open_object() -> None:
     assert "properties" not in stated_route
 
 
+def test_an_unshaped_result_key_may_compile_as_an_open_object() -> None:
+    state = _state((("antal_arenden_per_kategori", None),))
+    projection = named_result_projection(state)
+    assert projection is not None
+
+    spec = _compile_through_the_whole_path(
+        state,
+        result_keys=_staged_result_keys(
+            projection,
+            field_types={"antal_arenden_per_kategori": "object"},
+        ),
+    )
+
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    category_counts = contract["properties"]["antal_arenden_per_kategori"]
+    assert category_counts["type"] == "object"
+    assert category_counts["additionalProperties"] is True
+    assert "properties" not in category_counts
+
+
 def test_an_open_group_keeps_its_members_through_runtime_pruning() -> None:
     # The open object is only worth compiling if the runtime keeps what the
     # step puts in it. Pruning drops keys solely beneath an explicit
@@ -586,8 +607,9 @@ def test_an_open_group_keeps_its_members_through_runtime_pruning() -> None:
 
 
 def test_the_open_object_capability_is_unreachable_from_the_wire() -> None:
-    # It is a server capability, so the prepared schema must not offer it: a
-    # model cannot ask for an unconstrained object on one of its own fields.
+    # The implementation flag is server-owned, so the prepared schema must not
+    # offer it. Create admission derives openness from an object with no static
+    # children instead of trusting a provider-authored internal switch.
     state = _state((("case_id", None),))
     projection = named_result_projection(state)
     assert projection is not None
@@ -630,8 +652,8 @@ def test_the_typed_admission_boundary_also_refuses_the_server_only_flag() -> Non
 
 
 def test_a_model_authored_empty_object_is_still_refused() -> None:
-    # The open object is a server capability for a user-declared group only.
-    # A model that invents an empty object still gets the repairable message.
+    # The general field model still requires an explicit server-set flag. Only
+    # the create adapter may derive that flag from its compact semantic shape.
     with pytest.raises(ValidationError):
         StructuredFieldDraft(
             name="tom_grupp",
@@ -757,8 +779,9 @@ def test_a_model_authored_placement_is_rejected_as_an_extra_property() -> None:
 
 def test_the_wire_record_asks_the_model_only_what_the_user_left_open() -> None:
     # A declared shape is the user's, so its enum has exactly one member and
-    # the server materializes it either way. An unshaped name is a leaf the
-    # model may type — but never as an object, which could not compile.
+    # the server materializes it either way. An unshaped name may be any
+    # semantic type; objects compile as open maps because no members were
+    # declared by the user.
     state = _state((("documents", "array"), ("case_id", None)))
     projection = named_result_projection(state)
     assert projection is not None
@@ -776,7 +799,7 @@ def test_the_wire_record_asks_the_model_only_what_the_user_left_open() -> None:
     case_id_types = result_keys["properties"]["case_id"]["properties"]["field_type"][
         "enum"
     ]
-    assert "object" not in case_id_types
+    assert "object" in case_id_types
     assert "string" in case_id_types
 
 
@@ -901,7 +924,7 @@ def test_an_envelope_field_the_model_already_declared_is_not_duplicated() -> Non
     assert contract["properties"]["risks"]["description"] == "Modellens egna risker."
 
 
-def test_a_model_field_that_buries_an_obligated_name_is_repairable() -> None:
+def test_a_model_field_that_only_buries_an_obligated_name_is_discarded() -> None:
     state = _state((("case_id", None),))
     projection = named_result_projection(state)
     assert projection is not None
@@ -930,13 +953,12 @@ def test_a_model_field_that_buries_an_obligated_name_is_repairable() -> None:
         obligation_projection=projection,
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as failure:
-        compile_create_intent_to_spec(intent, context=context)
+    spec = compile_create_intent_to_spec(intent, context=context)
 
-    failure_code = failure.value.log_context["failure_code"]
-    assert failure_code == "named_result_obligation_collision"
-    # Repairable: the model chose the second home and can remove it.
-    assert _retryable_architecture_failure_code(failure.value) == failure_code
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    assert "case_id" in contract["properties"]
+    assert "envelope" not in contract["properties"]
 
 
 def test_a_dropped_obligation_is_never_handed_to_the_model_to_repair() -> None:
@@ -1032,7 +1054,7 @@ def test_a_discarded_model_root_cannot_suppress_an_envelope_field() -> None:
     assert "properties" not in contract["properties"]["assessment"]
 
 
-def test_a_surviving_model_field_repeating_an_obligation_is_repairable() -> None:
+def test_a_nested_obligation_copy_is_pruned_without_losing_its_siblings() -> None:
     state = _state((("assessment", "object"), ("risks", None)))
     projection = named_result_projection(state)
     assert projection is not None
@@ -1052,7 +1074,13 @@ def test_a_surviving_model_field_repeating_an_obligation_is_repairable() -> None
                             "field_type": "string",
                             "description": "En andra hemvist för samma fält.",
                             "required": True,
-                        }
+                        },
+                        {
+                            "name": "notes",
+                            "field_type": "string",
+                            "description": "Modellens andra användbara uppgift.",
+                            "required": True,
+                        },
                     ],
                 }
             ],
@@ -1060,12 +1088,12 @@ def test_a_surviving_model_field_repeating_an_obligation_is_repairable() -> None
         obligation_projection=projection,
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as failure:
-        compile_create_intent_to_spec(intent, context=context)
+    spec = compile_create_intent_to_spec(intent, context=context)
 
-    assert failure.value.log_context["failure_code"] == (
-        "named_result_obligation_collision"
-    )
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    assert "risks" in contract["properties"]
+    assert set(contract["properties"]["other"]["properties"]) == {"notes"}
 
 
 def test_a_wholly_discarded_model_tree_does_not_demand_a_repair() -> None:
@@ -1104,6 +1132,35 @@ def test_a_wholly_discarded_model_tree_does_not_demand_a_repair() -> None:
     contract = _terminal_output_contract(spec)
     assert contract is not None
     assert contract["properties"]["assessment"]["type"] == "object"
+
+
+def test_an_invalid_terminal_copy_is_discarded_before_typed_validation() -> None:
+    # The server owns the projected root, so the model's terminal copy can
+    # never reach the compiled contract. It must be discarded before Pydantic
+    # validates its shape; otherwise an invalid redundant copy burns repair
+    # calls even though the server already has the complete field definition.
+    state = _state((("summary_report", "object"),))
+    projection = named_result_projection(state)
+    assert projection is not None
+
+    intent = parse_create_flow_intent_arguments(
+        _arguments(
+            result_keys=_staged_result_keys(projection),
+            model_output_fields=[
+                {
+                    "name": "summary_report",
+                    "field_type": "object",
+                    "description": "A redundant object without children.",
+                    "required": True,
+                }
+            ],
+        ),
+        obligation_projection=projection,
+    )
+
+    assert intent.steps[-1].output_fields is None
+    assert intent.obligated_output_fields[0].name == "summary_report"
+    assert intent.obligated_output_fields[0].allow_additional_properties is True
 
 
 def test_legacy_any_depth_model_satisfaction_of_an_envelope_field_is_unchanged() -> (

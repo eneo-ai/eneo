@@ -303,11 +303,10 @@ def _intent_with_obligated_output_fields(
     carrying that role's own name. The assembly's global alias semantics are
     untouched — it simply has nothing left to complete on this branch.
 
-    Order matters and it is the whole correctness argument: what the model
-    keeps is decided FIRST, and everything afterwards — collisions, envelope
-    satisfaction — is judged against the fields that actually survive. Judging
-    against the fields that were merely submitted let a discarded subtree both
-    demand a repair and suppress an envelope root it would never emit.
+    Create admission has already removed model-authored copies of obligated
+    terminal fields, including invalid copies that typed validation could not
+    admit. The compiler therefore only has to combine the admitted model fields
+    with the server-owned roots and the remaining envelope fields.
     """
 
     obligated = intent.obligated_output_fields
@@ -315,16 +314,8 @@ def _intent_with_obligated_output_fields(
         return intent
     obligated_identities = {fold_result_field_name(field.name) for field in obligated}
     terminal_step = intent.steps[-1]
-    surviving_model_fields = [
-        field
-        for field in (terminal_step.output_fields or [])
-        if fold_result_field_name(field.name) not in obligated_identities
-    ]
-    _reject_obligated_name_collisions(
-        surviving_model_fields,
-        obligated_identities=obligated_identities,
-    )
-    model_declared_names = structured_field_draft_names(tuple(surviving_model_fields))
+    model_fields = terminal_step.output_fields or []
+    model_declared_names = structured_field_draft_names(tuple(model_fields))
     uncovered_envelope_fields = [
         field
         for field in envelope_fields
@@ -334,7 +325,6 @@ def _intent_with_obligated_output_fields(
             field.name,
         )
     ]
-    model_fields = surviving_model_fields
     return intent.model_copy(
         update={
             "steps": [
@@ -351,45 +341,6 @@ def _intent_with_obligated_output_fields(
             ]
         }
     )
-
-
-def _reject_obligated_name_collisions(
-    fields: list[StructuredFieldDraft],
-    *,
-    obligated_identities: set[str],
-    path: str = "",
-) -> None:
-    """Refuse a surviving model field that repeats a user-named result.
-
-    A model ROOT of an obligation's identity is simply outranked and has
-    already been removed before this runs, so nothing here asks for a repair
-    the model's own text could not perform. What remains is a second,
-    contradictory home for a name the contract binds exactly once — the same
-    name buried inside some other branch — and that is repairable feedback
-    rather than a silent choice between two placements.
-    """
-
-    for field in fields:
-        field_path = f"{path}.{field.name}" if path else field.name
-        if fold_result_field_name(field.name) in obligated_identities:
-            raise AIBuilderArchitectureError(
-                public_code="architecture_materialization_failed",
-                detail=(
-                    f"{field_path} repeats a result field the user named. Each "
-                    "user-named field belongs in exactly one place; remove this "
-                    "copy and let the named field keep its own placement."
-                ),
-                log_context={
-                    "failure_code": "named_result_obligation_collision",
-                    "reason": "named_result_obligation_collision",
-                    "field_names": field_path,
-                },
-            )
-        _reject_obligated_name_collisions(
-            (field.fields or []) + (field.item_fields or []),
-            obligated_identities=obligated_identities,
-            path=field_path,
-        )
 
 
 def _missing_obligation_paths(
