@@ -4355,6 +4355,8 @@
   "ai_builder_requirements_superseded": "Superseded by a newer requirements summary.",
   "ai_builder_requirements_title": "This is how Eneo understood the task",
   "ai_builder_requirements_user_request": "You asked for",
+  "ai_builder_requirements_show_full_request": "Show full request",
+  "ai_builder_requirements_hide_full_request": "Show less",
   "ai_builder_send": "Send",
   "ai_builder_show_details": "Show details",
   "ai_builder_show_less": "Show less",

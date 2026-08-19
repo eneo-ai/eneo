@@ -149,6 +149,15 @@
       { label: m.ai_builder_requirements_output(), value: outputTerm }
     ].filter((row) => !decisionsState.has(row.value))
   );
+  const USER_REQUEST_CLAMP_CHARS = 180;
+  const USER_REQUEST_CLAMP_LINES = 5;
+  const userRequestId = $derived(`builder-user-request-${summary.requirements_version}`);
+  let userRequestExpanded = $state(false);
+  const userRequestNeedsClamp = $derived(
+    userRequest != null &&
+      (userRequest.length > USER_REQUEST_CLAMP_CHARS ||
+        userRequest.split(/\r?\n/).length > USER_REQUEST_CLAMP_LINES)
+  );
 
   // One owner for the whole correction: which row it is about, whether the box
   // is open, and the words in it. A draft belongs to the scope it was written
@@ -361,9 +370,32 @@
             <h3 class="text-secondary text-[0.8125rem]">
               {m.ai_builder_requirements_user_request()}
             </h3>
-            <p class="text-primary mt-0.5 text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
+            <p
+              id={userRequestId}
+              class="text-primary mt-0.5 max-w-[72ch] text-[0.8125rem] leading-relaxed break-words whitespace-pre-wrap"
+              class:line-clamp-5={userRequestNeedsClamp && !userRequestExpanded}
+            >
               {userRequest}
             </p>
+            {#if userRequestNeedsClamp}
+              <button
+                type="button"
+                class="text-accent-stronger focus-visible:ring-accent-stronger/40 mt-1 -ml-2 inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none max-sm:min-h-[44px]"
+                aria-expanded={userRequestExpanded}
+                aria-controls={userRequestId}
+                onclick={() => (userRequestExpanded = !userRequestExpanded)}
+              >
+                {userRequestExpanded
+                  ? m.ai_builder_requirements_hide_full_request()
+                  : m.ai_builder_requirements_show_full_request()}
+                <IconChevronDown
+                  class="size-3.5 transition-transform duration-200 ease-out motion-reduce:duration-0 {userRequestExpanded
+                    ? 'rotate-180'
+                    : ''}"
+                  aria-hidden="true"
+                />
+              </button>
+            {/if}
           </section>
         {/if}
 

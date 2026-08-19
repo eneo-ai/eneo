@@ -1094,6 +1094,43 @@ describe("FlowAIBuilder confirm, build and review", () => {
     calls[1]!.finish();
   });
 
+  it("keeps a long original request compact until the user expands it", async () => {
+    const longRequest = Array.from(
+      { length: 18 },
+      (_, index) => `${index + 1}. Bevara den här delen av den ursprungliga uppgiften.`
+    ).join("\n");
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", longRequest),
+            assistantMessage("a1", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    const requestHeading = screen.getByRole("heading", {
+      name: m.ai_builder_requirements_user_request()
+    });
+    const request = requestHeading.nextElementSibling as HTMLElement;
+    const toggle = screen.getByRole("button", {
+      name: m.ai_builder_requirements_show_full_request()
+    });
+
+    expect(request.textContent).toBe(longRequest);
+    expect(request.classList.contains("line-clamp-5")).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    await fireEvent.click(toggle);
+
+    expect(request.classList.contains("line-clamp-5")).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("changes an answer from the confirmation without leaving the card", async () => {
     const { fetch } = makeFetch({
       sessions: [

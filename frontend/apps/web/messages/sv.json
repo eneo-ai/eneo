@@ -4355,6 +4355,8 @@
   "ai_builder_requirements_superseded": "Ersatt av en nyare sammanfattning av kraven.",
   "ai_builder_requirements_title": "Så här har Eneo förstått uppgiften",
   "ai_builder_requirements_user_request": "Du bad om",
+  "ai_builder_requirements_show_full_request": "Visa hela uppgiften",
+  "ai_builder_requirements_hide_full_request": "Visa mindre",
   "ai_builder_send": "Skicka",
   "ai_builder_show_details": "Visa detaljer",
   "ai_builder_show_less": "Visa mindre",
