@@ -1,4 +1,5 @@
-import { exec } from "node:child_process";
+import { exec, execFileSync } from "node:child_process";
+import { hostname } from "node:os";
 import { resolve } from "node:path";
 
 // Brings up the ephemeral test stack (docker-compose.e2e.yml) before the run and
@@ -8,6 +9,25 @@ import { resolve } from "node:path";
 // iterating on specs against an already-running stack, including `--ui`).
 const COMPOSE = resolve(process.cwd(), "../../../docker-compose.e2e.yml");
 const SERVICES = ["e2e-db", "e2e-redis", "e2e-mock-model", "e2e-backend", "celery-worker-flows"];
+
+function configureWorkspaceSource() {
+  if (process.env.E2E_WORKSPACE_SOURCE) return;
+
+  try {
+    const mounts = JSON.parse(
+      execFileSync("docker", ["inspect", hostname(), "--format", "{{json .Mounts}}"], {
+        encoding: "utf8"
+      })
+    ) as Array<{ Destination?: string; Source?: string }>;
+    const workspaceMount = mounts.find((mount) => mount.Destination === "/workspace");
+    if (workspaceMount?.Source) {
+      process.env.E2E_WORKSPACE_SOURCE = workspaceMount.Source;
+      console.log(`[e2e] using host workspace ${workspaceMount.Source}`);
+    }
+  } catch {
+    // Outside a devcontainer, Compose's default `.` source is already correct.
+  }
+}
 
 // `docker compose up --wait` is silent while healthchecks run (backend can take
 // ~30-60s), so a manual run looks hung. Poll `ps` alongside the wait and print a
@@ -35,6 +55,8 @@ function printStatus(): Promise<void> {
 
 export default async function globalSetup() {
   if (process.env.E2E_MANAGE_STACK === "0") return;
+
+  configureWorkspaceSource();
 
   console.log("[e2e] starting isolated test stack (db, redis, mock-model, backend)…");
 

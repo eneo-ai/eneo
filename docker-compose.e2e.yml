@@ -38,7 +38,10 @@ x-e2e-backend-environment: &e2e-backend-environment
   DEFAULT_USER_PASSWORD: E2ePassword1!
 
 x-e2e-backend-volumes: &e2e-backend-volumes
-  - .:/workspace
+  # When Compose is invoked from inside the devcontainer, `.` resolves to the
+  # container-only `/workspace` path, which the host Docker daemon cannot bind.
+  # Point E2E_WORKSPACE_SOURCE at the host checkout in that case.
+  - ${E2E_WORKSPACE_SOURCE:-.}:/workspace
   - backend_venv:/workspace/backend/.venv:ro
 
 services:
@@ -71,7 +74,7 @@ services:
     image: eneo_devcontainer-eneo
     command: ["python3", "/workspace/e2e/mock_model_server.py"]
     volumes:
-      - .:/workspace:ro
+      - ${E2E_WORKSPACE_SOURCE:-.}:/workspace:ro
     networks: [e2e]
     healthcheck:
       test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8200"]

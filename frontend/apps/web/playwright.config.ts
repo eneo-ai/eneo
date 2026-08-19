@@ -52,12 +52,14 @@ export default defineConfig({
     // build whose wall-clock straddles 180s on shared runners is the root cause
     // of the intermittent "Timed out waiting from config.webServer" failures.
     // Locally we still build+preview so `bun run test:e2e` works out of the box.
+    // The local build currently takes about four minutes in the devcontainer,
+    // so leave enough startup budget for slower machines as well.
     command: process.env.CI
       ? `bun run preview --port ${PORT} --strictPort`
       : `bun run build && bun run preview --port ${PORT} --strictPort`,
     port: PORT,
     reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
+    timeout: 360_000,
     env: {
       // Build/preview into a separate SvelteKit dir so the E2E build never
       // clobbers a live `vite dev`'s `.svelte-kit` — tests and dev can run at

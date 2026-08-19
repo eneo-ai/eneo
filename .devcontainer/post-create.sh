@@ -5,16 +5,23 @@
 
 set -euf -o pipefail
 
-# Create docker group for testcontainers support (Docker-in-Docker)
-# Extract the GID from the docker socket which is mounted from the host
-# This works on any system because it uses the actual docker GID from the socket
+# Join the group that owns the mounted Docker socket for testcontainers support.
+# On Linux this is commonly a dedicated docker group. Docker Desktop and
+# OrbStack may expose the socket as root:root, so relying on a group named
+# "docker" can still leave the vscode user unable to open it.
 if [ -e /var/run/docker.sock ]; then
     DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-    if ! grep -q "^docker:" /etc/group; then
-        sudo groupadd -g "$DOCKER_GID" docker || true
+    SOCKET_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1 || true)
+    if [ -z "$SOCKET_GROUP" ]; then
+        if getent group docker >/dev/null; then
+            sudo groupmod -g "$DOCKER_GID" docker
+        else
+            sudo groupadd -g "$DOCKER_GID" docker
+        fi
+        SOCKET_GROUP=docker
     fi
-    sudo usermod -aG docker vscode
-    echo "✓ Docker group created with GID $DOCKER_GID for testcontainers support"
+    sudo usermod -aG "$SOCKET_GROUP" vscode
+    echo "✓ vscode joined Docker socket group $SOCKET_GROUP (GID $DOCKER_GID) for testcontainers support"
 fi
 
 # Install uv

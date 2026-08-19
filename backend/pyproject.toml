@@ -105,6 +105,7 @@ dev = [
     "vulture>=2.16",
     "mypy-boto3-s3>=1.43,<2",
     "botocore-stubs>=1.43,<2",
+    "mutmut>=3.7,<4",
 ]
 
 [build-system]
@@ -158,6 +159,23 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
+
+[tool.mutmut]
+source_paths = ["src/eneo"]
+only_mutate = [
+    "src/eneo/flows/ai_builder/ai_builder_action_policy.py",
+    "src/eneo/flows/ai_builder/ai_builder_architecture_commit.py",
+    "src/eneo/flows/ai_builder/ai_builder_commit_invariance.py",
+    "src/eneo/flows/ai_builder/ai_builder_send_lease.py",
+    "src/eneo/flows/flow_ai_builder_budget_settings.py",
+]
+pytest_add_cli_args_test_selection = [
+    "tests/unittests/flows/ai_builder/test_ai_builder_action_policy.py",
+    "tests/unittests/flows/ai_builder/test_ai_builder_architecture_commit.py",
+    "tests/unittests/flows/ai_builder/test_ai_builder_commit_invariance.py",
+    "tests/unittests/flows/ai_builder/test_ai_builder_send_lease.py",
+    "tests/unittests/tenants/test_tenant_flow_settings.py",
+]
 
 # Dead-code / dependency analysis. Both are advisory (not wired into pre-commit)
 # and run via `task deadcode` or directly. They surface candidates for a human
