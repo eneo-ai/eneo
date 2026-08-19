@@ -25058,8 +25058,8 @@ export interface components {
      *     stores it. It is not a promise that a field by that name reaches the
      *     compiled result: whether an obligation is projected at all depends on the
      *     output mode, the presence of a declared schema, and the confidence the name
-     *     was admitted with. `label` is what the summary sentence says about the same
-     *     obligation, rendered by the same owner, so list and prose cannot disagree.
+     *     was admitted with. `label` is a bounded readable rendering for display; the
+     *     exact `id`, not this label, participates in confirmation identity.
      *
      *     `origin` says how the name got here — read out of the user's own writing,
      *     or typed into this card. It is display provenance, not a requirement: both
