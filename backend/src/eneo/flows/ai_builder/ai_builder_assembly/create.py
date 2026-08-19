@@ -1324,11 +1324,24 @@ def _aggregate_terminal_previous_structured_refs(
         for step in planned_steps
     ):
         return ()
-    return tuple(
+    refs = tuple(
         PreviousFieldRef(from_step=index, field_path=field.name)
         for index, step in enumerate(planned_steps, start=1)
         for field in step.output_fields
     )
+    # A later analysis step commonly refines a field first emitted by its
+    # source reader. The structured projection has one root namespace, so the
+    # later producer is the canonical value for a repeated identity; retaining
+    # both would make an otherwise valid compare plan impossible to lower.
+    seen: set[str] = set()
+    surviving_reversed: list[PreviousFieldRef] = []
+    for ref in reversed(refs):
+        identity = fold_result_field_name(ref.field_path)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        surviving_reversed.append(ref)
+    return tuple(reversed(surviving_reversed))
 
 
 def _assemble_pure_audio_transcription(
@@ -1622,6 +1635,7 @@ def _complete_planned_source_reader_contracts(
             )
 
     updated_steps = list(planned_steps)
+    renamed_roots_by_step: dict[int, dict[str, str]] = {}
     for index in source_reader_indexes:
         fields = fields_by_index.get(index, [])
         planned_step = planned_steps[index]
@@ -1634,6 +1648,12 @@ def _complete_planned_source_reader_contracts(
         if completed_fields == planned_step.output_fields:
             continue
         updated_steps[index] = replace(planned_step, output_fields=completed_fields)
+        renamed_roots = _canonical_source_reader_root_renames(
+            before=planned_step.output_fields,
+            after=completed_fields,
+        )
+        if renamed_roots:
+            renamed_roots_by_step[index + 1] = renamed_roots
         logger.info(
             "ai_builder_source_reader_contract_completed",
             extra={
@@ -1641,7 +1661,59 @@ def _complete_planned_source_reader_contracts(
                 "field_names": [field.name for field in fields],
             },
         )
+    if renamed_roots_by_step:
+        updated_steps = [
+            _rewrite_source_reader_refs(
+                step,
+                renamed_roots_by_step=renamed_roots_by_step,
+            )
+            for step in updated_steps
+        ]
     return tuple(updated_steps)
+
+
+def _canonical_source_reader_root_renames(
+    *,
+    before: tuple[StructuredFieldDraft, ...],
+    after: tuple[StructuredFieldDraft, ...],
+) -> dict[str, str]:
+    if not any(field.name == "documents" for field in after):
+        return {}
+    return {
+        fold_result_field_name(field.name): "documents"
+        for field in before
+        if field.name != "documents" and structured_fields_have_document_items((field,))
+    }
+
+
+def _rewrite_source_reader_refs(
+    step: PlannedStep,
+    *,
+    renamed_roots_by_step: dict[int, dict[str, str]],
+) -> PlannedStep:
+    rewritten: list[PreviousFieldRef] = []
+    changed = False
+    for ref in step.previous_field_refs:
+        renamed_roots = renamed_roots_by_step.get(ref.from_step)
+        path_parts = ref.field_path.split(".", 1)
+        canonical_root = (
+            renamed_roots.get(fold_result_field_name(path_parts[0]))
+            if renamed_roots is not None
+            else None
+        )
+        if canonical_root is None:
+            rewritten.append(ref)
+            continue
+        canonical_path = (
+            canonical_root
+            if len(path_parts) == 1
+            else f"{canonical_root}.{path_parts[1]}"
+        )
+        rewritten.append(ref.model_copy(update={"field_path": canonical_path}))
+        changed = True
+    if not changed:
+        return step
+    return replace(step, previous_field_refs=tuple(rewritten))
 
 
 def _apply_per_source_reader_execution(
@@ -1654,6 +1726,7 @@ def _apply_per_source_reader_execution(
     for planned_step in planned_steps:
         if not (
             planned_step_is_source_reader(planned_step)
+            and len(planned_step.output_fields) == 1
             and structured_fields_have_document_items(planned_step.output_fields)
             and planned_step.input_type in _FILE_INPUT_TYPES
             and planned_step.runtime_max_files is not None

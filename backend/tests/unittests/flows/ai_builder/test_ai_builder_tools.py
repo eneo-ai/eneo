@@ -147,6 +147,32 @@ class TestBuildToolSchema:
                 tool_schema=schema,
             )
 
+    def test_create_admission_rehomes_unambiguous_step_tail_properties(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Grounded assessment",
+            "plan_rationale": "Assess the submitted material.",
+            "steps": [
+                {
+                    "name": "Assess material",
+                    "instructions": "Assess only the supplied material.",
+                }
+            ],
+            "knowledge_refs": ["knowledge.policy"],
+            "citations_requested": True,
+        }
+
+        admitted = admit_propose_flow_tool_arguments(
+            arguments=arguments,
+            tool_schema=schema,
+        )
+
+        assert "knowledge_refs" not in admitted
+        assert "citations_requested" not in admitted
+        assert admitted["steps"][-1]["knowledge_refs"] == ["knowledge.policy"]
+        assert admitted["steps"][-1]["citations_requested"] is True
+        assert "knowledge_refs" in arguments
+
     def test_create_schema_projects_runtime_identity_without_argument_shape_change(
         self,
     ) -> None:
@@ -306,6 +332,34 @@ class TestBuildToolSchema:
         assert field.required is True
         assert field.fields is None
         assert field.item_fields is None
+
+    def test_create_object_without_members_is_admitted_as_open(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Case statistics",
+            "plan_rationale": "Summarize counts from the uploaded table.",
+            "steps": [
+                {
+                    "name": "Calculate statistics",
+                    "instructions": "Calculate counts by category.",
+                    "output_fields": [
+                        {
+                            "name": "category_counts",
+                            "field_type": "object",
+                            "description": "Counts keyed by observed category.",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        validate_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema)
+        intent = parse_create_flow_intent_arguments(arguments)
+
+        field = intent.steps[0].output_fields[0]
+        assert field.field_type == "object"
+        assert field.fields is None
+        assert field.allow_additional_properties is True
 
     def test_create_structured_field_relationships_are_owned_by_typed_admission(
         self,

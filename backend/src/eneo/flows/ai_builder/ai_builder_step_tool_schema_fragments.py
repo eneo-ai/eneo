@@ -204,7 +204,8 @@ def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
                 **children_schema,
                 "description": (
                     "Nested object members or array-item members. Use null for "
-                    "primitive fields and arrays of primitive values."
+                    "primitive fields, arrays of primitive values, and objects "
+                    "whose dynamic member names are not known in advance."
                 ),
             },
         },

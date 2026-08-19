@@ -10,6 +10,7 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     complete_structured_source_reader_fields,
     source_contract_shadow_form_field_names,
     structured_fields_have_document_items,
+    structured_fields_have_source_leaf,
 )
 from eneo.flows.flow_authoring_spec import FormFieldSpec
 
@@ -19,12 +20,14 @@ def _field(
     field_type: StructuredFieldType = "string",
     *,
     description: str = "Beskrivning.",
+    fields: list[StructuredFieldDraft] | None = None,
     item_fields: list[StructuredFieldDraft] | None = None,
 ) -> StructuredFieldDraft:
     return StructuredFieldDraft(
         name=name,
         field_type=field_type,
         description=description,
+        fields=fields,
         item_fields=item_fields,
     )
 
@@ -238,6 +241,27 @@ def test_source_reader_completion_preserves_localized_document_array_items() -> 
         "slutsatser",
     ]
     assert structured_fields_have_document_items(completed)
+
+
+def test_localized_document_container_satisfies_the_canonical_capture_name() -> None:
+    completed = complete_structured_source_reader_fields(
+        (
+            _field(
+                "dokument",
+                "array",
+                item_fields=[_field("titel", description="Dokumenttitel.")],
+            ),
+        ),
+        required_fields=(SourceCaptureField(name="dokument"),),
+    )
+
+    documents_field = completed[0]
+    assert documents_field.name == "documents"
+    assert [field.name for field in documents_field.item_fields or []] == [
+        "source_label",
+        "titel",
+    ]
+    assert structured_fields_have_source_leaf(completed, "dokument")
 
 
 def test_source_reader_completion_does_not_tag_non_source_document_arrays() -> None:
