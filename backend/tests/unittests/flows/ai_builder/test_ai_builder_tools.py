@@ -29,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_tool_parsing import (
 from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
     ProposalToolArgumentsError,
+    admit_propose_flow_tool_arguments,
     build_propose_flow_tool_schema,
     extract_assumptions,
     extract_plan_rationale,
@@ -128,6 +129,23 @@ class TestBuildToolSchema:
         assert intent.steps[0].model_ref is None
         assert intent.steps[0].knowledge_refs == []
         assert intent.steps[0].citations_requested is False
+
+    def test_create_admission_does_not_invent_missing_step_instructions(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Case assessment",
+            "plan_rationale": "Assess the submitted case.",
+            "steps": [{"name": "Assess case"}],
+        }
+
+        with pytest.raises(
+            ProposalToolArgumentsError,
+            match=r"steps\.0: 'instructions' is a required property",
+        ):
+            admit_propose_flow_tool_arguments(
+                arguments=arguments,
+                tool_schema=schema,
+            )
 
     def test_create_schema_projects_runtime_identity_without_argument_shape_change(
         self,

@@ -105,7 +105,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
     ProposalToolArgumentsError,
     ProposalToolSchema,
-    validate_propose_flow_tool_arguments,
+    admit_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.planning_state import (
     PlanningState,
@@ -429,7 +429,7 @@ class ProposalSubmissionOwner:
         metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
         try:
-            validate_propose_flow_tool_arguments(
+            admitted_arguments = admit_propose_flow_tool_arguments(
                 arguments=invocation.arguments,
                 tool_schema=proposal_tool_schema,
             )
@@ -449,6 +449,16 @@ class ProposalSubmissionOwner:
                 failure_kind="parse",
                 failure_codes=frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE}),
             )
+        if admitted_arguments is not invocation.arguments:
+            logger.info(
+                "ai_builder_proposal_arguments_normalized "
+                "session_id=%s reason=misplaced_create_child "
+                "step_count_before=%s step_count_after=%s",
+                invocation.turn.session_id,
+                len(invocation.arguments.get("steps", ())),
+                len(admitted_arguments.get("steps", ())),
+            )
+            invocation = replace(invocation, arguments=admitted_arguments)
         if target_kind == TargetKind.CREATE:
             if planning_state.architecture_commit is None:
                 raise AIBuilderArchitectureError(
