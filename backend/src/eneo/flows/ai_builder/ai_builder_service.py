@@ -121,8 +121,8 @@ SSE_EVENT_STATUS = _SSE_EVENT_STATUS
 SSE_EVENT_USAGE = _SSE_EVENT_USAGE
 SSE_EVENT_DONE = _SSE_EVENT_DONE
 
-_AI_BUILDER_CONTROLLED_TOOL_KEYS = frozenset(
-    {"tools", "tool_choice", "function_call", "parallel_tool_calls"}
+_AI_BUILDER_CONTROLLED_LITELLM_KEYS = frozenset(
+    {"tools", "tool_choice", "function_call", "parallel_tool_calls", "timeout"}
 )
 
 configure_litellm_runtime(litellm)
@@ -142,7 +142,7 @@ def _sanitize_ai_builder_litellm_kwargs(
     return {
         key: value
         for key, value in litellm_kwargs.items()
-        if key not in _AI_BUILDER_CONTROLLED_TOOL_KEYS
+        if key not in _AI_BUILDER_CONTROLLED_LITELLM_KEYS
     }
 
 
@@ -517,8 +517,8 @@ class AIBuilderService:
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
-        max_input_tokens: int | None = None,
-        max_output_tokens: int | None = None,
+        max_input_tokens: int,
+        max_output_tokens: int,
         budget_policy: AIBuilderBudgetPolicy | None = None,
         attachment_context_policy: AIBuilderAttachmentContextPolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,

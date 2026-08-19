@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Literal, Self, cast
+from typing import Annotated, Any, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -35,12 +35,15 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionOptionPayload,
     StructuredQuestionPayload,
 )
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     SlotClassificationBias,
     SlotClassificationSource,
 )
-from eneo.flows.ai_builder.ai_builder_slot_classifier import classify_slots
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    classify_slots as _classify_slots,
+)
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
@@ -72,6 +75,20 @@ CORPUS_PATH = (
     / "scripts"
     / "ai_builder_semantic_classifier_cases.json"
 )
+
+
+async def classify_slots(**kwargs: Any):
+    kwargs.setdefault("max_input_tokens", 100_000)
+    kwargs.setdefault("max_output_tokens", 4_096)
+    kwargs.setdefault(
+        "budget_policy",
+        AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=0,
+            minimum_conversation_budget_tokens=0,
+        ),
+    )
+    return await _classify_slots(**kwargs)
+
 
 ScenarioKind = Literal[
     "paraphrase",

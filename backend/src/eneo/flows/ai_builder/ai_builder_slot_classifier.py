@@ -23,14 +23,18 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_attachment_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
-    AIBuilderBadRequestException,
-    AIBuilderErrorCode,
+    AIBuilderKnownProviderRejectionException,
+    build_ai_builder_request_budget_exhausted_error,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import RESULT_OBLIGATION_VALUES
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     DeclaredSchemaCandidate,
     project_schema_fields,
+)
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    AIBuilderResolvedRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
@@ -126,16 +130,14 @@ async def classify_slots(
     bias: SlotClassificationBias | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
-    max_input_tokens: int | None = None,
-    max_output_tokens: int | None = None,
-    safety_buffer_tokens: int = 0,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy,
 ) -> SlotClassificationAttempt:
-    if max_input_tokens is not None and max_input_tokens < 1:
+    if max_input_tokens < 1:
         raise ValueError("Slot classification max input tokens must be positive")
-    if max_output_tokens is not None and max_output_tokens < 1:
+    if max_output_tokens < 1:
         raise ValueError("Slot classification max output tokens must be positive")
-    if safety_buffer_tokens < 0:
-        raise ValueError("Slot classification safety buffer cannot be negative")
     slot_values = normalize_slot_classification_values(allowed_slot_values)
     if not slot_classification_input_is_valid(classification_input):
         raise ValueError("Slot classification input must contain unique, valid sources")
@@ -172,7 +174,7 @@ async def classify_slots(
         bias=bias,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
+        safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
     )
     cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
     if cached is not None:
@@ -195,20 +197,27 @@ async def classify_slots(
         ModelKwargs(temperature=0.0)
     )
     completion_kwargs["response_format"] = response_format
-    _ensure_slot_classification_request_fits_model(
+    completion_kwargs.pop("timeout", None)
+    request_budget = _resolve_slot_classification_request_budget(
         messages=messages,
         response_format=response_format,
         litellm_model=litellm_model,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
+        budget_policy=budget_policy,
     )
-    if max_output_tokens is not None:
-        completion_kwargs["max_tokens"] = max_output_tokens
+    if request_budget is None:
+        raise AIBuilderKnownProviderRejectionException(
+            build_ai_builder_request_budget_exhausted_error(request_id=None)
+        )
+    completion_kwargs["max_tokens"] = request_budget.resolved_output_tokens
     if before_provider_call is not None:
         await before_provider_call()
     call = (
-        usage_tracker.begin_call(call_kind="slot_classification")
+        usage_tracker.begin_call(
+            call_kind="slot_classification",
+            request_budget=request_budget,
+        )
         if usage_tracker is not None
         else None
     )
@@ -218,6 +227,7 @@ async def classify_slots(
             messages=messages,
             stream=False,
             drop_params=True,
+            timeout=request_budget.timeout_seconds,
             **completion_kwargs,
         )
     except Exception as error:
@@ -288,14 +298,38 @@ def slot_classification_request_fits_model(
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
-    safety_buffer_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy,
 ) -> bool:
+    return (
+        _resolve_slot_classification_request_budget(
+            messages=messages,
+            response_format=response_format,
+            litellm_model=litellm_model,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
+            budget_policy=budget_policy,
+        )
+        is not None
+    )
+
+
+def _resolve_slot_classification_request_budget(
+    *,
+    messages: list[dict[str, Any]],
+    response_format: dict[str, object],
+    litellm_model: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy,
+) -> AIBuilderResolvedRequestBudget | None:
     request_tokens = count_message_tokens(messages, litellm_model) + count_tokens(
         json.dumps(response_format, ensure_ascii=False, separators=(",", ":")),
         litellm_model,
     )
-    required_context_tokens = request_tokens + max_output_tokens + safety_buffer_tokens
-    return required_context_tokens <= max_input_tokens
+    return budget_policy.classification_request_budget(
+        context_window_tokens=max_input_tokens,
+        model_output_ceiling_tokens=max_output_tokens,
+    ).resolve(input_tokens=request_tokens)
 
 
 def admit_slot_classification_input(
@@ -310,9 +344,8 @@ def admit_slot_classification_input(
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
-    safety_buffer_tokens: int,
-    minimum_conversation_tokens: int,
-) -> tuple[SlotClassificationInput, bool]:
+    budget_policy: AIBuilderBudgetPolicy,
+) -> SlotClassificationInput:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
     response_format = _slot_classification_response_format(
         normalized_values,
@@ -339,30 +372,40 @@ def admit_slot_classification_input(
             litellm_model=litellm_model,
             max_input_tokens=input_token_limit,
             max_output_tokens=max_output_tokens,
-            safety_buffer_tokens=safety_buffer_tokens,
+            budget_policy=budget_policy,
         )
 
+    protected_source_ids = {
+        source.source_id
+        for source in classification_input.sources
+        if source.kind in {"user_message", "structured_answer"}
+        and source.message_id == classification_input.current_user_message_id
+    }
+    transcript_only_input = replace(
+        classification_input,
+        sources=tuple(
+            source
+            for source in classification_input.sources
+            if source.kind != "uploaded_file"
+        ),
+    )
+    protected_input = replace(
+        transcript_only_input,
+        sources=tuple(
+            source
+            for source in transcript_only_input.sources
+            if source.source_id in protected_source_ids
+        ),
+    )
+
     if attachment_context is not None:
-        attachment_input_token_limit = max(
-            0,
-            max_input_tokens - minimum_conversation_tokens,
-        )
-        transcript_only_input = replace(
-            classification_input,
-            sources=tuple(
-                source
-                for source in classification_input.sources
-                if source.kind != "uploaded_file"
-            ),
-        )
 
         def fits_attachment(candidate: AIBuilderAttachmentContext) -> bool:
             return fits(
                 _with_slot_classification_attachment_context(
-                    replace(transcript_only_input, sources=()),
+                    protected_input,
                     candidate,
                 ),
-                input_token_limit=attachment_input_token_limit,
             )
 
         fitted_attachment_context = fit_ai_builder_attachment_context(
@@ -375,26 +418,47 @@ def admit_slot_classification_input(
         )
 
     if fits(classification_input):
-        return classification_input, True
+        return classification_input
 
-    transcript_sources = [
+    optional_transcript_sources = [
         source
         for source in classification_input.sources
         if source.kind != "uploaded_file"
+        and source.source_id not in protected_source_ids
     ]
-    if not transcript_sources:
-        return classification_input, False
-    total_available_chars = sum(len(source.text) for source in transcript_sources)
+    include_uploaded_sources = True
+    minimum = replace(
+        classification_input,
+        sources=tuple(
+            source
+            for source in classification_input.sources
+            if source.source_id in protected_source_ids
+            or source.kind == "uploaded_file"
+        ),
+    )
+    if not minimum.sources or not fits(minimum):
+        include_uploaded_sources = False
+        minimum = protected_input
+    if not minimum.sources or not fits(minimum):
+        raise AIBuilderKnownProviderRejectionException(
+            build_ai_builder_request_budget_exhausted_error(request_id=None)
+        )
+    if not optional_transcript_sources:
+        return minimum
+
+    total_available_chars = sum(
+        len(source.text) for source in optional_transcript_sources
+    )
 
     def render(char_budget: int) -> SlotClassificationInput:
         included_lengths = _fair_classification_source_allocations(
-            transcript_sources,
+            optional_transcript_sources,
             char_budget,
         )
         allocation_by_id = {
             source.source_id: included_length
             for source, included_length in zip(
-                transcript_sources,
+                optional_transcript_sources,
                 included_lengths,
                 strict=True,
             )
@@ -402,45 +466,44 @@ def admit_slot_classification_input(
         return replace(
             classification_input,
             sources=tuple(
-                replace(
-                    source,
-                    text=source.text[: allocation_by_id[source.source_id]],
-                    truncated=(
-                        source.truncated
-                        or allocation_by_id[source.source_id] < len(source.text)
-                    ),
-                    selected_value=source.text[: allocation_by_id[source.source_id]]
-                    if source.kind == "structured_answer"
-                    else source.selected_value,
+                (
+                    replace(
+                        source,
+                        text=source.text[: allocation_by_id[source.source_id]],
+                        truncated=(
+                            source.truncated
+                            or allocation_by_id[source.source_id] < len(source.text)
+                        ),
+                        selected_value=(
+                            source.text[: allocation_by_id[source.source_id]]
+                            if source.kind == "structured_answer"
+                            else source.selected_value
+                        ),
+                    )
+                    if source.source_id in allocation_by_id
+                    else source
                 )
-                if source.source_id in allocation_by_id
-                else source
                 for source in classification_input.sources
+                if source.source_id in protected_source_ids
+                or (source.kind == "uploaded_file" and include_uploaded_sources)
+                or allocation_by_id.get(source.source_id, 0) > 0
             ),
         )
 
-    minimum_char_budget = len(transcript_sources)
-    minimum = render(minimum_char_budget)
-    if not fits(minimum):
-        return minimum, False
-    lower = minimum_char_budget
-    upper = minimum_char_budget
-    while upper < total_available_chars:
-        upper = min(total_available_chars, upper * 2)
-        if upper == total_available_chars:
-            break
-        if not fits(render(upper)):
-            break
+    lower = 0
+    upper = min(1, total_available_chars)
+    while upper < total_available_chars and fits(render(upper)):
         lower = upper
-    if lower == total_available_chars:
-        return render(lower), True
+        upper = min(total_available_chars, upper * 2)
+    if fits(render(upper)):
+        return render(upper)
     while lower + 1 < upper:
         midpoint = (lower + upper) // 2
         if fits(render(midpoint)):
             lower = midpoint
         else:
             upper = midpoint
-    return render(lower), True
+    return render(lower)
 
 
 def _with_slot_classification_attachment_context(
@@ -477,10 +540,10 @@ def _fair_classification_source_allocations(
     char_budget: int,
 ) -> list[int]:
     bounded_budget = min(
-        max(char_budget, len(sources)), sum(len(source.text) for source in sources)
+        max(char_budget, 0), sum(len(source.text) for source in sources)
     )
     fair_share = bounded_budget // len(sources)
-    included_lengths = [max(1, min(len(source.text), fair_share)) for source in sources]
+    included_lengths = [min(len(source.text), fair_share) for source in sources]
     remaining = bounded_budget - sum(included_lengths)
     for index in range(len(sources) - 1, -1, -1):
         if remaining <= 0:
@@ -490,50 +553,6 @@ def _fair_classification_source_allocations(
         included_lengths[index] += added
         remaining -= added
     return included_lengths
-
-
-def _ensure_slot_classification_request_fits_model(
-    *,
-    messages: list[dict[str, Any]],
-    response_format: dict[str, object],
-    litellm_model: str,
-    max_input_tokens: int | None,
-    max_output_tokens: int | None,
-    safety_buffer_tokens: int,
-) -> None:
-    if max_input_tokens is None:
-        return
-    output_reserve_tokens = max_output_tokens or 0
-    if slot_classification_request_fits_model(
-        messages=messages,
-        response_format=response_format,
-        litellm_model=litellm_model,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=output_reserve_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
-    ):
-        return
-    request_tokens = count_message_tokens(messages, litellm_model) + count_tokens(
-        json.dumps(response_format, ensure_ascii=False, separators=(",", ":")),
-        litellm_model,
-    )
-    required_context_tokens = (
-        request_tokens + output_reserve_tokens + safety_buffer_tokens
-    )
-    raise AIBuilderBadRequestException(
-        "The selected Builder model cannot fit the requirement-classification "
-        "request. Choose a model with a larger context window or shorten the "
-        "conversation.",
-        code=AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED,
-        context={
-            "phase": "slot_classification",
-            "request_tokens": request_tokens,
-            "output_reserve_tokens": output_reserve_tokens,
-            "safety_buffer_tokens": safety_buffer_tokens,
-            "required_context_tokens": required_context_tokens,
-            "max_input_tokens": max_input_tokens,
-        },
-    )
 
 
 def _slot_classification_response_format(

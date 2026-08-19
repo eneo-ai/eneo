@@ -6,7 +6,10 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from eneo.flows.ai_builder.ai_builder_settings import resolve_ai_builder_budget_policy
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    resolve_ai_builder_budget_policy,
+)
 from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
@@ -28,6 +31,8 @@ def test_ai_builder_policy_resolves_admin_owned_operating_limits() -> None:
         defaults=SimpleNamespace(
             ai_builder_conversation_safety_buffer_tokens=2_000,
             ai_builder_minimum_conversation_budget_tokens=4_000,
+            ai_builder_classification_timeout_seconds=60.0,
+            ai_builder_proposal_timeout_seconds=180.0,
         ),
     )
 
@@ -62,7 +67,34 @@ def test_ai_builder_policy_rejects_operating_limits_above_system_ceiling(
             defaults=SimpleNamespace(
                 ai_builder_conversation_safety_buffer_tokens=2_000,
                 ai_builder_minimum_conversation_budget_tokens=4_000,
+                ai_builder_classification_timeout_seconds=60.0,
+                ai_builder_proposal_timeout_seconds=180.0,
             ),
         )
 
     assert exc_info.value.code is AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS
+
+
+def test_proposal_budget_clamps_capabilities_without_model_specific_rules() -> None:
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=2_000,
+        minimum_conversation_budget_tokens=4_000,
+    )
+
+    resolved_outputs = []
+    for output_ceiling in (32_768, 131_072):
+        budget = policy.proposal_request_budget(
+            context_window_tokens=131_072,
+            model_output_ceiling_tokens=output_ceiling,
+        ).resolve(input_tokens=20_000)
+        assert budget is not None
+        resolved_outputs.append(budget.resolved_output_tokens)
+
+    smaller_budget = policy.proposal_request_budget(
+        context_window_tokens=131_072,
+        model_output_ceiling_tokens=8_192,
+    ).resolve(input_tokens=20_000)
+
+    assert resolved_outputs == [32_768, 32_768]
+    assert smaller_budget is not None
+    assert smaller_budget.resolved_output_tokens == 8_192

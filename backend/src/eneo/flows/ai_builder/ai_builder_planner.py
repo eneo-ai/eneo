@@ -98,7 +98,6 @@ from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
 )
 from eneo.main.logging import get_logger
-from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
@@ -187,7 +186,6 @@ class AIBuilderPlanner:
         new_messages_start: int,
         proposal_request: ProposalPrepared,
         completion_model_route: ResolvedCompletionModelRoute,
-        max_output_tokens: int,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry,
         flow: "Flow | None",
@@ -212,7 +210,6 @@ class AIBuilderPlanner:
                     proposal_tool_schema=proposal_request.proposal_tool_schema,
                     decline_tool_schema=proposal_request.decline_tool_schema,
                     obligation_projection=proposal_request.obligation_projection,
-                    max_output_tokens=max_output_tokens,
                     proposal_temperature=self.planner_temperature,
                     request_id=request_id,
                     usage_tracker=usage_tracker,
@@ -224,13 +221,9 @@ class AIBuilderPlanner:
                     plan_edit_context=proposal_request.plan_edit_context,
                     prior_spec_for_revision=proposal_request.prior_spec_for_revision,
                     before_provider_call=before_provider_call,
-                    proposal_request_budget=(
-                        replace(
-                            proposal_request.request_budget,
-                            request_id=request_id,
-                        )
-                        if proposal_request.request_budget is not None
-                        else None
+                    proposal_request_budget=replace(
+                        proposal_request.request_budget,
+                        request_id=request_id,
                     ),
                 )
             ]
@@ -271,8 +264,8 @@ class AIBuilderPlanner:
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
-        max_input_tokens: int | None = None,
-        max_output_tokens: int | None = None,
+        max_input_tokens: int,
+        max_output_tokens: int,
         budget_policy: AIBuilderBudgetPolicy | None = None,
         attachment_context_policy: AIBuilderAttachmentContextPolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
@@ -307,18 +300,6 @@ class AIBuilderPlanner:
         if mapped_execution_policy is None:
             mapped_execution_policy = resolve_flow_mapped_execution_policy(None)
         litellm_model = completion_model_route.litellm_model
-        bare_name = litellm_model.split("/", 1)[-1] if "/" in litellm_model else None
-        defaults = lookup_model_defaults(litellm_model, bare_name)
-        if max_input_tokens is None:
-            max_input_tokens = defaults.max_input_tokens if defaults else None
-        if max_output_tokens is None:
-            max_output_tokens = defaults.max_output_tokens if defaults else None
-        if max_input_tokens is None or max_output_tokens is None:
-            raise AIBuilderBadRequestException(
-                "AI Builder planner budget settings are missing.",
-                code=AIBuilderErrorCode.PLANNER_BUDGET_MISSING,
-            )
-
         session = turn_preflight.session
         session_status = _session_status_value(session.status)
         conversation = list(session.conversation)
@@ -372,7 +353,11 @@ class AIBuilderPlanner:
             policy=attachment_context_policy,
             model_name=litellm_model,
             max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
+            max_output_tokens=budget_policy.preferred_proposal_output_tokens(
+                context_window_tokens=max_input_tokens,
+                model_output_ceiling_tokens=max_output_tokens,
+                fixed_input_tokens=(budget_policy.minimum_conversation_budget_tokens),
+            ),
             safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
             minimum_conversation_tokens=(
                 budget_policy.minimum_conversation_budget_tokens
@@ -514,7 +499,6 @@ class AIBuilderPlanner:
                         new_messages_start=new_messages_start,
                         proposal_request=proposal_request,
                         completion_model_route=completion_model_route,
-                        max_output_tokens=max_output_tokens,
                         request_id=request_id,
                         usage_tracker=usage_tracker,
                         flow=flow,
@@ -630,7 +614,6 @@ class AIBuilderPlanner:
                                     new_messages_start=len(conversation),
                                     proposal_request=proposal_request,
                                     completion_model_route=completion_model_route,
-                                    max_output_tokens=max_output_tokens,
                                     request_id=request_id,
                                     usage_tracker=usage_tracker,
                                     flow=flow,

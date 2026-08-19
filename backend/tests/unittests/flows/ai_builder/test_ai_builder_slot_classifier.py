@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -35,7 +36,6 @@ from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
-    AIBuilderErrorCode,
     AIBuilderKnownProviderRejectionException,
     AIBuilderProviderOutcomeUnknownException,
 )
@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTele
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
 )
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     ClassifiedEvidence,
@@ -52,7 +53,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     parse_slot_classification_response,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
-    classify_slots,
+    classify_slots as _classify_slots,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_prompt_hash,
 )
 from eneo.flows.ai_builder.planning_state import CheckpointProducerKind
@@ -60,6 +63,19 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
 from eneo.tenants.tenant import TenantInDB
+
+
+async def classify_slots(**kwargs: Any):
+    kwargs.setdefault("max_input_tokens", 100_000)
+    kwargs.setdefault("max_output_tokens", 4_096)
+    kwargs.setdefault(
+        "budget_policy",
+        AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=0,
+            minimum_conversation_budget_tokens=0,
+        ),
+    )
+    return await _classify_slots(**kwargs)
 
 
 def _classification_input(
@@ -2562,12 +2578,10 @@ async def test_classify_slots_refuses_duplicate_source_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_classify_slots_refuses_request_that_exceeds_selected_model_window() -> (
-    None
-):
+async def test_classify_slots_rejects_request_that_cannot_fit_selected_model() -> None:
     litellm_client = AsyncMock()
 
-    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
         await classify_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(),
@@ -2578,28 +2592,25 @@ async def test_classify_slots_refuses_request_that_exceeds_selected_model_window
             max_output_tokens=1024,
         )
 
-    assert exc_info.value.code is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
-    assert exc_info.value.context == {
-        "phase": "slot_classification",
-        "request_tokens": exc_info.value.context["request_tokens"],
-        "output_reserve_tokens": 1024,
-        "safety_buffer_tokens": 0,
-        "required_context_tokens": exc_info.value.context["required_context_tokens"],
-        "max_input_tokens": 1,
-    }
+    assert (
+        exc_info.value.public_error.code
+        is error_contract_module.AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
+    )
     litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_classify_slots_reserves_output_and_safety_within_model_window() -> None:
+async def test_classify_slots_clamps_output_to_available_headroom() -> None:
     litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE)
+    )
 
     with (
         patch.object(classifier, "count_message_tokens", return_value=100),
         patch.object(classifier, "count_tokens", return_value=20),
-        pytest.raises(AIBuilderBadRequestException) as exc_info,
     ):
-        await classify_slots(
+        attempt = await classify_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(),
             classification_input=_classification_input("Return JSON with case_id."),
@@ -2607,19 +2618,16 @@ async def test_classify_slots_reserves_output_and_safety_within_model_window() -
             tenant_id=uuid4(),
             max_input_tokens=1_000,
             max_output_tokens=800,
-            safety_buffer_tokens=100,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=100,
+                minimum_conversation_budget_tokens=0,
+            ),
         )
 
-    assert exc_info.value.code is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
-    assert exc_info.value.context == {
-        "phase": "slot_classification",
-        "request_tokens": 120,
-        "output_reserve_tokens": 800,
-        "safety_buffer_tokens": 100,
-        "required_context_tokens": 1_020,
-        "max_input_tokens": 1_000,
-    }
-    litellm_client.acompletion.assert_not_awaited()
+    assert attempt.outcome == "resolved"
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["max_tokens"] == 780
+    assert call_kwargs["timeout"] == 60.0
 
 
 @pytest.mark.asyncio

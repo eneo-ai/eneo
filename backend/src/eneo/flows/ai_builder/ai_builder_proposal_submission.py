@@ -83,7 +83,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     ProposalCallBudgetExhausted,
     ProposalMessageGroup,
-    ProposalRequestBudget,
     ProposalTurnContext,
     ToolProcessingResult,
     ToolRetryConfig,
@@ -94,6 +93,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderRequestBudget
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     DECLINE_FLOW_CHANGE_TOOL_NAME,
 )
@@ -211,7 +211,6 @@ class ProposalSubmissionOwner:
         resource_catalog: AIBuilderResourceCatalog,
         proposal_tool_schema: ProposalToolSchema,
         decline_tool_schema: ProposalToolSchema | None = None,
-        max_output_tokens: int,
         proposal_temperature: float,
         request_id: str,
         usage_tracker: ProposalTurnTelemetry,
@@ -224,7 +223,7 @@ class ProposalSubmissionOwner:
         plan_edit_context: ResolvedAIBuilderEditContext | None = None,
         prior_spec_for_revision: FlowDraftSpecCore | None = None,
         before_provider_call: Callable[[], Awaitable[None]] | None = None,
-        proposal_request_budget: ProposalRequestBudget | None = None,
+        proposal_request_budget: AIBuilderRequestBudget,
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         ctx = ProposalTurnContext(
             turn=turn,
@@ -238,7 +237,6 @@ class ProposalSubmissionOwner:
             available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,
             obligation_projection=obligation_projection,
-            max_output_tokens=max_output_tokens,
             request_id=request_id,
             flow=flow,
             assistant_snapshots=assistant_snapshots,

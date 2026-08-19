@@ -7182,6 +7182,7 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
     from eneo.flows.ai_builder.ai_builder_resource_catalog import (
         build_ai_builder_resource_catalog,
     )
+    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
     from eneo.flows.ai_builder.ai_builder_tools import (
         build_propose_flow_tool_schema,
     )
@@ -7287,7 +7288,13 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                     resource_catalog=resource_catalog,
                     proposal_tool_schema=proposal_tool_schema,
                     compile_context=None,
-                    max_output_tokens=512,
+                    proposal_request_budget=AIBuilderBudgetPolicy(
+                        conversation_safety_buffer_tokens=128,
+                        minimum_conversation_budget_tokens=256,
+                    ).proposal_request_budget(
+                        context_window_tokens=100_000,
+                        model_output_ceiling_tokens=2_048,
+                    ),
                     proposal_temperature=0.3,
                     request_id="req-edit-lost-lease",
                     usage_tracker=ProposalTurnTelemetry(

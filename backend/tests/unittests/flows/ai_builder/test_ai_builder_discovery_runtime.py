@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderKnownProviderRejectionException,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
@@ -72,6 +73,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_declared_schema_candidate,
     build_schema_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
@@ -159,6 +161,15 @@ def _route(
         supported_model_kwargs=SupportedModelKwargs(
             temperature=ModelKwargCapability(supported=True)
         ),
+    )
+
+
+def _budget_policy(
+    *, safety_buffer_tokens: int = 0, minimum_conversation_tokens: int = 0
+) -> AIBuilderBudgetPolicy:
+    return AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=safety_buffer_tokens,
+        minimum_conversation_budget_tokens=minimum_conversation_tokens,
     )
 
 
@@ -671,65 +682,62 @@ def test_slot_classification_input_carries_each_answering_question_identity() ->
 
 
 @pytest.mark.asyncio
-async def test_runtime_admits_the_largest_conversation_that_fits() -> None:
-    long_text = ("alpha beta gamma delta " * 3_000)[:50_000]
+async def test_runtime_preserves_current_turn_and_scales_optional_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_text = ("alpha beta gamma delta " * 3_000)[:50_000]
+    current_text = "Preserve this current instruction exactly."
 
-    async def admitted_conversation(max_input_tokens: int) -> tuple[str, object]:
-        litellm_client = AsyncMock()
-        litellm_client.acompletion.return_value = _make_response(json.dumps({}))
-        context = await build_runtime_discovery_context(
+    async def admitted_conversation(max_input_tokens: int) -> SlotClassificationInput:
+        classify = AsyncMock(
+            return_value=SlotClassificationAttempt(outcome="parse_failed")
+        )
+        monkeypatch.setattr(runtime, "classify_slots", classify)
+        await build_runtime_discovery_context(
             [
                 ConversationMessage(
-                    message_id="user-1",
+                    message_id="user-old",
                     role="user",
-                    content=long_text,
-                )
+                    content=old_text,
+                ),
+                ConversationMessage(
+                    message_id="user-current",
+                    role="user",
+                    content=current_text,
+                ),
             ],
-            litellm_client=litellm_client,
+            litellm_client=AsyncMock(),
             completion_model_route=_route(),
             tenant_id=uuid4(),
             max_input_tokens=max_input_tokens,
             max_output_tokens=1_000,
-            safety_buffer_tokens=1_000,
-            minimum_conversation_tokens=4_000,
-        )
-        litellm_client.acompletion.assert_awaited_once()
-        provider_request = litellm_client.acompletion.await_args.kwargs
-        messages = provider_request["messages"]
-        user_prompt = messages[1]["content"]
-        admitted = user_prompt.split(
-            "Typed evidence sources in conversation chronology, followed by stable "
-            "file-id order:\n",
-            1,
-        )[1].split("\n\nUnresolved slots and allowed values:", 1)[0]
-        admitted = admitted.split("\n", 1)[1]
-
-        def fits(prompt: str) -> bool:
-            return classifier.slot_classification_request_fits_model(
-                messages=[messages[0], {"role": "user", "content": prompt}],
-                response_format=provider_request["response_format"],
-                litellm_model="gpt-test",
-                max_input_tokens=max_input_tokens,
-                max_output_tokens=1_000,
+            budget_policy=_budget_policy(
                 safety_buffer_tokens=1_000,
-            )
-
-        # Maximal, not merely legal: what was sent fits, and the same request
-        # carrying one more character of the same conversation does not.
-        assert fits(user_prompt)
-        assert not fits(
-            user_prompt.replace(admitted, long_text[: len(admitted) + 1], 1)
+                minimum_conversation_tokens=4_000,
+            ),
         )
-        return admitted, context
+        return classify.await_args.kwargs["classification_input"]
 
-    narrow, _ = await admitted_conversation(12_000)
-    wide, context = await admitted_conversation(16_000)
+    narrow = await admitted_conversation(12_000)
+    wide = await admitted_conversation(16_000)
 
-    assert len(narrow) < len(wide) < len(long_text)
-    assert context.slot_classification_metadata is not None
-    assert [
-        item.truncated for item in context.slot_classification_metadata.source_inventory
-    ] == [True]
+    for admitted in (narrow, wide):
+        current = next(
+            source
+            for source in admitted.sources
+            if source.source_id == "user_message:user-current"
+        )
+        assert current.text == current_text
+        assert current.truncated is False
+    narrow_history = next(
+        (source.text for source in narrow.sources if source.message_id == "user-old"),
+        "",
+    )
+    wide_history = next(
+        (source.text for source in wide.sources if source.message_id == "user-old"),
+        "",
+    )
+    assert len(narrow_history) < len(wide_history) <= len(old_text)
 
 
 def test_slot_classification_input_keeps_parser_shape_invariants() -> None:
@@ -1976,38 +1984,33 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
 
 
 @pytest.mark.asyncio
-async def test_runtime_records_skipped_context_budget_when_minimum_request_cannot_fit() -> (
-    None
-):
+async def test_runtime_rejects_when_protected_current_turn_cannot_fit() -> None:
     litellm_client = AsyncMock()
 
-    context = await build_runtime_discovery_context(
-        [
-            ConversationMessage(
-                message_id="user-1",
-                role="user",
-                content="B",
-            )
-        ],
-        litellm_client=litellm_client,
-        completion_model_route=_route(),
-        tenant_id=uuid4(),
-        max_input_tokens=100,
-        max_output_tokens=70,
-        safety_buffer_tokens=20,
-        minimum_conversation_tokens=10,
-    )
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    message_id="user-1",
+                    role="user",
+                    content="B",
+                )
+            ],
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            tenant_id=uuid4(),
+            max_input_tokens=100,
+            max_output_tokens=70,
+            budget_policy=_budget_policy(
+                safety_buffer_tokens=20,
+                minimum_conversation_tokens=10,
+            ),
+        )
 
-    assert context.slot_classification_metadata is not None
-    assert context.slot_classification_metadata.outcome == "skipped_context_budget"
-    assert context.slot_classification_metadata.prompt_hash is None
-    assert context.slot_classification_metadata.source_inventory[0].source_id == (
-        "user_message:user-1"
+    assert (
+        exc_info.value.public_error.code
+        is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
     )
-    assert context.slot_classification_metadata.source_inventory[0].source_sha256 == (
-        hashlib.sha256(b"B").hexdigest()
-    )
-    assert context.slot_classification_metadata.source_inventory[0].truncated is False
     litellm_client.acompletion.assert_not_awaited()
 
 
@@ -2056,8 +2059,10 @@ async def test_runtime_refits_saturated_attachment_before_admitting_transcript()
         tenant_id=uuid4(),
         max_input_tokens=16_000,
         max_output_tokens=1_000,
-        safety_buffer_tokens=1_000,
-        minimum_conversation_tokens=4_000,
+        budget_policy=_budget_policy(
+            safety_buffer_tokens=1_000,
+            minimum_conversation_tokens=4_000,
+        ),
         attachment_context=attachment_context,
     )
 
@@ -2068,7 +2073,7 @@ async def test_runtime_refits_saturated_attachment_before_admitting_transcript()
         litellm_model="gpt-test",
         max_input_tokens=16_000,
         max_output_tokens=1_000,
-        safety_buffer_tokens=1_000,
+        budget_policy=_budget_policy(safety_buffer_tokens=1_000),
     )
     assert context.slot_classification_metadata is not None
     assert [
@@ -2111,7 +2116,7 @@ async def test_runtime_persists_exact_admitted_source_inventory(
             ConversationMessage(
                 message_id="user-latest",
                 role="user",
-                content="latest:" + "epsilon zeta eta theta " * 1_500,
+                content="latest instruction stays complete",
             ),
         ],
         litellm_client=AsyncMock(),
@@ -2119,8 +2124,10 @@ async def test_runtime_persists_exact_admitted_source_inventory(
         tenant_id=uuid4(),
         max_input_tokens=12_000,
         max_output_tokens=1_000,
-        safety_buffer_tokens=200,
-        minimum_conversation_tokens=500,
+        budget_policy=_budget_policy(
+            safety_buffer_tokens=200,
+            minimum_conversation_tokens=500,
+        ),
     )
 
     assert admitted_input is not None

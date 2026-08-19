@@ -71,6 +71,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_context,
     _plan_stream_event,
+    _proposal_request_budget,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import _make_usage
 
@@ -251,7 +252,7 @@ def _make_self_correction_request(
         litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
-        max_output_tokens=max_output_tokens,
+        proposal_request_budget=_proposal_request_budget(max_output_tokens),
         request_id=request_id,
         usage_tracker=usage_tracker,
         assistant_metadata=assistant_metadata,
@@ -331,7 +332,7 @@ def _make_forced_tool_after_text_request(
         litellm_kwargs={} if litellm_kwargs is None else litellm_kwargs,
         available_model_refs=available_model_refs,
         available_kb_refs=available_kb_refs,
-        max_output_tokens=max_output_tokens,
+        proposal_request_budget=_proposal_request_budget(max_output_tokens),
         request_id=resolved_request_id,
         usage_tracker=usage_tracker,
         assistant_metadata=assistant_metadata,

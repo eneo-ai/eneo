@@ -45,6 +45,8 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    AIBuilderKnownProviderRejectionException,
+    build_ai_builder_request_budget_exhausted_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -80,7 +82,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     LLMMessageParam,
     LLMMessageRole,
     ProposalMessageGroup,
-    ProposalRequestBudget,
     fit_proposal_message_groups,
     flatten_proposal_message_groups,
     group_proposal_messages,
@@ -109,7 +110,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     latest_schema_direction_answer_matches_candidates,
     merge_declared_schema_candidates,
 )
-from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    AIBuilderRequestBudget,
+)
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     build_propose_flow_tool_schema,
@@ -213,9 +217,9 @@ class ProposalPrepared(_PreparedBase):
     planning_state: PlanningState
     compile_context: CreateCompileContext | None
     proposal_tool_schema: ProposalToolSchema
+    request_budget: AIBuilderRequestBudget
     decline_tool_schema: ProposalToolSchema | None = None
     obligation_projection: ProposalObligationProjection | None = None
-    request_budget: ProposalRequestBudget | None = None
 
     @property
     def llm_messages(self) -> list[LLMMessageParam]:
@@ -239,7 +243,13 @@ async def prepare_planner_request(
             policy=request.attachment_context_policy,
             model_name=request.completion_model_route.litellm_model,
             max_input_tokens=request.max_input_tokens,
-            max_output_tokens=request.max_output_tokens,
+            max_output_tokens=request.budget_policy.preferred_proposal_output_tokens(
+                context_window_tokens=request.max_input_tokens,
+                model_output_ceiling_tokens=request.max_output_tokens,
+                fixed_input_tokens=(
+                    request.budget_policy.minimum_conversation_budget_tokens
+                ),
+            ),
             safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
             minimum_conversation_tokens=(
                 request.budget_policy.minimum_conversation_budget_tokens
@@ -279,12 +289,7 @@ async def prepare_planner_request(
             prepared_schema_candidates=schema_candidates,
             max_input_tokens=request.max_input_tokens,
             max_output_tokens=request.max_output_tokens,
-            safety_buffer_tokens=(
-                request.budget_policy.conversation_safety_buffer_tokens
-            ),
-            minimum_conversation_tokens=(
-                request.budget_policy.minimum_conversation_budget_tokens
-            ),
+            budget_policy=request.budget_policy,
         )
         rebuilt_planning_state = acknowledged_context.planning_state
         carry_forward_persisted_planner_state(
@@ -323,10 +328,7 @@ async def prepare_planner_request(
             attached_file_ids={file.id for file in request.attachment_files},
             max_input_tokens=request.max_input_tokens,
             max_output_tokens=request.max_output_tokens,
-            safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
-            minimum_conversation_tokens=(
-                request.budget_policy.minimum_conversation_budget_tokens
-            ),
+            budget_policy=request.budget_policy,
         )
         discovery_analysis = discovery_runtime.discovery_analysis
         rebuilt_planning_state = discovery_runtime.planning_state
@@ -613,6 +615,10 @@ def build_proposal_prepared(
         ),
         obligation_projection=obligation_projection,
     )
+    proposal_request_budget = budget_policy.proposal_request_budget(
+        context_window_tokens=max_input_tokens,
+        model_output_ceiling_tokens=max_output_tokens,
+    )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names
         if compile_context is not None and not is_edit_mode
@@ -655,8 +661,7 @@ def build_proposal_prepared(
             proposal_tool_schema, decline_tool_schema
         ),
         litellm_model=litellm_model,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        request_budget=proposal_request_budget,
         budget_policy=budget_policy,
     )
 
@@ -703,8 +708,7 @@ def build_proposal_prepared(
         conversation=conversation,
         system_prompt=proposal_system_prompt,
         litellm_model=litellm_model,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        request_budget=proposal_request_budget,
         budget_policy=budget_policy,
         current_turn_start=current_turn_start,
     )
@@ -744,11 +748,7 @@ def build_proposal_prepared(
         proposal_tool_schema=proposal_tool_schema,
         decline_tool_schema=decline_tool_schema,
         obligation_projection=obligation_projection,
-        request_budget=ProposalRequestBudget(
-            context_window_tokens=max_input_tokens,
-            output_reserve_tokens=max_output_tokens,
-            safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
-        ),
+        request_budget=proposal_request_budget,
     )
 
 
@@ -804,19 +804,22 @@ def _proposal_system_prompt_token_limit(
     *,
     turn_tool_schemas: list[dict[str, Any]],
     litellm_model: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    request_budget: AIBuilderRequestBudget,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> int:
     """What the model can actually carry as a system prompt this turn."""
 
+    tool_tokens = count_tool_tokens(turn_tool_schemas, litellm_model)
+    output_tokens = request_budget.preferred_output_tokens(
+        input_tokens=(tool_tokens + budget_policy.minimum_conversation_budget_tokens)
+    )
     return max(
         0,
-        max_input_tokens
-        - max_output_tokens
-        - budget_policy.conversation_safety_buffer_tokens
+        request_budget.context_window_tokens
+        - output_tokens
+        - request_budget.safety_buffer_tokens
         - budget_policy.minimum_conversation_budget_tokens
-        - count_tool_tokens(turn_tool_schemas, litellm_model),
+        - tool_tokens,
     )
 
 
@@ -855,13 +858,12 @@ def _fit_replayed_requirements(
     if lower:
         return with_assumptions(lower)
 
-    # The bounded parts of the disclosure are bounded by evidence, not by the
-    # model: a hundred named results can outgrow the prompt on their own. What
-    # this function returns must fit, so the replay is dropped entirely rather
-    # than handed on over budget. `PlanningState` still carries every typed
-    # fact into the prompt and into compilation.
     without_assumptions = with_assumptions(0)
-    return without_assumptions if fits(without_assumptions) else None
+    if fits(without_assumptions):
+        return without_assumptions
+    raise AIBuilderKnownProviderRejectionException(
+        build_ai_builder_request_budget_exhausted_error(request_id=None)
+    )
 
 
 def validate_preprovider_schema_gate(
@@ -957,8 +959,7 @@ def _prepare_prompt_messages(
     conversation: list[ConversationMessage],
     system_prompt: str,
     litellm_model: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    request_budget: AIBuilderRequestBudget,
     budget_policy: AIBuilderBudgetPolicy,
     current_turn_start: int,
 ) -> PreparedPromptMessages:
@@ -966,11 +967,14 @@ def _prepare_prompt_messages(
         [{"role": "system", "content": system_prompt}],
         litellm_model,
     )
+    output_tokens = request_budget.preferred_output_tokens(
+        input_tokens=(prompt_tokens + budget_policy.minimum_conversation_budget_tokens)
+    )
     conversation_budget = compute_conversation_token_budget(
-        model_max_input_tokens=max_input_tokens,
+        model_max_input_tokens=request_budget.context_window_tokens,
         system_prompt_tokens=prompt_tokens,
-        max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
+        max_output_tokens=output_tokens,
+        safety_buffer_tokens=request_budget.safety_buffer_tokens,
     )
     raw_messages = [
         conversation_message_to_llm_message(message) for message in conversation

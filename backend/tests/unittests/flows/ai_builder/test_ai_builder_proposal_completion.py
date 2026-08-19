@@ -55,8 +55,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCallBudget,
     ProposalMessageGroup,
-    ProposalRequestBudget,
     append_protected_repair_group,
+    fit_proposal_request_budget,
     flatten_proposal_message_groups,
     forced_tool_choice,
 )
@@ -65,6 +65,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
+)
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    AIBuilderRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationInput,
@@ -112,15 +116,49 @@ def _completion_request(
     **kwargs: Any,
 ) -> ProposalCompletionRequestContract:
     kwargs.setdefault("target_kind", TargetKind.CREATE)
-    return ProposalCompletionRequestContract(
-        message_groups=(
-            ProposalMessageGroup(
-                messages=tuple(messages),  # type: ignore[arg-type]
-                kind="current_turn",
-                protected=True,
-            ),
+    max_output_tokens = kwargs.pop("max_output_tokens")
+    request_budget = kwargs.pop(
+        "request_budget",
+        AIBuilderRequestBudget(
+            context_window_tokens=100_000,
+            model_output_ceiling_tokens=max_output_tokens,
+            target_output_tokens=max_output_tokens,
+            minimum_output_tokens=1,
+            safety_buffer_tokens=0,
+            timeout_seconds=180.0,
         ),
+    )
+    message_groups = (
+        ProposalMessageGroup(
+            messages=tuple(messages),  # type: ignore[arg-type]
+            kind="current_turn",
+            protected=True,
+        ),
+    )
+    return ProposalCompletionRequestContract(
+        message_groups=message_groups,
+        request_budget=request_budget,
         **kwargs,
+    )
+
+
+def _request_budget(
+    *,
+    context_window_tokens: int,
+    output_tokens: int,
+    minimum_output_tokens: int = 1,
+    safety_buffer_tokens: int = 0,
+    timeout_seconds: float = 180.0,
+    request_id: str | None = None,
+) -> AIBuilderRequestBudget:
+    return AIBuilderRequestBudget(
+        context_window_tokens=context_window_tokens,
+        model_output_ceiling_tokens=output_tokens,
+        target_output_tokens=output_tokens,
+        minimum_output_tokens=minimum_output_tokens,
+        safety_buffer_tokens=safety_buffer_tokens,
+        timeout_seconds=timeout_seconds,
+        request_id=request_id,
     )
 
 
@@ -788,6 +826,7 @@ async def test_proposal_provider_failure_uses_typed_disposition(
     }
     before_provider_call.assert_awaited_once_with()
     assert litellm_client.acompletion.await_count == 1
+    assert litellm_client.acompletion.await_args.kwargs["timeout"] == 180.0
     failure_calls = [
         call for call in event_log.call_args_list if call.args == ("failure_event",)
     ]
@@ -1121,21 +1160,48 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_request_budget_treats_model_output_as_a_ceiling() -> None:
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Keep this current turn"}],
+            tool_schemas=[],
+            route=_route(),
+            max_output_tokens=100,
+            temperature=0.2,
+            request_budget=_request_budget(
+                context_window_tokens=100,
+                output_tokens=100,
+            ),
+        ),
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert 0 < call_kwargs["max_tokens"] < 100
+    assert call_kwargs["messages"] == [
+        {"role": "user", "content": "Keep this current turn"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system_message = {"role": "system", "content": "protected system"}
     current_turn = {"role": "user", "content": "protected current turn"}
     call_budget = ProposalCallBudget()
-    request_budget = ProposalRequestBudget(
+    request_budget = _request_budget(
         context_window_tokens=20,
-        output_reserve_tokens=10,
-        safety_buffer_tokens=0,
+        output_tokens=10,
+        minimum_output_tokens=10,
         request_id="req-budget-overflow",
     )
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
-        lambda messages, _model: 11,
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        lambda messages, _tools, _model: SimpleNamespace(tokens=11),
     )
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
@@ -1143,31 +1209,27 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
     )
     before_provider_call = AsyncMock()
     litellm_client = SimpleNamespace(acompletion=AsyncMock())
+    ctx = _make_context(
+        message_groups=(
+            ProposalMessageGroup(
+                messages=(system_message,),  # type: ignore[arg-type]
+                kind="system",
+                protected=True,
+            ),
+            ProposalMessageGroup(
+                messages=(current_turn,),  # type: ignore[arg-type]
+                kind="current_turn",
+                protected=True,
+            ),
+        ),
+        proposal_request_budget=request_budget,
+        proposal_call_budget=call_budget,
+    )
 
     with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
         await call_proposal_completion(
             litellm_client=litellm_client,
-            request=ProposalCompletionRequestContract(
-                message_groups=(
-                    ProposalMessageGroup(
-                        messages=(system_message,),  # type: ignore[arg-type]
-                        kind="system",
-                        protected=True,
-                    ),
-                    ProposalMessageGroup(
-                        messages=(current_turn,),  # type: ignore[arg-type]
-                        kind="current_turn",
-                        protected=True,
-                    ),
-                ),
-                tool_schemas=[],
-                route=_route(),
-                target_kind=TargetKind.CREATE,
-                max_output_tokens=10,
-                temperature=0.2,
-                request_budget=request_budget,
-                call_budget=call_budget,
-            ),
+            request=ctx.completion_request(temperature=0.2),
             before_provider_call=before_provider_call,
         )
 
@@ -1179,6 +1241,55 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
         "another_call_permitted": False,
         "retry_scope": "new_turn",
     }
+    assert call_budget.calls_started == 0
+    before_provider_call.assert_not_awaited()
+    litellm_client.acompletion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_final_strict_tool_payload_is_admitted_before_provider_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    call_budget = ProposalCallBudget()
+    before_provider_call = AsyncMock()
+    litellm_client = SimpleNamespace(acompletion=AsyncMock())
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        lambda _messages, _tools, _model: SimpleNamespace(tokens=0),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda tools, _model: (11 if tools[0]["function"].get("strict") is True else 0),
+    )
+    ctx = _make_context(
+        route=_route(supports_strict_tool_schema=True),
+        message_groups=(
+            ProposalMessageGroup(
+                messages=({"role": "user", "content": "current turn"},),
+                kind="current_turn",
+                protected=True,
+            ),
+        ),
+        proposal_request_budget=_request_budget(
+            context_window_tokens=20,
+            output_tokens=10,
+            minimum_output_tokens=10,
+            request_id="req-strict-payload-overflow",
+        ),
+        proposal_call_budget=call_budget,
+    )
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
+        await call_proposal_completion(
+            litellm_client=litellm_client,
+            request=ctx.completion_request(temperature=0.2),
+            before_provider_call=before_provider_call,
+        )
+
+    assert (
+        exc_info.value.public_error.code
+        is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
+    )
     assert call_budget.calls_started == 0
     before_provider_call.assert_not_awaited()
     litellm_client.acompletion.assert_not_awaited()
@@ -1235,21 +1346,25 @@ def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_conte
         ),
     )
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
-        lambda candidate, _model: len(candidate) * 10,
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        lambda candidate, _tools, _model: SimpleNamespace(tokens=len(candidate) * 10),
     )
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
         lambda _tools, _model: 0,
     )
-    budget = ProposalRequestBudget(
+    budget = _request_budget(
         context_window_tokens=45,
-        output_reserve_tokens=0,
-        safety_buffer_tokens=0,
+        output_tokens=1,
         request_id="req-repair-budget",
     )
 
-    fitted = budget.fit(message_groups=groups, tool_schemas=[], model_name="test")
+    fitted, resolved = fit_proposal_request_budget(
+        budget=budget,
+        message_groups=groups,
+        tool_schemas=[],
+        model_name="test",
+    )
 
     assert flatten_proposal_message_groups(fitted) == [
         system_message,
@@ -1257,6 +1372,7 @@ def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_conte
         failed_call,
         tool_feedback,
     ]
+    assert resolved.resolved_output_tokens == 1
 
 
 @pytest.mark.asyncio
@@ -1285,8 +1401,8 @@ async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
         "content": "repair feedback",
     }
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
-        lambda messages, _model: len(messages) * 20,
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        lambda messages, _tools, _model: SimpleNamespace(tokens=len(messages) * 20),
     )
     monkeypatch.setattr(
         "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
@@ -1295,41 +1411,39 @@ async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
     call_budget = ProposalCallBudget(call_limit=4, calls_started=1)
     before_provider_call = AsyncMock()
     litellm_client = SimpleNamespace(acompletion=AsyncMock())
+    ctx = _make_context(
+        message_groups=(
+            ProposalMessageGroup(
+                messages=(system_message,),  # type: ignore[arg-type]
+                kind="system",
+                protected=True,
+            ),
+            ProposalMessageGroup(
+                messages=(current_turn,),  # type: ignore[arg-type]
+                kind="current_turn",
+                protected=True,
+            ),
+            ProposalMessageGroup(
+                messages=(repair_call, repair_feedback),  # type: ignore[arg-type]
+                kind="repair",
+                protected=True,
+            ),
+        ),
+        proposal_request_budget=_request_budget(
+            context_window_tokens=70,
+            output_tokens=20,
+            minimum_output_tokens=20,
+            request_id="req-repair-overflow",
+        ),
+        proposal_call_budget=call_budget,
+    )
 
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         await call_proposal_completion(
             litellm_client=litellm_client,
-            request=ProposalCompletionRequestContract(
-                message_groups=(
-                    ProposalMessageGroup(
-                        messages=(system_message,),  # type: ignore[arg-type]
-                        kind="system",
-                        protected=True,
-                    ),
-                    ProposalMessageGroup(
-                        messages=(current_turn,),  # type: ignore[arg-type]
-                        kind="current_turn",
-                        protected=True,
-                    ),
-                    ProposalMessageGroup(
-                        messages=(repair_call, repair_feedback),  # type: ignore[arg-type]
-                        kind="repair",
-                        protected=True,
-                    ),
-                ),
-                tool_schemas=[],
-                route=_route(),
-                target_kind=TargetKind.CREATE,
-                max_output_tokens=0,
+            request=ctx.completion_request(
                 temperature=0.2,
                 counts_as_repair=True,
-                request_budget=ProposalRequestBudget(
-                    context_window_tokens=70,
-                    output_reserve_tokens=0,
-                    safety_buffer_tokens=0,
-                    request_id="req-repair-overflow",
-                ),
-                call_budget=call_budget,
             ),
             before_provider_call=before_provider_call,
         )
@@ -1369,9 +1483,9 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
         ),
     )
     monkeypatch.setattr(
-        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
-        lambda messages, _model: (
-            80 if "oversized" in json.dumps(messages) else len(messages) * 10
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        lambda messages, _tools, _model: SimpleNamespace(
+            tokens=(80 if "oversized" in json.dumps(messages) else len(messages) * 10)
         ),
     )
     monkeypatch.setattr(
@@ -1379,15 +1493,19 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
         lambda _tools, _model: 0,
     )
     call_budget = ProposalCallBudget()
-    request_budget = ProposalRequestBudget(
+    request_budget = _request_budget(
         context_window_tokens=50,
-        output_reserve_tokens=0,
-        safety_buffer_tokens=0,
+        output_tokens=1,
         request_id="req-second-repair-overflow",
     )
     before_provider_call = AsyncMock()
     litellm_client = SimpleNamespace(
         acompletion=AsyncMock(return_value=_make_response_with_text("repair"))
+    )
+    ctx = _make_context(
+        message_groups=initial_groups,
+        proposal_request_budget=request_budget,
+        proposal_call_budget=call_budget,
     )
 
     for message_groups, counts_as_repair in (
@@ -1396,16 +1514,10 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
     ):
         await call_proposal_completion(
             litellm_client=litellm_client,
-            request=ProposalCompletionRequestContract(
-                message_groups=message_groups,
-                tool_schemas=[],
-                route=_route(),
-                target_kind=TargetKind.CREATE,
-                max_output_tokens=0,
+            request=ctx.completion_request(
                 temperature=0.2,
+                message_groups=message_groups,
                 counts_as_repair=counts_as_repair,
-                request_budget=request_budget,
-                call_budget=call_budget,
             ),
             before_provider_call=before_provider_call,
         )
@@ -1413,16 +1525,10 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
     with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
         await call_proposal_completion(
             litellm_client=litellm_client,
-            request=ProposalCompletionRequestContract(
-                message_groups=second_repair_groups,
-                tool_schemas=[],
-                route=_route(),
-                target_kind=TargetKind.CREATE,
-                max_output_tokens=0,
+            request=ctx.completion_request(
                 temperature=0.2,
+                message_groups=second_repair_groups,
                 counts_as_repair=True,
-                request_budget=request_budget,
-                call_budget=call_budget,
             ),
             before_provider_call=before_provider_call,
         )
@@ -1502,6 +1608,12 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=uuid4(),
         usage_tracker=tracker,
+        max_input_tokens=100_000,
+        max_output_tokens=4_096,
+        budget_policy=AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=0,
+            minimum_conversation_budget_tokens=0,
+        ),
     )
     assert classification is not None
     call_budget = ProposalCallBudget(call_limit=2)

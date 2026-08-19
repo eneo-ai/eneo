@@ -35,6 +35,10 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    AIBuilderRequestBudget,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import PlanningState
@@ -60,6 +64,18 @@ def _make_turn(
         tenant_id=tenant_id or uuid4(),
         lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
         base_planning_state_version=base_planning_state_version,
+    )
+
+
+def _proposal_request_budget(
+    model_output_ceiling_tokens: int = 4_096,
+) -> AIBuilderRequestBudget:
+    return AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=0,
+        minimum_conversation_budget_tokens=0,
+    ).proposal_request_budget(
+        context_window_tokens=100_000,
+        model_output_ceiling_tokens=model_output_ceiling_tokens,
     )
 
 
@@ -114,7 +130,7 @@ def _make_context(**overrides: object) -> ProposalTurnContext:
         "available_model_refs": None,
         "available_kb_refs": None,
         "resource_catalog": None,
-        "max_output_tokens": 4096,
+        "proposal_request_budget": _proposal_request_budget(),
         "request_id": "req-1",
         "planning_state": PlanningState.empty(),
         "flow": None,

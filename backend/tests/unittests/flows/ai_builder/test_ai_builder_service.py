@@ -1461,6 +1461,8 @@ class TestSendMessage:
                     request_snapshot=_test_request_snapshot("Hello"),
                     message="Hello",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -1496,6 +1498,8 @@ class TestSendMessage:
                     request_snapshot=_test_request_snapshot("Change step 2"),
                     message="Change step 2",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -1571,6 +1575,8 @@ class TestSendMessage:
                     message="Hello",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -1618,8 +1624,8 @@ class TestSendMessage:
         )
         repo.load_planning_state.return_value = _make_committed_planning_state()
         monkeypatch.setattr(
-            "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_message_tokens",
-            lambda _messages, _model: 1_000_000_000,
+            "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+            lambda _messages, _tools, _model: SimpleNamespace(tokens=1_000_000_000),
         )
         monkeypatch.setattr(
             "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
@@ -1637,6 +1643,8 @@ class TestSendMessage:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -1694,6 +1702,8 @@ class TestSendMessage:
                         message="Hello",
                         question_answer=_make_requirements_confirmation(),
                         completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                        max_input_tokens=128_000,
+                        max_output_tokens=16_384,
                     )
                 )
 
@@ -1723,6 +1733,8 @@ class TestSendMessageToolCall:
                     request_snapshot=_test_request_snapshot("Build from plain text"),
                     message="Build from plain text",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -1815,6 +1827,8 @@ class TestSendMessageToolCall:
                         "en DOCX-rapport."
                     ),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -1948,6 +1962,8 @@ class TestSendMessageToolCall:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -2000,6 +2016,8 @@ class TestSendMessageToolCall:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -2073,6 +2091,8 @@ class TestSendMessageToolCall:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -2308,6 +2328,8 @@ class TestSendMessageStructuredQuestion:
                     message="Bygg planen",
                     question_answer=None,
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -2478,6 +2500,8 @@ class TestSendMessageStructuredQuestion:
                         "ui_language": "sv",
                     },
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -2533,6 +2557,8 @@ class TestSendMessageStructuredQuestion:
                     ),
                     message="Jag vill ladda upp flera PDF-filer och jämföra innehållet mellan dokumenten.",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -2641,6 +2667,8 @@ class TestSendMessageStructuredQuestion:
                         "ui_language": "sv",
                     },
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 
@@ -2698,6 +2726,8 @@ class TestSendMessageStructuredQuestion:
                     ),
                     message="Bygg ett flöde som sammanfattar ett dokument.",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                    max_input_tokens=128_000,
+                    max_output_tokens=16_384,
                 )
             )
 

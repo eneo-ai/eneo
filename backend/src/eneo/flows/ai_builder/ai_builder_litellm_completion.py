@@ -25,6 +25,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCallBudgetExhausted,
     ProposalCompletionFn,
     ProposalCompletionRequest,
+    fit_proposal_request_budget,
     flatten_proposal_message_groups,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
@@ -82,25 +83,27 @@ async def call_proposal_completion(
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
 ) -> LLMCompletionResponse:
     tool_schemas = _outbound_proposal_tool_schemas(request)
-    message_groups = request.message_groups
-    if request.request_budget is not None:
-        message_groups = request.request_budget.fit(
-            message_groups=message_groups,
-            tool_schemas=tool_schemas,
-            model_name=request.route.litellm_model,
-        )
-    messages = flatten_proposal_message_groups(message_groups)
+    fitted_message_groups, request_budget = fit_proposal_request_budget(
+        budget=request.request_budget,
+        message_groups=request.message_groups,
+        tool_schemas=tool_schemas,
+        model_name=request.route.litellm_model,
+    )
+    messages = flatten_proposal_message_groups(fitted_message_groups)
     if not request.call_budget.try_start_call():
         raise ProposalCallBudgetExhausted
     provider_kwargs = request.route.prepare_provider_kwargs(
         ModelKwargs(temperature=request.temperature)
     )
     provider_kwargs.pop("drop_params", None)
+    provider_kwargs.pop("timeout", None)
     dropped_response_format = provider_kwargs.pop("response_format", None)
     if dropped_response_format is not None:
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
     incident_evidence = _proposal_request_evidence(
         request=request,
+        max_tokens=request_budget.resolved_output_tokens,
+        timeout_seconds=request_budget.timeout_seconds,
         messages=messages,
         tool_schemas=tool_schemas,
         provider_kwargs=provider_kwargs,
@@ -111,6 +114,7 @@ async def call_proposal_completion(
         usage_tracker.start_attempt(
             counts_as_repair=request.counts_as_repair,
             call_kind=call_kind,
+            request_budget=request_budget,
         )
     try:
         raw_response = await litellm_client.acompletion(
@@ -121,7 +125,8 @@ async def call_proposal_completion(
             parallel_tool_calls=False,
             stream=False,
             drop_params=True,
-            max_tokens=request.max_output_tokens,
+            max_tokens=request_budget.resolved_output_tokens,
+            timeout=request_budget.timeout_seconds,
             **provider_kwargs,
         )
     except Exception as error:
@@ -176,6 +181,8 @@ def _outbound_proposal_tool_schemas(
 def _proposal_request_evidence(
     *,
     request: ProposalCompletionRequest,
+    max_tokens: int,
+    timeout_seconds: float,
     messages: Sequence[Mapping[str, Any]],
     tool_schemas: list[dict[str, Any]],
     provider_kwargs: Mapping[str, object],
@@ -218,8 +225,13 @@ def _proposal_request_evidence(
         ),
         CompletionEvidenceField(
             name="max_tokens",
-            json_type=completion_evidence_json_type(request.max_output_tokens),
+            json_type=completion_evidence_json_type(max_tokens),
             domain="output_limit",
+        ),
+        CompletionEvidenceField(
+            name="timeout",
+            json_type=completion_evidence_json_type(timeout_seconds),
+            domain="transport_control",
         ),
     ]
     unclassified_outgoing_field_count = 0

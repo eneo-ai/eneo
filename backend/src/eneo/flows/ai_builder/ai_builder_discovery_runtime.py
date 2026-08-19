@@ -56,6 +56,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     resolve_example_output_schema_inference,
     resolve_structured_schema_direction,
 )
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    resolve_ai_builder_budget_policy,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedNamedResultDelta,
     ClassifiedSchemaDirection,
@@ -503,9 +507,9 @@ async def build_runtime_discovery_context(
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     max_input_tokens: int,
     max_output_tokens: int,
-    safety_buffer_tokens: int = 0,
-    minimum_conversation_tokens: int = 0,
+    budget_policy: AIBuilderBudgetPolicy | None = None,
 ) -> RuntimeDiscoveryContext:
+    budget_policy = budget_policy or resolve_ai_builder_budget_policy(None)
     schema_candidates = (
         prepared_schema_candidates
         if prepared_schema_candidates is not None
@@ -634,7 +638,7 @@ async def build_runtime_discovery_context(
         for intent in state.checkpoint_intents
         if intent.operation == "set"
     )
-    classification_input, request_fits = admit_slot_classification_input(
+    classification_input = admit_slot_classification_input(
         classification_input=classification_input,
         attachment_context=attachment_context,
         allowed_slot_values=allowed_values,
@@ -645,23 +649,8 @@ async def build_runtime_discovery_context(
         litellm_model=completion_model_route.litellm_model,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
-        minimum_conversation_tokens=minimum_conversation_tokens,
+        budget_policy=budget_policy,
     )
-    if not request_fits:
-        return _complete_runtime_discovery_context(
-            state,
-            attachment_context=attachment_context,
-            schema_candidates=schema_candidates,
-            schema_direction_pending=schema_direction_pending,
-            slot_classification_metadata=slot_classification_metadata_from_attempt(
-                SlotClassificationAttempt(outcome="skipped_context_budget"),
-                prompt_hash=None,
-                classification_input=classification_input,
-                model=completion_model_route.litellm_model,
-                provider=provider,
-            ),
-        )
     prior_named_result_classification = _latest_matching_named_result_classification(
         conversation,
         state=state,
@@ -678,7 +667,7 @@ async def build_runtime_discovery_context(
         bias=bias,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
+        safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
     )
     attempt = await classify_slots(
         litellm_client=litellm_client,
@@ -694,7 +683,7 @@ async def build_runtime_discovery_context(
         before_provider_call=before_provider_call,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
+        budget_policy=budget_policy,
     )
     if attempt.outcome != "resolved":
         return _complete_runtime_discovery_context(
@@ -916,8 +905,7 @@ async def build_discovery_runtime_result(
     attached_file_ids: Collection[UUID] = frozenset(),
     max_input_tokens: int,
     max_output_tokens: int,
-    safety_buffer_tokens: int = 0,
-    minimum_conversation_tokens: int = 0,
+    budget_policy: AIBuilderBudgetPolicy | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
         conversation,
@@ -934,8 +922,7 @@ async def build_discovery_runtime_result(
         prepared_schema_candidates=prepared_schema_candidates,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
-        safety_buffer_tokens=safety_buffer_tokens,
-        minimum_conversation_tokens=minimum_conversation_tokens,
+        budget_policy=budget_policy,
     )
     carry_forward_persisted_planner_state(
         context.planning_state,

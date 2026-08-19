@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderResolvedRequestBudget
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     build_assistant_message_metadata,
     build_planner_telemetry,
@@ -183,6 +184,7 @@ class ProposalCallRecord:
     usage: CompletionTokenUsage
     request_id: str
     attempt: int
+    request_budget: AIBuilderResolvedRequestBudget | None = None
     provider_failure_kind: AIBuilderProviderFailureKind | None = None
     provider_status_class: AIBuilderProviderStatusClass | None = None
     provider_turn_state: AIBuilderProviderTurnState | None = None
@@ -220,12 +222,18 @@ class ProposalTurnTelemetry:
     def llm_calls_made(self) -> int:
         return len(self.call_records)
 
-    def begin_call(self, *, call_kind: ProposalCallKind) -> ProposalCallRecord:
+    def begin_call(
+        self,
+        *,
+        call_kind: ProposalCallKind,
+        request_budget: AIBuilderResolvedRequestBudget | None = None,
+    ) -> ProposalCallRecord:
         record = ProposalCallRecord(
             call_kind=call_kind,
             usage=CompletionTokenUsage(),
             request_id=self.request_id,
             attempt=len(self.call_records) + 1,
+            request_budget=request_budget,
         )
         self.call_records.append(record)
         return record
@@ -244,6 +252,7 @@ class ProposalTurnTelemetry:
             usage=usage,
             request_id=call.request_id,
             attempt=call.attempt,
+            request_budget=call.request_budget,
         )
 
     def fail_call(
@@ -260,6 +269,7 @@ class ProposalTurnTelemetry:
             usage=CompletionTokenUsage(),
             request_id=call.request_id,
             attempt=call.attempt,
+            request_budget=call.request_budget,
             provider_failure_kind=failure.kind,
             provider_status_class=failure.status_class,
             provider_turn_state=failure.turn_state,
@@ -270,6 +280,7 @@ class ProposalTurnTelemetry:
         *,
         counts_as_repair: bool,
         call_kind: ProposalCallKind | None = None,
+        request_budget: AIBuilderResolvedRequestBudget | None = None,
     ) -> None:
         if self._attempt_started_ns is not None:
             self._complete_attempt(usage=None)
@@ -277,7 +288,8 @@ class ProposalTurnTelemetry:
         self._attempt_counts_as_repair = counts_as_repair
         self._pending_call = self.begin_call(
             call_kind=call_kind
-            or ("proposal_repair" if counts_as_repair else "proposal_initial")
+            or ("proposal_repair" if counts_as_repair else "proposal_initial"),
+            request_budget=request_budget,
         )
         if counts_as_repair:
             self.repair_attempts += 1
@@ -419,6 +431,31 @@ class ProposalTurnTelemetry:
                 "attempt": record.attempt,
                 "token_usage_source": record.usage.source,
                 "token_usage_estimated": record.usage.estimated,
+                **(
+                    {
+                        "context_window_tokens": (
+                            record.request_budget.context_window_tokens
+                        ),
+                        "model_output_ceiling_tokens": (
+                            record.request_budget.model_output_ceiling_tokens
+                        ),
+                        "target_output_tokens": (
+                            record.request_budget.target_output_tokens
+                        ),
+                        "effective_output_tokens": (
+                            record.request_budget.resolved_output_tokens
+                        ),
+                        "fixed_input_tokens": (
+                            record.request_budget.fixed_input_tokens
+                        ),
+                        "safety_buffer_tokens": (
+                            record.request_budget.safety_buffer_tokens
+                        ),
+                        "timeout_seconds": record.request_budget.timeout_seconds,
+                    }
+                    if record.request_budget is not None
+                    else {}
+                ),
                 **(
                     {"provider_failure_kind": record.provider_failure_kind}
                     if record.provider_failure_kind is not None

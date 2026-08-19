@@ -101,6 +101,7 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     _make_flow_spec,
     _make_retry_invocation,
     _plan_stream_event,
+    _proposal_request_budget,
 )
 from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _flow_with_description,
@@ -350,7 +351,7 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
                     proposal_tool_schema=build_propose_flow_tool_schema(
                         resource_catalog=resource_catalog
                     ),
-                    max_output_tokens=8_192,
+                    proposal_request_budget=_proposal_request_budget(8_192),
                     proposal_temperature=0.2,
                     request_id="req-complex-authoring-spec",
                     usage_tracker=usage_tracker,
@@ -1471,7 +1472,7 @@ async def test_edit_propose_flow_preserves_description_advisory_without_completi
         text_content="Assistant text",
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={"timeout": 30},
-        max_output_tokens=2048,
+        proposal_request_budget=_proposal_request_budget(2_048),
     )
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,
@@ -1530,7 +1531,7 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
         new_messages_start=1,
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
-        max_output_tokens=4096,
+        proposal_request_budget=_proposal_request_budget(4_096),
         request_id=tracker.request_id,
         usage_tracker=tracker,
     )
@@ -1574,7 +1575,7 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
         new_messages_start=1,
         litellm_model="openai/gpt-5.4",
         litellm_kwargs={},
-        max_output_tokens=4096,
+        proposal_request_budget=_proposal_request_budget(4_096),
         request_id=tracker.request_id,
         flow=flow,
         usage_tracker=tracker,

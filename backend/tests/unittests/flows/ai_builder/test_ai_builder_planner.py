@@ -89,6 +89,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalMessageGroup,
+    fit_proposal_request_budget,
     flatten_proposal_message_groups,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
@@ -122,7 +123,13 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionTurnPreflight,
     SessionTurnPreparationBaseline,
 )
-from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    AIBuilderRequestBudget,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationAttempt,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     DECLINE_FLOW_CHANGE_TOOL_NAME,
     PROPOSE_FLOW_TOOL_NAME,
@@ -359,7 +366,7 @@ async def _prepare_planner_request_for_test(
     flow: object = None,
     assistant_snapshots: object = None,
     attachment_files: list[File] | None = None,
-    max_input_tokens: int = 4096,
+    max_input_tokens: int = 100_000,
     max_output_tokens: int = 1024,
     budget_policy: AIBuilderBudgetPolicy | None = None,
     base_planning_state_version: int = 0,
@@ -521,6 +528,17 @@ def _budget_policy() -> AIBuilderBudgetPolicy:
     return AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=128,
         minimum_conversation_budget_tokens=256,
+    )
+
+
+def _proposal_budget(
+    *,
+    context_window_tokens: int = 4_096,
+    model_output_ceiling_tokens: int = 1_024,
+) -> AIBuilderRequestBudget:
+    return _budget_policy().proposal_request_budget(
+        context_window_tokens=context_window_tokens,
+        model_output_ceiling_tokens=model_output_ceiling_tokens,
     )
 
 
@@ -1094,8 +1112,8 @@ async def _collect_send_message_events(
             flow=None,
             assistant_snapshots=None,
             attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
             budget_policy=_budget_policy(),
         )
     ]
@@ -1408,8 +1426,8 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
             available_kbs=None,
             flow=None,
             assistant_snapshots=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -1838,8 +1856,8 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
             available_kbs=None,
             flow=None,
             assistant_snapshots=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2170,8 +2188,8 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             flow=None,
             assistant_snapshots=None,
             attachment_files=[],
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2235,7 +2253,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         "plan_edit_context": None,
         "prior_plan_for_revision": None,
         "litellm_model": model_name,
-        "max_output_tokens": 256,
+        "max_output_tokens": 1_024,
         "budget_policy": policy,
         "attachment_file_count": 1,
     }
@@ -2251,7 +2269,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     irreducible_request_tokens = (
         count_message_tokens(baseline.llm_messages, model_name)
         + count_tool_tokens([tool_schema_for_budget], model_name)
-        + 256
+        + 1_024
         + policy.conversation_safety_buffer_tokens
     )
     tight_context_window = irreducible_request_tokens + 300
@@ -2269,7 +2287,8 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     )
 
     assert prepared.request_budget is not None
-    fitted_groups = prepared.request_budget.fit(
+    fitted_groups, resolved_budget = fit_proposal_request_budget(
+        budget=prepared.request_budget,
         message_groups=prepared.message_groups,
         tool_schemas=[prepared_tool_schema_for_budget],
         model_name=model_name,
@@ -2278,8 +2297,8 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     final_request_tokens = (
         count_message_tokens(fitted_messages, model_name)
         + count_tool_tokens([prepared_tool_schema_for_budget], model_name)
-        + prepared.request_budget.output_reserve_tokens
-        + prepared.request_budget.safety_buffer_tokens
+        + resolved_budget.resolved_output_tokens
+        + resolved_budget.safety_buffer_tokens
     )
     assert final_request_tokens <= tight_context_window
     assert current_turn.content in [message["content"] for message in fitted_messages]
@@ -2294,7 +2313,8 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         context_window_tokens=irreducible_request_tokens - 1,
     )
     with pytest.raises(AIBuilderKnownProviderRejectionException):
-        impossible_budget.fit(
+        fit_proposal_request_budget(
+            budget=impossible_budget,
             message_groups=baseline.message_groups,
             tool_schemas=[tool_schema_for_budget],
             model_name=model_name,
@@ -2381,57 +2401,6 @@ def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
     system_content = prepared.llm_messages[0]["content"]
     assert isinstance(system_content, str)
     assert "ATTACHMENT-EVIDENCE" not in system_content
-
-
-def test_proposal_request_budget_refuses_a_window_only_the_old_charge_fitted() -> None:
-    # `fit()` reserves the tool schema before evicting history. At a window
-    # sized for the old charge the same request was admitted and then rejected
-    # by the provider; it must now be refused locally instead.
-    model_name = "gpt-4o-mini"
-    current_turn = ConversationMessage(role="user", content="Build a reporting flow.")
-    prepared = build_proposal_prepared(
-        requirements_state=RequirementsState(),
-        ui_language="en",
-        slot_classification_metadata=None,
-        planning_state=PlanningState.empty(),
-        flow_context=None,
-        is_edit_mode=False,
-        resource_catalog=build_ai_builder_resource_catalog(
-            available_models=None, available_kbs=None
-        ),
-        flow=None,
-        assistant_snapshots=None,
-        plan_edit_context=None,
-        prior_plan_for_revision=None,
-        litellm_model=model_name,
-        max_output_tokens=256,
-        budget_policy=AIBuilderBudgetPolicy(
-            conversation_safety_buffer_tokens=128,
-            minimum_conversation_budget_tokens=256,
-        ),
-        attachment_file_count=0,
-        conversation=[current_turn],
-        attachment_context=None,
-        max_input_tokens=100_000,
-        current_turn_start=0,
-    )
-    tool_schema = cast(dict[str, Any], prepared.proposal_tool_schema)
-    assert prepared.request_budget is not None
-    protected_tokens = count_message_tokens(prepared.llm_messages, model_name)
-    window = (
-        protected_tokens
-        + _litellm_function_estimate(tool_schema, model_name)
-        + prepared.request_budget.output_reserve_tokens
-        + prepared.request_budget.safety_buffer_tokens
-    )
-    budget = replace(prepared.request_budget, context_window_tokens=window)
-
-    with pytest.raises(AIBuilderKnownProviderRejectionException):
-        budget.fit(
-            message_groups=prepared.message_groups,
-            tool_schemas=[tool_schema],
-            model_name=model_name,
-        )
 
 
 def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
@@ -2592,8 +2561,8 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             flow=None,
             assistant_snapshots=None,
             attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2916,6 +2885,7 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
             planning_state=PlanningState.empty(),
             compile_context=None,
             proposal_tool_schema=_empty_proposal_tool_schema(),
+            request_budget=_proposal_budget(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -3112,6 +3082,10 @@ async def test_send_message_requires_one_template_before_proposal_without_provid
         "eneo.flows.ai_builder.ai_builder_planner.resolve_plan_edit_context",
         AsyncMock(return_value=(None, None)),
     )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_discovery_runtime.classify_slots",
+        AsyncMock(return_value=SlotClassificationAttempt(outcome="no_content")),
+    )
 
     events = [
         encode_ai_builder_stream_event(event)
@@ -3133,8 +3107,8 @@ async def test_send_message_requires_one_template_before_proposal_without_provid
             flow=None,
             assistant_snapshots=None,
             attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
             budget_policy=_budget_policy(),
         )
     ]
@@ -3286,6 +3260,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
             planning_state=PlanningState.empty(),
             compile_context=None,
             proposal_tool_schema=_empty_proposal_tool_schema(),
+            request_budget=_proposal_budget(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[],
                 available_kbs=[],
@@ -3376,6 +3351,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
             planning_state=PlanningState.empty(),
             compile_context=None,
             proposal_tool_schema=_empty_proposal_tool_schema(),
+            request_budget=_proposal_budget(),
             resource_catalog=build_ai_builder_resource_catalog(
                 available_models=[
                     _model_resource(str(local_model_id), "Renamed model")
@@ -3459,6 +3435,7 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
         planning_state=PlanningState.empty(),
         compile_context=None,
         proposal_tool_schema=_empty_proposal_tool_schema(),
+        request_budget=_proposal_budget(),
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[],
             available_kbs=[],
@@ -3489,7 +3466,6 @@ async def test_stream_proposal_events_commits_planning_state_payload_too_large(
             new_messages_start=0,
             proposal_request=proposal_request,
             completion_model_route=_route(),
-            max_output_tokens=1024,
             request_id="oversized-proposal-state",
             usage_tracker=ProposalTurnTelemetry(
                 request_id="oversized-proposal-state",
@@ -3599,6 +3575,8 @@ async def test_send_message_replays_the_exact_committed_error_without_provider_w
             message="Build a flow",
             completion_model_route=_route(),
             turn_preflight=preflight,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
         )
     ]
 
@@ -4315,22 +4293,13 @@ async def test_a_confirmed_disclosure_is_replayed_within_the_model_budget(
             _route().litellm_model,
         )
         <= budget.context_window_tokens
-        - budget.output_reserve_tokens
+        - budget.preferred_output_tokens(input_tokens=0)
         - budget.safety_buffer_tokens
     )
 
 
 @pytest.mark.asyncio
-async def test_a_disclosure_too_large_for_the_model_is_not_replayed_at_all() -> None:
-    """A confirmable session must still be able to produce a proposal.
-
-    The bounded parts of a disclosure are bounded by evidence, not by the
-    model: a hundred named results outgrow a small context window on their own,
-    and no amount of assumption trimming shrinks them. The replay is dropped
-    whole rather than handed on over budget; `PlanningState` still carries every
-    typed fact into the prompt and into compilation.
-    """
-
+async def test_a_confirmed_requirement_core_that_cannot_fit_is_rejected() -> None:
     planner = _make_planner()
     state = _document_architecture_state()
     state.named_result_evidence = [
@@ -4344,28 +4313,20 @@ async def test_a_disclosure_too_large_for_the_model_is_not_replayed_at_all() -> 
     disclosure = build_requirements_disclosure(state, ui_language="en")
     conversation = _confirmation_conversation(disclosure)
 
-    prepared = await _prepare_planner_request_for_test(
-        planner,
-        conversation=conversation,
-        completion_model_route=_route(),
-        persisted_planning_state=state,
-    )
-
-    assert isinstance(prepared, ProposalPrepared)
-    system_prompt = prepared.message_groups[0].messages[0]["content"]
-    assert isinstance(system_prompt, str)
-    assert "sokt_insats_med_ett_ganska_langt_namn_000" not in system_prompt
-    budget = prepared.request_budget
-    assert budget is not None
-    assert (
-        count_message_tokens(
-            [{"role": "system", "content": system_prompt}],
-            _route().litellm_model,
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
+        await _prepare_planner_request_for_test(
+            planner,
+            conversation=conversation,
+            completion_model_route=_route(),
+            persisted_planning_state=state,
+            max_input_tokens=4_096,
         )
-        <= budget.context_window_tokens
-        - budget.output_reserve_tokens
-        - budget.safety_buffer_tokens
+
+    assert (
+        exc_info.value.public_error.code
+        is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
     )
+    planner.litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4490,7 +4451,7 @@ def test_example_output_headings_never_become_requested_output_sections() -> Non
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
-        max_input_tokens=4096,
+        max_input_tokens=100_000,
         max_output_tokens=1024,
         budget_policy=_budget_policy(),
         attachment_file_count=0,

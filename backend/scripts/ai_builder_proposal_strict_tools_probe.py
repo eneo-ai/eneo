@@ -82,6 +82,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (  # noqa: 
     ProposalMessageGroup,
     forced_tool_choice,
 )
+from eneo.flows.ai_builder.ai_builder_settings import (  # noqa: E402
+    AIBuilderRequestBudget,
+)
 from eneo.flows.ai_builder.ai_builder_tools import (  # noqa: E402
     ProposalToolArgumentsError,
     ProposalToolSchema,
@@ -102,6 +105,7 @@ PROTOCOL_VERSION = "strict-tool-provider-capability.v3"
 _MAX_ARGUMENT_BYTES = 16_384
 _MAX_RECEIPT_BYTES = 131_072
 _DEFAULT_MAX_OUTPUT_TOKENS = 256
+_PROBE_TIMEOUT_SECONDS = 60.0
 # A real Builder proposal spends thousands of completion tokens, so the cap is a
 # bounded flag rather than a constant; the ceiling keeps one probe call cheap.
 _MAX_OUTPUT_TOKEN_CEILING = 8_192
@@ -569,13 +573,23 @@ def _request_controls_are_exact(
         and kwargs.get("stream") is False
         and kwargs.get("drop_params") is False
         and kwargs.get("max_tokens") == measurement.max_output_tokens
+        and kwargs.get("timeout") == _PROBE_TIMEOUT_SECONDS
         and kwargs.get("num_retries") == _PROVIDER_RETRY_LIMIT
         and "temperature" not in kwargs
     )
 
 
 _PROBE_LITELLM_FIXED_KEYS = frozenset(
-    {"model", "messages", "tools", "tool_choice", "stream", "drop_params", "max_tokens"}
+    {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "stream",
+        "drop_params",
+        "max_tokens",
+        "timeout",
+    }
 )
 
 
@@ -606,6 +620,8 @@ class _RecordingLiteLLMClient:
         }
         evidence = _proposal_request_evidence(
             request=self._proposal_request,
+            max_tokens=cast(int, kwargs["max_tokens"]),
+            timeout_seconds=cast(float, kwargs["timeout"]),
             messages=cast(list[dict[str, Any]], kwargs["messages"]),
             tool_schemas=cast(list[dict[str, Any]], kwargs["tools"]),
             provider_kwargs=provider_kwargs,
@@ -981,6 +997,18 @@ async def run_probe_call(
         "num_retries",
     ):
         provider_kwargs.pop(removed_key, None)
+    request_budget = AIBuilderRequestBudget(
+        context_window_tokens=(
+            _MAX_MEASUREMENT_PROMPT_BYTES
+            + _MAX_MEASUREMENT_SCHEMA_BYTES
+            + measured.max_output_tokens
+        ),
+        model_output_ceiling_tokens=measured.max_output_tokens,
+        target_output_tokens=measured.max_output_tokens,
+        minimum_output_tokens=1,
+        safety_buffer_tokens=0,
+        timeout_seconds=_PROBE_TIMEOUT_SECONDS,
+    )
     request = ProposalCompletionRequest(
         message_groups=(
             ProposalMessageGroup(
@@ -992,7 +1020,7 @@ async def run_probe_call(
         tool_schemas=cast(list[dict[str, Any]], [measured.tool_schema]),
         route=replace(probe_route, litellm_kwargs=dict(provider_kwargs)),
         target_kind=TargetKind.CREATE,
-        max_output_tokens=measured.max_output_tokens,
+        request_budget=request_budget,
         temperature=0.0,
         tool_choice=forced_tool_choice(PROBE_TOOL_NAME),
     )
@@ -1006,6 +1034,7 @@ async def run_probe_call(
         "stream": False,
         "drop_params": False,
         "max_tokens": measured.max_output_tokens,
+        "timeout": _PROBE_TIMEOUT_SECONDS,
         "num_retries": _PROVIDER_RETRY_LIMIT,
     }
     client = _RecordingLiteLLMClient(

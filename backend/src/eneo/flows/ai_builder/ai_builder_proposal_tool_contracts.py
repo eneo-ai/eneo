@@ -38,6 +38,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderRequestBudget,
+    AIBuilderResolvedRequestBudget,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import ProposalToolSchema
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
@@ -45,7 +49,7 @@ from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningStat
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.flow_resource_bindings import LocalResourceBinding
-from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
+from eneo.tokens.token_utils import count_tool_tokens, measure_provider_input_reserve
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
@@ -221,10 +225,11 @@ def fit_proposal_message_groups(
 ) -> tuple[ProposalMessageGroup, ...] | None:
     return _evict_optional_message_groups(
         groups,
-        fits=lambda candidate: count_message_tokens(
+        fits=lambda candidate: measure_provider_input_reserve(
             [dict(message) for message in flatten_proposal_message_groups(candidate)],
+            [],
             model_name,
-        )
+        ).tokens
         <= token_limit,
     )
 
@@ -252,41 +257,40 @@ def flatten_proposal_message_groups(
     return [message for group in groups for message in group.messages]
 
 
-@dataclass(frozen=True)
-class ProposalRequestBudget:
-    context_window_tokens: int
-    output_reserve_tokens: int
-    safety_buffer_tokens: int
-    request_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.context_window_tokens < 1:
-            raise ValueError("Proposal context window must be positive")
-        if self.output_reserve_tokens < 0 or self.safety_buffer_tokens < 0:
-            raise ValueError("Proposal request reserves cannot be negative")
-
-    def fit(
-        self,
-        *,
-        message_groups: tuple[ProposalMessageGroup, ...],
-        tool_schemas: list[dict[str, Any]],
-        model_name: str,
-    ) -> tuple[ProposalMessageGroup, ...]:
-        reserved_tokens = (
-            count_tool_tokens(tool_schemas, model_name)
-            + self.output_reserve_tokens
-            + self.safety_buffer_tokens
+def fit_proposal_request_budget(
+    *,
+    budget: AIBuilderRequestBudget,
+    message_groups: tuple[ProposalMessageGroup, ...],
+    tool_schemas: list[dict[str, Any]],
+    model_name: str,
+) -> tuple[tuple[ProposalMessageGroup, ...], AIBuilderResolvedRequestBudget]:
+    tool_tokens = count_tool_tokens(tool_schemas, model_name)
+    protected_messages = flatten_proposal_message_groups(
+        tuple(group for group in message_groups if group.protected)
+    )
+    resolved = budget.resolve(
+        input_tokens=(
+            tool_tokens
+            + measure_provider_input_reserve(
+                [dict(message) for message in protected_messages],
+                [],
+                model_name,
+            ).tokens
         )
-        fitted = fit_proposal_message_groups(
-            message_groups,
-            token_limit=self.context_window_tokens - reserved_tokens,
-            model_name=model_name,
-        )
-        if fitted is not None:
-            return fitted
+    )
+    if resolved is None:
         raise AIBuilderKnownProviderRejectionException(
-            build_ai_builder_request_budget_exhausted_error(request_id=self.request_id)
+            build_ai_builder_request_budget_exhausted_error(
+                request_id=budget.request_id
+            )
         )
+    fitted = fit_proposal_message_groups(
+        message_groups,
+        token_limit=resolved.available_input_tokens - tool_tokens,
+        model_name=model_name,
+    )
+    assert fitted is not None, "resolved protected proposal context must fit"
+    return fitted, resolved
 
 
 @dataclass(frozen=True)
@@ -295,13 +299,12 @@ class ProposalCompletionRequest:
     tool_schemas: list[dict[str, Any]]
     route: ResolvedCompletionModelRoute
     target_kind: TargetKind
-    max_output_tokens: int
+    request_budget: AIBuilderRequestBudget
     temperature: float
     tool_choice: ProposalToolChoiceParam = field(
         default_factory=lambda: forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
     )
     counts_as_repair: bool = False
-    request_budget: ProposalRequestBudget | None = None
     call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
 
 
@@ -361,7 +364,7 @@ class ProposalTurnContext:
     available_model_refs: set[str] | None
     available_kb_refs: set[str] | None
     resource_catalog: AIBuilderResourceCatalog | None
-    max_output_tokens: int
+    proposal_request_budget: AIBuilderRequestBudget
     request_id: str
     planning_state: PlanningState
     flow: "Flow | None" = None
@@ -374,7 +377,6 @@ class ProposalTurnContext:
     obligation_projection: ProposalObligationProjection | None = None
     before_provider_call: Callable[[], Awaitable[None]] | None = None
     proposal_call_budget: ProposalCallBudget = field(default_factory=ProposalCallBudget)
-    proposal_request_budget: ProposalRequestBudget | None = None
     compile_context: "CreateCompileContext | None" = None
     decline_tool_schema: ProposalToolSchema | None = None
 
@@ -397,17 +399,19 @@ class ProposalTurnContext:
         message_groups: tuple[ProposalMessageGroup, ...] | None = None,
         counts_as_repair: bool = False,
     ) -> ProposalCompletionRequest:
+        selected_message_groups = (
+            self.message_groups if message_groups is None else message_groups
+        )
+        tool_schemas = proposal_turn_tool_schemas(
+            self.proposal_tool_schema,
+            None if counts_as_repair else self.decline_tool_schema,
+        )
         return ProposalCompletionRequest(
-            message_groups=(
-                self.message_groups if message_groups is None else message_groups
-            ),
-            tool_schemas=proposal_turn_tool_schemas(
-                self.proposal_tool_schema,
-                None if counts_as_repair else self.decline_tool_schema,
-            ),
+            message_groups=selected_message_groups,
+            tool_schemas=tool_schemas,
             route=self.route,
             target_kind=self.target_kind,
-            max_output_tokens=self.max_output_tokens,
+            request_budget=self.proposal_request_budget,
             temperature=temperature,
             tool_choice=(
                 "required"
@@ -415,6 +419,5 @@ class ProposalTurnContext:
                 else forced_tool_choice(PROPOSE_FLOW_TOOL_NAME)
             ),
             counts_as_repair=counts_as_repair,
-            request_budget=self.proposal_request_budget,
             call_budget=self.proposal_call_budget,
         )

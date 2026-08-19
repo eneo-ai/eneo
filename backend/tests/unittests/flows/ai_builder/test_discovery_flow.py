@@ -3667,33 +3667,29 @@ class TestPlannerDiscoveryQuestionDispatch:
 
         events: list[dict[str, str]] = []
         client_turn_id = uuid4()
-        with patch(
-            "eneo.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
-            return_value=MagicMock(max_input_tokens=128000),
+        async for event in planner.send_message(
+            session_id=session_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            request_snapshot={
+                "client_turn_id": str(client_turn_id),
+                "message": "Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
+                "ui_language": "sv",
+            },
+            message="Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
+            ui_language="sv",
+            completion_model_route=ResolvedCompletionModelRoute(
+                litellm_model="openai/gpt-5.4",
+                provider_type="openai",
+                litellm_kwargs={},
+                supported_model_kwargs=SupportedModelKwargs(),
+            ),
+            available_models=None,
+            available_kbs=None,
+            max_input_tokens=128000,
+            max_output_tokens=4096,
         ):
-            async for event in planner.send_message(
-                session_id=session_id,
-                client_turn_id=client_turn_id,
-                request_fingerprint="a" * 64,
-                request_snapshot={
-                    "client_turn_id": str(client_turn_id),
-                    "message": "Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
-                    "ui_language": "sv",
-                },
-                message="Jag vill bygga ett flöde som hjälper mig att förstå officiella dokument.",
-                ui_language="sv",
-                completion_model_route=ResolvedCompletionModelRoute(
-                    litellm_model="openai/gpt-5.4",
-                    provider_type="openai",
-                    litellm_kwargs={},
-                    supported_model_kwargs=SupportedModelKwargs(),
-                ),
-                available_models=None,
-                available_kbs=None,
-                max_input_tokens=128000,
-                max_output_tokens=4096,
-            ):
-                events.append(encode_ai_builder_stream_event(event))
+            events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
         assert planner.litellm_client.acompletion.await_count == 1
@@ -3726,39 +3722,35 @@ class TestPlannerDiscoveryQuestionDispatch:
 
         events: list[dict[str, str]] = []
         client_turn_id = uuid4()
-        with patch(
-            "eneo.flows.ai_builder.ai_builder_planner.lookup_model_defaults",
-            return_value=MagicMock(max_input_tokens=128000),
-        ):
-            async for event in planner.send_message(
-                session_id=session_id,
-                client_turn_id=client_turn_id,
-                request_fingerprint="a" * 64,
-                request_snapshot={
-                    "client_turn_id": str(client_turn_id),
-                    "message": (
-                        "Create a flow that transcribes meeting audio, extracts ten "
-                        "topic sections, and produces a DOCX meeting report."
-                    ),
-                    "ui_language": "en",
-                },
-                message=(
+        async for event in planner.send_message(
+            session_id=session_id,
+            client_turn_id=client_turn_id,
+            request_fingerprint="a" * 64,
+            request_snapshot={
+                "client_turn_id": str(client_turn_id),
+                "message": (
                     "Create a flow that transcribes meeting audio, extracts ten "
                     "topic sections, and produces a DOCX meeting report."
                 ),
-                ui_language="en",
-                completion_model_route=ResolvedCompletionModelRoute(
-                    litellm_model="openai/gpt-5.4",
-                    provider_type="openai",
-                    litellm_kwargs={},
-                    supported_model_kwargs=SupportedModelKwargs(),
-                ),
-                available_models=None,
-                available_kbs=None,
-                max_input_tokens=128000,
-                max_output_tokens=4096,
-            ):
-                events.append(encode_ai_builder_stream_event(event))
+                "ui_language": "en",
+            },
+            message=(
+                "Create a flow that transcribes meeting audio, extracts ten "
+                "topic sections, and produces a DOCX meeting report."
+            ),
+            ui_language="en",
+            completion_model_route=ResolvedCompletionModelRoute(
+                litellm_model="openai/gpt-5.4",
+                provider_type="openai",
+                litellm_kwargs={},
+                supported_model_kwargs=SupportedModelKwargs(),
+            ),
+            available_models=None,
+            available_kbs=None,
+            max_input_tokens=128000,
+            max_output_tokens=4096,
+        ):
+            events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
         assert json.loads(events[1]["data"])["question_id"] == ("primary_runtime_input")

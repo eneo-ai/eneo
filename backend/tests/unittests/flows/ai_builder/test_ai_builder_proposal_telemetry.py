@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
 )
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderRequestBudget
 from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
@@ -153,8 +154,20 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "proposal_initial",
         "proposal_repair",
     )
+    request_budget = AIBuilderRequestBudget(
+        context_window_tokens=32_000,
+        model_output_ceiling_tokens=16_000,
+        target_output_tokens=8_000,
+        minimum_output_tokens=1_024,
+        safety_buffer_tokens=2_000,
+        timeout_seconds=180.0,
+    ).resolve(input_tokens=6_000)
+    assert request_budget is not None
     for kind, usage in zip(kinds, usages, strict=True):
-        call = telemetry.begin_call(call_kind=kind)
+        call = telemetry.begin_call(
+            call_kind=kind,
+            request_budget=request_budget,
+        )
         telemetry.complete_call(call=call, usage=usage)
 
     payload = telemetry.build_planner_telemetry()
@@ -173,6 +186,23 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
     assert payload["token_usage_source"] == "litellm_estimate"
     assert payload["token_usage_estimated"] is True
     assert payload["call_records"][-1]["token_usage_source"] == "none"
+    assert payload["call_records"][0] == {
+        "call_kind": "slot_classification",
+        "request_id": "req-call-family",
+        "attempt": 1,
+        "token_usage_source": "provider",
+        "token_usage_estimated": False,
+        "context_window_tokens": 32_000,
+        "model_output_ceiling_tokens": 16_000,
+        "target_output_tokens": 8_000,
+        "effective_output_tokens": 8_000,
+        "fixed_input_tokens": 6_000,
+        "safety_buffer_tokens": 2_000,
+        "timeout_seconds": 180.0,
+        "prompt_tokens": 2,
+        "completion_tokens": 1,
+        "total_tokens": 3,
+    }
     assert "prompt_tokens" not in payload["call_records"][-1]
     assert "completion_tokens" not in payload["call_records"][-1]
     assert "total_tokens" not in payload["call_records"][-1]
@@ -182,6 +212,10 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         usage_tracker=telemetry,
     )
     assert metadata is not None
+    assert (
+        metadata["planner_telemetry"]["call_records"][0]["effective_output_tokens"]
+        == 8_000
+    )
     summary = metadata["session_telemetry"]
     assert summary["prompt_tokens_total"] == 7
     assert summary["completion_tokens_total"] == 3
