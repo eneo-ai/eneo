@@ -6357,6 +6357,7 @@
   "ai_builder_flow_out_value": "{type} kommer ut ur varje körning",
   "ai_builder_node_io": "{input} → {output}",
   "ai_builder_node_model_none": "Ingen AI-modell",
+  "ai_builder_node_model_space_default": "Ytans standardmodell",
   "ai_builder_node_review_checkpoint": "Granskning",
   "ai_builder_node_review_checkpoint_hint": "Flödet pausar här och du godkänner innan nästa steg körs.",
   "ai_builder_node_per_file": "per fil",

@@ -176,6 +176,38 @@ describe("BuilderReviewScreen plan document", () => {
     expect(screen.getByText(m.ai_builder_review_checkpoint_note({ count: 1 }))).toBeTruthy();
   });
 
+  it("distinguishes the space default model from deterministic steps", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...makeCreateState(),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            spec: {
+              flow_name: "Ljud till PDF",
+              flow_description: "",
+              form_fields: [],
+              steps: [
+                makeRenderStep({
+                  name: "Analysera samtalet",
+                  output_mode: "pass_through",
+                  output_type: "json"
+                }),
+                makeRenderStep({
+                  plan_step_ref: "step_c",
+                  output_mode: "render_verbatim"
+                })
+              ]
+            }
+          })
+        })
+      }
+    });
+
+    expect(screen.getAllByText(m.ai_builder_node_model_space_default()).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(m.ai_builder_node_model_none()).length).toBeGreaterThan(0);
+  });
+
   it("keeps an expanded step expanded across Diagram↔Detaljer switches", async () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
