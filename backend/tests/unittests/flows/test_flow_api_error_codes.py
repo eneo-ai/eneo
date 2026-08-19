@@ -48,10 +48,6 @@ FLOW_ERROR_CODE_PATTERN = re.compile(r"^flow_[a-z0-9_]+$")
 FLOW_GUIDE_BACKTICKED_TOKEN_PATTERN = re.compile(r"`((?:flow|typed_io)_[a-z0-9_]+)`")
 FLOW_GUIDE_NON_ERROR_CODE_TOKENS = {
     "flow_evidence": "resource permission name, not an error code",
-    "flow_run_history_minimum_retention_days": (
-        "retention policy field, not an error code"
-    ),
-    "flow_run_history_no_purge": "retention policy field, not an error code",
     "flow_run_history_retention_days": "retention policy field, not an error code",
     "flow_runtime_upload_abandonment_days": (
         "runtime upload retention field, not an error code"
@@ -66,24 +62,16 @@ PUBLIC_FLOW_ERROR_EMITTER_PATHS = (
     FLOW_SOURCE_ROOT / "flow_runtime_file_service.py",
     FLOW_SOURCE_ROOT / "variable_resolver.py",
     FLOW_SOURCE_ROOT / "application" / "flow_run_service.py",
-    FLOW_SOURCE_ROOT / "application" / "flow_run_rerun_service.py",
     FLOW_SOURCE_ROOT / "application" / "flow_run_review_checkpoint_service.py",
     FLOW_SOURCE_ROOT / "infrastructure" / "flow_run_repo.py",
 )
 TERMINAL_RUN_ERROR_CODE_CALL_KEYWORDS = {
-    "close_active_rerun_operations_for_terminal_run": {"error_code"},
     "close_open_step_attempts_for_terminal_run": {"error_code"},
 }
 DOCUMENTED_DYNAMIC_TERMINAL_RUN_ERROR_CODE_PRODUCERS = {
     (
         "src/eneo/flows/application/flow_run_terminalization.py",
         "close_open_step_attempts_for_terminal_run",
-        "error_code",
-        "effective_error_code",
-    ),
-    (
-        "src/eneo/flows/application/flow_run_terminalization.py",
-        "close_active_rerun_operations_for_terminal_run",
         "error_code",
         "effective_error_code",
     ),

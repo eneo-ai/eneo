@@ -52,7 +52,6 @@ class DeletedCounts(TypedDict):
     flow_template_assets_skipped_undetermined_reference: int
     flow_runs_skipped_undelivered_audit: int
     flow_runs_skipped_unresolved_webhook: int
-    flow_runs_skipped_active_rerun: int
     flow_audit_outbox_delivered_rows: int
     total: int
 
@@ -129,7 +128,6 @@ def _record_flow_run_history_blocked_counts(
 ) -> None:
     deleted["flow_runs_skipped_undelivered_audit"] = counts.skipped_undelivered_audit
     deleted["flow_runs_skipped_unresolved_webhook"] = counts.skipped_unresolved_webhook
-    deleted["flow_runs_skipped_active_rerun"] = counts.skipped_active_rerun
 
 
 def _record_flow_debug_redaction_counts(
@@ -187,7 +185,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "flow_template_assets_skipped_undetermined_reference": 0,
             "flow_runs_skipped_undelivered_audit": 0,
             "flow_runs_skipped_unresolved_webhook": 0,
-            "flow_runs_skipped_active_rerun": 0,
             "flow_audit_outbox_delivered_rows": 0,
             "total": 0,
         },
@@ -429,8 +426,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"{results['deleted']['flow_runs_skipped_undelivered_audit']}, "
             f"flow_runs_skipped_unresolved_webhook: "
             f"{results['deleted']['flow_runs_skipped_unresolved_webhook']}, "
-            f"flow_runs_skipped_active_rerun: "
-            f"{results['deleted']['flow_runs_skipped_active_rerun']}, "
             f"flow_audit_outbox_delivered_rows: "
             f"{results['deleted']['flow_audit_outbox_delivered_rows']})"
         )

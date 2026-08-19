@@ -14,7 +14,6 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStepPublic,
-    FlowRunStepRerunResponse,
     FlowRunTokenUsagePublic,
     FlowRunTranscriptionUsagePublic,
     FlowRunWebhookDeliveryPublic,
@@ -40,8 +39,6 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
-    FlowRunRerunInvalidatedStep,
-    FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
@@ -210,32 +207,6 @@ class FlowAssembler:
                 "runtime_input_file_ids": list(runtime_input_file_ids),
                 "result_files": list(result_files),
             }
-        )
-
-    def to_rerun_response(
-        self,
-        *,
-        operation: FlowRunRerunOperation,
-        run: FlowRun,
-        invalidated_steps: Sequence[FlowRunRerunInvalidatedStep],
-        result_files: Sequence[FlowRunStepResultFile] = (),
-        token_usage: FlowRunTokenUsage | None = None,
-        transcription_usage: FlowRunTranscriptionUsage | None = None,
-        final_output: FlowFinalOutputContractPublic | None = None,
-    ) -> FlowRunStepRerunResponse:
-        return FlowRunStepRerunResponse(
-            operation_id=operation.id,
-            run=self.to_run_public(
-                run,
-                result_files=result_files,
-                token_usage=token_usage,
-                transcription_usage=transcription_usage,
-                final_output=final_output,
-            ),
-            rerun_step_id=operation.rerun_step_id,
-            new_attempt_no=operation.root_attempt_no,
-            invalidated_step_ids=[step.step_id for step in invalidated_steps],
-            status=operation.status,
         )
 
     def to_review_checkpoint_public(

@@ -15,7 +15,6 @@ import pytest
 from fastapi import BackgroundTasks
 
 from eneo.audit.application.audit_metadata import AuditMetadata
-from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
@@ -29,7 +28,6 @@ from eneo.flows.api.flow_models import (
     FlowRunCreateRequest,
     FlowRunRedispatchRequest,
     FlowRunReviewCheckpointResumeRequest,
-    FlowRunStepRerunRequest,
 )
 from eneo.flows.api.flow_run_lifecycle_router import (
     cancel_flow_run,
@@ -38,7 +36,6 @@ from eneo.flows.api.flow_run_lifecycle_router import (
     list_flow_runs,
     redispatch_flow_run,
 )
-from eneo.flows.api.flow_run_rerun_router import rerun_flow_run_step
 from eneo.flows.api.flow_run_review_router import resume_flow_run_review_checkpoint
 from eneo.flows.api.flow_run_steps_router import (
     get_flow_graph,
@@ -68,11 +65,9 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
-    FlowRunRerunOperationStatus,
     FlowStepResultStatus,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
 )
@@ -93,7 +88,6 @@ from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _flow,
     _RecordingBackgroundTasks,
-    _rerun_result,
     _result_file,
     _review_checkpoint,
     _run,
@@ -621,224 +615,6 @@ async def test_create_flow_run_handles_missing_headers_object():
     )
 
     assert flow_run_service.create_run.await_args.kwargs["idempotency_key"] is None
-
-
-@pytest.mark.asyncio
-async def test_rerun_flow_run_step_calls_service_and_schedules_recoverable_dispatch(
-    monkeypatch,
-):
-    container = MagicMock()
-    flow_id = uuid4()
-    step_id = uuid4()
-    input_file_id = uuid4()
-    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
-        update={"revision": 2, "status": FlowRunStatus.QUEUED}
-    )
-    rerun_result = _rerun_result(run, step_id, invalidated_step_ids=(step_id, uuid4()))
-    events: list[str] = []
-    run_service = AsyncMock()
-    rerun_service = AsyncMock()
-    rerun_service.rerun_step.return_value = rerun_result
-
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    container.flow_run_service.return_value = run_service
-    container.flow_run_rerun_service.return_value = rerun_service
-    container.flow_service.return_value = flow_service
-    container.user.return_value = user
-    container.audit_service.return_value = AsyncMock()
-    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
-    _enable_explicit_transaction(container, events)
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-
-    background_tasks = _RecordingBackgroundTasks(events)
-    response = await rerun_flow_run_step(
-        id=flow_id,
-        run_id=run.id,
-        step_id=step_id,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        rerun_in=FlowRunStepRerunRequest(
-            expected_run_revision=1,
-            reason="Reviewer accepted corrected transcription",
-            input_payload_json={"reviewer_note": "corrected"},
-            step_inputs={step_id: {"file_ids": [input_file_id]}},
-        ),
-        background_tasks=background_tasks,
-        container=container,
-    )
-
-    assert response.operation_id == rerun_result.operation.id
-    assert events == [
-        "transaction_enter",
-        "transaction_exit",
-        "add_task",
-    ]
-    assert response.run.id == run.id
-    assert response.run.revision == 2
-    assert response.rerun_step_id == step_id
-    assert response.new_attempt_no == 2
-    assert response.invalidated_step_ids == [
-        step.step_id for step in rerun_result.invalidated_steps
-    ]
-    assert response.status == FlowRunRerunOperationStatus.QUEUED
-    rerun_service.rerun_step.assert_awaited_once_with(
-        flow_id=flow_id,
-        run_id=run.id,
-        rerun_step_id=step_id,
-        expected_run_revision=1,
-        reason="Reviewer accepted corrected transcription",
-        input_payload_json={"reviewer_note": "corrected"},
-        step_inputs={step_id: FlowRunStepInputFiles(file_ids=(input_file_id,))},
-    )
-    audit_kwargs = container.audit_service.return_value.log_async.await_args.kwargs
-    assert audit_kwargs["tenant_id"] == user.tenant_id
-    assert audit_kwargs["actor_id"] == user.id
-    assert audit_kwargs["action"] == ActionType.FLOW_RUN_RERUN_REQUESTED
-    assert audit_kwargs["entity_id"] == run.id
-    assert audit_kwargs["description"] == (
-        f"Requested rerun for flow run {run.id} step {step_id}"
-    )
-    assert audit_kwargs["metadata"]["extra"] == {
-        "flow_id": str(flow_id),
-        "rerun_operation_id": str(rerun_result.operation.id),
-        "rerun_step_id": str(step_id),
-        "rerun_created": True,
-    }
-    assert len(background_tasks.tasks) == 1
-    scheduled = background_tasks.tasks[0]
-    assert scheduled.func is dispatch_flow_run_recoverably_after_commit
-    assert scheduled.kwargs == {
-        "run_id": run.id,
-        "tenant_id": user.tenant_id,
-        "expected_revision": run.revision,
-    }
-
-
-@pytest.mark.asyncio
-async def test_rerun_flow_run_step_replay_does_not_schedule_dispatch(monkeypatch):
-    container = MagicMock()
-    flow_id = uuid4()
-    step_id = uuid4()
-    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
-        update={"output_payload_json": {"text": "Rerun finished"}}
-    )
-    rerun_result = _rerun_result(
-        run,
-        step_id,
-        created=False,
-        status=FlowRunRerunOperationStatus.COMPLETED,
-    )
-    run_service = AsyncMock()
-    run_service.enrich_run_with_result_files_and_usage.return_value = (
-        FlowRunWithResultFilesAndUsage(
-            run=run,
-            result_files=(),
-            token_usage=None,
-            final_output=FlowFinalOutputContractPublic(
-                step_id=step_id,
-                step_order=1,
-                output_type=FlowOutputType.TEXT,
-                output_mode=FlowOutputMode.PASS_THROUGH,
-                delivery=FlowOutputDelivery.PAYLOAD,
-            ),
-        )
-    )
-    rerun_service = AsyncMock()
-    rerun_service.rerun_step.return_value = rerun_result
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    container.flow_run_service.return_value = run_service
-    container.flow_run_rerun_service.return_value = rerun_service
-    container.flow_service.return_value = flow_service
-    container.user.return_value = user
-    container.audit_service.return_value = AsyncMock()
-    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-
-    background_tasks = BackgroundTasks()
-    response = await rerun_flow_run_step(
-        id=flow_id,
-        run_id=run.id,
-        step_id=step_id,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        rerun_in=FlowRunStepRerunRequest(
-            expected_run_revision=1,
-            reason="Replay existing request",
-        ),
-        background_tasks=background_tasks,
-        container=container,
-    )
-
-    assert response.status == FlowRunRerunOperationStatus.COMPLETED
-    assert response.run.result is not None
-    assert response.run.result.kind == "inline_text"
-    assert response.run.result.text == "Rerun finished"
-    assert background_tasks.tasks == []
-    rerun_service.rerun_step.assert_awaited_once()
-    run_service.enrich_run_with_result_files_and_usage.assert_awaited_once_with(
-        run=run,
-    )
-    audit_kwargs = container.audit_service.return_value.log_async.await_args.kwargs
-    assert audit_kwargs["action"] == ActionType.FLOW_RUN_RERUN_REQUESTED
-    assert audit_kwargs["metadata"]["extra"]["rerun_created"] is False
-
-
-@pytest.mark.asyncio
-async def test_rerun_flow_run_step_stale_revision_does_not_schedule_dispatch(
-    monkeypatch,
-):
-    container = MagicMock()
-    flow_id = uuid4()
-    run_id = uuid4()
-    step_id = uuid4()
-    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    run_service = AsyncMock()
-    rerun_service = AsyncMock()
-    rerun_service.rerun_step.side_effect = BadRequestException(
-        "Flow run revision is stale.",
-        code="flow_run_rerun_stale_revision",
-    )
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    container.flow_run_service.return_value = run_service
-    container.flow_run_rerun_service.return_value = rerun_service
-    container.flow_service.return_value = flow_service
-    container.user.return_value = user
-    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-
-    background_tasks = BackgroundTasks()
-    with pytest.raises(BadRequestException) as exc_info:
-        await rerun_flow_run_step(
-            id=flow_id,
-            run_id=run_id,
-            step_id=step_id,
-            request=SimpleNamespace(state=SimpleNamespace()),
-            rerun_in=FlowRunStepRerunRequest(
-                expected_run_revision=1,
-                reason="Stale request",
-            ),
-            background_tasks=background_tasks,
-            container=container,
-        )
-
-    assert exc_info.value.code == "flow_run_rerun_stale_revision"
-    assert background_tasks.tasks == []
-    rerun_service.rerun_step.assert_awaited_once()
 
 
 @pytest.mark.asyncio

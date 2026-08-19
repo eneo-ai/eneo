@@ -31,7 +31,7 @@ from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStep,
 )
-from eneo.flows.enums import FlowRunRerunOperationStatus, FlowRunReviewCheckpointState
+from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.exceptions import (
@@ -69,20 +69,11 @@ def _flow(flow_id):
         run_history_retention=FlowRunRetentionOff(
             state="off",
             effective_days=None,
-            effective_minimum_days=None,
-            no_purge=False,
-            policy_conflict=False,
-            activation_sources=(),
-            barrier_sources=(),
+            source="none",
             contributors=FlowRunRetentionContributors(
                 organization_days=None,
-                classification_days=None,
                 space_days=None,
                 flow_days=None,
-                organization_minimum_days=None,
-                classification_minimum_days=None,
-                organization_no_purge=False,
-                classification_no_purge=False,
             ),
         ),
         created_at=now,
@@ -139,31 +130,6 @@ def _review_checkpoint(
         decided_by_principal_type=PrincipalType.USER,
         created_at=now,
         updated_at=now,
-    )
-
-
-def _rerun_result(
-    run: FlowRun,
-    step_id,
-    *,
-    created=True,
-    status=FlowRunRerunOperationStatus.QUEUED,
-    invalidated_step_ids=None,
-):
-    invalidated_ids = tuple(invalidated_step_ids or (step_id,))
-    return SimpleNamespace(
-        operation=SimpleNamespace(
-            id=uuid4(),
-            rerun_step_id=step_id,
-            root_attempt_no=2,
-            status=status,
-        ),
-        run=run,
-        invalidated_steps=tuple(
-            SimpleNamespace(step_id=invalidated_id)
-            for invalidated_id in invalidated_ids
-        ),
-        created=created,
     )
 
 
@@ -230,14 +196,9 @@ def _evidence_export_payload(
             "redaction_policy_version": "flow-evidence-redaction.v3",
             "retention_state_summary": {
                 "tracking_state": "not_tracked",
-                "tombstone_count": 0,
-                "retention_purged_count": 0,
-                "artifact_content_purged_count": 0,
-                "redacted_for_deletion_count": 0,
                 "note": (
-                    "No retention tombstones are present in this export; rows purged "
-                    "before tombstone tracking remain indistinguishable from "
-                    "never-tracked evidence."
+                    "Deletion provenance is not tracked; purged rows remain "
+                    "indistinguishable from evidence that was never recorded."
                 ),
             },
             "artifact_availability_summary": {
@@ -269,18 +230,6 @@ def _evidence_export_payload(
             "rag_sources": [],
             "rag_usage_tracking": {},
             "citations": {},
-            "rerun_lineage": {
-                "operations_count": 0,
-                "queued_operations_count": 0,
-                "running_operations_count": 0,
-                "completed_operations_count": 0,
-                "failed_operations_count": 0,
-                "cancelled_operations_count": 0,
-                "active_operations_count": 0,
-                "terminal_operations_count": 0,
-                "invalidated_steps_count": 0,
-                "completed_replacement_count": 0,
-            },
             "review_checkpoints": review_checkpoint_summary_payload,
             "final_output": {
                 "kind": "empty",

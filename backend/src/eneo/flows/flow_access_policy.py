@@ -17,7 +17,6 @@ class FlowApiAction(str, Enum):
     TRACE_VIEW = "trace_view"
     REVIEW = "review"
     RESUME = "resume"
-    RERUN = "rerun"
     AUDIT_VIEW = "audit_view"
 
 
@@ -93,12 +92,6 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         required_permissions=(Permission.FLOWS_MANAGE,),
         denial_message="You do not have permission to resume flows.",
         service_key_capability="resume",
-        service_key_allowed_when_requested=True,
-    ),
-    FlowApiAction.RERUN: FlowActionRequirement(
-        required_permissions=(Permission.FLOWS_MANAGE,),
-        denial_message="You do not have permission to rerun flows.",
-        service_key_capability="rerun",
         service_key_allowed_when_requested=True,
     ),
     FlowApiAction.AUDIT_VIEW: FlowActionRequirement(

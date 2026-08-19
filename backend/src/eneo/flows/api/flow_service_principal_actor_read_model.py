@@ -47,9 +47,7 @@ class FlowServicePrincipalActorPresenter:
     async def present_evidence(
         self, payload: Mapping[str, object]
     ) -> dict[str, object]:
-        service_principal_ids = tuple(
-            _iter_review_checkpoint_service_ids(payload)
-        ) + tuple(_iter_rerun_operation_service_ids(payload))
+        service_principal_ids = tuple(_iter_review_checkpoint_service_ids(payload))
         actors = await _load_flow_service_principal_actor_summaries(
             api_key_repo=self.api_key_repo,
             tenant_id=self.tenant_id,
@@ -65,13 +63,6 @@ class FlowServicePrincipalActorPresenter:
             service_fields=(
                 ("requester_service_id", "requester_service_principal"),
                 ("decided_by_service_id", "decided_by_service_principal"),
-            ),
-        )
-        enriched["rerun_operations"] = _enrich_records(
-            payload.get("rerun_operations"),
-            actors=actors,
-            service_fields=(
-                ("requested_by_service_id", "requested_by_service_principal"),
             ),
         )
         return enriched
@@ -111,11 +102,6 @@ def _iter_review_checkpoint_service_ids(
         yield from _iter_record_service_ids(
             record, ("requester_service_id", "decided_by_service_id")
         )
-
-
-def _iter_rerun_operation_service_ids(payload: Mapping[str, object]) -> Iterable[UUID]:
-    for record in _iter_mapping_records(payload.get("rerun_operations")):
-        yield from _iter_record_service_ids(record, ("requested_by_service_id",))
 
 
 def _iter_record_service_ids(

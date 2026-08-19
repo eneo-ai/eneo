@@ -139,23 +139,6 @@ async def test_load_run_allows_owner_content_access(user):
 
 
 @pytest.mark.asyncio
-async def test_load_run_allows_owner_rerun_access(user):
-    flow_id = uuid4()
-    run = _run(user, flow_id)
-    flow_run_repo = AsyncMock()
-    flow_run_repo.get.return_value = run
-    policy = _policy(user, flow_run_repo=flow_run_repo)
-
-    result = await policy.load_run(
-        run_id=run.id,
-        flow_id=flow_id,
-        access_kind="rerun",
-    )
-
-    assert result == run
-
-
-@pytest.mark.asyncio
 async def test_load_run_translates_repository_missing_run_to_public_not_found(user):
     flow_id = uuid4()
     run_id = uuid4()

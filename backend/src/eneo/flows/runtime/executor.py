@@ -31,7 +31,6 @@ from eneo.flows.assistant_execution_snapshot import (
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
-    FlowRunRerunInvalidatedStep,
     FlowRunStatus,
     FlowStepAttempt,
     FlowStepAttemptStatus,
@@ -48,10 +47,6 @@ from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
 )
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
-from eneo.flows.domain.rerun_exceptions import (
-    FlowRunRerunAttemptLineageConflictError,
-    FlowRunRerunMultipleActiveOperationsError,
-)
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FLOW_REVIEW_CHECKPOINT_OPEN_TERMINAL_INVARIANT_CLASSES,
     FlowReviewCheckpointOpenTerminalInvariantFailure,
@@ -71,7 +66,6 @@ from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
-    FlowRunRerunInvalidationRole,
 )
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
@@ -102,10 +96,6 @@ from eneo.flows.infrastructure.flow_provider_call_recorder import (
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
-from eneo.flows.infrastructure.flow_run_rerun_repo import (
-    FlowRunActiveRerunOperation,
-    FlowRunRerunRepository,
-)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -218,18 +208,12 @@ if TYPE_CHECKING:
     from eneo.spaces.space import Space
 
 
-_RERUN_MULTIPLE_ACTIVE_OPERATIONS_RUN_ERROR_MESSAGE = (
-    "Rerun failed because multiple active rerun operations exist."
-)
-_RERUN_ATTEMPT_LINEAGE_CONFLICT_RUN_ERROR_MESSAGE = (
-    "Rerun failed because the invalidated step is already linked to another attempt."
-)
 _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV = (
     "ENEO_TEST_FLOW_CRASH_AFTER_ATTEMPT_START_RUN_ID"
 )
 _PROCESS_TEST_CRASH_EXIT_CODE = 86
 _PROVIDER_WORK_AMBIGUITY_DISCLOSURE = (
-    "Provider work may or may not have started; rerunning can repeat provider work "
+    "Provider work may or may not have started; retrying can repeat provider work "
     "and spend."
 )
 
@@ -469,7 +453,6 @@ class FlowRunExecutor:
         session: AsyncSession,
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
-        flow_run_rerun_repo: FlowRunRerunRepository,
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
         space_repo: SpaceRepository,
@@ -506,7 +489,6 @@ class FlowRunExecutor:
         self.session = session
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
-        self.flow_run_rerun_repo = flow_run_rerun_repo
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_run_terminalizer = flow_run_terminalizer
         self.webhook_delivery_repo = (
@@ -749,24 +731,6 @@ class FlowRunExecutor:
                 "error": run_error.code.value,
             }
 
-        try:
-            active_rerun_operation = (
-                await self.flow_run_rerun_repo.get_active_rerun_operation(
-                    run_id=run_id,
-                    flow_id=flow_id,
-                    tenant_id=tenant_id,
-                )
-            )
-        except FlowRunRerunMultipleActiveOperationsError:
-            return await self._handle_multiple_active_rerun_operations(
-                run_id=run_id,
-                flow_id=flow_id,
-                tenant_id=tenant_id,
-            )
-        active_rerun_steps_by_id = self._active_rerun_steps_by_id(
-            active_rerun_operation
-        )
-
         logger.info(
             "flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps)
         )
@@ -878,10 +842,6 @@ class FlowRunExecutor:
                     tenant_id=tenant_id,
                     step=step,
                     celery_task_id=celery_task_id,
-                    active_rerun_operation=active_rerun_operation,
-                    active_rerun_invalidated_step=active_rerun_steps_by_id.get(
-                        step.step_id
-                    ),
                 )
                 await self._commit()
                 # A zero-model step can cross this commit before an external test
@@ -890,15 +850,6 @@ class FlowRunExecutor:
                     _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV
                 ) == str(run_id):
                     os._exit(_PROCESS_TEST_CRASH_EXIT_CODE)
-            except FlowRunRerunAttemptLineageConflictError:
-                return await self._handle_attempt_start_failure(
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    step=step,
-                    claimed=claimed_result,
-                    error_code=FlowApiErrorCode.RUN_RERUN_ATTEMPT_LINEAGE_CONFLICT_INVARIANT,
-                    error_message=_RERUN_ATTEMPT_LINEAGE_CONFLICT_RUN_ERROR_MESSAGE,
-                )
             except Exception:
                 return await self._handle_attempt_start_failure(
                     run_id=run_id,
@@ -1084,14 +1035,6 @@ class FlowRunExecutor:
         await self._commit()
         return finalization.payload
 
-    @staticmethod
-    def _active_rerun_steps_by_id(
-        operation: FlowRunActiveRerunOperation | None,
-    ) -> dict[UUID, FlowRunRerunInvalidatedStep]:
-        if operation is None:
-            return {}
-        return {step.step_id: step for step in operation.invalidated_steps}
-
     async def _start_step_attempt(
         self,
         *,
@@ -1100,17 +1043,13 @@ class FlowRunExecutor:
         tenant_id: UUID,
         step: RuntimeStep,
         celery_task_id: str | None,
-        active_rerun_operation: FlowRunActiveRerunOperation | None,
-        active_rerun_invalidated_step: FlowRunRerunInvalidatedStep | None,
     ) -> FlowStepAttempt:
-        attempt_no = await self._resolve_attempt_no(
-            run_id=run_id,
+        attempt_no = await self.flow_run_repo.allocate_next_attempt_no(
             tenant_id=tenant_id,
-            step=step,
-            active_rerun_operation=active_rerun_operation,
-            active_rerun_invalidated_step=active_rerun_invalidated_step,
+            flow_run_id=run_id,
+            step_id=step.step_id,
         )
-        started_attempt = await self.flow_run_repo.create_or_get_attempt_started(
+        return await self.flow_run_repo.create_or_get_attempt_started(
             run_id=run_id,
             flow_id=flow_id,
             tenant_id=tenant_id,
@@ -1118,70 +1057,6 @@ class FlowRunExecutor:
             step_order=step.step_order,
             attempt_no=attempt_no,
             celery_task_id=celery_task_id,
-            rerun_operation_id=(
-                active_rerun_operation.operation.id
-                if active_rerun_invalidated_step is not None
-                and active_rerun_operation is not None
-                else None
-            ),
-            predecessor_attempt_id=(
-                active_rerun_invalidated_step.prior_attempt_id
-                if active_rerun_invalidated_step is not None
-                else None
-            ),
-        )
-        if active_rerun_invalidated_step is not None:
-            if active_rerun_operation is None:
-                raise RuntimeError("Rerun step context requires an active operation.")
-            if not (
-                active_rerun_invalidated_step.role == FlowRunRerunInvalidationRole.ROOT
-                and active_rerun_operation.operation.root_step_input_override_requested
-            ):
-                await self.flow_run_repo.copy_step_input_files_from_predecessor_attempt(
-                    run_id=run_id,
-                    flow_id=flow_id,
-                    tenant_id=tenant_id,
-                    step_id=step.step_id,
-                    step_order=step.step_order,
-                    predecessor_attempt_id=(
-                        active_rerun_invalidated_step.prior_attempt_id
-                    ),
-                    target_attempt_no=started_attempt.attempt_no,
-                )
-            await self.flow_run_rerun_repo.link_rerun_invalidated_step_attempt(
-                operation_id=active_rerun_operation.operation.id,
-                tenant_id=tenant_id,
-                step_id=step.step_id,
-                new_attempt_no=started_attempt.attempt_no,
-                new_attempt_id=started_attempt.id,
-            )
-            if active_rerun_invalidated_step.role == FlowRunRerunInvalidationRole.ROOT:
-                await self.flow_run_rerun_repo.mark_rerun_operation_running(
-                    operation_id=active_rerun_operation.operation.id,
-                    tenant_id=tenant_id,
-                    root_attempt_id=started_attempt.id,
-                )
-        return started_attempt
-
-    async def _resolve_attempt_no(
-        self,
-        *,
-        run_id: UUID,
-        tenant_id: UUID,
-        step: RuntimeStep,
-        active_rerun_operation: FlowRunActiveRerunOperation | None,
-        active_rerun_invalidated_step: FlowRunRerunInvalidatedStep | None,
-    ) -> int:
-        if (
-            active_rerun_operation is not None
-            and active_rerun_invalidated_step is not None
-            and active_rerun_invalidated_step.role == FlowRunRerunInvalidationRole.ROOT
-        ):
-            return active_rerun_operation.operation.root_attempt_no
-        return await self.flow_run_repo.allocate_next_attempt_no(
-            tenant_id=tenant_id,
-            flow_run_id=run_id,
-            step_id=step.step_id,
         )
 
     async def _execute_step(
@@ -1682,39 +1557,6 @@ class FlowRunExecutor:
                 tenant_id=tenant_id,
             )
         return run.status == FlowRunStatus.CANCELLED
-
-    async def _handle_multiple_active_rerun_operations(
-        self,
-        *,
-        run_id: UUID,
-        flow_id: UUID,
-        tenant_id: UUID,
-    ) -> dict[str, Any]:
-        await self._rollback()
-        logger.critical(
-            "flow_executor.rerun_multiple_active_operations_terminalized_failed "
-            "run_id=%s code=%s",
-            run_id,
-            FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT.value,
-            exc_info=True,
-        )
-        await self._terminalize_run(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            target_status=FlowRunStatus.FAILED,
-            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.EXECUTOR_FAILED,
-                code=FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT,
-                message=_RERUN_MULTIPLE_ACTIVE_OPERATIONS_RUN_ERROR_MESSAGE,
-            ),
-        )
-        await self._commit()
-        return await self._return_after_terminalized_step_write(
-            run_id=run_id,
-            flow_id=flow_id,
-            tenant_id=tenant_id,
-        )
 
     async def _return_after_terminalized_step_write(
         self,

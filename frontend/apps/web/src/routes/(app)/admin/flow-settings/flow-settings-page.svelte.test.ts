@@ -105,17 +105,9 @@ function pageProps(mappedOverrides: Record<string, unknown> = {}): PageProps {
 function pageData(mappedOverrides: Record<string, unknown> = {}) {
   return {
     flowRetentionPolicy: {
+      run_debug_evidence_days: null,
       flow_run_history_retention_days: null,
-      flow_run_history_minimum_retention_days: null,
-      flow_run_history_no_purge: false,
-      flow_runtime_upload_abandonment_days: null,
-      effective_state: {
-        run_history_deletion_active: false,
-        runtime_upload_abandonment_active: false,
-        classification_policy_count: 0,
-        activation_sources: [],
-        barrier_sources: []
-      }
+      flow_runtime_upload_abandonment_days: null
     },
     flowInputLimits: {
       file_max_size_bytes: 10 * 1024 * 1024,
@@ -143,21 +135,7 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
       max_recorded_passages_per_source: 5,
       max_recorded_passage_bytes: 4096,
       max_recorded_passage_bytes_per_step: 131_072
-    },
-    securityClassifications: {
-      security_enabled: true,
-      security_classifications: [
-        {
-          id: "class-1",
-          name: "Klass 1",
-          description: "Intern information",
-          security_level: 0,
-          created_at: null,
-          updated_at: null
-        }
-      ]
-    },
-    flowClassificationRetentionPolicies: { policies: [] }
+    }
   };
 }
 
@@ -300,30 +278,6 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(page.getByRole("button", { name: "Ignorera ändringar: Största ljudfil" }))
       .toBeVisible();
-  });
-
-  test("edits one classification rule in a focused dialog", async () => {
-    render(FlowSettingsPage, pageProps());
-
-    await expect.element(page.getByText("Regler per säkerhetsklassificering")).toBeVisible();
-    expect(
-      page.getByRole("spinbutton", { name: "Gallra efter dagar för Klass 1" }).query()
-    ).toBeNull();
-
-    await page.getByRole("button", { name: "Ändra regel för Klass 1" }).click();
-
-    await expect
-      .element(page.getByRole("spinbutton", { name: "Gallra efter dagar för Klass 1" }))
-      .toBeVisible();
-    await expect
-      .element(page.getByRole("dialog", { name: "Gallringsregel för Klass 1" }))
-      .toBeVisible();
-
-    await page.getByRole("spinbutton", { name: "Gallra efter dagar för Klass 1" }).fill("30");
-    await page.getByRole("button", { name: "Stäng", exact: true }).click();
-
-    await expect.element(page.getByText("Ingen egen regel").first()).toBeVisible();
-    await expect.element(page.getByText("Osparad ändring")).toBeVisible();
   });
 
   test("reveals low-frequency runtime limits and keeps invalid edits visible", async () => {

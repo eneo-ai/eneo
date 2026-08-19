@@ -18,7 +18,6 @@ _TABLE_MODULES = (
     "eneo.database.tables.completion_model_migration_history_table",
     "eneo.database.tables.feature_flag_table",
     "eneo.database.tables.files_table",
-    "eneo.database.tables.flow_classification_retention_policy_table",
     "eneo.database.tables.flow_tables",
     "eneo.database.tables.group_chats_table",
     "eneo.database.tables.groups_spaces_table",

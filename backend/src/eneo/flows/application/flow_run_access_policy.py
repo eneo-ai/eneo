@@ -35,7 +35,6 @@ FlowRunAccessKind = Literal[
     "status",
     "cancel",
     "content",
-    "rerun",
     "artifact",
     "evidence_view",
     "evidence_export_redacted",
@@ -182,7 +181,7 @@ class FlowRunAccessPolicy:
             _actor, classification_level = await self.load_space_access(
                 flow_id=run.flow_id
             )
-            if access_kind in {"status", "cancel", "content", "rerun", "artifact"}:
+            if access_kind in {"status", "cancel", "content", "artifact"}:
                 return
             if access_kind == "evidence_view":
                 if capability >= EvidenceCapabilityLevel.VIEW:
@@ -226,7 +225,6 @@ class FlowRunAccessPolicy:
                 "status",
                 "cancel",
                 "content",
-                "rerun",
                 "artifact",
                 "evidence_view",
                 "evidence_export_redacted",
@@ -246,7 +244,7 @@ class FlowRunAccessPolicy:
                 )
 
         if principal.matches_run(run):
-            if access_kind in {"status", "cancel", "content", "rerun", "artifact"}:
+            if access_kind in {"status", "cancel", "content", "artifact"}:
                 return
             if access_kind in {"evidence_view", "evidence_export_redacted"}:
                 if user_can_perform_flow_action(self.user, FlowApiAction.TRACE_VIEW):

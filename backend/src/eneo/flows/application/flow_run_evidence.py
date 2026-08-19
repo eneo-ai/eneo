@@ -10,8 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
-    FlowRunRerunInvalidatedStep,
-    FlowRunRerunOperation,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
     FlowStepAttempt,
@@ -39,8 +37,6 @@ EvidenceSectionIdentifier: TypeAlias = Literal[
     "step_attempts",
     "result_files",
     "runtime_input_files",
-    "rerun_operations",
-    "rerun_invalidated_steps",
     "review_checkpoints",
     "webhook_deliveries",
     "provider_calls",
@@ -155,8 +151,6 @@ def build_debug_export(
     step_results: list[FlowStepResult] | None = None,
     step_attempts: list[FlowStepAttempt] | None = None,
     result_files: list[FlowRunStepResultFile] | None = None,
-    rerun_operations: list[FlowRunRerunOperation] | None = None,
-    rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep] | None = None,
     token_usage: FlowRunTokenUsage | None = None,
     transcription_usage: FlowRunTranscriptionUsage | None = None,
     knowledge_evidence_view: RunViewPassageOmission | None = None,
@@ -168,8 +162,6 @@ def build_debug_export(
         version=version,
         step_results=step_results or [],
         step_attempts=step_attempts or [],
-        rerun_operations=rerun_operations or [],
-        rerun_invalidated_steps=rerun_invalidated_steps or [],
     )
     rag_by_step_order = _current_attempt_rag_by_step_order(
         step_results=step_results or [],
@@ -257,14 +249,10 @@ def _latest_evidence_timestamp(
     version: FlowVersion,
     step_results: list[FlowStepResult],
     step_attempts: list[FlowStepAttempt],
-    rerun_operations: list[FlowRunRerunOperation],
-    rerun_invalidated_steps: list[FlowRunRerunInvalidatedStep],
 ) -> datetime:
     timestamps = [run.updated_at, version.updated_at]
     timestamps.extend(result.updated_at for result in step_results)
     timestamps.extend(attempt.updated_at for attempt in step_attempts)
-    timestamps.extend(operation.updated_at for operation in rerun_operations)
-    timestamps.extend(step.updated_at for step in rerun_invalidated_steps)
     return max(timestamps)
 
 

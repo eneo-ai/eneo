@@ -32,7 +32,6 @@ from eneo.flows.application.flow_run_evidence_service import (
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
     Flow,
-    FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
     FlowStep,
@@ -55,12 +54,6 @@ from eneo.flows.domain.flow_step_attempt_input import (
 )
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_retention_tombstone import (
-    FLOW_RETENTION_ACTOR_SOURCE,
-    FlowAttemptRetentionMarker,
-    FlowRetentionTombstone,
-    RunDebugAttemptRetentionCounts,
-)
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
     FlowRunDispatchErrorKind,
@@ -71,7 +64,6 @@ from eneo.flows.flow_run_input_envelope import (
     FlowRunInputEnvelopePatch,
 )
 from eneo.flows.flow_run_provenance import (
-    FlowAttemptRuntimeEvidencePurgedError,
     FlowResolvedInputEdges,
     FlowResolvedInputEdgesConflictError,
     FlowResolvedInputEdgesUnavailableError,
@@ -83,7 +75,6 @@ from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
     _attempt_evidence_logical_bytes,
 )
-from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -188,37 +179,6 @@ def _build_flow(
             ),
         ],
     )
-
-
-def _attempt_retention_marker_payload(
-    *,
-    tenant_id: UUID,
-    run_id: UUID,
-    trace_id: UUID,
-    object_id: UUID,
-) -> FlowPersistedJsonObject:
-    now = datetime.now(timezone.utc)
-    return FlowAttemptRetentionMarker(
-        tombstone=FlowRetentionTombstone(
-            tenant_id=str(tenant_id),
-            run_id=str(run_id),
-            trace_id=str(trace_id),
-            data_class="run_debug_evidence",
-            object_type="flow_step_attempt",
-            object_id=str(object_id),
-            policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
-            cutoff=now,
-            actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-            counts=RunDebugAttemptRetentionCounts(
-                cleared_field_count=1,
-                provider_call_count=0,
-                resolved_input_aggregate_count=0,
-                resolved_input_edge_count=0,
-            ),
-            timestamp=now,
-            retention_state="retention_purged",
-        )
-    ).to_payload()
 
 
 @dataclass(frozen=True)
@@ -1285,9 +1245,6 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
 
         await FlowRunTerminalizer(
             run_repo,
-            FlowRunRerunRepository(
-                session=run_repo.session,
-            ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
@@ -1454,9 +1411,6 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
         )
         terminalizer = FlowRunTerminalizer(
             run_repo,
-            FlowRunRerunRepository(
-                session=run_repo.session,
-            ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
@@ -1651,9 +1605,6 @@ async def test_failed_terminalization_stamps_active_step_result_error_code(
 
         await FlowRunTerminalizer(
             run_repo,
-            FlowRunRerunRepository(
-                session=run_repo.session,
-            ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,
@@ -1939,9 +1890,6 @@ async def test_claim_step_result_serializes_against_terminalization(
             terminal_repo = FlowRunRepository(session=terminal_session)
             terminalized = await FlowRunTerminalizer(
                 terminal_repo,
-                FlowRunRerunRepository(
-                    session=terminal_session,
-                ),
                 terminal_repo.audit_outbox_repo,
                 FlowRunReviewCheckpointRepository(
                     session=terminal_session,
@@ -2570,127 +2518,6 @@ async def test_create_or_get_attempt_started_is_idempotent(
 
 
 @pytest.mark.asyncio
-@pytest.mark.integration
-@pytest.mark.parametrize("unavailable_status", ["corrupt", "retention_purged"])
-async def test_attempt_evidence_writers_preserve_unavailable_provenance(
-    attempt_provenance_context,
-    unavailable_status,
-):
-    context = attempt_provenance_context
-    async with sessionmanager.session() as session, session.begin():
-        run_repo = FlowRunRepository(session=session)
-        attempt = await run_repo.create_or_get_attempt_started(
-            run_id=context.run_id,
-            flow_id=context.flow_id,
-            tenant_id=context.tenant_id,
-            step_id=context.step_id,
-            step_order=1,
-            attempt_no=1,
-            celery_task_id=f"{unavailable_status}-attempt-provenance",
-        )
-        if unavailable_status == "corrupt":
-            persisted_provenance = {
-                "schema_version": "flow-attempt-provenance.v3",
-                "unexpected": {},
-            }
-        else:
-            persisted_provenance = _attempt_retention_marker_payload(
-                tenant_id=context.tenant_id,
-                run_id=context.run_id,
-                trace_id=context.trace_id,
-                object_id=attempt.id,
-            )
-        await session.execute(
-            sa.update(FlowStepAttempts)
-            .where(FlowStepAttempts.id == attempt.id)
-            .values(provenance_json=persisted_provenance)
-        )
-
-        if unavailable_status == "retention_purged":
-            with pytest.raises(FlowAttemptRuntimeEvidencePurgedError) as start_error:
-                await run_repo.activate_step_attempt(
-                    run_id=context.run_id,
-                    step_id=context.step_id,
-                    attempt_no=1,
-                    tenant_id=context.tenant_id,
-                    resolved_input_edges=_resolved_input_aggregate(
-                        binding_ref="unavailable-input"
-                    ),
-                    attempt_input=build_activated_attempt_input(
-                        start=context.attempt_start
-                    ),
-                )
-            assert start_error.value.run_id == context.run_id
-            assert start_error.value.step_id == context.step_id
-            assert start_error.value.attempt_no == 1
-            assert start_error.value.tenant_id == context.tenant_id
-        else:
-            activated = await run_repo.activate_step_attempt(
-                run_id=context.run_id,
-                step_id=context.step_id,
-                attempt_no=1,
-                tenant_id=context.tenant_id,
-                resolved_input_edges=_resolved_input_aggregate(
-                    binding_ref="unavailable-input"
-                ),
-                attempt_input=build_activated_attempt_input(
-                    start=context.attempt_start
-                ),
-            )
-            assert activated is not None
-
-        persisted = await session.get(FlowStepAttempts, attempt.id)
-        assert persisted is not None
-        assert persisted.provenance_json == persisted_provenance
-        resolved_input_row = await session.get(
-            FlowStepAttemptResolvedInputs, attempt.id
-        )
-        if unavailable_status == "retention_purged":
-            assert resolved_input_row is None
-            assert persisted.input_payload_json is None
-            assert persisted.requested_model is None
-            assert persisted.provider is None
-        else:
-            assert resolved_input_row is not None
-            parsed_activated_input = parse_flow_step_attempt_input(
-                persisted.input_payload_json
-            )
-            assert parsed_activated_input.attempt_input is not None
-            assert parsed_activated_input.attempt_input.start == context.attempt_start
-
-        finished = await run_repo.finish_attempt(
-            run_id=context.run_id,
-            step_id=context.step_id,
-            attempt_no=1,
-            tenant_id=context.tenant_id,
-            status=FlowStepAttemptStatus.FAILED,
-            provenance_json={
-                "schema_version": "flow-attempt-provenance.v3",
-                "citations": {"citation_observed": True},
-            },
-            attempt_input=build_terminal_attempt_input(
-                start=context.attempt_start,
-                resolved_input={"secret": "runtime-input"},
-            ),
-            output_payload_json={"secret": "runtime-output"},
-        )
-
-        assert finished is not None
-        assert finished.provenance_json == persisted_provenance
-        if unavailable_status == "retention_purged":
-            assert finished.input_payload_json is None
-            assert finished.output_payload_json is None
-        else:
-            parsed_attempt_input = parse_flow_step_attempt_input(
-                finished.input_payload_json
-            )
-            assert parsed_attempt_input.attempt_input is not None
-            assert parsed_attempt_input.attempt_input.resolved_input == {
-                "secret": "runtime-input"
-            }
-            assert finished.output_payload_json == {"secret": "runtime-output"}
-
-
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_attempt_provenance_writers_preserve_tracked_sections(
@@ -3418,9 +3245,6 @@ async def test_attempt_start_serializes_against_terminalization(
             terminal_repo = FlowRunRepository(session=terminal_session)
             terminalized = await FlowRunTerminalizer(
                 terminal_repo,
-                FlowRunRerunRepository(
-                    session=terminal_session,
-                ),
                 terminal_repo.audit_outbox_repo,
                 FlowRunReviewCheckpointRepository(
                     session=terminal_session,
@@ -3551,9 +3375,6 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
 
         await FlowRunTerminalizer(
             run_repo,
-            FlowRunRerunRepository(
-                session=run_repo.session,
-            ),
             run_repo.audit_outbox_repo,
             FlowRunReviewCheckpointRepository(
                 session=run_repo.session,

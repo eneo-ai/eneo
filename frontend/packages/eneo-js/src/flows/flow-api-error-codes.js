@@ -144,17 +144,7 @@ export const FLOW_API_ERROR_CODE = Object.freeze({
   TEMPLATE_READ_ONLY: "flow_template_read_only",
   TEMPLATE_UNSUPPORTED_EXTENSION: "flow_template_unsupported_extension",
   TEMPLATE_MISSING_CONTENT: "flow_template_missing_content",
-  TEMPLATE_IN_USE: "flow_template_in_use",
-  RUN_RERUN_REASON_REQUIRED: "flow_run_rerun_reason_required",
-  RUN_RERUN_REASON_TOO_LONG: "flow_run_rerun_reason_too_long",
-  RUN_RERUN_STALE_REVISION: "flow_run_rerun_stale_revision",
-  RUN_RERUN_INVALID_TRANSITION: "flow_run_rerun_invalid_transition",
-  RUN_RERUN_STEP_NOT_FOUND: "flow_run_rerun_step_not_found",
-  RUN_RERUN_STEP_INCOMPLETE: "flow_run_rerun_step_incomplete",
-  RUN_RERUN_STEP_INPUTS_INVALID: "flow_run_rerun_step_inputs_invalid",
-  RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT:
-    "flow_run_rerun_multiple_active_operations_invariant",
-  RUN_RERUN_ATTEMPT_LINEAGE_CONFLICT_INVARIANT: "flow_run_rerun_attempt_lineage_conflict_invariant"
+  TEMPLATE_IN_USE: "flow_template_in_use"
 });
 export const FLOW_API_ERROR_CODES = Object.freeze([
   "flow_not_published",
@@ -300,14 +290,5 @@ export const FLOW_API_ERROR_CODES = Object.freeze([
   "flow_template_read_only",
   "flow_template_unsupported_extension",
   "flow_template_missing_content",
-  "flow_template_in_use",
-  "flow_run_rerun_reason_required",
-  "flow_run_rerun_reason_too_long",
-  "flow_run_rerun_stale_revision",
-  "flow_run_rerun_invalid_transition",
-  "flow_run_rerun_step_not_found",
-  "flow_run_rerun_step_incomplete",
-  "flow_run_rerun_step_inputs_invalid",
-  "flow_run_rerun_multiple_active_operations_invariant",
-  "flow_run_rerun_attempt_lineage_conflict_invariant"
+  "flow_template_in_use"
 ]);

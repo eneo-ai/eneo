@@ -445,41 +445,6 @@ describe("flows templates endpoint", () => {
     });
   });
 
-  it("reruns a step with the generated operation body", async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ status: "queued", rerun_step_id: "step-1" }), {
-          status: 202
-        })
-    );
-    const flows = initFlows(createClient({ baseUrl: "https://api.example.test", fetch }));
-
-    await flows.runs.rerunStep({
-      flowId: "flow-1",
-      runId: "run-1",
-      stepId: "step-1",
-      expected_run_revision: 7,
-      reason: "Reviewer accepted the corrected source.",
-      input_payload_json: { reviewer_note: "Use the corrected source." },
-      step_inputs: { "step-1": { file_ids: ["file-2", "file-1"] } }
-    });
-
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe(
-      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/steps/step-1/rerun/"
-    );
-    expect(fetch.mock.calls[0][1]).toMatchObject({
-      method: "POST",
-      headers: { "Content-Type": "application/json" }
-    });
-    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
-      expected_run_revision: 7,
-      reason: "Reviewer accepted the corrected source.",
-      input_payload_json: { reviewer_note: "Use the corrected source." },
-      step_inputs: { "step-1": { file_ids: ["file-2", "file-1"] } }
-    });
-  });
-
   it("sends the observed dispatch-exhaustion epoch when redriving a run", async () => {
     const fetch = vi.fn(
       async () => new Response(JSON.stringify({ run: { status: "queued" }, redispatched_count: 1 }))

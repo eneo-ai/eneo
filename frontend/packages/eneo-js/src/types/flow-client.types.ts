@@ -133,19 +133,6 @@ async function compilePublishedFlowWebAppJourney(runtimeFile: File) {
     });
   }
   await flows.runs.exportEvidence({ id: run.id, flowId, format: "json", detail: "redacted" });
-
-  const completedStatus = statusCapabilities.statuses.find(
-    (item) => item.status === completed.status
-  );
-  if (completedStatus?.is_rerun_eligible) {
-    await flows.runs.rerunStep({
-      flowId,
-      runId: run.id,
-      stepId: inputStep.step_id,
-      expected_run_revision: current.revision,
-      reason: "The source file was corrected."
-    });
-  }
 }
 
 void compilePublishedFlowWebAppJourney;

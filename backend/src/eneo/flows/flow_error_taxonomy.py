@@ -21,7 +21,6 @@ FlowErrorCategory = Literal[
     "Typed input/output",
     "Review checkpoint",
     "Template asset",
-    "Rerun",
 ]
 
 FlowErrorSurface = Literal[
@@ -1175,69 +1174,6 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Keep the template asset available while published versions can use it.",
         user_action="Unpublish or replace the published flow template before deleting it.",
     ),
-    FlowApiErrorCode.RUN_RERUN_REASON_REQUIRED: _entry(
-        category="Rerun",
-        surfaced_through="API error response",
-        cause="The rerun request did not include a non-empty reason.",
-        consumer_action="Require a reason before submitting a rerun request.",
-        user_action="Enter a reason before rerunning the step.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_REASON_TOO_LONG: _entry(
-        category="Rerun",
-        surfaced_through="API error response",
-        cause="The rerun reason exceeded the accepted length.",
-        consumer_action="Truncate or ask the user to shorten the rerun reason.",
-        user_action="Shorten the rerun reason and try again.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_STALE_REVISION: _entry(
-        category="Rerun",
-        surfaced_through="API error response",
-        cause="The run changed after the caller loaded it.",
-        consumer_action="Refetch the run and submit rerun against the latest revision.",
-        user_action="Reload the run and try rerun again.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_INVALID_TRANSITION: _entry(
-        category="Rerun",
-        surfaced_through="API error response",
-        cause="The run status cannot accept a step rerun.",
-        consumer_action="Check status capabilities before showing or submitting rerun.",
-        user_action="Reload the run before trying again.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_STEP_NOT_FOUND: _entry(
-        category="Rerun",
-        surfaced_through="API error response",
-        cause="The selected rerun step is absent from the published snapshot.",
-        consumer_action="Refetch run steps and only offer rerun for current step ids.",
-        user_action="Reload the run and choose an available step.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_STEP_INCOMPLETE: _entry(
-        category="Rerun",
-        surfaced_through="API error response",
-        cause="The selected rerun step or dependency does not have a completed current result.",
-        consumer_action="Offer rerun only for completed current step results.",
-        user_action="Choose a completed step and try again.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID: _entry(
-        category="Rerun",
-        surfaced_through="API error response",
-        cause="Rerun file overrides targeted a step other than the rerun root.",
-        consumer_action="Attach rerun files only to the step being rerun.",
-        user_action="Remove files from other steps and try again.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT: _entry(
-        category="Rerun",
-        surfaced_through="Run error payload",
-        cause="The run had multiple active rerun operations during execution.",
-        consumer_action="Reload the run and escalate with the run ID if multiple active operations remain.",
-        user_action="Reload the run and contact support if the problem remains.",
-    ),
-    FlowApiErrorCode.RUN_RERUN_ATTEMPT_LINEAGE_CONFLICT_INVARIANT: _entry(
-        category="Rerun",
-        surfaced_through="Run error payload",
-        cause="The rerun attempt history conflicted with an existing invalidated-step link.",
-        consumer_action="Reload the run and escalate with the run ID if lineage remains inconsistent.",
-        user_action="Reload the run and contact support if the problem remains.",
-    ),
 }
 
 FLOW_ERROR_CATEGORY_ORDER: tuple[FlowErrorCategory, ...] = (
@@ -1250,7 +1186,6 @@ FLOW_ERROR_CATEGORY_ORDER: tuple[FlowErrorCategory, ...] = (
     "Typed input/output",
     "Review checkpoint",
     "Template asset",
-    "Rerun",
 )
 
 

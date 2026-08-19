@@ -77,13 +77,6 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
     )
-    flow_run_history_minimum_retention_days: Optional[int] = Field(
-        default=None,
-        strict=True,
-        ge=MIN_RETENTION_DAYS,
-        le=MAX_RETENTION_DAYS,
-    )
-    flow_run_history_no_purge: bool = Field(default=False, strict=True)
     flow_runtime_upload_abandonment_days: Optional[int] = Field(
         default=None,
         strict=True,
@@ -306,13 +299,6 @@ class TenantUpdate(TenantUpdatePublic):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
     )
-    flow_run_history_minimum_retention_days: Optional[int] = Field(
-        default=None,
-        strict=True,
-        ge=MIN_RETENTION_DAYS,
-        le=MAX_RETENTION_DAYS,
-    )
-    flow_run_history_no_purge: bool = Field(default=False, strict=True)
     flow_runtime_upload_abandonment_days: Optional[int] = Field(
         default=None,
         strict=True,

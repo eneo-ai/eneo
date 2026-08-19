@@ -36,7 +36,6 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
-from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -49,9 +48,6 @@ LIFECYCLE_LOGGER = "eneo.flows.application.flow_run_lifecycle_events"
 def _flow_run_terminalizer(run_repo: FlowRunRepository) -> FlowRunTerminalizer:
     return FlowRunTerminalizer(
         run_repo,
-        FlowRunRerunRepository(
-            session=run_repo.session,
-        ),
         run_repo.audit_outbox_repo,
         FlowRunReviewCheckpointRepository(
             session=run_repo.session,

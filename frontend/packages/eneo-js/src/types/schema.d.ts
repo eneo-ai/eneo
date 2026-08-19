@@ -2982,7 +2982,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 156 actions with their enabled status for the modal UI.
+     * @description Retrieve all 155 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -4707,37 +4707,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Rerun flow run step
-     * @description Request a rerun for one completed step in an existing flow run.
-     *
-     *     The endpoint returns `202 Accepted` for both a newly accepted rerun and an idempotent
-     *     replay of the same rerun request. Use the response `status` to track the rerun operation
-     *     lifecycle. On replay, the nested `run` is the current persisted run state, so
-     *     `run.revision` can be newer than the submitted `expected_run_revision`.
-     *
-     *     Rerun is a run lifecycle mutation. Human callers follow the existing flow management
-     *     policy; service-key principals may rerun only their own runs under stable service
-     *     principal ownership.
-     *
-     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
-     */
-    post: operations["rerun_flow_run_step"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/flows/{id}/runtime-files/{file_id}/": {
     parameters: {
       query?: never;
@@ -6363,66 +6332,6 @@ export interface paths {
     patch: operations["update_audit_logging_setting_api_v1_settings_audit_logging_patch"];
     trace?: never;
   };
-  "/api/v1/settings/flow-classification-retention-policies": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * List flow classification retention policies
-     * @description List tenant Flow classification retention inputs. A row's delete-after value activates automatic run-history deletion for matching spaces, including while security_enabled is false. A barrier-only row with minimum-retention or no-purge does not activate deletion. Debug-evidence cleanup is independent, and listing policies does not delete data.
-     */
-    get: operations["list_flow_classification_retention_policies"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Set flow classification retention policy
-     * @description Create, replace, or remove the desired retention state for one tenant security classification. Enabling or shortening its delete-after value, and every minimum-retention or no-purge change, requires the exact preview confirmation. A barrier-only state never activates deletion. Setting all three values Off removes the row through this same operation. This endpoint itself deletes no run data and does not configure debug-evidence redaction.
-     */
-    put: operations["put_flow_classification_retention_policy"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Preview a flow classification retention policy change
-     * @description Use the same exact-state, set-based Flow retention gate as organization policy changes before enabling or shortening classification delete-after, or changing minimum-retention or no-purge. This bounded read returns the control-plane version, preview hash, fixed clock anchor, current/proposed eligibility, distinct file bytes, latent Flow/Space values, and blockers needed to confirm the proposal without deleting data.
-     */
-    post: operations["preview_flow_classification_retention_policy"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/settings/flow-document-render-limits": {
     parameters: {
       query?: never;
@@ -6552,7 +6461,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the tenant-admin Flow deletion envelope, independent preservation barriers, and debug-evidence cleanup value. Null organization and classification delete-after values mean automatic run-history deletion is Off. Minimum-retention and no-purge values can block deletion without activating it. This endpoint does not itself delete data.
+     * @description Return the tenant fallback for layered Flow run-history retention, the runtime-upload cleanup window, and the independent debug-evidence value. A Flow-specific value overrides its Space value, and a Space value overrides the tenant fallback. Null means automatic deletion is disabled at that layer; this endpoint never previews or reconstructs deleted data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -6562,29 +6471,9 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update tenant Flow retention inputs. Omitted fields are unchanged and null means Off. Enabling or shortening a delete-after value, and every change to minimum-retention or no-purge, requires the exact preview confirmation returned by /flow-retention-policy/preview. Disabling or lengthening only an ordinary delete-after value does not require confirmation. run_debug_evidence_days remains independent JSONB cleanup.
+     * @description Update tenant Flow retention inputs. Omitted fields are unchanged and null means Off. Flow values override Space values, which override this tenant fallback. run_debug_evidence_days remains independent JSONB cleanup. The shared retention worker applies changes on its next scheduled pass; there is no classification barrier, tombstone, or preview/confirmation workflow.
      */
     patch: operations["update_flow_retention_policy"];
-    trace?: never;
-  };
-  "/api/v1/settings/flow-retention-policy/preview": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Preview a flow retention policy change
-     * @description Read a bounded, set-based impact preview for exact proposed organization delete-after, minimum-retention, no-purge, and never-attached runtime-upload values. The preview includes current, proposed, newly eligible, and no-longer-eligible counts, distinct file bytes, fixed clock anchors, latent Flow/Space values, and blockers. It changes no policy and deletes no data.
-     */
-    post: operations["preview_flow_retention_policy"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
     trace?: never;
   };
   "/api/v1/settings/flow-runtime-policy": {
@@ -8083,46 +7972,6 @@ export interface paths {
      */
     put: operations["update_embedding_model_metadata_api_v1_sysadmin_embedding_models__id__metadata_put"];
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/sysadmin/flows/audit-outbox/dead-letters/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * List dead-lettered Flow audit deliveries
-     * @description Requires the configured super API key. List a bounded, oldest-first window of dead-lettered Flow lifecycle audit deliveries. Use each row's dead_lettered_at as the generation token for redrive.
-     */
-    get: operations["list_flow_run_audit_outbox_dead_letters"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/sysadmin/flows/audit-outbox/{outbox_id}/redrive/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Redrive dead-lettered Flow audit delivery
-     * @description Requires the configured super API key. Atomically reset one listed dead-letter generation to pending with a fresh five-attempt budget and record the required tenant audit. A stale generation token is rejected; the normal delivery worker performs delivery. Poll Flow runtime health and list dead letters again to verify recovery.
-     */
-    post: operations["redrive_flow_run_audit_outbox_delivery"];
     delete?: never;
     options?: never;
     head?: never;
@@ -9637,7 +9486,6 @@ export interface components {
       | "flow_run_completed"
       | "flow_run_failed"
       | "flow_run_redispatched"
-      | "flow_run_rerun_requested"
       | "flow_run_cancelled"
       | "flow_run_audit_delivery_redriven"
       | "flow_classification_override"
@@ -11518,7 +11366,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 70,
+     *           "action_count": 69,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -13895,8 +13743,7 @@ export interface components {
        * Provenance Persisted Version Status
        * @enum {string}
        */
-      provenance_persisted_version_status:
-        "not_tracked" | "tracked" | "corrupt" | "retention_purged";
+      provenance_persisted_version_status: "not_tracked" | "tracked" | "corrupt";
       /** Provenance Schema Version Current */
       provenance_schema_version_current: string;
       /** Provenance Schema Version Min */
@@ -13967,7 +13814,6 @@ export interface components {
       rag_usage_tracking: {
         [key: string]: components["schemas"]["JsonValue"];
       };
-      rerun_lineage: components["schemas"]["EvidenceRerunLineageSummary"];
       review_checkpoints: components["schemas"]["EvidenceReviewCheckpointSummary"];
       /** Status */
       status?: string | null;
@@ -14041,41 +13887,10 @@ export interface components {
       /** Usage State */
       usage_state?: string | null;
     };
-    /** EvidenceRerunLineageSummary */
-    EvidenceRerunLineageSummary: {
-      /** Active Operations Count */
-      active_operations_count: number;
-      /** Cancelled Operations Count */
-      cancelled_operations_count: number;
-      /** Completed Operations Count */
-      completed_operations_count: number;
-      /** Completed Replacement Count */
-      completed_replacement_count: number;
-      /** Failed Operations Count */
-      failed_operations_count: number;
-      /** Invalidated Steps Count */
-      invalidated_steps_count: number;
-      /** Operations Count */
-      operations_count: number;
-      /** Queued Operations Count */
-      queued_operations_count: number;
-      /** Running Operations Count */
-      running_operations_count: number;
-      /** Terminal Operations Count */
-      terminal_operations_count: number;
-    };
     /** EvidenceRetentionStateSummary */
     EvidenceRetentionStateSummary: {
-      /** Artifact Content Purged Count */
-      artifact_content_purged_count: number;
       /** Note */
       note: string;
-      /** Redacted For Deletion Count */
-      redacted_for_deletion_count: number;
-      /** Retention Purged Count */
-      retention_purged_count: number;
-      /** Tombstone Count */
-      tombstone_count: number;
       /**
        * Tracking State
        * @enum {string}
@@ -14702,16 +14517,7 @@ export interface components {
       | "flow_template_read_only"
       | "flow_template_unsupported_extension"
       | "flow_template_missing_content"
-      | "flow_template_in_use"
-      | "flow_run_rerun_reason_required"
-      | "flow_run_rerun_reason_too_long"
-      | "flow_run_rerun_stale_revision"
-      | "flow_run_rerun_invalid_transition"
-      | "flow_run_rerun_step_not_found"
-      | "flow_run_rerun_step_incomplete"
-      | "flow_run_rerun_step_inputs_invalid"
-      | "flow_run_rerun_multiple_active_operations_invariant"
-      | "flow_run_rerun_attempt_lineage_conflict_invariant";
+      | "flow_template_in_use";
     /**
      * FlowAssistantCreateRequest
      * @example {
@@ -14826,105 +14632,6 @@ export interface components {
       prompt?: components["schemas"]["PromptCreate"] | null;
       /** Websites */
       websites?: components["schemas"]["ModelId"][] | null;
-    };
-    /**
-     * FlowClassificationRetentionPoliciesPublic
-     * @example {
-     *       "policies": [
-     *         {
-     *           "data_retention_days": 7,
-     *           "minimum_retention_days": 30,
-     *           "no_purge": false,
-     *           "security_classification_id": "6f982fa9-8f74-451f-b6fc-773f937af7ef"
-     *         }
-     *       ]
-     *     }
-     */
-    FlowClassificationRetentionPoliciesPublic: {
-      /** Policies */
-      policies: components["schemas"]["FlowClassificationRetentionPolicyPublic"][];
-    };
-    /**
-     * FlowClassificationRetentionPolicyPreviewRequest
-     * @example {
-     *       "data_retention_days": 14,
-     *       "minimum_retention_days": 30,
-     *       "no_purge": false
-     *     }
-     */
-    FlowClassificationRetentionPolicyPreviewRequest: {
-      /**
-       * Data Retention Days
-       * @description Proposed matching-classification Flow run-history activation window.
-       */
-      data_retention_days: number | null;
-      /**
-       * Minimum Retention Days
-       * @description Proposed matching-classification minimum retention barrier.
-       */
-      minimum_retention_days: number | null;
-      /**
-       * No Purge
-       * @description Proposed matching-classification no-purge barrier; it does not activate automatic deletion.
-       */
-      no_purge: boolean;
-    };
-    /**
-     * FlowClassificationRetentionPolicyPublic
-     * @example {
-     *       "data_retention_days": 7,
-     *       "minimum_retention_days": 30,
-     *       "no_purge": false,
-     *       "security_classification_id": "6f982fa9-8f74-451f-b6fc-773f937af7ef"
-     *     }
-     */
-    FlowClassificationRetentionPolicyPublic: {
-      /**
-       * Data Retention Days
-       * @description Matching-classification Flow run-history activation window in days. The effective window is the minimum of this value, the organization value, and configured Space or Flow tightening values.
-       */
-      data_retention_days: number | null;
-      /**
-       * Minimum Retention Days
-       * @description Matching-classification minimum retention barrier in days.
-       */
-      minimum_retention_days: number | null;
-      /**
-       * No Purge
-       * @description Matching-classification no-purge barrier; it never activates deletion.
-       */
-      no_purge: boolean;
-      /**
-       * Security Classification Id
-       * Format: uuid
-       */
-      security_classification_id: string;
-    };
-    /**
-     * FlowClassificationRetentionPolicyUpdate
-     * @example {
-     *       "data_retention_days": 14,
-     *       "minimum_retention_days": 30,
-     *       "no_purge": false
-     *     }
-     */
-    FlowClassificationRetentionPolicyUpdate: {
-      confirmation?: components["schemas"]["FlowRetentionChangeConfirmationPublic"] | null;
-      /**
-       * Data Retention Days
-       * @description Matching-classification Flow run-history activation window in days. The effective window is the minimum of this value, the organization value, and configured Space or Flow tightening values.
-       */
-      data_retention_days: number | null;
-      /**
-       * Minimum Retention Days
-       * @description Matching-classification minimum retention barrier in days.
-       */
-      minimum_retention_days: number | null;
-      /**
-       * No Purge
-       * @description Matching-classification no-purge barrier; it never activates deletion.
-       */
-      no_purge: boolean;
     };
     /**
      * FlowCreateRequest
@@ -15066,8 +14773,6 @@ export interface components {
         | "step_attempts"
         | "result_files"
         | "runtime_input_files"
-        | "rerun_operations"
-        | "rerun_invalidated_steps"
         | "review_checkpoints"
         | "webhook_deliveries"
         | "provider_calls"
@@ -15942,28 +15647,13 @@ export interface components {
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
      *       "run_history_retention": {
-     *         "activation_sources": [
-     *           "organization",
-     *           "classification"
-     *         ],
-     *         "barrier_sources": [
-     *           "organization_minimum",
-     *           "classification_minimum"
-     *         ],
      *         "contributors": {
-     *           "classification_days": 30,
-     *           "classification_minimum_days": 60,
-     *           "classification_no_purge": false,
      *           "flow_days": 30,
      *           "organization_days": 90,
-     *           "organization_minimum_days": 90,
-     *           "organization_no_purge": false,
      *           "space_days": 14
      *         },
-     *         "effective_days": 14,
-     *         "effective_minimum_days": 90,
-     *         "no_purge": false,
-     *         "policy_conflict": true,
+     *         "effective_days": 30,
+     *         "source": "flow",
      *         "state": "days"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
@@ -16090,7 +15780,7 @@ export interface components {
       max_recorded_passage_bytes: number;
       /**
        * Max Recorded Passage Bytes Per Run View
-       * @description Total recorded passage bytes one interactive run view may show. A run has no attempt limit, so this bounds what reading a heavily rerun run materialises. Sources and counts are never released.
+       * @description Total recorded passage bytes one interactive run view may show. A run has no attempt limit, so this bounds what reading a run with many attempts materialises. Sources and counts are never released.
        */
       max_recorded_passage_bytes_per_run_view: number;
       /**
@@ -16246,18 +15936,6 @@ export interface components {
        */
       status: "not_tracked";
     };
-    /** FlowResolvedInputLineageRetentionPurged */
-    FlowResolvedInputLineageRetentionPurged: {
-      /** Resolved Input Aggregate Count */
-      resolved_input_aggregate_count: number;
-      /** Resolved Input Edge Count */
-      resolved_input_edge_count: number;
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      status: "retention_purged";
-    };
     /** FlowResolvedInputLineageTracked */
     FlowResolvedInputLineageTracked: {
       /** Edges */
@@ -16328,251 +16006,18 @@ export interface components {
       /** Name */
       name: string;
     };
-    /** FlowRetentionChangeConfirmationPublic */
-    FlowRetentionChangeConfirmationPublic: {
-      /** Expected Control Plane Version */
-      expected_control_plane_version: string;
-      /** Expected Preview Hash */
-      expected_preview_hash: string;
-      /**
-       * Previewed At
-       * Format: date-time
-       */
-      previewed_at: string;
-    };
-    /** FlowRetentionDataImpactPublic */
-    FlowRetentionDataImpactPublic: {
-      /** Current Eligible Count */
-      current_eligible_count: number;
-      /** Earliest Proposed Anchor */
-      earliest_proposed_anchor: string | null;
-      /** Earliest Proposed Delete After At */
-      earliest_proposed_delete_after_at: string | null;
-      /** Earliest Proposed Minimum Not Before At */
-      earliest_proposed_minimum_not_before_at: string | null;
-      /** Latest Proposed Anchor */
-      latest_proposed_anchor: string | null;
-      /** Latest Proposed Delete After At */
-      latest_proposed_delete_after_at: string | null;
-      /** Latest Proposed Minimum Not Before At */
-      latest_proposed_minimum_not_before_at: string | null;
-      /** Newly Eligible Bytes */
-      newly_eligible_bytes: number;
-      /** Newly Eligible Count */
-      newly_eligible_count: number;
-      /** No Longer Eligible Count */
-      no_longer_eligible_count: number;
-      /** Proposed Eligible Bytes */
-      proposed_eligible_bytes: number;
-      /** Proposed Eligible Count */
-      proposed_eligible_count: number;
-    };
-    /** FlowRetentionEffectiveStatePublic */
-    FlowRetentionEffectiveStatePublic: {
-      /**
-       * Activation Sources
-       * @description Configured scopes whose delete-after values activate deletion.
-       */
-      activation_sources: ("organization" | "classification")[];
-      /**
-       * Barrier Sources
-       * @description Configured minimum-retention and no-purge sources that can block deletion without activating it.
-       */
-      barrier_sources: (
-        | "organization_minimum"
-        | "classification_minimum"
-        | "organization_no_purge"
-        | "classification_no_purge"
-      )[];
-      /**
-       * Classification Policy Count
-       * @description Number of configured classification delete-after activators.
-       */
-      classification_policy_count: number;
-      /**
-       * Run History Deletion Active
-       * @description Whether an organization or classification delete-after value activates automatic Flow run-history deletion.
-       */
-      run_history_deletion_active: boolean;
-      /**
-       * Runtime Upload Abandonment Active
-       * @description Whether automatic abandoned runtime-upload deletion is active.
-       */
-      runtime_upload_abandonment_active: boolean;
-    };
-    /**
-     * FlowRetentionImpactPreviewPublic
-     * @example {
-     *       "control_plane_version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-     *       "destructive_change": true,
-     *       "latent_flow_retention_days": [
-     *         1,
-     *         14
-     *       ],
-     *       "latent_space_retention_days": [
-     *         7,
-     *         30
-     *       ],
-     *       "lifecycle_blockers": {
-     *         "active_rerun_count": 0,
-     *         "undelivered_audit_count": 1,
-     *         "unresolved_webhook_count": 0
-     *       },
-     *       "policy_blockers": {
-     *         "run_history_minimum_not_satisfied_count": 4,
-     *         "run_history_no_purge_count": 0,
-     *         "run_history_policy_conflict_count": 12,
-     *         "runtime_upload_minimum_not_satisfied_count": 1,
-     *         "runtime_upload_no_purge_count": 0,
-     *         "runtime_upload_policy_conflict_count": 3
-     *       },
-     *       "preview_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-     *       "previewed_at": "2026-07-13T12:00:00Z",
-     *       "run_history": {
-     *         "current_eligible_count": 0,
-     *         "earliest_proposed_anchor": "2025-01-01T12:00:00Z",
-     *         "earliest_proposed_delete_after_at": "2025-01-31T12:00:00Z",
-     *         "earliest_proposed_minimum_not_before_at": "2025-04-01T12:00:00Z",
-     *         "latest_proposed_anchor": "2026-01-01T12:00:00Z",
-     *         "latest_proposed_delete_after_at": "2026-01-31T12:00:00Z",
-     *         "latest_proposed_minimum_not_before_at": "2026-04-01T12:00:00Z",
-     *         "newly_eligible_bytes": 4096,
-     *         "newly_eligible_count": 12,
-     *         "no_longer_eligible_count": 0,
-     *         "proposed_eligible_bytes": 4096,
-     *         "proposed_eligible_count": 12
-     *       },
-     *       "run_history_anchor": "finished_at_or_created_at",
-     *       "runtime_upload_anchor": "created_at",
-     *       "runtime_uploads": {
-     *         "current_eligible_count": 0,
-     *         "earliest_proposed_anchor": "2025-06-01T12:00:00Z",
-     *         "earliest_proposed_delete_after_at": "2025-06-15T12:00:00Z",
-     *         "earliest_proposed_minimum_not_before_at": "2025-08-30T12:00:00Z",
-     *         "latest_proposed_anchor": "2025-12-01T12:00:00Z",
-     *         "latest_proposed_delete_after_at": "2025-12-15T12:00:00Z",
-     *         "latest_proposed_minimum_not_before_at": "2026-03-01T12:00:00Z",
-     *         "newly_eligible_bytes": 1024,
-     *         "newly_eligible_count": 3,
-     *         "no_longer_eligible_count": 0,
-     *         "proposed_eligible_bytes": 1024,
-     *         "proposed_eligible_count": 3
-     *       }
-     *     }
-     */
-    FlowRetentionImpactPreviewPublic: {
-      /** Control Plane Version */
-      control_plane_version: string;
-      /** Destructive Change */
-      destructive_change: boolean;
-      /** Latent Flow Retention Days */
-      latent_flow_retention_days: number[];
-      /** Latent Space Retention Days */
-      latent_space_retention_days: number[];
-      lifecycle_blockers: components["schemas"]["FlowRetentionLifecycleBlockersPublic"];
-      policy_blockers: components["schemas"]["FlowRetentionPolicyBlockersPublic"];
-      /** Preview Hash */
-      preview_hash: string;
-      /**
-       * Previewed At
-       * Format: date-time
-       */
-      previewed_at: string;
-      run_history: components["schemas"]["FlowRetentionDataImpactPublic"];
-      /**
-       * Run History Anchor
-       * @constant
-       */
-      run_history_anchor: "finished_at_or_created_at";
-      /**
-       * Runtime Upload Anchor
-       * @constant
-       */
-      runtime_upload_anchor: "created_at";
-      runtime_uploads: components["schemas"]["FlowRetentionDataImpactPublic"];
-    };
-    /** FlowRetentionLifecycleBlockersPublic */
-    FlowRetentionLifecycleBlockersPublic: {
-      /** Active Rerun Count */
-      active_rerun_count: number;
-      /** Undelivered Audit Count */
-      undelivered_audit_count: number;
-      /** Unresolved Webhook Count */
-      unresolved_webhook_count: number;
-    };
-    /**
-     * FlowRetentionOrganizationPreviewRequest
-     * @example {
-     *       "flow_run_history_minimum_retention_days": 90,
-     *       "flow_run_history_no_purge": false,
-     *       "flow_run_history_retention_days": 30,
-     *       "flow_runtime_upload_abandonment_days": 14
-     *     }
-     */
-    FlowRetentionOrganizationPreviewRequest: {
-      /**
-       * Flow Run History Minimum Retention Days
-       * @description Organization minimum retention barrier for Flow run history and never-attached runtime uploads. Null removes this barrier.
-       */
-      flow_run_history_minimum_retention_days: number | null;
-      /**
-       * Flow Run History No Purge
-       * @description Organization barrier that blocks automatic Flow run-history and never-attached runtime-upload purge without activating deletion.
-       */
-      flow_run_history_no_purge: boolean;
-      /**
-       * Flow Run History Retention Days
-       * @description Organization Flow run-history activation window. Null leaves automatic deletion off except for spaces with a matching classification policy.
-       */
-      flow_run_history_retention_days: number | null;
-      /** Flow Runtime Upload Abandonment Days */
-      flow_runtime_upload_abandonment_days: number | null;
-    };
-    /** FlowRetentionPolicyBlockersPublic */
-    FlowRetentionPolicyBlockersPublic: {
-      /** Run History Minimum Not Satisfied Count */
-      run_history_minimum_not_satisfied_count: number;
-      /** Run History No Purge Count */
-      run_history_no_purge_count: number;
-      /** Run History Policy Conflict Count */
-      run_history_policy_conflict_count: number;
-      /** Runtime Upload Minimum Not Satisfied Count */
-      runtime_upload_minimum_not_satisfied_count: number;
-      /** Runtime Upload No Purge Count */
-      runtime_upload_no_purge_count: number;
-      /** Runtime Upload Policy Conflict Count */
-      runtime_upload_policy_conflict_count: number;
-    };
     /**
      * FlowRetentionPolicyPublic
      * @example {
-     *       "effective_state": {
-     *         "activation_sources": [
-     *           "organization"
-     *         ],
-     *         "barrier_sources": [
-     *           "organization_minimum"
-     *         ],
-     *         "classification_policy_count": 0,
-     *         "run_history_deletion_active": true,
-     *         "runtime_upload_abandonment_active": true
-     *       },
-     *       "flow_run_history_minimum_retention_days": 90,
-     *       "flow_run_history_no_purge": false,
      *       "flow_run_history_retention_days": 30,
      *       "flow_runtime_upload_abandonment_days": 14,
-     *       "run_debug_evidence_days": 7
+     *       "run_debug_evidence_days": 30
      *     }
      */
     FlowRetentionPolicyPublic: {
-      effective_state: components["schemas"]["FlowRetentionEffectiveStatePublic"];
-      /** Flow Run History Minimum Retention Days */
-      flow_run_history_minimum_retention_days: number | null;
-      /** Flow Run History No Purge */
-      flow_run_history_no_purge: boolean;
       /**
        * Flow Run History Retention Days
-       * @description Organization Flow run-history activation window. Null leaves automatic deletion off except for spaces with a matching classification policy.
+       * @description Tenant fallback for Flow run history. A Flow value overrides its Space value, and a Space value overrides this tenant value.
        */
       flow_run_history_retention_days: number | null;
       /** Flow Runtime Upload Abandonment Days */
@@ -16583,21 +16028,13 @@ export interface components {
     /**
      * FlowRetentionPolicyUpdate
      * @example {
-     *       "flow_run_history_minimum_retention_days": 90,
-     *       "flow_run_history_no_purge": false,
-     *       "flow_run_history_retention_days": 30
+     *       "flow_run_history_retention_days": 30,
+     *       "flow_runtime_upload_abandonment_days": 14,
+     *       "run_debug_evidence_days": 30
      *     }
      */
     FlowRetentionPolicyUpdate: {
-      confirmation?: components["schemas"]["FlowRetentionChangeConfirmationPublic"] | null;
-      /** Flow Run History Minimum Retention Days */
-      flow_run_history_minimum_retention_days?: number | null;
-      /** Flow Run History No Purge */
-      flow_run_history_no_purge?: boolean;
-      /**
-       * Flow Run History Retention Days
-       * @description Organization Flow run-history activation window. Null leaves automatic deletion off except for spaces with a matching classification policy.
-       */
+      /** Flow Run History Retention Days */
       flow_run_history_retention_days?: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days?: number | null;
@@ -16676,118 +16113,6 @@ export interface components {
        * @enum {string}
        */
       kind: "artifact";
-    };
-    /** FlowRunAuditOutboxDeadLetterResponse */
-    FlowRunAuditOutboxDeadLetterResponse: {
-      /**
-       * Action
-       * @description Lifecycle audit action awaiting delivery.
-       */
-      action: string;
-      /**
-       * Created At
-       * Format: date-time
-       * @description Time the durable lifecycle audit outbox row was created.
-       */
-      created_at: string;
-      /**
-       * Dead Lettered At
-       * Format: date-time
-       * @description Generation token required by the redrive operation.
-       */
-      dead_lettered_at: string;
-      /**
-       * Delivery Attempts
-       * @description Delivery attempts charged in this dead-letter generation.
-       */
-      delivery_attempts: number;
-      /**
-       * Delivery Last Error
-       * @description Bounded, secret-redacted diagnostic from the final attempt.
-       */
-      delivery_last_error: string | null;
-      /**
-       * Flow Id
-       * Format: uuid
-       * @description Flow whose run emitted the lifecycle audit.
-       */
-      flow_id: string;
-      /**
-       * Flow Run Id
-       * Format: uuid
-       * @description Flow run whose lifecycle audit is pending.
-       */
-      flow_run_id: string;
-      /**
-       * Outbox Id
-       * Format: uuid
-       * @description Audit outbox row identifier used for redrive.
-       */
-      outbox_id: string;
-      /**
-       * Source
-       * @description Runtime source that emitted the lifecycle audit.
-       */
-      source: string;
-      /**
-       * Tenant Id
-       * Format: uuid
-       * @description Tenant that owns the lifecycle audit row.
-       */
-      tenant_id: string;
-    };
-    /** FlowRunAuditOutboxRedriveRequest */
-    FlowRunAuditOutboxRedriveRequest: {
-      /**
-       * Expected Dead Lettered At
-       * Format: date-time
-       * @description Exact dead_lettered_at generation token returned by the list.
-       */
-      expected_dead_lettered_at: string;
-      /**
-       * Reason
-       * @description Operator diagnosis recorded in the mandatory audit row.
-       */
-      reason: string;
-    };
-    /** FlowRunAuditOutboxRedriveResponse */
-    FlowRunAuditOutboxRedriveResponse: {
-      /**
-       * Delivery Attempts
-       * @description Fresh delivery-attempt budget starts at zero.
-       * @constant
-       */
-      delivery_attempts: 0;
-      /**
-       * Delivery Status
-       * @description Post-redrive state consumed by the normal delivery worker.
-       * @constant
-       */
-      delivery_status: "pending";
-      /**
-       * Flow Run Id
-       * Format: uuid
-       * @description Flow run whose audit row was redriven.
-       */
-      flow_run_id: string;
-      /**
-       * Next Delivery At
-       * Format: date-time
-       * @description Time from which the normal delivery worker may claim the row.
-       */
-      next_delivery_at: string;
-      /**
-       * Operator Audit Id
-       * Format: uuid
-       * @description Tenant-scoped mandatory audit record for this redrive.
-       */
-      operator_audit_id: string;
-      /**
-       * Outbox Id
-       * Format: uuid
-       * @description Redriven audit outbox row identifier.
-       */
-      outbox_id: string;
     };
     /**
      * FlowRunCapacityPublic
@@ -17587,7 +16912,7 @@ export interface components {
       /**
        * Id
        * Format: uuid
-       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, rerun, and artifact requests.
+       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, and artifact requests.
        */
       id: string;
       /**
@@ -17624,7 +16949,7 @@ export interface components {
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /**
        * Revision
-       * @description Monotonic run lifecycle compare token. Step-rerun requests use this value as `expected_run_revision`.
+       * @description Monotonic run lifecycle compare token.
        */
       revision: number;
       /**
@@ -17632,7 +16957,7 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
-      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, redispatch, or rerun. */
+      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
        * Tenant Id
@@ -17731,8 +17056,6 @@ export interface components {
         | "flow_review_rejected"
         | "flow_run_cancelled"
         | "flow_run_error_payload_invalid"
-        | "flow_run_rerun_attempt_lineage_conflict_invariant"
-        | "flow_run_rerun_multiple_active_operations_invariant"
         | "flow_run_user_cancelled"
         | "flow_runtime_actor_invalid"
         | "flow_runtime_input_not_consumed"
@@ -18163,11 +17486,7 @@ export interface components {
      *         "redaction_applied": true,
      *         "redaction_policy_version": "flow-evidence-redaction.v3",
      *         "retention_state_summary": {
-     *           "artifact_content_purged_count": 0,
-     *           "note": "No retention tombstones are present in this export; rows purged before tombstone tracking remain indistinguishable from never-tracked evidence.",
-     *           "redacted_for_deletion_count": 0,
-     *           "retention_purged_count": 0,
-     *           "tombstone_count": 0,
+     *           "note": "Deleted evidence is not tracked separately; missing rows remain indistinguishable from never-recorded evidence.",
      *           "tracking_state": "not_tracked"
      *         },
      *         "review_checkpoint_summary": {
@@ -18312,18 +17631,6 @@ export interface components {
      *           "prompt_context_inclusion_tracked": true,
      *           "retrieval_tracked": true,
      *           "selection_basis": "semantic_search_ranked_chunks_grouped_by_source"
-     *         },
-     *         "rerun_lineage": {
-     *           "active_operations_count": 0,
-     *           "cancelled_operations_count": 0,
-     *           "completed_operations_count": 0,
-     *           "completed_replacement_count": 0,
-     *           "failed_operations_count": 0,
-     *           "invalidated_steps_count": 0,
-     *           "operations_count": 0,
-     *           "queued_operations_count": 0,
-     *           "running_operations_count": 0,
-     *           "terminal_operations_count": 0
      *         },
      *         "review_checkpoints": {
      *           "active_checkpoint_conflict": false,
@@ -18692,8 +17999,6 @@ export interface components {
      *         "next_after_event_id": "00000000-0000-0000-0000-000000000801",
      *         "total_count": 2
      *       },
-     *       "rerun_invalidated_steps": [],
-     *       "rerun_operations": [],
      *       "result_files": [
      *         {
      *           "attempt_no": 1,
@@ -18849,10 +18154,6 @@ export interface components {
         [key: string]: unknown;
       };
       provider_calls: components["schemas"]["ProviderCallEvidencePage"];
-      /** Rerun Invalidated Steps */
-      rerun_invalidated_steps: components["schemas"]["FlowRunRerunInvalidatedStepPublic"][];
-      /** Rerun Operations */
-      rerun_operations: components["schemas"]["FlowRunRerunOperationPublic"][];
       /** Result Files */
       result_files: components["schemas"]["FlowRunStepResultFile"][];
       /** Review Checkpoints */
@@ -18892,60 +18193,6 @@ export interface components {
        * @description Exact terminal text produced by the published final step.
        */
       text: string;
-    };
-    /**
-     * FlowRunInputRevisionNotRecorded
-     * @description Revision evidence predates tracking or never reached acceptance.
-     */
-    FlowRunInputRevisionNotRecorded: {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      status: "not_recorded";
-    };
-    /**
-     * FlowRunInputRevisionTracked
-     * @description What one rerun did to a run's inputs.
-     *
-     *     The run row keeps only the current payload, so without this the chain from
-     *     the original submission to the values a step actually consumed cannot be
-     *     rebuilt. Recording the prior payload rather than the resulting one means
-     *     every revision is recoverable by walking the reruns in order and finishing
-     *     at the run row.
-     */
-    FlowRunInputRevisionTracked: {
-      /** Changed Paths */
-      changed_paths: string[];
-      /** Prior Input Hash */
-      prior_input_hash: string;
-      /** Prior Input Payload */
-      prior_input_payload: {
-        [key: string]: components["schemas"]["JsonValue"];
-      } | null;
-      /** Resulting Input Hash */
-      resulting_input_hash: string;
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      status: "tracked";
-    };
-    /**
-     * FlowRunInputRevisionUnavailable
-     * @description Persisted revision evidence exists but cannot be read safely.
-     */
-    FlowRunInputRevisionUnavailable: {
-      /**
-       * Reason
-       * @constant
-       */
-      reason: "invalid_persisted_revision";
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      status: "unavailable";
     };
     /**
      * FlowRunLifecycleSource
@@ -19075,7 +18322,7 @@ export interface components {
       /**
        * Id
        * Format: uuid
-       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, rerun, and artifact requests.
+       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, and artifact requests.
        */
       id: string;
       /**
@@ -19112,7 +18359,7 @@ export interface components {
       result_files?: components["schemas"]["FlowRunStepResultFile"][];
       /**
        * Revision
-       * @description Monotonic run lifecycle compare token. Step-rerun requests use this value as `expected_run_revision`.
+       * @description Monotonic run lifecycle compare token.
        */
       revision: number;
       /**
@@ -19120,7 +18367,7 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
-      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, redispatch, or rerun. */
+      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
        * Tenant Id
@@ -19190,302 +18437,25 @@ export interface components {
       redispatched_count: number;
       run: components["schemas"]["FlowRunPublic"];
     };
-    /** FlowRunRerunInvalidatedStepPublic */
-    FlowRunRerunInvalidatedStepPublic: {
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string;
-      /** Dependency Sources Json */
-      dependency_sources_json: components["schemas"]["RerunDependencyKind"][];
-      /**
-       * Flow Id
-       * Format: uuid
-       */
-      flow_id: string;
-      /**
-       * Flow Run Id
-       * Format: uuid
-       */
-      flow_run_id: string;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Invalidation Order */
-      invalidation_order: number;
-      /** New Attempt Id */
-      new_attempt_id?: string | null;
-      /** New Attempt No */
-      new_attempt_no?: number | null;
-      /**
-       * Operation Id
-       * Format: uuid
-       */
-      operation_id: string;
-      /** Prior Attempt Id */
-      prior_attempt_id?: string | null;
-      /** Prior Step Result Id */
-      prior_step_result_id?: string | null;
-      role: components["schemas"]["FlowRunRerunInvalidationRole"];
-      /**
-       * Step Id
-       * Format: uuid
-       */
-      step_id: string;
-      /** Step Order */
-      step_order: number;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /**
-       * Updated At
-       * Format: date-time
-       */
-      updated_at: string;
-    };
-    /**
-     * FlowRunRerunInvalidationRole
-     * @enum {string}
-     */
-    FlowRunRerunInvalidationRole: "root" | "downstream";
-    /** FlowRunRerunOperationPublic */
-    FlowRunRerunOperationPublic: {
-      /** Accepted Run Revision */
-      accepted_run_revision: number;
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string;
-      /** Expected Run Revision */
-      expected_run_revision: number;
-      /** @description Stable machine-readable rerun failure code. */
-      failure_code?:
-        | (
-            | "flow_assistant_snapshot_drift"
-            | "flow_definition_checksum_mismatch"
-            | "flow_definition_flow_id_invalid"
-            | "flow_definition_invalid"
-            | "flow_definition_no_executable_steps"
-            | "flow_definition_schema_version_missing"
-            | "flow_definition_schema_version_unsupported"
-            | "flow_definition_steps_invalid"
-            | "flow_deleted"
-            | "flow_dispatch_failed"
-            | "flow_input_contract_inapplicable"
-            | "flow_llm_request_timeout"
-            | "flow_mapped_provider_call_limit_exceeded"
-            | "flow_missing_principal"
-            | "flow_provider_call_evidence_persistence_failed"
-            | "flow_provider_rate_limited"
-            | "flow_provider_unavailable"
-            | "flow_review_expired"
-            | "flow_review_open_active_conflict_invariant"
-            | "flow_review_open_multiple_active_checkpoints_invariant"
-            | "flow_review_open_step_result_incomplete_invariant"
-            | "flow_review_policy_invalid"
-            | "flow_review_rejected"
-            | "flow_run_cancelled"
-            | "flow_run_error_payload_invalid"
-            | "flow_run_rerun_attempt_lineage_conflict_invariant"
-            | "flow_run_rerun_multiple_active_operations_invariant"
-            | "flow_run_user_cancelled"
-            | "flow_runtime_actor_invalid"
-            | "flow_runtime_input_not_consumed"
-            | "flow_service_principal_disabled"
-            | "flow_step_attempt_start_failed"
-            | "flow_step_execution_failed"
-            | "flow_step_missing"
-            | "flow_task_failure"
-            | "flow_task_timeout"
-            | "flow_unsupported_output_mode"
-            | "flow_unsupported_output_type"
-            | "flow_webhook_delivery_failed"
-            | "flow_worker_stalled"
-            | "typed_io_audio_invalid_file_type"
-            | "typed_io_audio_missing_file"
-            | "typed_io_audio_source_unsupported"
-            | "typed_io_audio_too_many_files"
-            | "typed_io_contract_violation"
-            | "typed_io_document_source_unsupported"
-            | "typed_io_empty_extraction"
-            | "typed_io_file_not_found"
-            | "typed_io_file_source_unsupported"
-            | "typed_io_http_connection_error"
-            | "typed_io_http_invalid_config"
-            | "typed_io_http_invalid_url"
-            | "typed_io_http_malformed_response"
-            | "typed_io_http_non_success"
-            | "typed_io_http_response_too_large"
-            | "typed_io_http_ssrf_blocked"
-            | "typed_io_http_timeout"
-            | "typed_io_input_exceeds_model_window"
-            | "typed_io_input_too_large"
-            | "typed_io_invalid_file_type"
-            | "typed_io_invalid_input_source_combination"
-            | "typed_io_invalid_input_source_position"
-            | "typed_io_invalid_json_input"
-            | "typed_io_invalid_output_mode_combination"
-            | "typed_io_invalid_schema"
-            | "typed_io_missing_required_files"
-            | "typed_io_output_parse_failed"
-            | "typed_io_render_failed"
-            | "typed_io_template_checksum_mismatch"
-            | "typed_io_template_render_failed"
-            | "typed_io_transcript_too_large"
-            | "typed_io_transcription_config_invalid"
-            | "typed_io_transcription_empty"
-            | "typed_io_transcription_failed"
-            | "typed_io_transcription_model_missing"
-            | "typed_io_transcription_model_unavailable"
-            | "typed_io_transcription_not_enabled"
-            | "typed_io_unsupported_type"
-            | "typed_io_validation_failed"
-            | "typed_io_variable_resolution_failed"
-          )
-        | null;
-      /** Failure Message */
-      failure_message?: string | null;
-      /** Finished At */
-      finished_at?: string | null;
-      /**
-       * Flow Id
-       * Format: uuid
-       */
-      flow_id: string;
-      /**
-       * Flow Run Id
-       * Format: uuid
-       */
-      flow_run_id: string;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /**
-       * Input Payload
-       * @description Inline rerun input payload recorded at rerun acceptance time.
-       */
-      input_payload?: {
-        [key: string]: unknown;
-      } | null;
-      /**
-       * Input Revision
-       * @description Input revision evidence for this rerun. `tracked` includes hashes, changed paths, and the superseded input snapshot; `not_recorded` identifies older or unaccepted operations; `unavailable` isolates invalid persisted evidence without hiding neighboring operations.
-       */
-      input_revision:
-        | components["schemas"]["FlowRunInputRevisionTracked"]
-        | components["schemas"]["FlowRunInputRevisionNotRecorded"]
-        | components["schemas"]["FlowRunInputRevisionUnavailable"];
-      /** Reason */
-      reason: string;
-      /**
-       * Request Fingerprint
-       * @description Stable fingerprint that correlates repeated rerun requests with the accepted operation and invalidation lineage.
-       */
-      request_fingerprint: string;
-      requested_by_principal_type: components["schemas"]["PrincipalType"];
-      requested_by_service_principal?:
-        components["schemas"]["FlowServicePrincipalActorPublic"] | null;
-      /** Requested By User Id */
-      requested_by_user_id?: string | null;
-      /**
-       * Rerun Step Id
-       * Format: uuid
-       */
-      rerun_step_id: string;
-      /** Rerun Step Order */
-      rerun_step_order: number;
-      /** Root Attempt Id */
-      root_attempt_id?: string | null;
-      /** Root Attempt No */
-      root_attempt_no: number;
-      /** @description Root-step runtime file override recorded at rerun acceptance time. Null means files were inherited from the predecessor attempt. */
-      root_step_input_override?:
-        components["schemas"]["FlowRunRerunStepInputOverridePublic"] | null;
-      /**
-       * Root Step Input Override Requested
-       * @description True when the rerun request explicitly replaced or cleared root step runtime files; false when the root attempt inherits files from its predecessor.
-       */
-      root_step_input_override_requested: boolean;
-      /** Started At */
-      started_at?: string | null;
-      status: components["schemas"]["FlowRunRerunOperationStatus"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      /**
-       * Updated At
-       * Format: date-time
-       */
-      updated_at: string;
-    };
-    /**
-     * FlowRunRerunOperationStatus
-     * @enum {string}
-     */
-    FlowRunRerunOperationStatus: "queued" | "running" | "completed" | "failed" | "cancelled";
-    /** FlowRunRerunStepInputOverridePublic */
-    FlowRunRerunStepInputOverridePublic: {
-      /**
-       * File Ids
-       * @description Runtime file IDs stored for the rerun root attempt. An empty list means the rerun explicitly cleared the root step files.
-       */
-      file_ids: string[];
-      /**
-       * Step Id
-       * Format: uuid
-       * @description Root step whose runtime input files were explicitly replaced or cleared by the rerun request.
-       */
-      step_id: string;
-    };
     /** FlowRunRetentionContributors */
     FlowRunRetentionContributors: {
-      /** Classification Days */
-      classification_days: number | null;
-      /** Classification Minimum Days */
-      classification_minimum_days: number | null;
-      /** Classification No Purge */
-      classification_no_purge: boolean;
       /** Flow Days */
       flow_days: number | null;
       /** Organization Days */
       organization_days: number | null;
-      /** Organization Minimum Days */
-      organization_minimum_days: number | null;
-      /** Organization No Purge */
-      organization_no_purge: boolean;
       /** Space Days */
       space_days: number | null;
     };
     /** FlowRunRetentionDays */
     FlowRunRetentionDays: {
-      /** Activation Sources */
-      activation_sources: ("organization" | "classification")[];
-      /** Barrier Sources */
-      barrier_sources: (
-        | "organization_minimum"
-        | "classification_minimum"
-        | "organization_no_purge"
-        | "classification_no_purge"
-      )[];
       contributors: components["schemas"]["FlowRunRetentionContributors"];
       /** Effective Days */
       effective_days: number;
-      /** Effective Minimum Days */
-      effective_minimum_days: number | null;
-      /** No Purge */
-      no_purge: boolean;
-      /** Policy Conflict */
-      policy_conflict: boolean;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "organization" | "space" | "flow";
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -19494,24 +18464,14 @@ export interface components {
     };
     /** FlowRunRetentionOff */
     FlowRunRetentionOff: {
-      /** Activation Sources */
-      activation_sources: ("organization" | "classification")[];
-      /** Barrier Sources */
-      barrier_sources: (
-        | "organization_minimum"
-        | "classification_minimum"
-        | "organization_no_purge"
-        | "classification_no_purge"
-      )[];
       contributors: components["schemas"]["FlowRunRetentionContributors"];
       /** Effective Days */
       effective_days: null;
-      /** Effective Minimum Days */
-      effective_minimum_days: number | null;
-      /** No Purge */
-      no_purge: boolean;
-      /** Policy Conflict */
-      policy_conflict: boolean;
+      /**
+       * Source
+       * @constant
+       */
+      source: "none";
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
@@ -19996,7 +18956,6 @@ export interface components {
      *           "is_active": true,
      *           "is_awaiting_review": false,
      *           "is_cancellable": true,
-     *           "is_rerun_eligible": false,
      *           "is_terminal": false,
      *           "should_poll": true,
      *           "status": "queued"
@@ -20006,7 +18965,6 @@ export interface components {
      *           "is_active": true,
      *           "is_awaiting_review": false,
      *           "is_cancellable": true,
-     *           "is_rerun_eligible": false,
      *           "is_terminal": false,
      *           "should_poll": true,
      *           "status": "running"
@@ -20016,7 +18974,6 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": true,
      *           "is_cancellable": true,
-     *           "is_rerun_eligible": false,
      *           "is_terminal": false,
      *           "should_poll": true,
      *           "status": "awaiting_review"
@@ -20026,7 +18983,6 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": false,
      *           "is_cancellable": false,
-     *           "is_rerun_eligible": true,
      *           "is_terminal": true,
      *           "should_poll": false,
      *           "status": "completed"
@@ -20036,7 +18992,6 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": false,
      *           "is_cancellable": false,
-     *           "is_rerun_eligible": true,
      *           "is_terminal": true,
      *           "should_poll": false,
      *           "status": "failed"
@@ -20046,7 +19001,6 @@ export interface components {
      *           "is_active": false,
      *           "is_awaiting_review": false,
      *           "is_cancellable": false,
-     *           "is_rerun_eligible": false,
      *           "is_terminal": true,
      *           "should_poll": false,
      *           "status": "cancelled"
@@ -20088,11 +19042,6 @@ export interface components {
        * @description True when the cancel endpoint `POST /flows/{id}/runs/{run_id}/cancel/` is valid.
        */
       is_cancellable: boolean;
-      /**
-       * Is Rerun Eligible
-       * @description True when a completed or failed run may enter step-rerun validation. The rerun endpoint still validates the target step, run revision, permissions, and any replacement inputs.
-       */
-      is_rerun_eligible: boolean;
       /**
        * Is Terminal
        * @description True when the run lifecycle is complete and normal polling can stop.
@@ -20191,8 +19140,6 @@ export interface components {
             | "flow_review_rejected"
             | "flow_run_cancelled"
             | "flow_run_error_payload_invalid"
-            | "flow_run_rerun_attempt_lineage_conflict_invariant"
-            | "flow_run_rerun_multiple_active_operations_invariant"
             | "flow_run_user_cancelled"
             | "flow_runtime_actor_invalid"
             | "flow_runtime_input_not_consumed"
@@ -20309,100 +19256,6 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
-    };
-    /**
-     * FlowRunStepRerunRequest
-     * @example {
-     *       "expected_run_revision": 7,
-     *       "input_payload_json": {
-     *         "reviewer_note": "Use the corrected spelling of Alex."
-     *       },
-     *       "reason": "The HR reviewer corrected the transcription for step 1.",
-     *       "step_inputs": {
-     *         "00000000-0000-0000-0000-000000000101": {
-     *           "file_ids": [
-     *             "00000000-0000-0000-0000-000000000701"
-     *           ]
-     *         }
-     *       }
-     *     }
-     */
-    FlowRunStepRerunRequest: {
-      /**
-       * Expected Run Revision
-       * @description Run revision observed by the caller before requesting the rerun.
-       */
-      expected_run_revision: number;
-      /**
-       * Input Payload Json
-       * @description Optional replacement for the run's semantic inline input payload when the rerun is accepted. Existing orchestration metadata and runtime transcription cache values are preserved.
-       */
-      input_payload_json?: {
-        [key: string]: unknown;
-      } | null;
-      /**
-       * Reason
-       * @description Human-readable reason for accepting the rerun operation.
-       */
-      reason: string;
-      /**
-       * Step Inputs
-       * @description Optional file inputs keyed by the rerun root step id. Provided step ids replace their existing `step_inputs` entry; other step ids are preserved.
-       */
-      step_inputs?: {
-        [key: string]: components["schemas"]["StepRunInput"];
-      } | null;
-    };
-    /**
-     * FlowRunStepRerunResponse
-     * @example {
-     *       "invalidated_step_ids": [
-     *         "00000000-0000-0000-0000-000000000101",
-     *         "00000000-0000-0000-0000-000000000102"
-     *       ],
-     *       "new_attempt_no": 2,
-     *       "operation_id": "00000000-0000-0000-0000-000000000801",
-     *       "rerun_step_id": "00000000-0000-0000-0000-000000000101",
-     *       "run": {
-     *         "created_at": "2026-03-17T10:05:00Z",
-     *         "dispatch_attempt_count": 0,
-     *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
-     *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
-     *         "flow_id": "00000000-0000-0000-0000-000000000001",
-     *         "flow_version": 3,
-     *         "id": "00000000-0000-0000-0000-000000000301",
-     *         "input_payload_json": {
-     *           "employee_name": "Alex Example"
-     *         },
-     *         "job_id": "00000000-0000-0000-0000-000000000401",
-     *         "result_files": [],
-     *         "revision": 8,
-     *         "status": "queued",
-     *         "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *         "trace_id": "00000000-0000-0000-0000-000000000302",
-     *         "updated_at": "2026-03-17T10:05:00Z"
-     *       },
-     *       "status": "queued"
-     *     }
-     */
-    FlowRunStepRerunResponse: {
-      /** Invalidated Step Ids */
-      invalidated_step_ids: string[];
-      /** New Attempt No */
-      new_attempt_no: number;
-      /**
-       * Operation Id
-       * Format: uuid
-       */
-      operation_id: string;
-      /**
-       * Rerun Step Id
-       * Format: uuid
-       */
-      rerun_step_id: string;
-      /** @description Current persisted run state. On idempotent replay, `run.revision` may have advanced past the request's `expected_run_revision`. */
-      run: components["schemas"]["FlowRunPublic"];
-      status: components["schemas"]["FlowRunRerunOperationStatus"];
     };
     /** FlowRunStepResultFile */
     FlowRunStepResultFile: {
@@ -20806,11 +19659,6 @@ export interface components {
        * @description POST template for redispatching a stale queued run. Replace `{run_id}` with the id returned by create_run; non-stale queued runs can return `redispatched_count: 0`.
        */
       redispatch_run_template: string;
-      /**
-       * Rerun Step Template
-       * @description POST template for requesting a completed step rerun. Replace `{run_id}` and `{step_id}` with values from the run and step responses.
-       */
-      rerun_step_template: string;
       /** @description Review checkpoint path templates for human-in-loop clients. These templates let web apps discover active checkpoint, edit, approve, reject, and resume URLs before a run reaches awaiting_review. */
       review_checkpoints: components["schemas"]["FlowReviewCheckpointRuntimePathsPublic"];
       /**
@@ -20922,7 +19770,6 @@ export interface components {
      *         "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
      *         "provider_calls_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/provider-calls/",
      *         "redispatch_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/redispatch/",
-     *         "rerun_step_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/{step_id}/rerun/",
      *         "review_checkpoints": {
      *           "active_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/active/",
      *           "approve_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
@@ -21094,28 +19941,13 @@ export interface components {
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
      *       "published_version": 3,
      *       "run_history_retention": {
-     *         "activation_sources": [
-     *           "organization",
-     *           "classification"
-     *         ],
-     *         "barrier_sources": [
-     *           "organization_minimum",
-     *           "classification_minimum"
-     *         ],
      *         "contributors": {
-     *           "classification_days": 30,
-     *           "classification_minimum_days": 60,
-     *           "classification_no_purge": false,
      *           "flow_days": 30,
      *           "organization_days": 90,
-     *           "organization_minimum_days": 90,
-     *           "organization_no_purge": false,
      *           "space_days": 14
      *         },
-     *         "effective_days": 14,
-     *         "effective_minimum_days": 90,
-     *         "no_purge": false,
-     *         "policy_conflict": true,
+     *         "effective_days": 30,
+     *         "source": "flow",
      *         "state": "days"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
@@ -21219,8 +20051,6 @@ export interface components {
             | "flow_review_rejected"
             | "flow_run_cancelled"
             | "flow_run_error_payload_invalid"
-            | "flow_run_rerun_attempt_lineage_conflict_invariant"
-            | "flow_run_rerun_multiple_active_operations_invariant"
             | "flow_run_user_cancelled"
             | "flow_runtime_actor_invalid"
             | "flow_runtime_input_not_consumed"
@@ -21301,8 +20131,6 @@ export interface components {
       num_tokens_input?: number | null;
       /** Num Tokens Output */
       num_tokens_output?: number | null;
-      /** Predecessor Attempt Id */
-      predecessor_attempt_id?: string | null;
       /** Provenance Json */
       provenance_json?: {
         [key: string]: unknown;
@@ -21313,14 +20141,11 @@ export interface components {
       provider_response_id?: string | null;
       /** Requested Model */
       requested_model?: string | null;
-      /** Rerun Operation Id */
-      rerun_operation_id?: string | null;
       /** Resolved Input Lineage */
       resolved_input_lineage:
         | components["schemas"]["FlowResolvedInputLineageNotTracked"]
         | components["schemas"]["FlowResolvedInputLineageTracked"]
-        | components["schemas"]["FlowResolvedInputEdgesCorruptionMarker"]
-        | components["schemas"]["FlowResolvedInputLineageRetentionPurged"];
+        | components["schemas"]["FlowResolvedInputEdgesCorruptionMarker"];
       /** Response Model */
       response_model?: string | null;
       /**
@@ -21336,8 +20161,6 @@ export interface components {
       step_id: string;
       /** Step Order */
       step_order: number;
-      /** Superseded By Attempt Id */
-      superseded_by_attempt_id?: string | null;
       /**
        * Tenant Id
        * Format: uuid
@@ -24163,24 +22986,6 @@ export interface components {
       /** Expected Previous Revision */
       expected_previous_revision: number;
     };
-    /** OffsetPaginatedResponse[FlowRunAuditOutboxDeadLetterResponse] */
-    OffsetPaginatedResponse_FlowRunAuditOutboxDeadLetterResponse_: {
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-      /**
-       * Has More
-       * @description Whether another page exists after the returned offset window
-       */
-      has_more: boolean;
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["FlowRunAuditOutboxDeadLetterResponse"][];
-    };
     /** OffsetPaginatedResponse[FlowRunPublic] */
     OffsetPaginatedResponse_FlowRunPublic_: {
       /**
@@ -26328,23 +25133,6 @@ export interface components {
       default_effort: string | null;
     };
     /**
-     * RerunDependencyKind
-     * @enum {string}
-     */
-    RerunDependencyKind:
-      | "input_source.previous_step"
-      | "input_source.all_previous_steps"
-      | "input_bindings.question"
-      | "input_config.url"
-      | "input_config.headers"
-      | "input_config.body.template"
-      | "output_config.url"
-      | "output_config.headers"
-      | "output_config.body.template"
-      | "output_config.bindings"
-      | "assistant_snapshot.instructions"
-      | "runtime_alias.previous_step";
-    /**
      * ResourcePermission
      * @enum {string}
      */
@@ -26645,8 +25433,6 @@ export interface components {
         | "step_attempts"
         | "result_files"
         | "runtime_input_files"
-        | "rerun_operations"
-        | "rerun_invalidated_steps"
         | "review_checkpoints"
         | "webhook_deliveries"
         | "provider_calls"
@@ -26677,8 +25463,6 @@ export interface components {
         | "step_attempts"
         | "result_files"
         | "runtime_input_files"
-        | "rerun_operations"
-        | "rerun_invalidated_steps"
         | "review_checkpoints"
         | "webhook_deliveries"
         | "provider_calls"
@@ -26709,8 +25493,6 @@ export interface components {
         | "step_attempts"
         | "result_files"
         | "runtime_input_files"
-        | "rerun_operations"
-        | "rerun_invalidated_steps"
         | "review_checkpoints"
         | "webhook_deliveries"
         | "provider_calls"
@@ -28984,13 +27766,6 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
-      /** Flow Run History Minimum Retention Days */
-      flow_run_history_minimum_retention_days?: number | null;
-      /**
-       * Flow Run History No Purge
-       * @default false
-       */
-      flow_run_history_no_purge?: boolean;
       /** Flow Run History Retention Days */
       flow_run_history_retention_days?: number | null;
       /** Flow Runtime Upload Abandonment Days */
@@ -29388,13 +28163,6 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
-      /** Flow Run History Minimum Retention Days */
-      flow_run_history_minimum_retention_days?: number | null;
-      /**
-       * Flow Run History No Purge
-       * @default false
-       */
-      flow_run_history_no_purge?: boolean;
       /** Flow Run History Retention Days */
       flow_run_history_retention_days?: number | null;
       /** Flow Runtime Upload Abandonment Days */
@@ -45402,28 +44170,13 @@ export interface operations {
            *           "owner_user_id": "00000000-0000-0000-0000-000000000030",
            *           "published_version": 3,
            *           "run_history_retention": {
-           *             "activation_sources": [
-           *               "organization",
-           *               "classification"
-           *             ],
-           *             "barrier_sources": [
-           *               "organization_minimum",
-           *               "classification_minimum"
-           *             ],
            *             "contributors": {
-           *               "classification_days": 30,
-           *               "classification_minimum_days": 60,
-           *               "classification_no_purge": false,
            *               "flow_days": 30,
            *               "organization_days": 90,
-           *               "organization_minimum_days": 90,
-           *               "organization_no_purge": false,
            *               "space_days": 14
            *             },
-           *             "effective_days": 14,
-           *             "effective_minimum_days": 90,
-           *             "no_purge": false,
-           *             "policy_conflict": true,
+           *             "effective_days": 30,
+           *             "source": "flow",
            *             "state": "days"
            *           },
            *           "space_id": "00000000-0000-0000-0000-000000000020",
@@ -48213,90 +46966,6 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9001,
            *       "message": "API key space scope does not match requested flow."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Run not found for this flow and tenant. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Flow run not found."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  rerun_flow_run_step: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Identifier of the flow that owns the run. */
-        id: string;
-        /** @description Identifier of the run to mutate. */
-        run_id: string;
-        /** @description Identifier of the step to rerun. */
-        step_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowRunStepRerunRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunStepRerunResponse"];
-        };
-      };
-      /** @description Rerun request is invalid. Representative machine-readable codes include `flow_run_rerun_reason_required`, `flow_run_rerun_reason_too_long`, `flow_run_rerun_stale_revision`, `flow_run_rerun_invalid_transition`, `flow_run_rerun_step_not_found`, `flow_run_rerun_step_incomplete`, and `flow_run_rerun_step_inputs_invalid`. A corrupt published snapshot returns `flow_definition_checksum_mismatch`. If the request includes `input_payload_json` or `step_inputs`, rerun can also return the shared run input and runtime-file validation codes used by create-run, such as `flow_run_reserved_input_payload_key`, `flow_run_input_payload_too_large`, `flow_run_file_not_bound_to_flow`, `flow_run_file_not_accessible`, `flow_run_runtime_input_disabled`, `flow_run_step_input_max_files_exceeded`, `flow_run_step_input_file_too_large`, and `flow_run_step_input_mimetype_rejected`. */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "insufficient_tenant_permission",
-           *       "context": {
-           *         "auth_layer": "tenant_role"
-           *       },
-           *       "eneo_error_code": 9001,
-           *       "message": "You do not have permission to rerun flows."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -53798,195 +52467,6 @@ export interface operations {
       };
     };
   };
-  list_flow_classification_retention_policies: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowClassificationRetentionPoliciesPublic"];
-        };
-      };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "insufficient_tenant_permission",
-           *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  put_flow_classification_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Tenant security classification id to bind the policy to. */
-        security_classification_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowClassificationRetentionPolicyUpdate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json":
-            components["schemas"]["FlowClassificationRetentionPolicyPublic"] | null;
-        };
-      };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "insufficient_tenant_permission",
-           *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Security classification does not exist for this tenant. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Not found."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The destructive change requires a fresh exact preview, or the control-plane/preview state changed before confirmation. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "flow_retention_preview_stale",
-           *       "eneo_error_code": 9057,
-           *       "message": "Request a new Flow retention preview and confirm it."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  preview_flow_classification_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Tenant security classification id to preview. */
-        security_classification_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowClassificationRetentionPolicyPreviewRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRetentionImpactPreviewPublic"];
-        };
-      };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "insufficient_tenant_permission",
-           *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Security classification does not exist for this tenant. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Not found."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
   get_flow_document_render_limits: {
     parameters: {
       query?: never;
@@ -54564,71 +53044,6 @@ export interface operations {
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "insufficient_tenant_permission",
-           *       "eneo_error_code": 9001,
-           *       "message": "Insufficient permissions."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The destructive change requires a fresh exact preview, or the control-plane/preview state changed before confirmation. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "flow_retention_preview_stale",
-           *       "eneo_error_code": 9057,
-           *       "message": "Request a new Flow retention preview and confirm it."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  preview_flow_retention_policy: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowRetentionOrganizationPreviewRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRetentionImpactPreviewPublic"];
         };
       };
       /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
@@ -59195,139 +57610,6 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  list_flow_run_audit_outbox_dead_letters: {
-    parameters: {
-      query?: {
-        /** @description Maximum number of rows to return. */
-        limit?: number;
-        /** @description Number of dead-lettered rows to skip. */
-        offset?: number;
-      };
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunAuditOutboxDeadLetterResponse_"];
-        };
-      };
-      /** @description The configured super API key is required. */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "authentication_error",
-           *       "eneo_error_code": 9005,
-           *       "message": "Authentication required."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-    };
-  };
-  redrive_flow_run_audit_outbox_delivery: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        outbox_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["FlowRunAuditOutboxRedriveRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["FlowRunAuditOutboxRedriveResponse"];
-        };
-      };
-      /** @description The configured super API key is required. */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "authentication_error",
-           *       "eneo_error_code": 9005,
-           *       "message": "Authentication required."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The requested audit outbox row does not exist. */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "flow_audit_outbox_delivery_not_found",
-           *       "eneo_error_code": 9000,
-           *       "message": "Audit outbox row not found."
-           *     }
-           */
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The row is not dead-lettered or its dead-letter generation token is stale. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          /**
-           * @example {
-           *       "code": "flow_audit_outbox_redrive_conflict",
-           *       "eneo_error_code": 9057,
-           *       "message": "Audit outbox row is not eligible for redrive."
-           *     }
-           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

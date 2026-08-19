@@ -13,8 +13,6 @@ from eneo.flows.application.flow_run_evidence import (
 )
 from eneo.flows.domain.flow import (
     FlowRun,
-    FlowRunRerunInvalidatedStep,
-    FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
@@ -75,8 +73,6 @@ class EvidenceBundle:
     step_results: Sequence[FlowStepResult]
     step_attempts: Sequence[FlowStepAttempt]
     result_files: Sequence[FlowRunStepResultFile]
-    rerun_operations: Sequence[FlowRunRerunOperation]
-    rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep]
     review_checkpoints: Sequence[FlowRunReviewCheckpoint]
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead]
     provider_calls: ProviderCallEvidencePage
@@ -122,13 +118,6 @@ class EvidenceBundle:
                 "result_files": [
                     item.model_dump(mode="json") for item in self.result_files
                 ],
-                "rerun_operations": [
-                    item.model_dump(mode="json") for item in self.rerun_operations
-                ],
-                "rerun_invalidated_steps": [
-                    item.model_dump(mode="json")
-                    for item in self.rerun_invalidated_steps
-                ],
                 "review_checkpoints": [
                     _dump_review_checkpoint_record(item)
                     for item in self.review_checkpoints
@@ -155,8 +144,6 @@ class RedactedEvidenceBundle:
     step_results: tuple[dict[str, Any], ...]
     step_attempts: tuple[dict[str, Any], ...]
     result_files: tuple[dict[str, Any], ...]
-    rerun_operations: tuple[dict[str, Any], ...]
-    rerun_invalidated_steps: tuple[dict[str, Any], ...]
     review_checkpoints: tuple[dict[str, Any], ...]
     webhook_deliveries: tuple[dict[str, Any], ...]
     provider_calls: ProviderCallEvidencePage
@@ -174,10 +161,6 @@ class RedactedEvidenceBundle:
                 "step_results": [dict(item) for item in self.step_results],
                 "step_attempts": [dict(item) for item in self.step_attempts],
                 "result_files": [dict(item) for item in self.result_files],
-                "rerun_operations": [dict(item) for item in self.rerun_operations],
-                "rerun_invalidated_steps": [
-                    dict(item) for item in self.rerun_invalidated_steps
-                ],
                 "review_checkpoints": [dict(item) for item in self.review_checkpoints],
                 "webhook_deliveries": [dict(item) for item in self.webhook_deliveries],
                 "provider_calls": self.provider_calls.model_dump(mode="json"),
@@ -200,8 +183,6 @@ def build_evidence_bundle(
         UUID, FlowResolvedInputEdgesParseResult
     ],
     result_files: Sequence[FlowRunStepResultFile] = (),
-    rerun_operations: Sequence[FlowRunRerunOperation] = (),
-    rerun_invalidated_steps: Sequence[FlowRunRerunInvalidatedStep] = (),
     review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
     provider_calls: ProviderCallEvidencePage | None = None,
@@ -257,8 +238,6 @@ def build_evidence_bundle(
         step_results=tuple(step_results),
         step_attempts=tuple(step_attempts),
         result_files=tuple(result_files),
-        rerun_operations=tuple(rerun_operations),
-        rerun_invalidated_steps=tuple(rerun_invalidated_steps),
         review_checkpoints=tuple(review_checkpoints),
         webhook_deliveries=tuple(webhook_deliveries),
         provider_calls=provider_calls
@@ -282,8 +261,6 @@ def build_evidence_bundle(
             step_results=list(step_results),
             step_attempts=list(step_attempts),
             result_files=list(result_files),
-            rerun_operations=list(rerun_operations),
-            rerun_invalidated_steps=list(rerun_invalidated_steps),
             token_usage=token_usage,
             transcription_usage=transcription_usage,
             knowledge_evidence_view=knowledge_evidence_view,
@@ -348,26 +325,6 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
     masked_paths.extend(result_file_section.masked_paths)
     masked_fields.extend(result_file_section.masked_fields)
 
-    rerun_operation_section = _redact_record_payloads(
-        section_path="bundle.rerun_operations",
-        payloads=[
-            rerun_operation.model_dump(mode="json")
-            for rerun_operation in bundle.rerun_operations
-        ],
-    )
-    masked_paths.extend(rerun_operation_section.masked_paths)
-    masked_fields.extend(rerun_operation_section.masked_fields)
-
-    rerun_invalidated_step_section = _redact_record_payloads(
-        section_path="bundle.rerun_invalidated_steps",
-        payloads=[
-            invalidated_step.model_dump(mode="json")
-            for invalidated_step in bundle.rerun_invalidated_steps
-        ],
-    )
-    masked_paths.extend(rerun_invalidated_step_section.masked_paths)
-    masked_fields.extend(rerun_invalidated_step_section.masked_fields)
-
     review_checkpoint_section = _redact_record_payloads(
         section_path="bundle.review_checkpoints",
         payloads=[
@@ -399,8 +356,6 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         step_results=step_result_section.records,
         step_attempts=step_attempt_section.records,
         result_files=result_file_section.records,
-        rerun_operations=rerun_operation_section.records,
-        rerun_invalidated_steps=rerun_invalidated_step_section.records,
         review_checkpoints=review_checkpoint_section.records,
         webhook_deliveries=tuple(
             _dump_webhook_delivery(item) for item in bundle.webhook_deliveries

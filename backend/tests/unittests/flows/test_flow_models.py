@@ -21,8 +21,6 @@ from eneo.flows.api.flow_models import (
     FlowRunDebugAttempt,
     FlowRunEvidenceResponse,
     FlowRunPublic,
-    FlowRunRerunInvalidatedStepPublic,
-    FlowRunRerunOperationPublic,
     FlowRunStepPublic,
     FlowRuntimeInputContractPublic,
     FlowRuntimeUploadPolicyPublic,
@@ -40,7 +38,6 @@ from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
-    FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowStepAttemptStatus,
@@ -849,9 +846,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     step_result_id = uuid4()
     file_id = uuid4()
     attempt_id = uuid4()
-    rerun_operation_id = uuid4()
-    rerun_invalidated_step_id = uuid4()
-    replacement_attempt_id = uuid4()
     review_checkpoint_id = uuid4()
     review_checkpoint_contract = {
         "type": "object",
@@ -929,58 +923,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "finished_at": "2026-03-20T12:00:05Z",
                     "created_at": "2026-03-20T12:00:00Z",
                     "updated_at": "2026-03-20T12:00:05Z",
-                }
-            ],
-            "rerun_operations": [
-                {
-                    "id": str(rerun_operation_id),
-                    "tenant_id": str(tenant_id),
-                    "flow_id": str(flow_id),
-                    "flow_run_id": str(run_id),
-                    "rerun_step_id": str(step_id),
-                    "rerun_step_order": 1,
-                    "root_attempt_no": 2,
-                    "root_attempt_id": str(replacement_attempt_id),
-                    "status": "completed",
-                    "request_fingerprint": "rerun-fingerprint",
-                    "expected_run_revision": 1,
-                    "accepted_run_revision": 2,
-                    "reason": "Reviewer corrected the step output.",
-                    "input_payload_json": {"question": "Updated input"},
-                    "input_revision": {"status": "not_recorded"},
-                    "root_step_input_override": {
-                        "step_id": str(step_id),
-                        "file_ids": [],
-                    },
-                    "root_step_input_override_requested": True,
-                    "requested_by_principal_type": "user",
-                    "requested_by_user_id": str(uuid4()),
-                    "failure_code": None,
-                    "failure_message": None,
-                    "started_at": "2026-03-20T12:01:00Z",
-                    "finished_at": "2026-03-20T12:01:05Z",
-                    "created_at": "2026-03-20T12:01:00Z",
-                    "updated_at": "2026-03-20T12:01:05Z",
-                }
-            ],
-            "rerun_invalidated_steps": [
-                {
-                    "id": str(rerun_invalidated_step_id),
-                    "operation_id": str(rerun_operation_id),
-                    "tenant_id": str(tenant_id),
-                    "flow_id": str(flow_id),
-                    "flow_run_id": str(run_id),
-                    "step_id": str(step_id),
-                    "step_order": 1,
-                    "invalidation_order": 1,
-                    "role": "root",
-                    "dependency_sources_json": ["input_bindings.question"],
-                    "prior_step_result_id": str(step_result_id),
-                    "prior_attempt_id": str(attempt_id),
-                    "new_attempt_no": 2,
-                    "new_attempt_id": str(replacement_attempt_id),
-                    "created_at": "2026-03-20T12:01:00Z",
-                    "updated_at": "2026-03-20T12:01:05Z",
                 }
             ],
             "review_checkpoints": [
@@ -1129,20 +1071,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
 
     assert isinstance(response.step_attempts[0], FlowStepAttemptPublic)
     assert response.step_attempts[0].status == FlowStepAttemptStatus.COMPLETED
-    assert isinstance(response.rerun_operations[0], FlowRunRerunOperationPublic)
-    assert response.rerun_operations[0].status == FlowRunRerunOperationStatus.COMPLETED
-    assert response.rerun_operations[0].root_attempt_id == replacement_attempt_id
-    assert response.rerun_operations[0].input_payload == {"question": "Updated input"}
-    assert response.rerun_operations[0].root_step_input_override is not None
-    assert response.rerun_operations[0].root_step_input_override.step_id == step_id
-    assert response.rerun_operations[0].root_step_input_override.file_ids == []
-    assert isinstance(
-        response.rerun_invalidated_steps[0], FlowRunRerunInvalidatedStepPublic
-    )
-    assert response.rerun_invalidated_steps[0].operation_id == rerun_operation_id
-    assert response.rerun_invalidated_steps[0].dependency_sources_json == [
-        "input_bindings.question"
-    ]
     assert response.step_results[0].effective_prompt == "Summarize the report"
     assert response.step_results[0].model_parameters_json == {"temperature": 0.2}
     assert response.step_results[0].flow_step_execution_hash == "abc123"
@@ -1202,35 +1130,6 @@ def _flow_step_attempt_public_payload() -> dict[str, object]:
     }
 
 
-def _flow_run_rerun_operation_public_payload() -> dict[str, object]:
-    return {
-        "id": str(uuid4()),
-        "tenant_id": str(uuid4()),
-        "flow_id": str(uuid4()),
-        "flow_run_id": str(uuid4()),
-        "rerun_step_id": str(uuid4()),
-        "rerun_step_order": 1,
-        "root_attempt_no": 2,
-        "root_attempt_id": None,
-        "status": "failed",
-        "request_fingerprint": "rerun-fingerprint",
-        "expected_run_revision": 1,
-        "accepted_run_revision": 2,
-        "reason": "Retry the failed step.",
-        "input_payload_json": {"question": "Updated input"},
-        "input_revision": {"status": "not_recorded"},
-        "root_step_input_override_requested": False,
-        "requested_by_principal_type": "user",
-        "requested_by_user_id": str(uuid4()),
-        "failure_code": None,
-        "failure_message": None,
-        "started_at": "2026-03-20T12:01:00Z",
-        "finished_at": "2026-03-20T12:01:05Z",
-        "created_at": "2026-03-20T12:01:00Z",
-        "updated_at": "2026-03-20T12:01:05Z",
-    }
-
-
 @pytest.mark.parametrize("bad_value", (_MISSING, None), ids=("missing", "none"))
 @pytest.mark.parametrize(
     "field_name", ("flow_run_id", "flow_id", "tenant_id", "step_id")
@@ -1277,11 +1176,6 @@ def test_flow_run_step_public_exposes_nullable_error_code() -> None:
     [
         (FlowRunStepPublic, _flow_run_step_public_payload, "error_code"),
         (FlowStepAttemptPublic, _flow_step_attempt_public_payload, "error_code"),
-        (
-            FlowRunRerunOperationPublic,
-            _flow_run_rerun_operation_public_payload,
-            "failure_code",
-        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -1292,13 +1186,9 @@ def test_flow_run_step_public_exposes_nullable_error_code() -> None:
             FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
             FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
         ),
-        (
-            FlowApiErrorCode.RUN_RERUN_INVALID_TRANSITION.value,
-            FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value,
-        ),
         ("not_a_flow_error_code", FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID.value),
     ],
-    ids=("none", "terminal", "cataloged_non_terminal", "uncataloged"),
+    ids=("none", "terminal", "uncataloged"),
 )
 def test_public_terminal_error_code_fields_sanitize_persisted_values(
     model: type[BaseModel],

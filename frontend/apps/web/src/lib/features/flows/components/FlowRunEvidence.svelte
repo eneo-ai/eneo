@@ -297,10 +297,6 @@
         return m.flow_run_evidence_section_result_files();
       case "runtime_input_files":
         return m.flow_run_evidence_section_runtime_input_files();
-      case "rerun_operations":
-        return m.flow_run_evidence_section_rerun_operations();
-      case "rerun_invalidated_steps":
-        return m.flow_run_evidence_section_rerun_invalidated_steps();
       case "review_checkpoints":
         return m.flow_run_evidence_section_review_checkpoints();
       case "webhook_deliveries":

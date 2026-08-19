@@ -1,9 +1,3 @@
-import type {
-  FlowRetentionChangeConfirmation,
-  FlowRetentionImpactPreview,
-  FlowRetentionPolicy
-} from "@eneo/eneo-js";
-
 export const FLOW_RETENTION_MIN_DAYS = 1;
 export const FLOW_RETENTION_MAX_DAYS = 2555;
 
@@ -27,37 +21,6 @@ export function retentionDaysChangeIsDestructive(
   proposedDays: number | null
 ): boolean {
   return proposedDays !== null && (currentDays === null || proposedDays < currentDays);
-}
-
-export function organizationRetentionChangeIsDestructive(
-  current: FlowRetentionPolicy,
-  proposedRunHistoryDays: number | null,
-  proposedUploadDays: number | null,
-  proposedMinimumDays: number | null,
-  proposedNoPurge: boolean
-): boolean {
-  return (
-    retentionDaysChangeIsDestructive(
-      current.flow_run_history_retention_days,
-      proposedRunHistoryDays
-    ) ||
-    retentionDaysChangeIsDestructive(
-      current.flow_runtime_upload_abandonment_days,
-      proposedUploadDays
-    ) ||
-    current.flow_run_history_minimum_retention_days !== proposedMinimumDays ||
-    current.flow_run_history_no_purge !== proposedNoPurge
-  );
-}
-
-export function confirmationFromFlowRetentionPreview(
-  preview: FlowRetentionImpactPreview
-): FlowRetentionChangeConfirmation {
-  return {
-    expected_control_plane_version: preview.control_plane_version,
-    expected_preview_hash: preview.preview_hash,
-    previewed_at: preview.previewed_at
-  };
 }
 
 export function formatFlowRetentionBytes(bytes: number): string {

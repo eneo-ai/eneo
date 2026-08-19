@@ -23,7 +23,6 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
-from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -49,12 +48,10 @@ class FlowRunTerminalizer:
     def __init__(
         self,
         flow_run_repo: FlowRunRepository,
-        flow_run_rerun_repo: FlowRunRerunRepository,
         audit_outbox_repo: FlowRunAuditOutboxRepository,
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
     ):
         self.flow_run_repo = flow_run_repo
-        self.flow_run_rerun_repo = flow_run_rerun_repo
         self.audit_outbox_repo = audit_outbox_repo
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
 
@@ -216,14 +213,6 @@ class FlowRunTerminalizer:
                 error_code=effective_error_code,
                 error_message=effective_error_message,
             )
-
-        await self.flow_run_rerun_repo.close_active_rerun_operations_for_terminal_run(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            target_status=target_status,
-            error_code=effective_error_code,
-            error_message=effective_error_message,
-        )
 
         checkpoint_principal = self._principal_or_none_from_run(
             run=terminal_run,

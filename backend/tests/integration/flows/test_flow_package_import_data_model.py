@@ -1098,56 +1098,50 @@ async def test_flow_package_import_lock_serializes_successful_retry_visibility(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
+async def test_flow_package_export_import_route_roundtrip_between_tenants_and_container_instances(
     db_container,
     completion_model_factory,
     space_factory,
+    tenant_factory,
     admin_user,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async with db_container() as container:
-        session = container.session()
-        model = await completion_model_factory(
-            session=session,
-            name=f"flow-package-roundtrip-model-{uuid4()}",
+    async def fake_log_flow_package_import(**kwargs: object) -> None:
+        return None
+
+    async def fake_log_flow_package_export(**kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        flow_package_router,
+        "_log_flow_package_import",
+        fake_log_flow_package_import,
+    )
+    monkeypatch.setattr(
+        flow_package_router,
+        "_log_flow_package_export",
+        fake_log_flow_package_export,
+    )
+
+    async with db_container() as source_container:
+        source_session = source_container.session()
+        source_model = await completion_model_factory(
+            session=source_session,
+            name=f"flow-package-source-model-{uuid4()}",
         )
-        space = await space_factory(
-            session,
-            f"Flow package roundtrip {uuid4()}",
-            [model.id],
+        source_space = await space_factory(
+            source_session,
+            f"Flow package source {uuid4()}",
+            [source_model.id],
         )
         await _add_space_membership(
-            session=session,
-            space_id=space.id,
+            session=source_session,
+            space_id=source_space.id,
             user_id=admin_user.id,
         )
-        _patch_import_access(
-            monkeypatch,
-            target_space_id=space.id,
-            candidates=FlowPackageImportPlannerCandidates(
-                models=[_model_candidate(model.id)]
-            ),
-        )
 
-        async def fake_log_flow_package_import(**kwargs: object) -> None:
-            return None
-
-        async def fake_log_flow_package_export(**kwargs: object) -> None:
-            return None
-
-        monkeypatch.setattr(
-            flow_package_router,
-            "_log_flow_package_import",
-            fake_log_flow_package_import,
-        )
-        monkeypatch.setattr(
-            flow_package_router,
-            "_log_flow_package_export",
-            fake_log_flow_package_export,
-        )
-
-        imported_spec = FlowDraftSpecCore(
-            flow_name="Route Import Demo",
+        source_spec = FlowDraftSpecCore(
+            flow_name="Cross-instance package demo",
             steps=[
                 StepSpec(
                     plan_step_ref="summarize",
@@ -1160,22 +1154,24 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
                 )
             ],
         )
-        imported_apply = await FlowAuthoringCommandService().apply(
+        source_apply = await FlowAuthoringCommandService().apply(
             command=CreateFlowAuthoringCommand(
-                space_id=space.id,
-                spec=imported_spec,
+                space_id=source_space.id,
+                spec=source_spec,
                 origin=FlowPackageAuthoringOrigin(
-                    package_id="se.demo.route-import",
+                    package_id="se.demo.source",
                     package_version="1.0.0",
-                    content_checksum="sha256:test",
+                    content_checksum="sha256:source",
                 ),
-                resource_bindings=(_model_binding(model.id),),
+                resource_bindings=(_model_binding(source_model.id),),
             ),
-            flow_service=container.flow_service(),
+            flow_service=source_container.flow_service(),
         )
-        await session.flush()
+        await source_session.flush()
 
-        exported_flow = await container.flow_service().get_flow(imported_apply.flow_id)
+        exported_flow = await source_container.flow_service().get_flow(
+            source_apply.flow_id
+        )
 
         async def fake_require_flow_edit_access(
             request: Request,
@@ -1184,7 +1180,7 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
             flow_id: UUID,
             allow_service_key_principals: bool = False,
         ) -> FlowAccessContext:
-            assert flow_id == imported_apply.flow_id
+            assert flow_id == source_apply.flow_id
             assert allow_service_key_principals is False
             return FlowAccessContext(
                 flow=exported_flow,
@@ -1199,52 +1195,139 @@ async def test_flow_package_export_import_route_roundtrip_creates_second_draft(
         )
 
         export_response = await flow_package_router.export_flow_package(
-            id=imported_apply.flow_id,
+            id=source_apply.flow_id,
             export_request=FlowPackageExportRequest(
-                package_id="se.demo.route-roundtrip",
+                package_id="se.demo.cross-instance",
                 package_version="1.0.0",
-                name="Route Roundtrip Demo",
-                description="Exported by route-level roundtrip test.",
+                name="Cross-instance package demo",
+                description="Exported in one tenant and imported into another.",
             ),
             request=_request(),
-            container=cast(Container, container),
+            container=cast(Container, source_container),
         )
+        exported_package = export_response.body
+        source_tenant_id = admin_user.tenant_id
+        source_model_id = source_model.id
+        source_flow_id = source_apply.flow_id
 
-        exported_package_base64 = base64.b64encode(export_response.body).decode("ascii")
-        second_import = await flow_package_router.import_flow_package_as_draft(
-            id=space.id,
+    envelope = reader.read_flow_package(exported_package)
+    assert envelope.manifest.schema_version == 1
+    assert len(envelope.content_checksum) == 64
+    serialized_archive = exported_package.decode("latin-1")
+    for private_identifier in (source_tenant_id, source_model_id, source_flow_id):
+        assert str(private_identifier) not in serialized_archive
+    assert "signed_url" not in serialized_archive.lower()
+    assert "credentials" not in serialized_archive.lower()
+
+    async with db_container() as setup_container:
+        setup_session = setup_container.session()
+        target_tenant = await tenant_factory(
+            setup_session,
+            name=f"Flow package target tenant {uuid4()}",
+        )
+        target_role = await setup_container.role_repo().create_role(
+            RoleCreate(
+                name=f"flow-package-target-{uuid4().hex[:8]}",
+                permissions=[Permission.ASSISTANTS, Permission.FLOWS_MANAGE],
+                tenant_id=target_tenant.id,
+            )
+        )
+        target_user_domain = await setup_container.user_repo().add(
+            UserAdd(
+                email=f"flow-package-target-{uuid4().hex[:8]}@example.com",
+                username=f"flow_package_target_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=target_tenant.id,
+                roles=[ModelId(id=target_role.id)],
+            )
+        )
+        target_model = await completion_model_factory(
+            session=setup_session,
+            name=f"flow-package-target-model-{uuid4()}",
+            tenant_id=target_tenant.id,
+        )
+        target_space = await space_factory(
+            setup_session,
+            f"Flow package target {uuid4()}",
+            [target_model.id],
+            tenant_id=target_tenant.id,
+        )
+        await _add_space_membership(
+            session=setup_session,
+            space_id=target_space.id,
+            user_id=target_user_domain.id,
+        )
+        target_tenant_id = target_tenant.id
+        target_user_id = target_user_domain.id
+        target_model_id = target_model.id
+        target_space_id = target_space.id
+        target_tenant_domain = await setup_container.tenant_repo().get(target_tenant_id)
+        assert target_tenant_domain is not None
+
+    async with db_container(
+        user=target_user_domain,
+        tenant=target_tenant_domain,
+    ) as target_container:
+        target_session = target_container.session()
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=target_space_id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(target_model_id)]
+            ),
+        )
+        import_response = await flow_package_router.import_flow_package_as_draft(
+            id=target_space_id,
             import_request=_import_request(
-                exported_package_base64,
-                selected_bindings=[_model_binding_request(model.id)],
+                base64.b64encode(exported_package).decode("ascii"),
+                selected_bindings=[_model_binding_request(target_model_id)],
             ),
             request=_request(),
-            container=cast(Container, container),
+            container=cast(Container, target_container),
         )
-        await session.flush()
+        await target_session.flush()
 
-        assert not isinstance(second_import, JSONResponse)
-        assert second_import.flow_id != imported_apply.flow_id
-        assert second_import.flow_name == "Route Import Demo (2)"
-        assert second_import.package_id == "se.demo.route-roundtrip"
-        assert second_import.package_version == "1.0.0"
-        assert second_import.steps_created == 1
-        assert second_import.resource_bindings_count == 1
+        assert not isinstance(import_response, JSONResponse)
+        assert import_response.flow_id != source_flow_id
+        assert import_response.flow_name == "Cross-instance package demo"
+        assert import_response.package_id == "se.demo.cross-instance"
+        assert import_response.package_version == "1.0.0"
+        assert import_response.steps_created == 1
+        assert import_response.resource_bindings_count == 1
+
+        imported_flow = await target_session.scalar(
+            sa.select(Flows).where(Flows.id == import_response.flow_id)
+        )
+        assert imported_flow is not None
+        assert imported_flow.tenant_id == target_tenant_id
+        assert imported_flow.space_id == target_space_id
+        assert imported_flow.owner_user_id == target_user_id
+        assert imported_flow.published_version is None
+
+        imported_step = await target_session.scalar(
+            sa.select(FlowSteps).where(FlowSteps.flow_id == import_response.flow_id)
+        )
+        assert imported_step is not None
+        imported_assistant = await target_session.get(
+            Assistants,
+            imported_step.assistant_id,
+        )
+        assert imported_assistant is not None
+        assert imported_assistant.completion_model_id == target_model_id
+        assert imported_assistant.completion_model_id != source_model_id
 
         import_records = (
-            await session.scalars(
-                sa.select(FlowPackageImports)
-                .where(
-                    FlowPackageImports.space_id == space.id,
+            await target_session.scalars(
+                sa.select(FlowPackageImports).where(
+                    FlowPackageImports.tenant_id == target_tenant_id,
+                    FlowPackageImports.space_id == target_space_id,
                     FlowPackageImports.status
                     == FlowPackageImportStatus.DRAFT_CREATED.value,
                 )
-                .order_by(FlowPackageImports.created_at)
             )
         ).all()
-
-        assert [record.flow_id for record in import_records] == [second_import.flow_id]
-        assert [record.package_id for record in import_records] == [
-            "se.demo.route-roundtrip"
+        assert [record.flow_id for record in import_records] == [
+            import_response.flow_id
         ]
 
 

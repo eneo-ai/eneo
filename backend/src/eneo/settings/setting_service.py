@@ -1,5 +1,4 @@
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -12,10 +11,6 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.completion_models.domain.skill_context import skill_context_token_allowance
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
-    FlowRetentionBoolPatch,
-    FlowRetentionChangeConfirmation,
-    FlowRetentionOrganizationProposal,
-    FlowRetentionValuePatch,
 )
 from eneo.files.file_reference import file_reference_base_url
 from eneo.flows.domain.mapped_execution_policy import (
@@ -71,9 +66,6 @@ from eneo.settings.settings import (
     FlowMappedExecutionPolicyUpdate,
     FlowRagEvidencePolicyPublic,
     FlowRagEvidencePolicyUpdate,
-    FlowRetentionEffectiveStatePublic,
-    FlowRetentionImpactPreviewPublic,
-    FlowRetentionOrganizationPreviewRequest,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyPublic,
@@ -910,45 +902,15 @@ class SettingService:
     async def get_flow_retention_policy(self) -> FlowRetentionPolicyPublic:
         tenant = await self._get_tenant_for_flow_settings()
         policy = resolve_flow_retention_policy(getattr(tenant, "flow_settings", None))
-        state = (
-            await self.data_retention_service.get_flow_retention_control_plane_state(
-                tenant_id=self.user.tenant_id
-            )
-        )
         return FlowRetentionPolicyPublic(
             run_debug_evidence_days=policy.run_debug_evidence_days,
-            flow_run_history_retention_days=(state.organization_run_history_days),
-            flow_runtime_upload_abandonment_days=(
-                state.runtime_upload_abandonment_days
+            flow_run_history_retention_days=getattr(
+                tenant, "flow_run_history_retention_days", None
             ),
-            flow_run_history_minimum_retention_days=(
-                state.organization_minimum_retention_days
-            ),
-            flow_run_history_no_purge=state.organization_no_purge,
-            effective_state=FlowRetentionEffectiveStatePublic.from_domain(state),
-        )
-
-    @validate_permissions(Permission.ADMIN)
-    async def preview_flow_retention_policy(
-        self,
-        payload: FlowRetentionOrganizationPreviewRequest,
-    ) -> FlowRetentionImpactPreviewPublic:
-        preview = await self.data_retention_service.preview_flow_retention_organization_change(
-            tenant_id=self.user.tenant_id,
-            proposal=FlowRetentionOrganizationProposal(
-                flow_run_history_retention_days=(
-                    payload.flow_run_history_retention_days
-                ),
-                flow_runtime_upload_abandonment_days=(
-                    payload.flow_runtime_upload_abandonment_days
-                ),
-                flow_run_history_minimum_retention_days=(
-                    payload.flow_run_history_minimum_retention_days
-                ),
-                flow_run_history_no_purge=payload.flow_run_history_no_purge,
+            flow_runtime_upload_abandonment_days=getattr(
+                tenant, "flow_runtime_upload_abandonment_days", None
             ),
         )
-        return FlowRetentionImpactPreviewPublic.from_domain(preview)
 
     @validate_permissions(Permission.ADMIN)
     async def update_flow_retention_policy(
@@ -956,45 +918,11 @@ class SettingService:
         payload: FlowRetentionPolicyUpdate,
     ) -> FlowRetentionPolicyPublic:
         patch = payload.model_dump(exclude_unset=True)
-        patch.pop("confirmation", None)
         if not patch:
             raise BadRequestException(
                 "At least one flow retention policy field must be provided.",
                 code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
             )
-        confirmation = (
-            FlowRetentionChangeConfirmation(
-                expected_control_plane_version=(
-                    payload.confirmation.expected_control_plane_version
-                ),
-                expected_preview_hash=payload.confirmation.expected_preview_hash,
-                previewed_at=payload.confirmation.previewed_at,
-            )
-            if payload.confirmation is not None
-            else None
-        )
-        decision = await self.data_retention_service.prepare_flow_retention_organization_change(
-            tenant_id=self.user.tenant_id,
-            run_history_patch=FlowRetentionValuePatch(
-                is_set="flow_run_history_retention_days" in payload.model_fields_set,
-                value=payload.flow_run_history_retention_days,
-            ),
-            upload_abandonment_patch=FlowRetentionValuePatch(
-                is_set="flow_runtime_upload_abandonment_days"
-                in payload.model_fields_set,
-                value=payload.flow_runtime_upload_abandonment_days,
-            ),
-            minimum_retention_patch=FlowRetentionValuePatch(
-                is_set="flow_run_history_minimum_retention_days"
-                in payload.model_fields_set,
-                value=payload.flow_run_history_minimum_retention_days,
-            ),
-            no_purge_patch=FlowRetentionBoolPatch(
-                is_set="flow_run_history_no_purge" in payload.model_fields_set,
-                value=payload.flow_run_history_no_purge,
-            ),
-            confirmation=confirmation,
-        )
         tenant = await self._get_tenant_for_flow_settings()
         current_debug_policy = resolve_flow_retention_policy(
             getattr(tenant, "flow_settings", None)
@@ -1018,25 +946,27 @@ class SettingService:
                     str(error),
                     code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
                 ) from error
+
+        old_history_days = getattr(tenant, "flow_run_history_retention_days", None)
+        old_upload_days = getattr(tenant, "flow_runtime_upload_abandonment_days", None)
+        new_history_days = (
+            payload.flow_run_history_retention_days
+            if "flow_run_history_retention_days" in payload.model_fields_set
+            else old_history_days
+        )
+        new_upload_days = (
+            payload.flow_runtime_upload_abandonment_days
+            if "flow_runtime_upload_abandonment_days" in payload.model_fields_set
+            else old_upload_days
+        )
         await self.tenant_repo.update_tenant(
             TenantUpdate(
                 id=self.user.tenant_id,
                 flow_settings=next_flow_settings,
-                flow_run_history_retention_days=(
-                    decision.new_policy.flow_run_history_retention_days
-                ),
-                flow_runtime_upload_abandonment_days=(
-                    decision.new_policy.flow_runtime_upload_abandonment_days
-                ),
-                flow_run_history_minimum_retention_days=(
-                    decision.new_policy.flow_run_history_minimum_retention_days
-                ),
-                flow_run_history_no_purge=(
-                    decision.new_policy.flow_run_history_no_purge
-                ),
+                flow_run_history_retention_days=new_history_days,
+                flow_runtime_upload_abandonment_days=new_upload_days,
             )
         )
-        activation_time = datetime.now(timezone.utc)
         await self.audit_service.log(
             tenant_id=self.user.tenant_id,
             user=self.user,
@@ -1049,44 +979,17 @@ class SettingService:
                     "run_debug_evidence_days": (
                         current_debug_policy.run_debug_evidence_days
                     ),
-                    "flow_run_history_retention_days": (
-                        decision.old_policy.flow_run_history_retention_days
-                    ),
-                    "flow_runtime_upload_abandonment_days": (
-                        decision.old_policy.flow_runtime_upload_abandonment_days
-                    ),
-                    "flow_run_history_minimum_retention_days": (
-                        decision.old_policy.flow_run_history_minimum_retention_days
-                    ),
-                    "flow_run_history_no_purge": (
-                        decision.old_policy.flow_run_history_no_purge
-                    ),
+                    "flow_run_history_retention_days": old_history_days,
+                    "flow_runtime_upload_abandonment_days": old_upload_days,
                 },
                 "new_policy": {
-                    "run_debug_evidence_days": payload.run_debug_evidence_days
-                    if "run_debug_evidence_days" in payload.model_fields_set
-                    else current_debug_policy.run_debug_evidence_days,
-                    "flow_run_history_retention_days": (
-                        decision.new_policy.flow_run_history_retention_days
+                    "run_debug_evidence_days": (
+                        payload.run_debug_evidence_days
+                        if "run_debug_evidence_days" in payload.model_fields_set
+                        else current_debug_policy.run_debug_evidence_days
                     ),
-                    "flow_runtime_upload_abandonment_days": (
-                        decision.new_policy.flow_runtime_upload_abandonment_days
-                    ),
-                    "flow_run_history_minimum_retention_days": (
-                        decision.new_policy.flow_run_history_minimum_retention_days
-                    ),
-                    "flow_run_history_no_purge": (
-                        decision.new_policy.flow_run_history_no_purge
-                    ),
-                },
-                "preview": (
-                    decision.preview.audit_summary()
-                    if decision.preview is not None
-                    else None
-                ),
-                "activation": {
-                    "destructive_change": decision.destructive_change,
-                    "activated_at": activation_time.isoformat(),
+                    "flow_run_history_retention_days": new_history_days,
+                    "flow_runtime_upload_abandonment_days": new_upload_days,
                 },
             },
         )

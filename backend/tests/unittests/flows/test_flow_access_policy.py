@@ -40,7 +40,6 @@ def _service_key_user(*permissions: Permission):
         (FlowApiAction.VIEW, [Permission.FLOWS_VIEW]),
         (FlowApiAction.RUN, [Permission.FLOWS_RUN]),
         (FlowApiAction.EDIT, [Permission.FLOWS_MANAGE]),
-        (FlowApiAction.RERUN, [Permission.FLOWS_MANAGE]),
         (FlowApiAction.REVIEW, [Permission.FLOWS_MANAGE]),
         (FlowApiAction.RESUME, [Permission.FLOWS_MANAGE]),
         (
@@ -81,7 +80,6 @@ def test_coarse_permissions_do_not_grant_unimplemented_actions(
         FlowApiAction.VIEW,
         FlowApiAction.RUN,
         FlowApiAction.EDIT,
-        FlowApiAction.RERUN,
         FlowApiAction.REVIEW,
         FlowApiAction.RESUME,
         FlowApiAction.TRACE_VIEW,
@@ -91,80 +89,6 @@ def test_coarse_flows_alias_keeps_current_shipped_grants(
     action: FlowApiAction,
 ) -> None:
     assert user_can_perform_flow_action(_user(Permission.FLOWS), action) is True
-
-
-@pytest.mark.parametrize(
-    (
-        "principal_type",
-        "permission",
-        "allow_service_key_principals",
-        "expected_error_code",
-    ),
-    [
-        pytest.param("user", Permission.FLOWS_MANAGE, False, None, id="user-manage"),
-        pytest.param(
-            "user",
-            Permission.FLOWS_RUN,
-            False,
-            "insufficient_tenant_permission",
-            id="user-run",
-        ),
-        pytest.param(
-            "user",
-            Permission.FLOWS_VIEW,
-            False,
-            "insufficient_tenant_permission",
-            id="user-view",
-        ),
-        pytest.param(
-            "service_key",
-            Permission.FLOWS_MANAGE,
-            False,
-            FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value,
-            id="service-key-default",
-        ),
-        pytest.param(
-            "service_key",
-            Permission.FLOWS_MANAGE,
-            True,
-            None,
-            id="service-key-explicit-own-runtime-capability",
-        ),
-    ],
-)
-def test_rerun_permission_matrix(
-    principal_type: str,
-    permission: Permission,
-    allow_service_key_principals: bool,
-    expected_error_code: str | None,
-) -> None:
-    principal = (
-        _service_key_user(permission)
-        if principal_type == "service_key"
-        else _user(permission)
-    )
-
-    if expected_error_code is None:
-        require_flow_action(
-            principal,
-            FlowApiAction.RERUN,
-            allow_service_key_principals=allow_service_key_principals,
-        )
-        return
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        require_flow_action(
-            principal,
-            FlowApiAction.RERUN,
-            allow_service_key_principals=allow_service_key_principals,
-        )
-
-    assert exc_info.value.code == expected_error_code
-    if principal_type == "service_key":
-        assert exc_info.value.context == {
-            "auth_layer": "service_key_principal",
-            "capability": "rerun",
-        }
 
 
 def test_edit_requires_manage_permission_not_view_only() -> None:

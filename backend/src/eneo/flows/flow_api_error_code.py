@@ -163,19 +163,6 @@ class FlowApiErrorCode(str, Enum):
     TEMPLATE_UNSUPPORTED_EXTENSION = "flow_template_unsupported_extension"
     TEMPLATE_MISSING_CONTENT = "flow_template_missing_content"
     TEMPLATE_IN_USE = "flow_template_in_use"
-    RUN_RERUN_REASON_REQUIRED = "flow_run_rerun_reason_required"
-    RUN_RERUN_REASON_TOO_LONG = "flow_run_rerun_reason_too_long"
-    RUN_RERUN_STALE_REVISION = "flow_run_rerun_stale_revision"
-    RUN_RERUN_INVALID_TRANSITION = "flow_run_rerun_invalid_transition"
-    RUN_RERUN_STEP_NOT_FOUND = "flow_run_rerun_step_not_found"
-    RUN_RERUN_STEP_INCOMPLETE = "flow_run_rerun_step_incomplete"
-    RUN_RERUN_STEP_INPUTS_INVALID = "flow_run_rerun_step_inputs_invalid"
-    RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT = (
-        "flow_run_rerun_multiple_active_operations_invariant"
-    )
-    RUN_RERUN_ATTEMPT_LINEAGE_CONFLICT_INVARIANT = (
-        "flow_run_rerun_attempt_lineage_conflict_invariant"
-    )
 
 
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
@@ -263,8 +250,6 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT,
         FlowApiErrorCode.REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT,
         FlowApiErrorCode.REVIEW_OPEN_MULTIPLE_ACTIVE_CHECKPOINTS_INVARIANT,
-        FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT,
-        FlowApiErrorCode.RUN_RERUN_ATTEMPT_LINEAGE_CONFLICT_INVARIANT,
     }
     | FLOW_TYPED_IO_ERROR_CODES
 )

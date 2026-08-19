@@ -12,7 +12,6 @@ from test_flow_run_service import (
     _flow,
     _flow_repo,
     _provider_call_repo,
-    _rerun_command_result,
     _run,
     _step_result_record,
     _trace_user,
@@ -67,12 +66,6 @@ from eneo.flows.infrastructure.flow_run_repo import (
     StepAttemptEvidenceSize,
     StepAttemptPage,
 )
-from eneo.flows.infrastructure.flow_run_rerun_repo import (
-    FlowRunRerunEvidenceAdmission,
-    FlowRunRerunEvidenceMeasurements,
-    FlowRunRerunEvidenceRowCounts,
-    FlowRunRerunRepository,
-)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointEvidenceMeasurement,
 )
@@ -110,16 +103,6 @@ def _access_policy_double() -> AsyncMock:
     policy = AsyncMock(spec=FlowRunAccessPolicy)
     policy.passage_disclosure_for_run.return_value = "text_disclosed"
     return policy
-
-
-def _flow_run_rerun_repo() -> AsyncMock:
-    repo = AsyncMock(spec=FlowRunRerunRepository)
-    repo.list_rerun_operations_for_run.return_value = []
-    repo.list_rerun_operations_for_evidence_view.return_value = (
-        FlowRunRerunEvidenceAdmission(operations=(), omission_reason=None)
-    )
-    repo.list_rerun_invalidated_steps_for_run.return_value = []
-    return repo
 
 
 def _webhook_delivery_repo() -> AsyncMock:
@@ -172,12 +155,6 @@ def _seed_empty_evidence_measurements(service: FlowRunEvidenceService) -> None:
     service.flow_version_repo.measure_definition_evidence.return_value = (
         FlowVersionEvidenceMeasurement.empty()
     )
-    service.flow_run_rerun_repo.measure_evidence_sections.return_value = (
-        FlowRunRerunEvidenceMeasurements.empty()
-    )
-    service.flow_run_rerun_repo.measure_evidence_row_counts.return_value = (
-        FlowRunRerunEvidenceRowCounts(0, 0)
-    )
     service.flow_run_review_checkpoint_repo.measure_evidence.return_value = (
         FlowRunReviewCheckpointEvidenceMeasurement.empty()
     )
@@ -222,7 +199,6 @@ def _service_for_empty_run(
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=provider_call_repo,
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -395,7 +371,6 @@ async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
-    flow_run_rerun_repo = _flow_run_rerun_repo()
     review_checkpoint_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     webhook_delivery_repo = _webhook_delivery_repo()
@@ -431,7 +406,6 @@ async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -477,7 +451,6 @@ async def test_get_evidence_loads_run_through_access_policy(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
-    flow_run_rerun_repo = _flow_run_rerun_repo()
     review_checkpoint_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
@@ -495,7 +468,6 @@ async def test_get_evidence_loads_run_through_access_policy(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -518,7 +490,6 @@ async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(use
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
-    flow_run_rerun_repo = _flow_run_rerun_repo()
     review_checkpoint_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
@@ -538,7 +509,6 @@ async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(use
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -566,7 +536,6 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
-    flow_run_rerun_repo = _flow_run_rerun_repo()
     review_checkpoint_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
@@ -611,7 +580,6 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -656,7 +624,6 @@ async def test_export_evidence_json_rejects_injected_run_id_mismatch(user):
         flow_repo=_flow_repo(),
         flow_run_repo=AsyncMock(),
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=AsyncMock(),
         file_repo=_file_repo(),
@@ -682,7 +649,6 @@ async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
-    flow_run_rerun_repo = _flow_run_rerun_repo()
     review_checkpoint_repo = AsyncMock()
     flow_version_repo = AsyncMock()
     flow = _flow(user=user)
@@ -710,7 +676,6 @@ async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -801,7 +766,6 @@ def _service_with_attempts(*, user, attempts_bytes: list[int], access_kind_run=N
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -924,9 +888,6 @@ async def test_export_preflight_refuses_section_rows_before_loading(user) -> Non
     service.flow_version_repo.measure_definition_evidence.return_value = (
         FlowVersionEvidenceMeasurement.empty()
     )
-    service.flow_run_rerun_repo.measure_evidence_sections.return_value = (
-        FlowRunRerunEvidenceMeasurements.empty()
-    )
     service.flow_run_review_checkpoint_repo.measure_evidence.return_value = (
         FlowRunReviewCheckpointEvidenceMeasurement.empty()
     )
@@ -972,16 +933,6 @@ def _set_section_row_count(
         service.flow_run_repo.measure_evidence_row_counts.return_value = replace(
             current, runtime_input_files=row_count
         )
-    elif section == "rerun_operations":
-        current = service.flow_run_rerun_repo.measure_evidence_row_counts.return_value
-        service.flow_run_rerun_repo.measure_evidence_row_counts.return_value = replace(
-            current, operations=row_count
-        )
-    elif section == "rerun_invalidated_steps":
-        current = service.flow_run_rerun_repo.measure_evidence_row_counts.return_value
-        service.flow_run_rerun_repo.measure_evidence_row_counts.return_value = replace(
-            current, invalidated_steps=row_count
-        )
     elif section == "review_checkpoints":
         service.flow_run_review_checkpoint_repo.measure_evidence_row_count.return_value = row_count
     elif section == "webhook_deliveries":
@@ -1002,16 +953,6 @@ def _set_section_row_count(
         ("result_files", EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING, "section_rows"),
         (
             "runtime_input_files",
-            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
-            "section_rows",
-        ),
-        (
-            "rerun_operations",
-            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
-            "section_rows",
-        ),
-        (
-            "rerun_invalidated_steps",
             EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
             "section_rows",
         ),
@@ -1181,82 +1122,6 @@ async def test_view_refuses_to_materialize_a_section_over_its_logical_budget(
     ]
 
 
-@pytest.mark.asyncio
-async def test_view_returns_500_rerun_prefix_and_reports_bounded_lower_count(
-    user,
-) -> None:
-    user = _trace_user(user)
-    service, run = _service_with_attempts(user=user, attempts_bytes=[])
-    operation = _rerun_command_result(
-        user=user,
-        run=run,
-        rerun_step_id=uuid4(),
-        invalidated_step_ids=[],
-    ).operation
-    service.flow_run_rerun_repo.measure_evidence_sections.return_value = replace(
-        FlowRunRerunEvidenceMeasurements.empty(),
-        operation_row_count=(
-            flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1
-        ),
-    )
-    service.flow_run_rerun_repo.list_rerun_operations_for_evidence_view.return_value = (
-        FlowRunRerunEvidenceAdmission(
-            operations=(operation,)
-            * flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS,
-            omission_reason="row_limit",
-        )
-    )
-
-    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
-
-    assert len(bundle.rerun_operations) == 500
-    assert (
-        service.flow_run_rerun_repo.list_rerun_operations_for_evidence_view.await_args.kwargs[
-            "logical_byte_budget"
-        ]
-        == flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
-    )
-    assert bundle.debug_export["run"]["summary"]["omissions"] == [
-        {
-            "reason": "row_limit",
-            "section": "rerun_operations",
-            "rows_omitted": 1,
-            "count_truncated": True,
-        }
-    ]
-
-
-@pytest.mark.asyncio
-async def test_dependent_view_omission_names_the_omitted_parent(user) -> None:
-    user = _trace_user(user)
-    service, run = _service_with_attempts(user=user, attempts_bytes=[])
-    service.flow_run_rerun_repo.measure_evidence_sections.return_value = replace(
-        FlowRunRerunEvidenceMeasurements.empty(),
-        operation_row_count=1,
-        operation_logical_json_bytes=(
-            flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES + 1
-        ),
-        invalidated_step_row_count=1,
-    )
-
-    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
-
-    assert bundle.debug_export["run"]["summary"]["omissions"] == [
-        {
-            "reason": "logical_bytes",
-            "section": "rerun_operations",
-            "rows_omitted": 1,
-            "count_truncated": False,
-        },
-        {
-            "reason": "parent_section_omitted",
-            "section": "rerun_invalidated_steps",
-            "rows_omitted": 1,
-            "count_truncated": False,
-        },
-    ]
-
-
 async def test_redacted_export_also_refuses_on_the_passage_load_guard(user) -> None:
     """Retained passage bytes bound the load for redacted exports too.
 
@@ -1316,7 +1181,7 @@ async def test_view_preflight_never_refuses_and_never_narrows_small_runs(user) -
 
 
 async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> None:
-    """A run with deep rerun history loads a bounded page and says so.
+    """A run with deep attempt history loads a bounded page and says so.
 
     The response must state how many attempt rows were not loaded — otherwise
     a narrowed view would read as the complete history.

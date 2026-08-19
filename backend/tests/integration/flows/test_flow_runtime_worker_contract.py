@@ -20,8 +20,6 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
-    FlowRunRerunInvalidatedSteps,
-    FlowRunRerunOperations,
     FlowRuns,
     FlowRunWebhookDeliveries,
     FlowStepAttempts,
@@ -38,7 +36,7 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
-from eneo.flows.enums import FlowRunLifecycleSource, FlowRunRerunOperationStatus
+from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -254,7 +252,6 @@ async def _create_runtime_worker_context(
         session=session,
         flow_repo=worker_container.flow_repo(),
         flow_run_repo=worker_container.flow_run_repo(),
-        flow_run_rerun_repo=worker_container.flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=worker_container.flow_run_review_checkpoint_repo(),
         flow_run_terminalizer=worker_container.flow_run_terminalizer(),
         flow_version_repo=worker_container.flow_version_repo(),
@@ -745,7 +742,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             session=session,
             flow_repo=container.flow_repo(),
             flow_run_repo=container.flow_run_repo(),
-            flow_run_rerun_repo=container.flow_run_rerun_repo(),
             flow_run_review_checkpoint_repo=container.flow_run_review_checkpoint_repo(),
             flow_run_terminalizer=container.flow_run_terminalizer(),
             flow_version_repo=container.flow_version_repo(),
@@ -859,144 +855,6 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
         assert outbox_row.target_status == FlowRunStatus.COMPLETED.value
         assert outbox_row.entity_id == run.id
         assert outbox_row.description == "flow_run_completed:executor_completed"
-
-        rerun_result = await container.flow_run_rerun_service().rerun_step(
-            flow_id=flow.id,
-            run_id=run.id,
-            rerun_step_id=step.id,
-            expected_run_revision=1,
-            reason="Regenerate the answer after review.",
-        )
-        assert rerun_result.created is True
-        assert rerun_result.operation.root_attempt_no == 2
-        assert rerun_result.invalidated_steps[0].prior_attempt_id == attempt_rows[0].id
-
-        rerun_worker_result = await executor.execute(
-            run_id=run.id,
-            flow_id=flow.id,
-            tenant_id=admin_user.tenant_id,
-            run_revision=rerun_result.run.revision,
-            celery_task_id=f"{run_correlation_id}-rerun",
-            retry_count=0,
-        )
-
-        assert rerun_worker_result == {"status": "completed"}
-        rerun_run_row = await session.scalar(
-            sa.select(FlowRuns).where(FlowRuns.id == run.id)
-        )
-        assert rerun_run_row is not None
-        assert rerun_run_row.status == FlowRunStatus.COMPLETED.value
-        assert rerun_run_row.revision == 2
-        assert rerun_run_row.output_payload_json == {
-            "text": "The rerun completed.",
-        }
-
-        rerun_step_result = await session.scalar(
-            sa.select(FlowStepResults).where(FlowStepResults.flow_run_id == run.id)
-        )
-        assert rerun_step_result is not None
-        assert rerun_step_result.status == FlowStepResultStatus.COMPLETED.value
-        assert rerun_step_result.current_attempt_no == 2
-        assert rerun_step_result.output_payload_json == {
-            "text": "The rerun completed.",
-        }
-
-        rerun_attempt_rows = (
-            (
-                await session.execute(
-                    sa.select(FlowStepAttempts)
-                    .where(FlowStepAttempts.flow_run_id == run.id)
-                    .order_by(FlowStepAttempts.attempt_no.asc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert [attempt.attempt_no for attempt in rerun_attempt_rows] == [1, 2]
-        assert [attempt.status for attempt in rerun_attempt_rows] == [
-            FlowStepAttemptStatus.COMPLETED.value,
-            FlowStepAttemptStatus.COMPLETED.value,
-        ]
-        assert (
-            rerun_attempt_rows[0].superseded_by_attempt_id == rerun_attempt_rows[1].id
-        )
-        assert rerun_attempt_rows[1].predecessor_attempt_id == rerun_attempt_rows[0].id
-        assert rerun_attempt_rows[1].rerun_operation_id == rerun_result.operation.id
-        assert rerun_attempt_rows[0].output_payload_json == {
-            "text": "The run completed.",
-        }
-        parsed_rerun_attempt_input = parse_flow_step_attempt_input(
-            rerun_attempt_rows[1].input_payload_json
-        )
-        assert parsed_rerun_attempt_input.status == "tracked"
-        assert parsed_rerun_attempt_input.attempt_input is not None
-        assert (
-            parsed_rerun_attempt_input.attempt_input.resolved_input["text"]
-            == (rerun_step_result.input_payload_json["text"])
-        )
-        assert rerun_attempt_rows[1].output_payload_json == {
-            "text": "The rerun completed.",
-        }
-
-        operation_row = await session.scalar(
-            sa.select(FlowRunRerunOperations).where(
-                FlowRunRerunOperations.id == rerun_result.operation.id
-            )
-        )
-        assert operation_row is not None
-        assert operation_row.status == FlowRunRerunOperationStatus.COMPLETED.value
-        assert operation_row.root_attempt_id == rerun_attempt_rows[1].id
-        assert operation_row.started_at is not None
-        assert operation_row.finished_at is not None
-
-        outbox_rows = (
-            (
-                await session.execute(
-                    sa.select(FlowRunAuditOutbox)
-                    .where(FlowRunAuditOutbox.flow_run_id == run.id)
-                    .order_by(FlowRunAuditOutbox.run_revision.asc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert [row.run_revision for row in outbox_rows] == [1, 2]
-        assert [row.target_status for row in outbox_rows] == [
-            FlowRunStatus.COMPLETED.value,
-            FlowRunStatus.COMPLETED.value,
-        ]
-
-        invalidated_row = await session.scalar(
-            sa.select(FlowRunRerunInvalidatedSteps).where(
-                FlowRunRerunInvalidatedSteps.operation_id == rerun_result.operation.id
-            )
-        )
-        assert invalidated_row is not None
-        assert invalidated_row.new_attempt_no == 2
-        assert invalidated_row.new_attempt_id == rerun_attempt_rows[1].id
-
-        rerun_evidence = (
-            await container.flow_run_evidence_service().get_redacted_evidence_bundle(
-                run_id=run.id
-            )
-        ).to_dict()
-        assert len(rerun_evidence["step_attempts"]) == 2
-        assert [
-            attempt["attempt_no"] for attempt in rerun_evidence["step_attempts"]
-        ] == [
-            1,
-            2,
-        ]
-        assert rerun_evidence["step_results"][0]["current_attempt_no"] == 2
-        assert rerun_evidence["step_results"][0]["output_payload_json"] == {
-            "text": "The rerun completed.",
-        }
-        assert rerun_evidence["step_attempts"][0]["output_payload_json"] == {
-            "text": "The run completed.",
-        }
-        assert rerun_evidence["step_attempts"][1]["output_payload_json"] == {
-            "text": "The rerun completed.",
-        }
 
 
 @pytest.mark.asyncio

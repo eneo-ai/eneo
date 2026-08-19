@@ -126,7 +126,6 @@ FORBIDDEN_API_MANUAL_CONSTRUCTION_CLASS_NAMES = frozenset(
 FLOW_RUN_REPOSITORY_PLATFORM_EXCEPTION_IMPORT_BAN = frozenset(
     {
         "infrastructure/flow_run_repo.py",
-        "infrastructure/flow_run_rerun_repo.py",
         "infrastructure/flow_run_review_checkpoint_repo.py",
     }
 )

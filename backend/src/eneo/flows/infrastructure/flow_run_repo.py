@@ -75,7 +75,6 @@ from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgesParseResult,
     FlowResolvedInputEdgesUnavailableError,
     parse_resolved_input_edges,
-    require_attempt_runtime_evidence_not_purged,
     resolve_attempt_terminalization_evidence,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
@@ -2228,8 +2227,6 @@ class FlowRunRepository:
         step_order: int,
         attempt_no: int,
         celery_task_id: str | None,
-        rerun_operation_id: UUID | None = None,
-        predecessor_attempt_id: UUID | None = None,
     ) -> FlowStepAttempt:
         run_status = await self.session.scalar(
             sa.select(FlowRuns.status)
@@ -2257,8 +2254,6 @@ class FlowRunRepository:
                 step_order=step_order,
                 attempt_no=attempt_no,
                 celery_task_id=celery_task_id,
-                rerun_operation_id=rerun_operation_id,
-                predecessor_attempt_id=predecessor_attempt_id,
                 status=FlowStepAttemptStatus.STARTED.value,
                 started_at=started_at,
             )
@@ -2285,82 +2280,6 @@ class FlowRunRepository:
             )
         return FlowStepAttempt.model_validate(row)
 
-    async def copy_step_input_files_from_predecessor_attempt(
-        self,
-        *,
-        run_id: UUID,
-        flow_id: UUID,
-        tenant_id: UUID,
-        step_id: UUID,
-        step_order: int,
-        predecessor_attempt_id: UUID | None,
-        target_attempt_no: int,
-    ) -> None:
-        if predecessor_attempt_id is None:
-            return
-        target_exists = await self.session.scalar(
-            sa.select(sa.literal(True))
-            .select_from(FlowRunStepInputFiles)
-            .where(FlowRunStepInputFiles.flow_run_id == run_id)
-            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
-            .where(FlowRunStepInputFiles.step_id == step_id)
-            .where(FlowRunStepInputFiles.attempt_no == target_attempt_no)
-            .limit(1)
-        )
-        if target_exists:
-            return
-
-        source_attempt_no = await self.session.scalar(
-            sa.select(FlowStepAttempts.attempt_no)
-            .where(FlowStepAttempts.id == predecessor_attempt_id)
-            .where(FlowStepAttempts.flow_run_id == run_id)
-            .where(FlowStepAttempts.flow_id == flow_id)
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(FlowStepAttempts.step_id == step_id)
-        )
-        if source_attempt_no is None:
-            return
-
-        file_ids = (
-            (
-                await self.session.execute(
-                    sa.select(FlowRunStepInputFiles.file_id)
-                    .where(FlowRunStepInputFiles.flow_run_id == run_id)
-                    .where(FlowRunStepInputFiles.tenant_id == tenant_id)
-                    .where(FlowRunStepInputFiles.step_id == step_id)
-                    .where(FlowRunStepInputFiles.attempt_no == source_attempt_no)
-                    .order_by(FlowRunStepInputFiles.ordinal.asc())
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not file_ids:
-            return
-
-        rows = build_step_input_file_rows(
-            flow_run_id=run_id,
-            flow_id=flow_id,
-            tenant_id=tenant_id,
-            attempt_no=target_attempt_no,
-            projections=[
-                {
-                    "step_id": step_id,
-                    "step_order": step_order,
-                    "file_ids": list(file_ids),
-                }
-            ],
-        )
-        # The source attempt row already holds the runtime-upload FK, so the
-        # referenced upload cannot disappear while this copy is inserted.
-        await self.session.execute(
-            pg_insert(FlowRunStepInputFiles)
-            .values(rows)
-            .on_conflict_do_nothing(
-                constraint="uq_flow_run_step_input_files_run_step_attempt_file"
-            )
-        )
-
     async def activate_step_attempt(
         self,
         *,
@@ -2385,13 +2304,6 @@ class FlowRunRepository:
             return None
         merged_attempt_input: FlowStepAttemptInput | None = None
         if attempt_input is not None:
-            require_attempt_runtime_evidence_not_purged(
-                row.provenance_json,
-                run_id=run_id,
-                step_id=step_id,
-                attempt_no=attempt_no,
-                tenant_id=tenant_id,
-            )
             merged_attempt_input = merge_flow_step_attempt_input(
                 row.input_payload_json,
                 attempt_input,
@@ -2596,34 +2508,7 @@ class FlowRunRepository:
         row.finished_at = datetime.now(timezone.utc)
         await self.session.flush()
         await self.session.refresh(row)
-        if status == FlowStepAttemptStatus.COMPLETED:
-            await self._mark_predecessor_superseded_by_attempt(
-                completed_attempt_row=row,
-                tenant_id=tenant_id,
-            )
         return FlowStepAttempt.model_validate(row)
-
-    async def _mark_predecessor_superseded_by_attempt(
-        self,
-        *,
-        completed_attempt_row: FlowStepAttempts,
-        tenant_id: UUID,
-    ) -> None:
-        if completed_attempt_row.predecessor_attempt_id is None:
-            return
-        await self.session.execute(
-            sa.update(FlowStepAttempts)
-            .where(FlowStepAttempts.id == completed_attempt_row.predecessor_attempt_id)
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(
-                sa.or_(
-                    FlowStepAttempts.superseded_by_attempt_id.is_(None),
-                    FlowStepAttempts.superseded_by_attempt_id
-                    == completed_attempt_row.id,
-                )
-            )
-            .values(superseded_by_attempt_id=completed_attempt_row.id)
-        )
 
 
 def _result_file_from_rows(

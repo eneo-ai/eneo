@@ -202,8 +202,6 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
-        "rerun_operations": [],
-        "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
@@ -397,8 +395,6 @@ async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
-        "rerun_operations": [],
-        "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
@@ -490,8 +486,6 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
         "step_results": [],
         "step_attempts": [],
         "result_files": [artifact_payload],
-        "rerun_operations": [],
-        "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
@@ -570,7 +564,6 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
     flow_id = uuid4()
     tenant_id = uuid4()
     requester_service_id = uuid4()
-    rerun_service_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=tenant_id)
     evidence = {
         "run": run.model_dump(mode="json"),
@@ -583,29 +576,6 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
-        "rerun_operations": [
-            {
-                "id": str(uuid4()),
-                "tenant_id": str(tenant_id),
-                "flow_id": str(flow_id),
-                "flow_run_id": str(run.id),
-                "rerun_step_id": str(uuid4()),
-                "rerun_step_order": 1,
-                "root_attempt_no": 2,
-                "status": "completed",
-                "request_fingerprint": "fingerprint",
-                "expected_run_revision": 1,
-                "accepted_run_revision": 2,
-                "reason": "Refresh output",
-                "input_revision": {"status": "not_recorded"},
-                "root_step_input_override_requested": False,
-                "requested_by_principal_type": "service_key",
-                "requested_by_service_id": str(rerun_service_id),
-                "created_at": "2026-03-20T12:00:00Z",
-                "updated_at": "2026-03-20T12:00:00Z",
-            }
-        ],
-        "rerun_invalidated_steps": [],
         "review_checkpoints": [
             {
                 "id": str(uuid4()),
@@ -674,10 +644,6 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
             id=requester_service_id,
             display_name="Requester service",
         ),
-        rerun_service_id: SimpleNamespace(
-            id=rerun_service_id,
-            display_name="Rerun service",
-        ),
     }
     container.api_key_v2_repo.return_value = api_key_repo
     container.audit_service.return_value = AsyncMock()
@@ -706,12 +672,6 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
     assert checkpoint.requester_service_principal is not None
     assert checkpoint.requester_service_principal.id == requester_service_id
     assert checkpoint.requester_service_principal.display_name == "Requester service"
-    rerun_operation = response.rerun_operations[0]
-    assert rerun_operation.requested_by_service_principal is not None
-    assert rerun_operation.requested_by_service_principal.id == rerun_service_id
-    assert (
-        rerun_operation.requested_by_service_principal.display_name == "Rerun service"
-    )
 
 
 @pytest.mark.asyncio
@@ -767,8 +727,6 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
-        "rerun_operations": [],
-        "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
@@ -918,8 +876,6 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
         "step_results": [],
         "step_attempts": [],
         "result_files": [],
-        "rerun_operations": [],
-        "rerun_invalidated_steps": [],
         "review_checkpoints": [],
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),

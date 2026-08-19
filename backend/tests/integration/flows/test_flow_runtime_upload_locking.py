@@ -13,7 +13,6 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
-    FlowRunRerunOperations,
     FlowRuns,
     FlowRunStepInputFiles,
     FlowRuntimeUploadedFiles,
@@ -26,7 +25,7 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileContentVariant, FileType
-from eneo.flows.enums import FlowRunRerunOperationStatus, FlowRunStatus
+from eneo.flows.enums import FlowRunStatus
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowRunHistoryPurgeCounts,
@@ -244,8 +243,6 @@ async def _make_runtime_upload_abandoned(upload: _RuntimeUpload) -> None:
             .where(Tenants.id == upload.tenant_id)
             .values(
                 flow_runtime_upload_abandonment_days=1,
-                flow_run_history_minimum_retention_days=None,
-                flow_run_history_no_purge=False,
             )
         )
 
@@ -639,69 +636,3 @@ async def test_abandonment_sweep_reports_file_bytes_while_shared_content_remains
         assert content is not None
         assert content.state == ContentState.AVAILABLE.value
         assert content.reference_count == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_run_purge_skips_rerun_that_wins_the_run_lock(
-    db_container,
-    completion_model_factory,
-    space_factory,
-    admin_user,
-) -> None:
-    fixture = await _create_bound_runtime_upload(
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        space_factory=space_factory,
-        admin_user=admin_user,
-    )
-
-    async with sessionmanager.session() as rerun_session:
-        async with rerun_session.begin():
-            locked_run_id = await rerun_session.scalar(
-                sa.select(FlowRuns.id)
-                .where(FlowRuns.id == fixture.run_id)
-                .with_for_update()
-            )
-            assert locked_run_id == fixture.run_id
-            rerun_session.add(
-                FlowRunRerunOperations(
-                    tenant_id=fixture.upload.tenant_id,
-                    flow_id=fixture.upload.flow_id,
-                    flow_run_id=fixture.run_id,
-                    rerun_step_id=fixture.step_id,
-                    rerun_step_order=1,
-                    root_attempt_no=2,
-                    root_attempt_id=None,
-                    status=FlowRunRerunOperationStatus.QUEUED.value,
-                    request_fingerprint=f"rerun-lock-{uuid4()}",
-                    expected_run_revision=1,
-                    accepted_run_revision=1,
-                    reason="Rerun wins the run lock.",
-                    input_payload_json=None,
-                    root_step_input_override_requested=False,
-                    requested_by_principal_type="user",
-                    requested_by_user_id=fixture.upload.owner_user_id,
-                    requested_by_service_id=None,
-                )
-            )
-            await rerun_session.execute(
-                sa.update(FlowRuns)
-                .where(FlowRuns.id == fixture.run_id)
-                .values(
-                    status=FlowRunStatus.QUEUED.value,
-                    finished_at=None,
-                )
-            )
-            await rerun_session.flush()
-
-            skipped_result = await _purge_run(fixture.run_id)
-            assert skipped_result.counts.flow_runs_considered == 1
-            assert skipped_result.counts.flow_runs_lock_deferred == 1
-            assert skipped_result.counts.flow_runs_purged == 0
-
-    assert await _runtime_source_rows_exist(fixture=fixture) == (True, True)
-    async with sessionmanager.session() as session, session.begin():
-        run = await session.get(FlowRuns, fixture.run_id)
-        assert run is not None
-        assert run.status == FlowRunStatus.QUEUED.value

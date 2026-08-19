@@ -44,7 +44,6 @@ from eneo.flows.api.flow_models import (
     FlowFinalOutputContractPublic,
     FlowOutputDelivery,
     FlowRunCreateRequest,
-    FlowRunStepRerunRequest,
     FlowStepCreateRequest,
     FlowUpdateRequest,
 )
@@ -56,7 +55,6 @@ from eneo.flows.api.flow_run_lifecycle_router import (
     list_flow_runs,
     redispatch_flow_run,
 )
-from eneo.flows.api.flow_run_rerun_router import rerun_flow_run_step
 from eneo.flows.api.flow_run_steps_router import get_flow_graph
 from eneo.flows.application.flow_run_service import (
     FlowRunPageWithResultFilesAndUsage,
@@ -78,7 +76,6 @@ from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
     _flow,
     _request,
-    _rerun_result,
     _run,
     _service_key,
 )
@@ -158,139 +155,6 @@ async def test_create_flow_run_rejects_user_without_run_permission():
 
     assert exc_info.value.code == "insufficient_tenant_permission"
     flow_run_service.create_run.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    ("permissions", "expected_code"),
-    [
-        ([Permission.FLOWS_VIEW], "insufficient_tenant_permission"),
-        ([Permission.FLOWS_RUN], "insufficient_tenant_permission"),
-        ([], "insufficient_tenant_permission"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_rerun_flow_run_step_permission_matrix_denies_non_managers(
-    monkeypatch,
-    permissions,
-    expected_code,
-):
-    container = MagicMock()
-    flow_id = uuid4()
-    step_id = uuid4()
-    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), permissions=permissions)
-    flow = _flow(flow_id)
-    flow.owner_user_id = user.id
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = flow
-    rerun_service = AsyncMock()
-    container.flow_service.return_value = flow_service
-    container.flow_run_rerun_service.return_value = rerun_service
-    container.user.return_value = user
-    _enable_space_access(container, user_permissions=permissions)
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        await rerun_flow_run_step(
-            id=flow_id,
-            run_id=uuid4(),
-            step_id=step_id,
-            request=SimpleNamespace(state=SimpleNamespace()),
-            rerun_in=FlowRunStepRerunRequest(
-                expected_run_revision=1,
-                reason="Ownership alone is not enough",
-            ),
-            background_tasks=BackgroundTasks(),
-            container=container,
-        )
-
-    assert exc_info.value.code == expected_code
-    rerun_service.rerun_step.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_rerun_flow_run_step_permission_matrix_allows_service_key_principal(
-    monkeypatch,
-):
-    container = MagicMock()
-    flow_id = uuid4()
-    run_id = uuid4()
-    step_id = uuid4()
-    user = SimpleNamespace(
-        id=uuid4(),
-        tenant_id=uuid4(),
-        permissions=[Permission.FLOWS_MANAGE],
-        active_api_key=_service_key(),
-    )
-    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
-        update={
-            "id": run_id,
-            "output_payload_json": {"text": "Rerun finished"},
-        }
-    )
-    flow_service = AsyncMock()
-    flow_service.get_flow.return_value = _flow(flow_id)
-    rerun_service = AsyncMock()
-    rerun_service.rerun_step.return_value = _rerun_result(
-        run,
-        step_id,
-        created=False,
-    )
-    run_service = AsyncMock()
-    run_service.enrich_run_with_result_files_and_usage.return_value = (
-        FlowRunWithResultFilesAndUsage(
-            run=run,
-            result_files=(),
-            token_usage=None,
-            final_output=FlowFinalOutputContractPublic(
-                step_id=step_id,
-                step_order=1,
-                output_type=FlowOutputType.TEXT,
-                output_mode=FlowOutputMode.PASS_THROUGH,
-                delivery=FlowOutputDelivery.PAYLOAD,
-            ),
-        )
-    )
-    container.flow_service.return_value = flow_service
-    container.flow_run_service.return_value = run_service
-    container.flow_run_rerun_service.return_value = rerun_service
-    container.audit_service.return_value = AsyncMock()
-    container.user.return_value = user
-    _enable_space_access(container, user_permissions=[Permission.FLOWS_MANAGE])
-    _enable_explicit_transaction(container)
-    monkeypatch.setattr(
-        flow_access_context_module,
-        "get_scope_filter",
-        lambda _request: ScopeFilter(space_id=None),
-    )
-
-    response = await rerun_flow_run_step(
-        id=flow_id,
-        run_id=run_id,
-        step_id=step_id,
-        request=SimpleNamespace(state=SimpleNamespace()),
-        rerun_in=FlowRunStepRerunRequest(
-            expected_run_revision=1,
-            reason="Service keys can request own-run reruns",
-        ),
-        background_tasks=BackgroundTasks(),
-        container=container,
-    )
-
-    assert response.run.id == run_id
-    rerun_service.rerun_step.assert_awaited_once_with(
-        flow_id=flow_id,
-        run_id=run_id,
-        rerun_step_id=step_id,
-        expected_run_revision=1,
-        reason="Service keys can request own-run reruns",
-        input_payload_json=None,
-        step_inputs=None,
-    )
-    container.audit_service.return_value.log_async.assert_awaited_once()
 
 
 @pytest.mark.asyncio

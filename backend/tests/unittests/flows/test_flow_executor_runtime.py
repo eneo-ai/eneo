@@ -30,31 +30,23 @@ from eneo.flows.assistant_execution_snapshot import (
 from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRun,
-    FlowRunRerunInvalidatedStep,
-    FlowRunRerunOperation,
     FlowRunStatus,
     FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultStatus,
     FlowStepRetrievalPolicy,
-    RerunStepInputOverride,
 )
 from eneo.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunPersistenceInvariantError
-from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptStart,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
-from eneo.flows.domain.rerun_exceptions import (
-    FlowRunRerunAttemptLineageConflictError,
-    FlowRunRerunMultipleActiveOperationsError,
-)
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointRunNotRunningError,
     FlowReviewCheckpointStepResultIncompleteError,
@@ -65,8 +57,6 @@ from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantE
 from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
-    FlowRunRerunInvalidationRole,
-    FlowRunRerunOperationStatus,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
@@ -79,10 +69,6 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.flow_runtime_policy import FlowRuntimePolicy
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
     ProviderCallEvidencePersistenceError,
-)
-from eneo.flows.infrastructure.flow_run_rerun_repo import (
-    FlowRunActiveRerunOperation,
-    FlowRunRerunRepository,
 )
 from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from eneo.flows.runtime import executor as executor_module
@@ -274,7 +260,6 @@ def _started_step_attempt(
         step_id=step_id,
         step_order=step_order,
         attempt_no=attempt_no,
-        rerun_operation_id=None,
         predecessor_attempt_id=None,
         superseded_by_attempt_id=None,
         celery_task_id="task-1",
@@ -397,7 +382,6 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
-    flow_run_rerun_repo = AsyncMock(spec=FlowRunRerunRepository)
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
@@ -422,11 +406,7 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
         )
 
     flow_run_repo.allocate_next_attempt_no = AsyncMock(return_value=1)
-    flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(return_value=None)
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
-    flow_run_repo.copy_step_input_files_from_predecessor_attempt = AsyncMock()
-    flow_run_rerun_repo.link_rerun_invalidated_step_attempt = AsyncMock()
-    flow_run_rerun_repo.mark_rerun_operation_running = AsyncMock()
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
         side_effect=_create_or_get_attempt_started
     )
@@ -467,7 +447,6 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
         session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,
@@ -513,77 +492,6 @@ def _empty_execution_state() -> RunExecutionState:
     )
 
 
-def _active_rerun_operation(
-    *,
-    user,
-    run: FlowRun,
-    step: RuntimeStep,
-    role: FlowRunRerunInvalidationRole,
-    root_step_input_override: RerunStepInputOverride | None,
-    root_step_input_override_requested: bool | None = None,
-    root_attempt_no: int = 3,
-    prior_attempt_id: UUID | None = None,
-) -> tuple[FlowRunActiveRerunOperation, FlowRunRerunInvalidatedStep]:
-    now = datetime.now(timezone.utc)
-    operation = FlowRunRerunOperation(
-        id=uuid4(),
-        tenant_id=run.tenant_id,
-        flow_id=run.flow_id,
-        flow_run_id=run.id,
-        rerun_step_id=step.step_id,
-        rerun_step_order=step.step_order,
-        root_attempt_no=root_attempt_no,
-        root_attempt_id=None,
-        status=FlowRunRerunOperationStatus.QUEUED,
-        request_fingerprint="rerun-fingerprint",
-        expected_run_revision=1,
-        accepted_run_revision=2,
-        reason="rerun",
-        input_payload_json=None,
-        input_revision=FlowRunInputRevisionNotRecorded(status="not_recorded"),
-        root_step_input_override_requested=(
-            root_step_input_override is not None
-            if root_step_input_override_requested is None
-            else root_step_input_override_requested
-        ),
-        root_step_input_override=root_step_input_override,
-        requested_by_principal_type=PrincipalType.USER,
-        requested_by_user_id=user.id,
-        requested_by_service_id=None,
-        failure_code=None,
-        failure_message=None,
-        started_at=None,
-        finished_at=None,
-        created_at=now,
-        updated_at=now,
-    )
-    invalidated_step = FlowRunRerunInvalidatedStep(
-        id=uuid4(),
-        operation_id=operation.id,
-        tenant_id=run.tenant_id,
-        flow_id=run.flow_id,
-        flow_run_id=run.id,
-        step_id=step.step_id,
-        step_order=step.step_order,
-        invalidation_order=1,
-        role=role,
-        dependency_sources_json=[],
-        prior_step_result_id=uuid4(),
-        prior_attempt_id=prior_attempt_id,
-        new_attempt_no=None,
-        new_attempt_id=None,
-        created_at=now,
-        updated_at=now,
-    )
-    return (
-        FlowRunActiveRerunOperation(
-            operation=operation,
-            invalidated_steps=(invalidated_step,),
-        ),
-        invalidated_step,
-    )
-
-
 @pytest.mark.asyncio
 async def test_flow_is_active_delegates_to_flow_repo(user):
     executor, flow_repo, _, _ = _build_executor(user)
@@ -597,135 +505,10 @@ async def test_flow_is_active_delegates_to_flow_repo(user):
     flow_repo.is_active.assert_awaited_once_with(flow_id=flow_id, tenant_id=tenant_id)
 
 
-@pytest.mark.asyncio
-async def test_start_step_attempt_skips_file_copy_for_root_rerun_file_override(user):
-    executor, _, flow_run_repo, _ = _build_executor(user)
-    flow_run_rerun_repo = executor.flow_run_rerun_repo
-    run = _run(status=FlowRunStatus.RUNNING, user=user)
-    step = _step_for_execute_step()
-    prior_attempt_id = uuid4()
-    active_operation, invalidated_step = _active_rerun_operation(
-        user=user,
-        run=run,
-        step=step,
-        role=FlowRunRerunInvalidationRole.ROOT,
-        root_step_input_override=RerunStepInputOverride(
-            step_id=step.step_id,
-            file_ids=(),
-        ),
-        root_step_input_override_requested=True,
-        prior_attempt_id=prior_attempt_id,
-    )
-
-    started = await executor._start_step_attempt(
-        run_id=run.id,
-        flow_id=run.flow_id,
-        tenant_id=run.tenant_id,
-        step=step,
-        celery_task_id="rerun-root",
-        active_rerun_operation=active_operation,
-        active_rerun_invalidated_step=invalidated_step,
-    )
-
-    assert started.attempt_no == active_operation.operation.root_attempt_no
-    flow_run_repo.copy_step_input_files_from_predecessor_attempt.assert_not_awaited()
-    flow_run_rerun_repo.link_rerun_invalidated_step_attempt.assert_awaited_once_with(
-        operation_id=active_operation.operation.id,
-        tenant_id=run.tenant_id,
-        step_id=step.step_id,
-        new_attempt_no=started.attempt_no,
-        new_attempt_id=started.id,
-    )
-    flow_run_rerun_repo.mark_rerun_operation_running.assert_awaited_once_with(
-        operation_id=active_operation.operation.id,
-        tenant_id=run.tenant_id,
-        root_attempt_id=started.id,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    (
-        "role",
-        "root_step_input_override",
-        "root_step_input_override_requested",
-        "allocated_attempt_no",
-        "expected_mark_running",
-    ),
-    [
-        (FlowRunRerunInvalidationRole.ROOT, None, False, 3, True),
-        (
-            FlowRunRerunInvalidationRole.DOWNSTREAM,
-            "override",
-            True,
-            4,
-            False,
-        ),
-    ],
-)
-async def test_start_step_attempt_copies_file_rows_for_rerun_inherited_inputs(
-    user,
-    role: FlowRunRerunInvalidationRole,
-    root_step_input_override: str | None,
-    root_step_input_override_requested: bool,
-    allocated_attempt_no: int,
-    expected_mark_running: bool,
-):
-    executor, _, flow_run_repo, _ = _build_executor(user)
-    flow_run_rerun_repo = executor.flow_run_rerun_repo
-    run = _run(status=FlowRunStatus.RUNNING, user=user)
-    step = _step_for_execute_step()
-    prior_attempt_id = uuid4()
-    flow_run_repo.allocate_next_attempt_no = AsyncMock(
-        return_value=allocated_attempt_no
-    )
-    active_operation, invalidated_step = _active_rerun_operation(
-        user=user,
-        run=run,
-        step=step,
-        role=role,
-        root_step_input_override=(
-            RerunStepInputOverride(step_id=step.step_id, file_ids=())
-            if root_step_input_override is not None
-            else None
-        ),
-        root_step_input_override_requested=root_step_input_override_requested,
-        root_attempt_no=3,
-        prior_attempt_id=prior_attempt_id,
-    )
-
-    started = await executor._start_step_attempt(
-        run_id=run.id,
-        flow_id=run.flow_id,
-        tenant_id=run.tenant_id,
-        step=step,
-        celery_task_id="rerun-inherited",
-        active_rerun_operation=active_operation,
-        active_rerun_invalidated_step=invalidated_step,
-    )
-
-    assert started.attempt_no == allocated_attempt_no
-    flow_run_repo.copy_step_input_files_from_predecessor_attempt.assert_awaited_once_with(
-        run_id=run.id,
-        flow_id=run.flow_id,
-        tenant_id=run.tenant_id,
-        step_id=step.step_id,
-        step_order=step.step_order,
-        predecessor_attempt_id=prior_attempt_id,
-        target_attempt_no=started.attempt_no,
-    )
-    flow_run_rerun_repo.link_rerun_invalidated_step_attempt.assert_awaited_once()
-    if expected_mark_running:
-        flow_run_rerun_repo.mark_rerun_operation_running.assert_awaited_once()
-    else:
-        flow_run_rerun_repo.mark_rerun_operation_running.assert_not_awaited()
-
-
 def test_executor_accepts_grouped_config(user):
     flow_repo = AsyncMock()
     session = AsyncMock()
     flow_run_repo = AsyncMock()
-    flow_run_rerun_repo = AsyncMock(spec=FlowRunRerunRepository)
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
@@ -763,7 +546,6 @@ def test_executor_accepts_grouped_config(user):
         session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,
@@ -1524,7 +1306,7 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     assert finish_kwargs["error_code"] == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
     public_error = (
         "Flow step 1 execution failed. Provider work may or may not have started; "
-        "rerunning can repeat provider work and spend."
+        "retrying can repeat provider work and spend."
     )
     assert finish_kwargs["error_message"] == public_error
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
@@ -1731,7 +1513,7 @@ async def test_provider_unavailability_is_typed_with_unknown_outcome_disclosure(
     assert finish_kwargs["error_code"] == FlowApiErrorCode.PROVIDER_UNAVAILABLE.value
     assert finish_kwargs["error_message"] == (
         "Flow step 1 execution failed because the provider was unavailable. "
-        "Provider work may or may not have started; rerunning can repeat provider "
+        "Provider work may or may not have started; retrying can repeat provider "
         "work and spend."
     )
     terminal_error = executor._terminalize_run.await_args.kwargs["error"]
@@ -1850,7 +1632,7 @@ async def test_late_capability_rejection_discloses_prior_provider_work(user):
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
     assert "may or may not have started" in finish_kwargs["error_message"]
     terminal_error = executor._terminalize_run.await_args.kwargs["error"]
-    assert "rerunning can repeat provider work and spend" in terminal_error.message
+    assert "retrying can repeat provider work and spend" in terminal_error.message
 
 
 @pytest.mark.asyncio
@@ -1940,181 +1722,6 @@ async def test_terminal_run_attempt_start_rejection_uses_failure_path_without_pr
         == FlowApiErrorCode.STEP_ATTEMPT_START_FAILED.value
     )
     assistant.get_response.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_execute_terminalizes_multiple_active_rerun_operations(
-    user,
-    caplog,
-):
-    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
-    flow_run_rerun_repo = executor.flow_run_rerun_repo
-    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
-    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
-    failed_run = queued_run.model_copy(
-        update={
-            "status": FlowRunStatus.FAILED,
-            "error": FlowRunError.from_source(
-                FlowRunLifecycleSource.EXECUTOR_FAILED,
-                code=FlowApiErrorCode.RUN_RERUN_MULTIPLE_ACTIVE_OPERATIONS_INVARIANT,
-                message="Rerun failed because multiple active rerun operations exist.",
-            ),
-        }
-    )
-    step_id = uuid4()
-    assistant_id = uuid4()
-
-    flow_run_repo.get = _run_get_mock(running_run, failed_run)
-    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.list_step_results = AsyncMock(return_value=[])
-    flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(
-        side_effect=FlowRunRerunMultipleActiveOperationsError(flow_run_id=queued_run.id)
-    )
-    flow_version_repo.get = AsyncMock(
-        return_value=_published_flow_version(
-            flow_id=queued_run.flow_id,
-            version=queued_run.flow_version,
-            tenant_id=user.tenant_id,
-            definition_checksum=None,
-            definition_json={
-                "steps": [
-                    {
-                        "step_id": str(step_id),
-                        "step_order": 1,
-                        "assistant_id": str(assistant_id),
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                    }
-                ]
-            },
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-    )
-    executor._flow_is_active = AsyncMock(return_value=True)
-
-    with caplog.at_level(logging.CRITICAL, logger="eneo.flows.runtime.executor"):
-        result = await executor.execute(
-            run_id=queued_run.id,
-            flow_id=queued_run.flow_id,
-            tenant_id=user.tenant_id,
-            run_revision=queued_run.revision,
-            celery_task_id="task-1",
-            retry_count=0,
-        )
-
-    assert result == {
-        "status": "failed",
-        "error": "Rerun failed because multiple active rerun operations exist.",
-    }
-    flow_run_repo.save_step_result.assert_not_awaited()
-    flow_run_repo.claim_step_result.assert_not_awaited()
-    executor.session.rollback.assert_awaited_once()
-    terminalize_kwargs = (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
-    )
-    assert terminalize_kwargs["target_status"] == FlowRunStatus.FAILED
-    run_error = terminalize_kwargs["error"]
-    assert run_error.code == "flow_run_rerun_multiple_active_operations_invariant"
-    assert (
-        run_error.message
-        == "Rerun failed because multiple active rerun operations exist."
-    )
-    assert "flow_executor.rerun_multiple_active_operations_terminalized_failed" in (
-        caplog.text
-    )
-
-
-@pytest.mark.asyncio
-async def test_rerun_lineage_conflict_uses_specific_run_error_after_claim(user):
-    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
-    flow_run_rerun_repo = executor.flow_run_rerun_repo
-    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
-    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
-    step = _runtime_step(step_order=1, input_source="flow_input")
-    claimed = _claimed_step_result(
-        run_id=queued_run.id,
-        flow_id=queued_run.flow_id,
-        tenant_id=user.tenant_id,
-        step_id=step.step_id,
-        assistant_id=step.assistant_id,
-    )
-    active_operation, _ = _active_rerun_operation(
-        user=user,
-        run=queued_run,
-        step=step,
-        role=FlowRunRerunInvalidationRole.ROOT,
-        root_step_input_override=None,
-        root_step_input_override_requested=False,
-        prior_attempt_id=uuid4(),
-    )
-
-    flow_run_repo.get = _run_get_mock(running_run, running_run)
-    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.list_step_results = AsyncMock(return_value=[])
-    flow_run_rerun_repo.get_active_rerun_operation = AsyncMock(
-        return_value=active_operation
-    )
-    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
-    flow_run_rerun_repo.link_rerun_invalidated_step_attempt = AsyncMock(
-        side_effect=FlowRunRerunAttemptLineageConflictError(
-            operation_id=active_operation.operation.id,
-            step_id=step.step_id,
-            new_attempt_id=uuid4(),
-        )
-    )
-    flow_run_repo.finish_attempt = AsyncMock()
-    flow_version_repo.get = AsyncMock(
-        return_value=_published_flow_version(
-            flow_id=queued_run.flow_id,
-            version=queued_run.flow_version,
-            tenant_id=user.tenant_id,
-            definition_checksum=None,
-            definition_json={
-                "steps": [
-                    {
-                        "step_id": str(step.step_id),
-                        "step_order": step.step_order,
-                        "assistant_id": str(step.assistant_id),
-                        "input_source": step.input_source,
-                        "output_mode": step.output_mode,
-                    }
-                ]
-            },
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-    )
-    executor._flow_is_active = AsyncMock(return_value=True)
-
-    result = await executor.execute(
-        run_id=queued_run.id,
-        flow_id=queued_run.flow_id,
-        tenant_id=user.tenant_id,
-        run_revision=queued_run.revision,
-        celery_task_id="task-1",
-        retry_count=0,
-    )
-
-    assert result == {
-        "status": "failed",
-        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
-    }
-    flow_run_repo.finish_attempt.assert_not_awaited()
-    flow_run_rerun_repo.mark_rerun_operation_running.assert_not_awaited()
-    saved_result = flow_run_repo.save_step_result.await_args.args[1]
-    assert saved_result.status == FlowStepResultStatus.FAILED
-    assert saved_result.error_message == "Flow step 1 execution failed."
-    terminalize_kwargs = (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs
-    )
-    run_error = terminalize_kwargs["error"]
-    assert run_error.code == "flow_run_rerun_attempt_lineage_conflict_invariant"
-    assert (
-        run_error.message
-        == "Rerun failed because the invalidated step is already linked to another attempt."
-    )
-    assert run_error.step_order == 1
 
 
 @pytest.mark.asyncio
@@ -2267,7 +1874,7 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
     terminal_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
         "error"
     ]
-    assert "rerunning can repeat provider work and spend" in terminal_error.message
+    assert "retrying can repeat provider work and spend" in terminal_error.message
 
 
 @pytest.mark.asyncio

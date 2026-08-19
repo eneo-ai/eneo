@@ -5,25 +5,19 @@ export const load = async (event) => {
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,
-    ragEvidencePolicy,
-    securityClassifications,
-    flowClassificationRetentionPolicies
+    ragEvidencePolicy
   ] = await Promise.all([
     eneo.settings.getFlowRetentionPolicy(),
     eneo.settings.getFlowInputLimits(),
     eneo.settings.getFlowRuntimePolicy(),
     eneo.settings.getMappedExecutionPolicy(),
-    eneo.settings.getRagEvidencePolicy(),
-    eneo.securityClassifications.list(),
-    eneo.settings.listFlowClassificationRetentionPolicies()
+    eneo.settings.getRagEvidencePolicy()
   ]);
   return {
     flowRetentionPolicy,
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,
-    ragEvidencePolicy,
-    securityClassifications,
-    flowClassificationRetentionPolicies
+    ragEvidencePolicy
   };
 };

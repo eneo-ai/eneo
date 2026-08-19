@@ -18,12 +18,10 @@ from eneo.flows.flow_run_error import FlowRunError
 @pytest.mark.asyncio
 async def test_terminalize_run_rejects_error_source_drift_before_writing() -> None:
     flow_run_repo = AsyncMock()
-    flow_run_rerun_repo = AsyncMock()
     audit_outbox_repo = AsyncMock()
     review_checkpoint_repo = AsyncMock()
     terminalizer = FlowRunTerminalizer(
         flow_run_repo,
-        flow_run_rerun_repo,
         audit_outbox_repo,
         review_checkpoint_repo,
     )

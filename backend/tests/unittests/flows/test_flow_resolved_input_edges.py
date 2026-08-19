@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 from copy import deepcopy
-from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -12,11 +11,6 @@ from eneo.flows.domain.canonical_json_hash import (
     canonical_json_bytes,
     canonical_json_hash,
 )
-from eneo.flows.flow_retention_tombstone import (
-    FlowAttemptRetentionMarker,
-    FlowRetentionTombstone,
-    RunDebugAttemptRetentionCounts,
-)
 from eneo.flows.flow_run_provenance import (
     FLOW_RESOLVED_INPUT_MAX_CANONICAL_BYTES,
     FLOW_RESOLVED_INPUT_MAX_EDGES,
@@ -24,7 +18,6 @@ from eneo.flows.flow_run_provenance import (
     FlowAttemptScopedProvenance,
     FlowResolvedInputEdges,
     group_resolved_input_edges,
-    parse_attempt_provenance_for_attempt,
     parse_resolved_input_edges,
     project_resolved_input_lineage,
 )
@@ -248,171 +241,6 @@ def test_parse_resolved_input_edges_preserves_null_as_not_tracked() -> None:
     assert result.status == "not_tracked"
     assert result.aggregate is None
     assert result.marker is None
-
-
-def test_missing_resolved_input_lineage_uses_attempt_retention_marker() -> None:
-    now = datetime.now(timezone.utc)
-    tenant_id = uuid4()
-    run_id = uuid4()
-    attempt_id = uuid4()
-    marker = FlowAttemptRetentionMarker(
-        tombstone=FlowRetentionTombstone(
-            tenant_id=str(tenant_id),
-            run_id=str(run_id),
-            trace_id=str(uuid4()),
-            data_class="run_debug_evidence",
-            object_type="flow_step_attempt",
-            object_id=str(attempt_id),
-            policy_source="tenant_policy",
-            cutoff=now,
-            counts=RunDebugAttemptRetentionCounts(
-                cleared_field_count=3,
-                provider_call_count=2,
-                resolved_input_aggregate_count=1,
-                resolved_input_edge_count=7,
-            ),
-            timestamp=now,
-            retention_state="retention_purged",
-        )
-    )
-
-    scoped_provenance = parse_attempt_provenance_for_attempt(
-        marker.to_payload(),
-        tenant_id=tenant_id,
-        run_id=run_id,
-        attempt_id=attempt_id,
-    )
-    assert scoped_provenance.retention_counts == marker.tombstone.counts
-
-    lineage = project_resolved_input_lineage(
-        resolved_inputs=parse_resolved_input_edges(None),
-        scoped_attempt_provenance=scoped_provenance,
-    )
-
-    assert lineage.model_dump(mode="json") == {
-        "status": "retention_purged",
-        "resolved_input_aggregate_count": 1,
-        "resolved_input_edge_count": 7,
-    }
-
-
-@pytest.mark.parametrize("mismatched_identity", ["tenant_id", "run_id", "attempt_id"])
-def test_missing_lineage_does_not_trust_another_attempts_retention_marker(
-    mismatched_identity: str,
-) -> None:
-    now = datetime.now(timezone.utc)
-    tenant_id = uuid4()
-    run_id = uuid4()
-    attempt_id = uuid4()
-    marker_identity = {
-        "tenant_id": tenant_id,
-        "run_id": run_id,
-        "attempt_id": attempt_id,
-    }
-    marker_identity[mismatched_identity] = uuid4()
-    marker = FlowAttemptRetentionMarker(
-        tombstone=FlowRetentionTombstone(
-            tenant_id=str(marker_identity["tenant_id"]),
-            run_id=str(marker_identity["run_id"]),
-            trace_id=str(uuid4()),
-            data_class="run_debug_evidence",
-            object_type="flow_step_attempt",
-            object_id=str(marker_identity["attempt_id"]),
-            policy_source="tenant_policy",
-            cutoff=now,
-            counts=RunDebugAttemptRetentionCounts(
-                cleared_field_count=3,
-                provider_call_count=2,
-                resolved_input_aggregate_count=1,
-                resolved_input_edge_count=7,
-            ),
-            timestamp=now,
-            retention_state="retention_purged",
-        )
-    )
-
-    scoped_provenance = parse_attempt_provenance_for_attempt(
-        marker.to_payload(),
-        tenant_id=tenant_id,
-        run_id=run_id,
-        attempt_id=attempt_id,
-    )
-    lineage = project_resolved_input_lineage(
-        resolved_inputs=parse_resolved_input_edges(None),
-        scoped_attempt_provenance=scoped_provenance,
-    )
-
-    parse_result = scoped_provenance.parse_result
-    assert parse_result.status == "corrupt"
-    assert parse_result.marker is not None
-    assert (
-        parse_result.marker.error_code
-        == "flow_attempt_provenance_invalid_retention_marker"
-    )
-    assert lineage.model_dump(mode="json") == {"status": "not_tracked"}
-
-
-@pytest.mark.parametrize(
-    "count_field",
-    [
-        "cleared_field_count",
-        "provider_call_count",
-        "resolved_input_aggregate_count",
-        "resolved_input_edge_count",
-    ],
-)
-def test_negative_attempt_retention_counts_are_corrupt(
-    count_field: str,
-) -> None:
-    now = datetime.now(timezone.utc)
-    tenant_id = uuid4()
-    run_id = uuid4()
-    attempt_id = uuid4()
-    raw_marker = FlowAttemptRetentionMarker(
-        tombstone=FlowRetentionTombstone(
-            tenant_id=str(tenant_id),
-            run_id=str(run_id),
-            trace_id=str(uuid4()),
-            data_class="run_debug_evidence",
-            object_type="flow_step_attempt",
-            object_id=str(attempt_id),
-            policy_source="tenant_policy",
-            cutoff=now,
-            counts=RunDebugAttemptRetentionCounts(
-                cleared_field_count=3,
-                provider_call_count=2,
-                resolved_input_aggregate_count=1,
-                resolved_input_edge_count=7,
-            ),
-            timestamp=now,
-            retention_state="retention_purged",
-        )
-    ).to_payload()
-    tombstone = raw_marker["tombstone"]
-    assert isinstance(tombstone, dict)
-    counts = tombstone["counts"]
-    assert isinstance(counts, dict)
-    counts[count_field] = -1
-
-    scoped_provenance = parse_attempt_provenance_for_attempt(
-        raw_marker,
-        tenant_id=tenant_id,
-        run_id=run_id,
-        attempt_id=attempt_id,
-    )
-    lineage = project_resolved_input_lineage(
-        resolved_inputs=parse_resolved_input_edges(None),
-        scoped_attempt_provenance=scoped_provenance,
-    )
-
-    parse_result = scoped_provenance.parse_result
-    assert parse_result.status == "corrupt"
-    assert parse_result.marker is not None
-    assert (
-        parse_result.marker.error_code
-        == "flow_attempt_provenance_invalid_retention_marker"
-    )
-    assert lineage.model_dump(mode="json") == {"status": "not_tracked"}
 
 
 @pytest.mark.parametrize(

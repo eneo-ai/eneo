@@ -22,11 +22,7 @@ from eneo.flows.enums import (
     FLOW_RUN_STATUS_FILTER_ORDER,
     OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     OPEN_FLOW_STEP_ATTEMPT_STATUSES,
-    RERUN_ELIGIBLE_FLOW_RUN_STATUS_VALUES,
-    RERUN_ELIGIBLE_FLOW_RUN_STATUSES,
-    RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS,
     TERMINAL_FLOW_RUN_STATUSES,
-    FlowRunRerunOperationStatus,
     FlowRunStatus,
     FlowRunStatusCapability,
     FlowStepAttemptStatus,
@@ -91,26 +87,10 @@ def test_flow_run_status_helpers_are_derived_from_capabilities() -> None:
         for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
         if capability.is_cancellable
     }
-    assert RERUN_ELIGIBLE_FLOW_RUN_STATUSES == {
-        FlowRunStatus.COMPLETED,
-        FlowRunStatus.FAILED,
-    }
-    assert RERUN_ELIGIBLE_FLOW_RUN_STATUS_VALUES == ("completed", "failed")
     assert ACTIVE_FLOW_RUN_STATUSES.isdisjoint(TERMINAL_FLOW_RUN_STATUSES)
     assert ACTIVE_FLOW_RUN_STATUSES | TERMINAL_FLOW_RUN_STATUSES | {
         FlowRunStatus.AWAITING_REVIEW
     } == set(FlowRunStatus)
-
-
-def test_rerun_operation_terminal_status_mapping_is_explicit() -> None:
-    assert set(RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS) == (
-        TERMINAL_FLOW_RUN_STATUSES
-    )
-    assert RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS == {
-        FlowRunStatus.COMPLETED: FlowRunRerunOperationStatus.COMPLETED,
-        FlowRunStatus.FAILED: FlowRunRerunOperationStatus.FAILED,
-        FlowRunStatus.CANCELLED: FlowRunRerunOperationStatus.CANCELLED,
-    }
 
 
 def test_flow_step_open_work_status_constants_are_explicit() -> None:
@@ -164,7 +144,6 @@ def test_flow_run_status_capability_public_fields_match_source() -> None:
     public_fields = set(FlowRunStatusCapabilityPublic.model_fields)
 
     assert public_fields == source_fields
-    assert "is_rerun_eligible" in public_fields
 
 
 def test_flow_run_status_capabilities_reject_unknown_response_fields() -> None:

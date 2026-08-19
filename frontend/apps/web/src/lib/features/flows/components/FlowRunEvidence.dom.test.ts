@@ -25,8 +25,6 @@ function evidenceWithCorruptPassageAggregates(
     step_results: [],
     step_attempts: [],
     result_files: [],
-    rerun_operations: [],
-    rerun_invalidated_steps: [],
     review_checkpoints: [],
     webhook_deliveries: [],
     provider_calls: {},
@@ -65,12 +63,6 @@ function evidenceWithBoundedSections(): FlowRunEvidenceWithTypedSteps {
       reason: "logical_bytes",
       section: "result_files",
       rows_omitted: 2,
-      count_truncated: false
-    },
-    {
-      reason: "parent_section_omitted",
-      section: "rerun_invalidated_steps",
-      rows_omitted: 1,
       count_truncated: false
     }
   ];
@@ -159,14 +151,6 @@ describe("FlowRunEvidence", () => {
         m.flow_run_evidence_view_bytes_omitted({
           section: m.flow_run_evidence_section_result_files(),
           count: "2"
-        })
-      )
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        m.flow_run_evidence_view_parent_omitted({
-          section: m.flow_run_evidence_section_rerun_invalidated_steps(),
-          count: "1"
         })
       )
     ).toBeTruthy();

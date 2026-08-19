@@ -101,9 +101,6 @@ from eneo.flows import (
     FlowService,
     FlowVersionRepository,
 )
-from eneo.flows.application.flow_classification_retention_policy_service import (
-    FlowClassificationRetentionPolicyService,
-)
 from eneo.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
@@ -112,7 +109,6 @@ from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
-from eneo.flows.application.flow_run_rerun_service import FlowRunRerunService
 from eneo.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
 )
@@ -122,16 +118,12 @@ from eneo.flows.flow_runtime_file_service import FlowRuntimeFileService
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
-from eneo.flows.infrastructure.flow_classification_retention_policy_repo import (
-    FlowClassificationRetentionPolicyRepository,
-)
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
-from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -874,10 +866,6 @@ class Container(containers.DeclarativeContainer):
         FlowRuntimeUploadRepository,
         session=session,
     )
-    flow_classification_retention_policy_repo = providers.Factory(
-        FlowClassificationRetentionPolicyRepository,
-        session=session,
-    )
     flow_run_repo = providers.Factory(
         FlowRunRepository,
         session=session,
@@ -885,10 +873,6 @@ class Container(containers.DeclarativeContainer):
     )
     flow_provider_call_repo = providers.Factory(
         FlowProviderCallRepository,
-        session=session,
-    )
-    flow_run_rerun_repo = providers.Factory(
-        FlowRunRerunRepository,
         session=session,
     )
     flow_run_review_checkpoint_repo = providers.Factory(
@@ -899,7 +883,6 @@ class Container(containers.DeclarativeContainer):
     flow_run_terminalizer = providers.Factory(
         FlowRunTerminalizer,
         flow_run_repo=flow_run_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
         audit_outbox_repo=flow_run_audit_outbox_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
     )
@@ -1108,13 +1091,6 @@ class Container(containers.DeclarativeContainer):
     data_retention_service = providers.Factory(
         DataRetentionService,
         session=session,
-    )
-    flow_classification_retention_policy_service = providers.Factory(
-        FlowClassificationRetentionPolicyService,
-        user=user,
-        repo=flow_classification_retention_policy_repo,
-        audit_service=audit_service,
-        data_retention_service=data_retention_service,
     )
     flow_run_audit_outbox_delivery_service = providers.Factory(
         FlowRunAuditOutboxDeliveryService,
@@ -1537,23 +1513,11 @@ class Container(containers.DeclarativeContainer):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=flow_provider_call_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
         access_policy=flow_run_access_policy,
         webhook_delivery_repo=flow_run_webhook_delivery_repo,
-    )
-    flow_run_rerun_service = providers.Factory(
-        FlowRunRerunService,
-        user=user,
-        flow_run_repo=flow_run_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
-        flow_version_repo=flow_version_repo,
-        file_repo=file_repo,
-        runtime_upload_repo=flow_runtime_upload_repo,
-        settings_service=settings_service,
-        access_policy=flow_run_access_policy,
     )
     flow_run_review_checkpoint_service = providers.Factory(
         FlowRunReviewCheckpointService,

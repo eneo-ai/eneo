@@ -2,8 +2,6 @@
 /** @typedef {NonNullable<import('../types/schema').operations["list_flow_runs"]["parameters"]["query"]>} FlowRunListQuery */
 /** @typedef {NonNullable<import('../types/schema').operations["export_flow_run_evidence"]["parameters"]["query"]>} FlowRunEvidenceExportQuery */
 /** @typedef {NonNullable<import('../types/schema').operations["list_flow_run_provider_calls"]["parameters"]["query"]>} FlowRunProviderCallListQuery */
-/** @typedef {import('../types/schema').operations["rerun_flow_run_step"]["requestBody"]["content"]["application/json"]} FlowRunStepRerunRequest */
-/** @typedef {import('../types/schema').operations["rerun_flow_run_step"]["responses"][202]["content"]["application/json"]} FlowRunStepRerunResponse */
 import { FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS } from "../flows/flow-run-reserved-input-payload-keys.js";
 
 const FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER = "Eneo-Package-Omitted-Mcp-Assistant-Count";
@@ -768,20 +766,6 @@ export function initFlows(client) {
         return _fetch("/api/v1/flows/{id}/runs/{run_id}/cancel/", {
           method: "post",
           params: { path: { id: flowId, run_id: run.id } }
-        });
-      },
-
-      /**
-       * Rerun one completed step and its downstream dependents.
-       * @param {{flowId: string, runId: string, stepId: string} & FlowRunStepRerunRequest} params
-       * @returns {Promise<FlowRunStepRerunResponse>}
-       * @throws {EneoError}
-       */
-      rerunStep: async ({ flowId, runId, stepId, ...requestBody }) => {
-        return _fetch("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/", {
-          method: "post",
-          params: { path: { id: flowId, run_id: runId, step_id: stepId } },
-          requestBody: { "application/json": requestBody }
         });
       },
 

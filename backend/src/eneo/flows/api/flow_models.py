@@ -74,7 +74,6 @@ from eneo.flows.domain.flow import (
     FlowStepRetrievalPolicy,
     parse_flow_step_retrieval_policy,
 )
-from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevision
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
     ProviderCallEvidencePage,
@@ -88,14 +87,11 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
-    FlowRunRerunInvalidationRole,
-    FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
-    RerunDependencyKind,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import (
@@ -288,24 +284,12 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "data_retention_days": 30,
     "run_history_retention": {
         "state": "days",
-        "effective_days": 14,
-        "effective_minimum_days": 90,
-        "no_purge": False,
-        "policy_conflict": True,
-        "activation_sources": ["organization", "classification"],
-        "barrier_sources": [
-            "organization_minimum",
-            "classification_minimum",
-        ],
+        "effective_days": 30,
+        "source": "flow",
         "contributors": {
             "organization_days": 90,
-            "classification_days": 30,
             "space_days": 14,
             "flow_days": 30,
-            "organization_minimum_days": 90,
-            "classification_minimum_days": 60,
-            "organization_no_purge": False,
-            "classification_no_purge": False,
         },
     },
     "created_at": "2026-03-17T09:30:00Z",
@@ -435,34 +419,6 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
 FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
     "run": FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
     "redispatched_count": 1,
-}
-
-FLOW_RUN_STEP_RERUN_REQUEST_EXAMPLE: dict[str, Any] = {
-    "expected_run_revision": 7,
-    "reason": "The HR reviewer corrected the transcription for step 1.",
-    "input_payload_json": {"reviewer_note": "Use the corrected spelling of Alex."},
-    "step_inputs": {
-        "00000000-0000-0000-0000-000000000101": {
-            "file_ids": ["00000000-0000-0000-0000-000000000701"]
-        }
-    },
-}
-
-FLOW_RUN_STEP_RERUN_RESPONSE_EXAMPLE: dict[str, Any] = {
-    "operation_id": "00000000-0000-0000-0000-000000000801",
-    "run": {
-        **FLOW_RUN_PUBLIC_EXAMPLE,
-        "revision": 8,
-        "status": "queued",
-        "result": None,
-    },
-    "rerun_step_id": "00000000-0000-0000-0000-000000000101",
-    "new_attempt_no": 2,
-    "invalidated_step_ids": [
-        "00000000-0000-0000-0000-000000000101",
-        "00000000-0000-0000-0000-000000000102",
-    ],
-    "status": "queued",
 }
 
 # Step identity here matches the review step in FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE, so a
@@ -1008,7 +964,7 @@ class FlowRunPublic(BaseModel):
     id: UUID = Field(
         description=(
             "Durable run identifier. Use it as the `{run_id}` path segment for "
-            "polling, review, cancel, rerun, and artifact requests."
+            "polling, review, cancel, and artifact requests."
         ),
     )
     flow_id: UUID = Field(description="Identifier of the flow that owns this run.")
@@ -1033,10 +989,7 @@ class FlowRunPublic(BaseModel):
         ),
     )
     revision: int = Field(
-        description=(
-            "Monotonic run lifecycle compare token. Step-rerun requests use this "
-            "value as `expected_run_revision`."
-        ),
+        description=("Monotonic run lifecycle compare token."),
     )
     status: FlowRunStatus = Field(
         description=(
@@ -1045,8 +998,7 @@ class FlowRunPublic(BaseModel):
             "will not advance until it is approved and resumed, and `completed`, "
             "`failed`, and `cancelled` are terminal. Call "
             "`GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable "
-            "matrix that says which statuses to keep polling, cancel, redispatch, "
-            "or rerun."
+            "matrix that says which statuses to keep polling, cancel, or redispatch."
         ),
     )
     dispatch_pending_since: datetime | None = Field(
@@ -1521,56 +1473,6 @@ class FlowRunRedispatchResponse(BaseModel):
     redispatched_count: int
 
 
-class FlowRunStepRerunRequest(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={"example": FLOW_RUN_STEP_RERUN_REQUEST_EXAMPLE},
-    )
-
-    expected_run_revision: int = Field(
-        ge=1,
-        description="Run revision observed by the caller before requesting the rerun.",
-    )
-    reason: str = Field(
-        min_length=1,
-        max_length=1024,
-        description="Human-readable reason for accepting the rerun operation.",
-    )
-    input_payload_json: dict[str, Any] | None = Field(
-        default=None,
-        description=(
-            "Optional replacement for the run's semantic inline input payload when "
-            "the rerun is accepted. Existing orchestration metadata and runtime "
-            "transcription cache values are preserved."
-        ),
-    )
-    step_inputs: dict[UUID, StepRunInput] | None = Field(
-        default=None,
-        description=(
-            "Optional file inputs keyed by the rerun root step id. Provided step ids "
-            "replace their existing `step_inputs` entry; other step ids are preserved."
-        ),
-    )
-
-
-class FlowRunStepRerunResponse(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={"example": FLOW_RUN_STEP_RERUN_RESPONSE_EXAMPLE}
-    )
-
-    operation_id: UUID
-    run: FlowRunPublic = Field(
-        description=(
-            "Current persisted run state. On idempotent replay, `run.revision` may "
-            "have advanced past the request's `expected_run_revision`."
-        )
-    )
-    rerun_step_id: UUID
-    new_attempt_no: int
-    invalidated_step_ids: list[UUID]
-    status: FlowRunRerunOperationStatus
-
-
 class FlowRunDebugIoTypes(BaseModel):
     input: str | None = None
     output: str | None = None
@@ -2021,154 +1923,6 @@ FLOW_RUN_RESULT_FILE_EXAMPLE: dict[str, Any] = {
 }
 
 
-class FlowRunRerunStepInputOverridePublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="forbid")
-
-    step_id: UUID = Field(
-        description="Root step whose runtime input files were explicitly replaced or cleared by the rerun request."
-    )
-    file_ids: list[UUID] = Field(
-        description=(
-            "Runtime file IDs stored for the rerun root attempt. An empty list "
-            "means the rerun explicitly cleared the root step files."
-        )
-    )
-
-
-class FlowRunRerunOperationPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    tenant_id: UUID
-    flow_id: UUID
-    flow_run_id: UUID
-    rerun_step_id: UUID
-    rerun_step_order: int
-    root_attempt_no: int
-    root_attempt_id: UUID | None = None
-    status: FlowRunRerunOperationStatus
-    request_fingerprint: str = Field(
-        description=(
-            "Stable fingerprint that correlates repeated rerun requests with "
-            "the accepted operation and invalidation lineage."
-        )
-    )
-    expected_run_revision: int
-    accepted_run_revision: int
-    reason: str
-    input_revision: FlowRunInputRevision = Field(
-        description=(
-            "Input revision evidence for this rerun. `tracked` includes hashes, "
-            "changed paths, and the superseded input snapshot; `not_recorded` "
-            "identifies older or unaccepted operations; `unavailable` isolates "
-            "invalid persisted evidence without hiding neighboring operations."
-        )
-    )
-    input_payload: dict[str, Any] | None = Field(
-        default=None,
-        description="Inline rerun input payload recorded at rerun acceptance time.",
-    )
-    root_step_input_override: FlowRunRerunStepInputOverridePublic | None = Field(
-        default=None,
-        description=(
-            "Root-step runtime file override recorded at rerun acceptance time. "
-            "Null means files were inherited from the predecessor attempt."
-        ),
-    )
-    root_step_input_override_requested: bool = Field(
-        description=(
-            "True when the rerun request explicitly replaced or cleared root "
-            "step runtime files; false when the root attempt inherits files "
-            "from its predecessor."
-        )
-    )
-    requested_by_principal_type: PrincipalType
-    requested_by_user_id: UUID | None = None
-    requested_by_service_principal: FlowServicePrincipalActorPublic | None = None
-    failure_code: NullablePublicTerminalErrorCode = Field(
-        default=None,
-        description="Stable machine-readable rerun failure code.",
-    )
-    failure_message: str | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
-
-    @model_validator(mode="before")
-    @classmethod
-    def project_public_payload(cls, value: Any) -> Any:
-        payload = _flow_run_rerun_operation_public_payload(
-            value,
-            field_names=tuple(cls.model_fields),
-        )
-        if payload is None:
-            return value
-
-        if "input_payload" not in payload:
-            payload["input_payload"] = payload.get("input_payload_json")
-
-        payload.pop("input_payload_json", None)
-        return payload
-
-    @model_validator(mode="after")
-    def validate_requested_by_actor(self) -> Self:
-        if self.root_step_input_override_requested != (
-            self.root_step_input_override is not None
-        ):
-            raise ValueError(
-                "root_step_input_override must be present exactly when "
-                "root_step_input_override_requested is true."
-            )
-        _validate_public_principal_actor_shape(
-            label="requested_by",
-            principal_type=self.requested_by_principal_type,
-            user_id=self.requested_by_user_id,
-            service_principal=self.requested_by_service_principal,
-            required=True,
-        )
-        return self
-
-
-def _flow_run_rerun_operation_public_payload(
-    value: Any,
-    *,
-    field_names: tuple[str, ...],
-) -> dict[str, Any] | None:
-    if isinstance(value, Mapping):
-        return dict(cast(Mapping[str, Any], value))
-
-    payload = {
-        field_name: getattr(value, field_name)
-        for field_name in field_names
-        if hasattr(value, field_name)
-    }
-    if hasattr(value, "input_payload_json"):
-        payload["input_payload_json"] = getattr(value, "input_payload_json")
-    return payload or None
-
-
-class FlowRunRerunInvalidatedStepPublic(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    operation_id: UUID
-    tenant_id: UUID
-    flow_id: UUID
-    flow_run_id: UUID
-    step_id: UUID
-    step_order: int
-    invalidation_order: int
-    role: FlowRunRerunInvalidationRole
-    dependency_sources_json: list[RerunDependencyKind]
-    prior_step_result_id: UUID | None = None
-    prior_attempt_id: UUID | None = None
-    new_attempt_no: int | None = None
-    new_attempt_id: UUID | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
 class FlowStepAttemptPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -2179,9 +1933,6 @@ class FlowStepAttemptPublic(BaseModel):
     step_id: UUID
     step_order: int
     attempt_no: int
-    rerun_operation_id: UUID | None = None
-    predecessor_attempt_id: UUID | None = None
-    superseded_by_attempt_id: UUID | None = None
     celery_task_id: str | None = None
     status: FlowStepAttemptStatus
     error_code: NullablePublicTerminalErrorCode = Field(
@@ -2293,8 +2044,6 @@ class FlowRunEvidenceResponse(BaseModel):
                 "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
                 "step_attempts": [],
                 "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
-                "rerun_operations": [],
-                "rerun_invalidated_steps": [],
                 "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
                 "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
                 "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
@@ -2309,8 +2058,6 @@ class FlowRunEvidenceResponse(BaseModel):
     step_results: list[FlowRunStepPublic]
     step_attempts: list[FlowStepAttemptPublic]
     result_files: list[FlowRunStepResultFile]
-    rerun_operations: list[FlowRunRerunOperationPublic]
-    rerun_invalidated_steps: list[FlowRunRerunInvalidatedStepPublic]
     review_checkpoints: list[FlowRunReviewCheckpointEvidencePublic]
     webhook_deliveries: list[FlowRunWebhookDeliveryPublic]
     provider_calls: ProviderCallEvidencePage
@@ -2349,14 +2096,9 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "redaction_policy_version": "flow-evidence-redaction.v3",
                     "retention_state_summary": {
                         "tracking_state": "not_tracked",
-                        "tombstone_count": 0,
-                        "retention_purged_count": 0,
-                        "artifact_content_purged_count": 0,
-                        "redacted_for_deletion_count": 0,
                         "note": (
-                            "No retention tombstones are present in this export; "
-                            "rows purged before tombstone tracking remain "
-                            "indistinguishable from never-tracked evidence."
+                            "Deleted evidence is not tracked separately; missing "
+                            "rows remain indistinguishable from never-recorded evidence."
                         ),
                     },
                     "artifact_availability_summary": {
@@ -2451,18 +2193,6 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         "cited_source_count": 1,
                         "unknown_citation_ids": [],
                         "uncited_inserted_source_ids": [],
-                    },
-                    "rerun_lineage": {
-                        "operations_count": 0,
-                        "queued_operations_count": 0,
-                        "running_operations_count": 0,
-                        "completed_operations_count": 0,
-                        "failed_operations_count": 0,
-                        "cancelled_operations_count": 0,
-                        "active_operations_count": 0,
-                        "terminal_operations_count": 0,
-                        "invalidated_steps_count": 0,
-                        "completed_replacement_count": 0,
                     },
                     "review_checkpoints": {
                         "count": 1,

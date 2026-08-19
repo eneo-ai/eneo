@@ -7,7 +7,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 FLOW_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 FLOW_PACKAGE_ARTIFACT_ROOT = BACKEND_ROOT / "src" / "eneo" / "flow_packages" / "domain"
 
-EXPECTED_ROOT_MODULES = 64
+EXPECTED_ROOT_MODULES = 61
 EXPECTED_ROOT_PACKAGES = 6
 
 

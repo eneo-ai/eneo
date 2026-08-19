@@ -45,37 +45,19 @@ def test_due_flow_run_history_purge_query_keeps_exact_policy_after_anchor_gate()
     compiled = _compile(service._build_due_flow_run_history_purge_query(now=now))
 
     assert (
-        compiled.count("coalesce(flow_runs.finished_at, flow_runs.created_at) <=") == 3
+        compiled.count("coalesce(flow_runs.finished_at, flow_runs.created_at) <=") == 2
     )
     assert "flow_runs.status IN ('completed', 'failed', 'cancelled')" in compiled
     assert compiled.count("make_interval") >= 2
-    assert "LEFT OUTER JOIN flow_classification_retention_policies" in compiled
-    assert (
-        "flow_classification_retention_policies.security_classification_id = "
-        "spaces.security_classification_id" in compiled
-    )
-    assert "flow_classification_retention_policies.tenant_id = spaces.tenant_id" in (
-        compiled
-    )
     assert "JOIN tenants ON flow_runs.tenant_id = tenants.id" in compiled
-    activation_sql = (
-        "least(tenants.flow_run_history_retention_days, "
-        "flow_classification_retention_policies.data_retention_days)"
-    )
     effective_retention_sql = (
-        f"CASE WHEN ({activation_sql} IS NOT NULL) THEN "
-        f"least({activation_sql}, spaces.data_retention_days, "
-        "flows.data_retention_days) ELSE NULL END"
+        "coalesce(flows.data_retention_days, spaces.data_retention_days, "
+        "tenants.flow_run_history_retention_days)"
     )
-    assert f"{activation_sql} IS NOT NULL" in compiled
     assert f"make_interval(0, 0, 0, {effective_retention_sql})" in compiled
-    assert "greatest(tenants.flow_run_history_minimum_retention_days" in compiled
-    assert "flow_classification_retention_policies.minimum_retention_days" in compiled
-    assert "tenants.flow_run_history_no_purge" in compiled
-    assert "flow_classification_retention_policies.no_purge" in compiled
-    assert "coalesce(flows.data_retention_days, spaces.data_retention_days)" not in (
-        compiled
-    )
+    assert "flow_classification_retention_policies" not in compiled
+    assert "minimum_retention" not in compiled
+    assert "no_purge" not in compiled
 
 
 @pytest.mark.asyncio

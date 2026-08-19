@@ -21,21 +21,17 @@ from pydantic import (
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
-from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevision
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
-    FlowRunRerunInvalidationRole,
-    FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowRuntimeInputFormat,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
     FlowTemplateAssetStatus,
-    RerunDependencyKind,
     flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
@@ -93,12 +89,6 @@ def parse_flow_step_retrieval_policy(
             "retrieval-plus-completion output modes ('pass_through', 'http_post')."
         )
     return policy
-
-
-@dataclass(frozen=True, slots=True)
-class RerunStepInputOverride:
-    step_id: UUID
-    file_ids: tuple[UUID, ...]
 
 
 def clone_json_object(value: object) -> FlowPersistedJsonObject | None:
@@ -191,22 +181,11 @@ class FlowRunRetentionContributors(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     organization_days: int | None
-    classification_days: int | None
     space_days: int | None
     flow_days: int | None
-    organization_minimum_days: int | None
-    classification_minimum_days: int | None
-    organization_no_purge: bool
-    classification_no_purge: bool
 
 
-FlowRunRetentionActivationSource: TypeAlias = Literal["organization", "classification"]
-FlowRunRetentionBarrierSource: TypeAlias = Literal[
-    "organization_minimum",
-    "classification_minimum",
-    "organization_no_purge",
-    "classification_no_purge",
-]
+FlowRunRetentionSource: TypeAlias = Literal["organization", "space", "flow", "none"]
 
 
 class FlowRunRetentionOff(BaseModel):
@@ -214,11 +193,7 @@ class FlowRunRetentionOff(BaseModel):
 
     state: Literal["off"]
     effective_days: None
-    effective_minimum_days: int | None
-    no_purge: bool
-    policy_conflict: bool
-    activation_sources: tuple[FlowRunRetentionActivationSource, ...]
-    barrier_sources: tuple[FlowRunRetentionBarrierSource, ...]
+    source: Literal["none"]
     contributors: FlowRunRetentionContributors
 
 
@@ -227,11 +202,7 @@ class FlowRunRetentionDays(BaseModel):
 
     state: Literal["days"]
     effective_days: int
-    effective_minimum_days: int | None
-    no_purge: bool
-    policy_conflict: bool
-    activation_sources: tuple[FlowRunRetentionActivationSource, ...]
-    barrier_sources: tuple[FlowRunRetentionBarrierSource, ...]
+    source: Literal["organization", "space", "flow"]
     contributors: FlowRunRetentionContributors
 
 
@@ -523,9 +494,6 @@ class FlowStepAttempt(BaseModel):
     step_id: UUID
     step_order: int
     attempt_no: int
-    rerun_operation_id: Optional[UUID] = None
-    predecessor_attempt_id: Optional[UUID] = None
-    superseded_by_attempt_id: Optional[UUID] = None
     celery_task_id: Optional[str] = None
     status: FlowStepAttemptStatus
     error_code: Optional[str] = None
@@ -543,76 +511,6 @@ class FlowStepAttempt(BaseModel):
     flow_step_execution_hash: Optional[str] = None
     started_at: datetime
     finished_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class FlowRunRerunOperation(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    tenant_id: UUID
-    flow_id: UUID
-    flow_run_id: UUID
-    rerun_step_id: UUID
-    rerun_step_order: int
-    root_attempt_no: int
-    root_attempt_id: Optional[UUID] = None
-    status: FlowRunRerunOperationStatus
-    request_fingerprint: str
-    expected_run_revision: int
-    accepted_run_revision: int
-    reason: str
-    input_payload_json: FlowPersistedJsonObject | None = None
-    input_revision: FlowRunInputRevision
-    root_step_input_override_requested: bool
-    root_step_input_override: RerunStepInputOverride | None
-    requested_by_principal_type: PrincipalType
-    requested_by_user_id: UUID | None = None
-    requested_by_service_id: UUID | None = None
-    failure_code: Optional[str] = None
-    failure_message: Optional[str] = None
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: datetime
-
-    @model_validator(mode="after")
-    def _validate_root_step_input_override(self) -> Self:
-        if self.root_step_input_override_requested != (
-            self.root_step_input_override is not None
-        ):
-            raise ValueError(
-                "root_step_input_override must be present exactly when "
-                "root_step_input_override_requested is true."
-            )
-        if (
-            self.root_step_input_override is not None
-            and self.root_step_input_override.step_id != self.rerun_step_id
-        ):
-            raise ValueError(
-                "root_step_input_override.step_id must match rerun_step_id."
-            )
-        return self
-
-
-class FlowRunRerunInvalidatedStep(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    operation_id: UUID
-    tenant_id: UUID
-    flow_id: UUID
-    flow_run_id: UUID
-    step_id: UUID
-    step_order: int
-    invalidation_order: int
-    role: FlowRunRerunInvalidationRole
-    dependency_sources_json: list[RerunDependencyKind]
-    prior_step_result_id: Optional[UUID] = None
-    prior_attempt_id: Optional[UUID] = None
-    new_attempt_no: Optional[int] = None
-    new_attempt_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
 

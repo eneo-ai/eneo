@@ -10,10 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
-    FlowRetentionOrganizationProposal,
-)
-from eneo.database.tables.flow_classification_retention_policy_table import (
-    FlowClassificationRetentionPolicies,
 )
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
@@ -22,7 +18,6 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowVersions,
 )
-from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -34,22 +29,20 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 class _EnvelopeCase:
     label: str
     organization_days: int | None
-    classification_days: int | None
     space_days: int | None
     flow_days: int | None
     effective_days: int | None
+    source: str
 
 
 @pytest.mark.parametrize(
     "case",
     [
-        _EnvelopeCase("off with latent children", None, None, 7, 3, None),
-        _EnvelopeCase("tenant only", 30, None, None, None, 30),
-        _EnvelopeCase("matching classification only", None, 20, None, None, 20),
-        _EnvelopeCase("tenant and classification minimum", 30, 20, None, None, 20),
-        _EnvelopeCase("children tighten", 30, 20, 10, 5, 5),
-        _EnvelopeCase("larger children cannot loosen", 10, 20, 30, 40, 10),
-        _EnvelopeCase("unclassified space uses tenant", 30, None, 20, 10, 10),
+        _EnvelopeCase("off", None, None, None, None, "none"),
+        _EnvelopeCase("tenant fallback", 30, None, None, 30, "organization"),
+        _EnvelopeCase("space overrides tenant", 30, 20, None, 20, "space"),
+        _EnvelopeCase("flow overrides space", 30, 20, 10, 10, "flow"),
+        _EnvelopeCase("flow can lengthen parent", 10, 20, 40, 40, "flow"),
     ],
     ids=lambda case: case.label,
 )
@@ -74,32 +67,13 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
         )
     )
     assert tenant_space_id is not None
-    classification = None
-    if case.classification_days is not None:
-        classification = SecurityClassification(
-            name=f"Retention envelope classification {uuid4()}",
-            description="Matching Flow retention classification",
-            security_level=2,
-            tenant_id=test_tenant.id,
-        )
-        async_session.add(classification)
-        await async_session.flush()
-        async_session.add(
-            FlowClassificationRetentionPolicies(
-                tenant_id=test_tenant.id,
-                security_classification_id=classification.id,
-                data_retention_days=case.classification_days,
-            )
-        )
     space = Spaces(
         name=f"Inactive Flow retention envelope {uuid4()}",
         description="Latent child retention values",
         tenant_id=test_tenant.id,
         user_id=None,
         tenant_space_id=tenant_space_id,
-        security_classification_id=(
-            classification.id if classification is not None else None
-        ),
+        security_classification_id=None,
         data_retention_days=case.space_days,
     )
     async_session.add(space)
@@ -150,7 +124,7 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
     )
     async_session.add(run)
     await async_session.flush()
-    blocked_by_audit = case.label == "children tighten"
+    blocked_by_audit = case.label == "flow overrides space"
     if blocked_by_audit:
         async_session.add(
             FlowRunAuditOutbox(
@@ -208,27 +182,9 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
     assert projected_flow.run_history_retention.state == (
         "off" if case.effective_days is None else "days"
     )
+    assert projected_flow.run_history_retention.source == case.source
     assert projected_flow.run_history_retention.contributors.model_dump() == {
         "organization_days": case.organization_days,
-        "classification_days": case.classification_days,
         "space_days": case.space_days,
         "flow_days": case.flow_days,
-        "organization_minimum_days": None,
-        "classification_minimum_days": None,
-        "organization_no_purge": False,
-        "classification_no_purge": False,
     }
-    if blocked_by_audit:
-        preview = await retention_service.preview_flow_retention_organization_change(
-            tenant_id=test_tenant.id,
-            proposal=FlowRetentionOrganizationProposal(
-                flow_run_history_retention_days=case.organization_days,
-                flow_runtime_upload_abandonment_days=None,
-            ),
-            previewed_at=anchor,
-        )
-        assert preview.run_history.current_eligible_count == 1
-        assert preview.run_history.proposed_eligible_count == 1
-        assert preview.lifecycle_blockers.undelivered_audit_count == 1
-        assert preview.lifecycle_blockers.unresolved_webhook_count == 0
-        assert preview.lifecycle_blockers.active_rerun_count == 0

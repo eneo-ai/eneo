@@ -24,7 +24,6 @@ FLOW_RUN_CAPACITY_PATH: Final[str] = "/runs/capacity/"
 FLOW_RUNS_PATH: Final[str] = "/{id}/runs/"
 FLOW_RUN_PATH: Final[str] = "/{id}/runs/{run_id}/"
 FLOW_RUN_CANCEL_PATH: Final[str] = "/{id}/runs/{run_id}/cancel/"
-FLOW_RUN_STEP_RERUN_PATH: Final[str] = "/{id}/runs/{run_id}/steps/{step_id}/rerun/"
 FLOW_RUN_REDISPATCH_PATH: Final[str] = "/{id}/runs/{run_id}/redispatch/"
 
 FLOW_REVIEW_ACTIVE_PATH: Final[str] = "/{id}/runs/{run_id}/review-checkpoints/active/"
@@ -153,12 +152,6 @@ class FlowRuntimePathsPublic(BaseModel):
             "with the id returned by create_run."
         )
     )
-    rerun_step_template: str = Field(
-        description=(
-            "POST template for requesting a completed step rerun. Replace `{run_id}` "
-            "and `{step_id}` with values from the run and step responses."
-        )
-    )
     redispatch_run_template: str = Field(
         description=(
             "POST template for redispatching a stale queued run. Replace `{run_id}` "
@@ -283,11 +276,6 @@ def build_flow_runtime_paths(
         ),
         cancel_run_template=_flow_path(
             FLOW_RUN_CANCEL_PATH,
-            flow_id=flow_id_value,
-            api_prefix=api_prefix,
-        ),
-        rerun_step_template=_flow_path(
-            FLOW_RUN_STEP_RERUN_PATH,
             flow_id=flow_id_value,
             api_prefix=api_prefix,
         ),

@@ -43,13 +43,8 @@ describe("canEditFlowRetentionContribution", () => {
   it("requires an active envelope and an unpublished Flow", () => {
     const contributors = {
       organization_days: 30,
-      classification_days: null,
       space_days: null,
-      flow_days: 14,
-      organization_minimum_days: 30,
-      classification_minimum_days: null,
-      organization_no_purge: false,
-      classification_no_purge: false
+      flow_days: 14
     };
 
     expect(
@@ -57,11 +52,7 @@ describe("canEditFlowRetentionContribution", () => {
         {
           state: "days",
           effective_days: 14,
-          effective_minimum_days: 30,
-          no_purge: false,
-          policy_conflict: true,
-          activation_sources: ["organization"],
-          barrier_sources: ["organization_minimum"],
+          source: "flow",
           contributors
         },
         false
@@ -72,11 +63,7 @@ describe("canEditFlowRetentionContribution", () => {
         {
           state: "days",
           effective_days: 14,
-          effective_minimum_days: 30,
-          no_purge: false,
-          policy_conflict: true,
-          activation_sources: ["organization"],
-          barrier_sources: ["organization_minimum"],
+          source: "flow",
           contributors
         },
         true
@@ -87,11 +74,7 @@ describe("canEditFlowRetentionContribution", () => {
         {
           state: "off",
           effective_days: null,
-          effective_minimum_days: 30,
-          no_purge: false,
-          policy_conflict: false,
-          activation_sources: [],
-          barrier_sources: ["organization_minimum"],
+          source: "none",
           contributors: { ...contributors, organization_days: null }
         },
         false

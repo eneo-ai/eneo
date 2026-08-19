@@ -30,8 +30,6 @@ from eneo.flows.application.flow_run_service import (
 from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
-    FlowRunRerunInvalidatedStep,
-    FlowRunRerunOperation,
     FlowRunStatus,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
@@ -47,7 +45,6 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunConcurrencyLimitReachedError,
     FlowRunNotFoundError,
 )
-from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.run_step_input_exceptions import (
@@ -58,11 +55,8 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
 )
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
-    FlowRunRerunInvalidationRole,
-    FlowRunRerunOperationStatus,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
-    RerunDependencyKind,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -91,12 +85,6 @@ from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunEvidenceRowCounts,
     StepAttemptEvidenceSize,
     StepAttemptPage,
-)
-from eneo.flows.infrastructure.flow_run_rerun_repo import (
-    FlowRunRerunCommandResult,
-    FlowRunRerunEvidenceMeasurements,
-    FlowRunRerunEvidenceRowCounts,
-    FlowRunRerunRepository,
 )
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointEvidenceMeasurement,
@@ -222,17 +210,6 @@ def _settings_service() -> AsyncMock:
     return service
 
 
-def _flow_run_rerun_repo() -> AsyncMock:
-    repo = AsyncMock(spec=FlowRunRerunRepository)
-    repo.list_rerun_operations_for_run.return_value = []
-    repo.list_rerun_invalidated_steps_for_run.return_value = []
-    repo.measure_evidence_sections.return_value = (
-        FlowRunRerunEvidenceMeasurements.empty()
-    )
-    repo.measure_evidence_row_counts.return_value = FlowRunRerunEvidenceRowCounts(0, 0)
-    return repo
-
-
 def _provider_call_repo() -> AsyncMock:
     repo = AsyncMock(spec=FlowProviderCallRepository)
     repo.list_usage_for_runs.return_value = {}
@@ -264,7 +241,6 @@ def _flow_run_evidence_service(
     flow_repo,
     flow_run_repo,
     provider_call_repo,
-    flow_run_rerun_repo,
     flow_run_review_checkpoint_repo,
     flow_version_repo,
     file_repo,
@@ -279,12 +255,6 @@ def _flow_run_evidence_service(
     )
     flow_version_repo.measure_definition_evidence.return_value = (
         FlowVersionEvidenceMeasurement.empty()
-    )
-    flow_run_rerun_repo.measure_evidence_sections.return_value = (
-        FlowRunRerunEvidenceMeasurements.empty()
-    )
-    flow_run_rerun_repo.measure_evidence_row_counts.return_value = (
-        FlowRunRerunEvidenceRowCounts(0, 0)
     )
     flow_run_review_checkpoint_repo.measure_evidence.return_value = (
         FlowRunReviewCheckpointEvidenceMeasurement.empty()
@@ -303,7 +273,6 @@ def _flow_run_evidence_service(
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=provider_call_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,
@@ -634,79 +603,6 @@ def _runtime_version(user, flow: Flow, version: int = 1) -> FlowVersionModel:
         ),
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
-    )
-
-
-def _rerun_command_result(
-    *,
-    user,
-    run: FlowRun,
-    rerun_step_id: UUID,
-    invalidated_step_ids: list[UUID],
-    created: bool = True,
-) -> FlowRunRerunCommandResult:
-    now = datetime.now(timezone.utc)
-    operation_id = uuid4()
-    operation = FlowRunRerunOperation(
-        id=operation_id,
-        tenant_id=user.tenant_id,
-        flow_id=run.flow_id,
-        flow_run_id=run.id,
-        rerun_step_id=rerun_step_id,
-        rerun_step_order=1,
-        root_attempt_no=2,
-        root_attempt_id=None,
-        status=FlowRunRerunOperationStatus.QUEUED,
-        request_fingerprint="fingerprint",
-        expected_run_revision=run.revision,
-        accepted_run_revision=run.revision,
-        reason="Fix source",
-        input_payload_json=None,
-        input_revision=FlowRunInputRevisionNotRecorded(status="not_recorded"),
-        root_step_input_override_requested=False,
-        root_step_input_override=None,
-        requested_by_principal_type=PrincipalType.USER,
-        requested_by_user_id=user.id,
-        requested_by_service_id=None,
-        failure_code=None,
-        failure_message=None,
-        started_at=None,
-        finished_at=None,
-        created_at=now,
-        updated_at=now,
-    )
-    invalidated_steps = tuple(
-        FlowRunRerunInvalidatedStep(
-            id=uuid4(),
-            operation_id=operation_id,
-            tenant_id=user.tenant_id,
-            flow_id=run.flow_id,
-            flow_run_id=run.id,
-            step_id=step_id,
-            step_order=index,
-            invalidation_order=index,
-            role=(
-                FlowRunRerunInvalidationRole.ROOT
-                if step_id == rerun_step_id
-                else FlowRunRerunInvalidationRole.DOWNSTREAM
-            ),
-            dependency_sources_json=[]
-            if step_id == rerun_step_id
-            else [RerunDependencyKind.INPUT_SOURCE_PREVIOUS_STEP],
-            prior_step_result_id=uuid4(),
-            prior_attempt_id=uuid4(),
-            new_attempt_no=None,
-            new_attempt_id=None,
-            created_at=now,
-            updated_at=now,
-        )
-        for index, step_id in enumerate(invalidated_step_ids, start=1)
-    )
-    return FlowRunRerunCommandResult(
-        operation=operation,
-        run=run,
-        invalidated_steps=invalidated_steps,
-        created=created,
     )
 
 
@@ -2635,7 +2531,6 @@ async def test_get_evidence_rejects_service_key_even_for_own_run(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2690,7 +2585,6 @@ async def test_get_evidence_allows_service_key_with_view_capability(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2736,7 +2630,6 @@ async def test_export_evidence_json_allows_service_key_redacted_export_with_writ
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2790,7 +2683,6 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2829,7 +2721,6 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_by_de
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2876,7 +2767,6 @@ async def test_export_evidence_json_allows_sensitive_flow_redacted_export_when_p
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2916,7 +2806,6 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_s
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2964,7 +2853,6 @@ async def test_export_evidence_json_rejects_sensitive_flow_redacted_export_for_t
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -2999,7 +2887,6 @@ async def test_export_evidence_json_rechecks_sensitive_policy_when_run_is_inject
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -3038,7 +2925,6 @@ async def test_export_evidence_json_rejects_cross_tenant_injected_run_for_tenant
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -3481,7 +3367,6 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -3527,7 +3412,6 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -3576,7 +3460,6 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -3633,7 +3516,6 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4328,7 +4210,6 @@ async def test_get_evidence_redacts_sensitive_values(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4484,7 +4365,6 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4576,7 +4456,6 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4630,7 +4509,6 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4716,7 +4594,6 @@ async def test_export_evidence_json_attributes_service_key_actor_to_key_id(user)
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4781,7 +4658,6 @@ async def test_get_evidence_normalizes_irreconstructible_attempt_provenance(user
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4841,7 +4717,6 @@ async def test_get_evidence_sets_rag_to_null_when_metadata_missing(user):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -4893,7 +4768,6 @@ async def test_get_evidence_ignores_rag_metadata_when_step_order_is_boolean(user
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=_file_repo(),
@@ -5095,7 +4969,6 @@ def _artifact_service(user, *, file_repo, result_file=None, run=None):
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
         provider_call_repo=_provider_call_repo(),
-        flow_run_rerun_repo=_flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=AsyncMock(),
         flow_version_repo=flow_version_repo,
         file_repo=file_repo,

@@ -43,9 +43,6 @@ def _runtime_paths_payload() -> dict[str, object]:
         "create_run": "/api/v1/flows/{id}/runs/",
         "list_runs": "/api/v1/flows/{id}/runs/",
         "cancel_run_template": "/api/v1/flows/{id}/runs/{run_id}/cancel/",
-        "rerun_step_template": (
-            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/"
-        ),
         "redispatch_run_template": ("/api/v1/flows/{id}/runs/{run_id}/redispatch/"),
         "review_checkpoints": _runtime_review_paths_payload(),
         "get_graph_for_run_template": "/api/v1/flows/{id}/graph/?run_id={run_id}",
@@ -82,11 +79,6 @@ def test_build_flow_runtime_paths_uses_explicit_api_prefix() -> None:
     assert (
         runtime_paths.cancel_run_template
         == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/cancel/"
-    )
-    assert (
-        runtime_paths.rerun_step_template
-        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/steps/"
-        "{step_id}/rerun/"
     )
     assert (
         runtime_paths.redispatch_run_template

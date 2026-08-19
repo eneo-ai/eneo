@@ -1066,30 +1066,9 @@ Common errors in this sequence: `flow_run_artifact_not_found`, `flow_run_artifac
 
 Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
 
-When a user needs to correct completed work, use reruns so lineage and invalidation stay visible.
-
-### Reruns
-
-Reruns invalidate downstream work and preserve lineage so clients can explain what changed.
-
-1. Call `runtime_paths.rerun_step_template` for a completed step to get accepted rerun operation state.
-2. Send explicit file overrides when replacing inputs; send an explicit empty override when the step should run without files.
-3. Use review checkpoint edits for corrected outputs before approval; rerun inputs are not direct post-run output edits.
-4. Poll `runtime_paths.get_run_template` and `list_steps_template`; downstream steps show the new lineage.
-
-Endpoint facts:
-
-| Endpoint                                                  | Method | Success        | Operation             |
-| --------------------------------------------------------- | ------ | -------------- | --------------------- |
-| `/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/` | `POST` | `202 Accepted` | `rerun_flow_run_step` |
-| `/api/v1/flows/{id}/runs/{run_id}/`                       | `GET`  | `200 OK`       | `get_flow_run`        |
-| `/api/v1/flows/{id}/runs/{run_id}/steps/`                 | `GET`  | `200 OK`       | `list_flow_run_steps` |
-
-Contract coverage: These endpoints are contract-tested.
-
-Common errors in this sequence: `flow_run_rerun_stale_revision`, `flow_run_rerun_invalid_transition`, `flow_run_rerun_step_not_found`, `flow_run_rerun_step_inputs_invalid`.
-
-Use the [Flow error reference](/guides/flows/reference/errors) for the complete code catalog and recovery actions.
+When a user needs to repeat completed work with corrected inputs, create a new
+run. The original run and its step-attempt evidence remain immutable and can be
+compared with the new run by their run identifiers.
 
 After the happy path works, add retries and polling rules so the integration behaves well under load.
 

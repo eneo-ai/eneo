@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Self
 
-from eneo.flows.domain.flow import FlowPersistedJsonObject, RerunStepInputOverride
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 
 EXPECTED_FLOW_VERSION_KEY = "expected_flow_version"
 STEP_INPUTS_KEY = "step_inputs"
@@ -19,13 +18,6 @@ _PERSISTED_RUNTIME_INPUT_KEYS = frozenset(
 FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS = _PERSISTED_RUNTIME_INPUT_KEYS | frozenset(
     {STEP_INPUTS_KEY, _REMOVED_TOP_LEVEL_RUNTIME_FILE_IDS_KEY}
 )
-RERUN_PRESERVED_INPUT_PAYLOAD_KEYS = _PERSISTED_RUNTIME_INPUT_KEYS
-
-
-@dataclass(frozen=True, slots=True)
-class RerunInputOverride:
-    inline_payload_json: FlowPersistedJsonObject | None = None
-    root_step_input: RerunStepInputOverride | None = None
 
 
 class FlowRunInputEnvelopePatch:
@@ -74,28 +66,4 @@ def build_initial_run_input_envelope(
 ) -> FlowPersistedJsonObject:
     payload = dict(normalized_inline_payload or {})
     payload[EXPECTED_FLOW_VERSION_KEY] = flow_version
-    return payload
-
-
-def build_rerun_execution_input_envelope(
-    *,
-    current: FlowPersistedJsonObject | None,
-    override: RerunInputOverride,
-) -> FlowPersistedJsonObject:
-    current_payload = dict(current or {})
-    if override.inline_payload_json is None:
-        payload = {
-            key: value
-            for key, value in current_payload.items()
-            if key not in FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
-            or key in RERUN_PRESERVED_INPUT_PAYLOAD_KEYS
-        }
-    else:
-        payload = {
-            key: value
-            for key, value in current_payload.items()
-            if key in RERUN_PRESERVED_INPUT_PAYLOAD_KEYS
-        }
-        payload.update(override.inline_payload_json)
-
     return payload

@@ -35,7 +35,6 @@ from eneo.flows.api.flow_runtime_paths import (
     FlowRuntimePathsPublic,
     build_flow_runtime_paths,
 )
-from eneo.flows.enums import FLOW_RUN_STATUS_CAPABILITIES, RerunDependencyKind
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
@@ -345,7 +344,6 @@ REQUIRED_PATHS: dict[str, set[str]] = {
         "post"
     },
     "/api/v1/flows/{id}/runs/{run_id}/cancel/": {"post"},
-    "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/": {"post"},
     "/api/v1/flows/{id}/runs/{run_id}/redispatch/": {"post"},
     "/api/v1/flows/runs/status-capabilities/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/evidence/": {"get"},
@@ -358,14 +356,6 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/settings/flow-runtime-policy": {"get", "patch"},
     "/api/v1/settings/flow-evidence-policy": {"get", "patch"},
     "/api/v1/settings/flow-retention-policy": {"get", "patch"},
-    "/api/v1/settings/flow-retention-policy/preview": {"post"},
-    "/api/v1/settings/flow-classification-retention-policies": {"get"},
-    "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}": {
-        "put",
-    },
-    "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview": {
-        "post",
-    },
 }
 
 RUNTIME_PATH_FIELD_OPERATIONS = flow_runtime_path_field_operations()
@@ -400,8 +390,6 @@ REQUIRED_SCHEMAS = {
     "FlowRuntimePublic",
     "FlowReviewCheckpointRuntimePathsPublic",
     "FlowRunContractPublic",
-    "FlowRunStepRerunRequest",
-    "FlowRunStepRerunResponse",
     "FlowRunReviewCheckpointPublic",
     "FlowRunReviewCheckpointEditRequest",
     "FlowRunReviewCheckpointApproveRequest",
@@ -410,11 +398,6 @@ REQUIRED_SCHEMAS = {
     "FlowRunReviewCheckpointResumeResponse",
     "FlowRunReviewCheckpointEvidencePublic",
     "FlowServicePrincipalActorPublic",
-    "FlowRunRerunOperationPublic",
-    "FlowRunInputRevisionTracked",
-    "FlowRunInputRevisionNotRecorded",
-    "FlowRunInputRevisionUnavailable",
-    "FlowRunRerunInvalidatedStepPublic",
     "FlowRunEvidenceResponse",
     "EvidenceExportUserActor",
     "EvidenceExportServiceKeyActor",
@@ -431,10 +414,6 @@ REQUIRED_SCHEMAS = {
     "FlowInputLimitsPublic",
     "FlowMappedExecutionPolicyPublic",
     "FlowMappedExecutionPolicyUpdate",
-    "FlowRetentionChangeConfirmationPublic",
-    "FlowRetentionDataImpactPublic",
-    "FlowRetentionImpactPreviewPublic",
-    "FlowRetentionOrganizationPreviewRequest",
     "FlowRetentionPolicyPublic",
     "FlowRetentionPolicyUpdate",
     "FlowTemplateAssetPublic",
@@ -496,22 +475,6 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "/api/v1/settings/flow-retention-policy",
         "patch",
     ): "update_flow_retention_policy",
-    (
-        "/api/v1/settings/flow-retention-policy/preview",
-        "post",
-    ): "preview_flow_retention_policy",
-    (
-        "/api/v1/settings/flow-classification-retention-policies",
-        "get",
-    ): "list_flow_classification_retention_policies",
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        "put",
-    ): "put_flow_classification_retention_policy",
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
-        "post",
-    ): "preview_flow_classification_retention_policy",
 }
 
 REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
@@ -595,10 +558,6 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "post",
     ): {"400", "403", "404", "422"},
     (
-        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
-        "post",
-    ): {"400", "403", "404", "422"},
-    (
         "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
         "post",
     ): {"403", "404", "422"},
@@ -653,23 +612,7 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/settings/flow-retention-policy",
         "patch",
-    ): {"400", "403", "409", "422"},
-    (
-        "/api/v1/settings/flow-retention-policy/preview",
-        "post",
-    ): {"403", "422"},
-    (
-        "/api/v1/settings/flow-classification-retention-policies",
-        "get",
-    ): {"403"},
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        "put",
-    ): {"403", "404", "409", "422"},
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
-        "post",
-    ): {"403", "404", "422"},
+    ): {"400", "403", "422"},
 }
 
 FLOW_SETTINGS_INVALID_PAYLOAD_MESSAGES: dict[str, str] = {
@@ -756,10 +699,6 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
         "post",
     ): {"400", "403", "404"},
     (
-        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
-        "post",
-    ): {"400", "403", "404"},
-    (
         "/api/v1/flows/{id}/runs/{run_id}/redispatch/",
         "post",
     ): {"403", "404"},
@@ -787,20 +726,7 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     ("/api/v1/settings/flow-evidence-policy", "get"): {"403"},
     ("/api/v1/settings/flow-evidence-policy", "patch"): {"400", "403"},
     ("/api/v1/settings/flow-retention-policy", "get"): {"403"},
-    ("/api/v1/settings/flow-retention-policy", "patch"): {"400", "403", "409"},
-    ("/api/v1/settings/flow-retention-policy/preview", "post"): {"403"},
-    (
-        "/api/v1/settings/flow-classification-retention-policies",
-        "get",
-    ): {"403"},
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        "put",
-    ): {"403", "404", "409"},
-    (
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
-        "post",
-    ): {"403", "404"},
+    ("/api/v1/settings/flow-retention-policy", "patch"): {"400", "403"},
 }
 
 
@@ -980,7 +906,6 @@ def test_openapi_flow_settings_update_requests_reject_unknown_fields(
     strict_request_schemas = {
         "FlowDocumentRenderLimitsUpdate",
         "FlowEvidencePolicyUpdate",
-        "FlowClassificationRetentionPolicyUpdate",
         "FlowInputLimitsUpdate",
         "FlowRetentionPolicyUpdate",
         "FlowRuntimePolicyUpdate",
@@ -1066,48 +991,20 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
     assert set(public_properties) == {
         "run_debug_evidence_days",
         "flow_run_history_retention_days",
-        "flow_run_history_minimum_retention_days",
-        "flow_run_history_no_purge",
         "flow_runtime_upload_abandonment_days",
-        "effective_state",
     }
     assert set(update_properties) == {
         "run_debug_evidence_days",
         "flow_run_history_retention_days",
-        "flow_run_history_minimum_retention_days",
-        "flow_run_history_no_purge",
         "flow_runtime_upload_abandonment_days",
-        "confirmation",
     }
     assert set(public_schema["required"]) == set(public_properties)
     assert update_schema.get("additionalProperties") is False
     assert update_schema.get("required", []) == []
 
-    effective_state = schemas["FlowRetentionEffectiveStatePublic"]
-    assert set(effective_state["required"]) == {
-        "run_history_deletion_active",
-        "runtime_upload_abandonment_active",
-        "classification_policy_count",
-        "activation_sources",
-        "barrier_sources",
-    }
-    assert set(
-        effective_state["properties"]["activation_sources"]["items"]["enum"]
-    ) == {
-        "organization",
-        "classification",
-    }
-    assert set(effective_state["properties"]["barrier_sources"]["items"]["enum"]) == {
-        "organization_minimum",
-        "classification_minimum",
-        "organization_no_purge",
-        "classification_no_purge",
-    }
-
     for field_name in (
         "run_debug_evidence_days",
         "flow_run_history_retention_days",
-        "flow_run_history_minimum_retention_days",
         "flow_runtime_upload_abandonment_days",
     ):
         for properties in (public_properties, update_properties):
@@ -1129,26 +1026,6 @@ def test_openapi_flow_retention_descriptions_are_public_and_match_confirmation_s
     operations = (
         _get_operation(openapi_spec, "/api/v1/settings/flow-retention-policy", "get"),
         _get_operation(openapi_spec, "/api/v1/settings/flow-retention-policy", "patch"),
-        _get_operation(
-            openapi_spec,
-            "/api/v1/settings/flow-retention-policy/preview",
-            "post",
-        ),
-        _get_operation(
-            openapi_spec,
-            "/api/v1/settings/flow-classification-retention-policies",
-            "get",
-        ),
-        _get_operation(
-            openapi_spec,
-            "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-            "put",
-        ),
-        _get_operation(
-            openapi_spec,
-            "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
-            "post",
-        ),
     )
     descriptions = "\n".join(
         str(operation.get("description", "")) for operation in operations
@@ -1156,39 +1033,19 @@ def test_openapi_flow_retention_descriptions_are_public_and_match_confirmation_s
     normalized = descriptions.lower()
 
     assert "wi-19" not in normalized
-    assert "disabling or lengthening does not require confirmation" not in normalized
-    assert "every change to minimum-retention or no-purge" in normalized
-    assert "minimum-retention" in normalized
-    assert "no-purge" in normalized
-    assert "barrier-only" in normalized
-    assert "exact preview" in normalized
+    assert "flow-specific value overrides its space value" in normalized
+    assert "space value" in normalized
+    assert "tenant fallback" in normalized
+    assert "preview/confirmation" in normalized
 
 
 def test_openapi_flow_retention_preview_and_confirmation_are_exact_contracts(
     openapi_spec: dict,
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
-    preview_request = schemas["FlowRetentionOrganizationPreviewRequest"]
-    confirmation = schemas["FlowRetentionChangeConfirmationPublic"]
-    preview = schemas["FlowRetentionImpactPreviewPublic"]
-
-    assert set(preview_request["required"]) == {
-        "flow_run_history_retention_days",
-        "flow_run_history_minimum_retention_days",
-        "flow_run_history_no_purge",
-        "flow_runtime_upload_abandonment_days",
-    }
-    assert preview_request.get("additionalProperties") is False
-    assert set(confirmation["required"]) == {
-        "expected_control_plane_version",
-        "expected_preview_hash",
-        "previewed_at",
-    }
-    assert set(preview["required"]) == set(preview["properties"])
-    assert preview["properties"]["run_history_anchor"]["const"] == (
-        "finished_at_or_created_at"
-    )
-    assert preview["properties"]["runtime_upload_anchor"]["const"] == "created_at"
+    assert "FlowRetentionOrganizationPreviewRequest" not in schemas
+    assert "FlowRetentionChangeConfirmationPublic" not in schemas
+    assert "FlowRetentionImpactPreviewPublic" not in schemas
 
 
 def test_openapi_flow_retention_surfaces_are_disambiguated(
@@ -1196,71 +1053,23 @@ def test_openapi_flow_retention_surfaces_are_disambiguated(
 ) -> None:
     paths = openapi_spec.get("paths", {})
     organization_retention = paths["/api/v1/settings/flow-retention-policy"]["get"]
-    classification_retention = paths[
-        "/api/v1/settings/flow-classification-retention-policies"
-    ]["get"]
-
     organization_description = str(
         organization_retention.get("description", "")
     ).lower()
-    classification_description = str(
-        classification_retention.get("description", "")
-    ).lower()
-
     assert "debug-evidence" in organization_description
-    assert "deletion envelope" in organization_description
-    assert "preservation barriers" in organization_description
+    assert "tenant fallback" in organization_description
     assert "wi-19" not in organization_description
-    assert "delete-after" in classification_description
-    assert "barrier-only" in classification_description
-    assert "minimum-retention" in classification_description
-    assert "no-purge" in classification_description
-    assert "debug-evidence" in classification_description
-    assert "security_enabled" in classification_description
+    assert "/api/v1/settings/flow-retention-policy/preview" not in paths
+    assert "/api/v1/settings/flow-classification-retention-policies" not in paths
 
 
 def test_openapi_flow_classification_retention_policy_contract(
     openapi_spec: dict,
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
-
-    row_schema = schemas.get("FlowClassificationRetentionPolicyPublic", {})
-    row_properties = row_schema.get("properties", {})
-    assert set(row_properties) == {
-        "security_classification_id",
-        "data_retention_days",
-        "minimum_retention_days",
-        "no_purge",
-    }
-    assert row_properties["security_classification_id"]["format"] == "uuid"
-    for field_name in ("data_retention_days", "minimum_retention_days"):
-        integer_schema = _integer_schema_option(row_properties[field_name])
-        assert integer_schema["minimum"] == 1
-        assert integer_schema["maximum"] == 2555
-        assert _schema_allows_null(row_properties[field_name])
-
-    list_schema = schemas.get("FlowClassificationRetentionPoliciesPublic", {})
-    assert set(list_schema.get("properties", {})) == {"policies"}
-
-    update_schema = schemas.get("FlowClassificationRetentionPolicyUpdate", {})
-    assert set(update_schema.get("properties", {})) == {
-        "data_retention_days",
-        "minimum_retention_days",
-        "no_purge",
-        "confirmation",
-    }
-    assert update_schema.get("additionalProperties") is False
-    assert set(update_schema["required"]) == {
-        "data_retention_days",
-        "minimum_retention_days",
-        "no_purge",
-    }
-    for field_name in ("data_retention_days", "minimum_retention_days"):
-        property_schema = update_schema["properties"][field_name]
-        integer_schema = _integer_schema_option(property_schema)
-        assert integer_schema["minimum"] == 1
-        assert integer_schema["maximum"] == 2555
-        assert _schema_allows_null(property_schema)
+    assert "FlowClassificationRetentionPolicyPublic" not in schemas
+    assert "FlowClassificationRetentionPoliciesPublic" not in schemas
+    assert "FlowClassificationRetentionPolicyUpdate" not in schemas
 
 
 def test_openapi_all_flow_success_responses_have_examples(
@@ -1399,7 +1208,6 @@ def test_openapi_flow_run_control_paths_include_flow_and_run_ids(
             "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
             "post",
         ),
-        ("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/", "post"),
         ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"),
         ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"),
     )
@@ -1659,12 +1467,6 @@ def test_openapi_flow_run_status_capabilities_guides_consumer_lifecycle(
         "server-gated by staleness"
         in row_schema["can_request_redispatch"]["description"]
     )
-    assert "completed or failed" in row_schema["is_rerun_eligible"]["description"]
-    public_rows = flow_run_status_capabilities_public().statuses
-    assert {row.status: row.is_rerun_eligible for row in public_rows} == {
-        status: capability.is_rerun_eligible
-        for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
-    }
 
 
 def test_openapi_flow_step_review_policy_documents_authoring_contract(
@@ -1810,8 +1612,6 @@ def test_openapi_runtime_paths_expose_review_checkpoint_templates(
     assert "committed before" in runtime_paths["create_run"]["description"]
     assert "immediately poll" in runtime_paths["create_run"]["description"]
     assert "{run_id}" in runtime_paths["cancel_run_template"]["description"]
-    assert "{run_id}" in runtime_paths["rerun_step_template"]["description"]
-    assert "{step_id}" in runtime_paths["rerun_step_template"]["description"]
     assert "{run_id}" in runtime_paths["redispatch_run_template"]["description"]
     assert (
         FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE
@@ -1939,18 +1739,11 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
         "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
         "post",
     )
-    rerun_operation = _get_operation(
-        openapi_spec,
-        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
-        "post",
-    )
-
     active_description = active_operation.get("description", "")
     edit_description = edit_operation.get("description", "")
     approve_description = approve_operation.get("description", "")
     reject_description = reject_operation.get("description", "")
     resume_description = resume_operation.get("description", "")
-    rerun_description = rerun_operation.get("description", "")
 
     assert "status` is `awaiting_review`" in active_description
     assert "step_snapshot_available" not in active_description
@@ -1983,9 +1776,6 @@ def test_openapi_review_checkpoint_endpoint_docs_guide_human_in_loop_clients(
     assert "after the original `expires_at`" in resume_description
     assert "resource_permissions.flows = write" in resume_description
     assert "committed before the response" in resume_description
-    assert "service-key principals may rerun only their own runs" in rerun_description
-    assert "stable service\nprincipal ownership" in rerun_description
-    assert "committed before the response" in rerun_description
 
     edit_400 = edit_operation["responses"]["400"]
     edit_400_text = str(edit_400)
@@ -2475,106 +2265,6 @@ def test_openapi_flow_run_public_does_not_expose_legacy_user_mirror(
     assert "user_id" not in run_properties
 
 
-def test_openapi_flow_run_evidence_response_exposes_rerun_lineage(
-    openapi_spec: dict,
-) -> None:
-    schemas = openapi_spec.get("components", {}).get("schemas", {})
-    evidence_schema = schemas.get("FlowRunEvidenceResponse", {})
-    evidence_properties = evidence_schema.get("properties", {})
-    step_result_properties = schemas.get("FlowRunStepPublic", {}).get("properties", {})
-
-    assert {"rerun_operations", "rerun_invalidated_steps"}.issubset(
-        evidence_schema.get("required", [])
-    )
-    assert "current_attempt_no" in step_result_properties
-    rerun_operations = _resolve_component_ref(
-        openapi_spec, evidence_properties.get("rerun_operations", {})
-    )
-    rerun_operation = _resolve_component_ref(
-        openapi_spec, rerun_operations.get("items", {})
-    )
-    assert rerun_operations.get("type") == "array"
-    assert rerun_operation.get("title") == "FlowRunRerunOperationPublic"
-    assert set(rerun_operation.get("properties", {})) >= {
-        "id",
-        "flow_run_id",
-        "rerun_step_id",
-        "root_attempt_no",
-        "root_attempt_id",
-        "status",
-        "request_fingerprint",
-        "expected_run_revision",
-        "accepted_run_revision",
-        "reason",
-        "input_payload",
-        "root_step_input_override",
-        "root_step_input_override_requested",
-        "requested_by_principal_type",
-        "requested_by_user_id",
-        "requested_by_service_principal",
-    }
-    assert "input_payload_json" not in rerun_operation.get("properties", {})
-    assert "step_inputs_json" not in rerun_operation.get("properties", {})
-    assert "requested_by_service_id" not in rerun_operation.get("properties", {})
-    root_step_input_override_property = rerun_operation.get("properties", {}).get(
-        "root_step_input_override", {}
-    )
-    root_step_input_override_ref = next(
-        (
-            option
-            for option in root_step_input_override_property.get("anyOf", [])
-            if isinstance(option, dict) and "$ref" in option
-        ),
-        root_step_input_override_property,
-    )
-    root_step_input_override = _resolve_component_ref(
-        openapi_spec,
-        root_step_input_override_ref,
-    )
-    assert root_step_input_override.get("title") == (
-        "FlowRunRerunStepInputOverridePublic"
-    )
-    assert set(root_step_input_override.get("properties", {})) == {
-        "step_id",
-        "file_ids",
-    }
-    assert root_step_input_override.get("required") == ["step_id", "file_ids"]
-    assert (
-        "explicitly cleared"
-        in root_step_input_override["properties"]["file_ids"]["description"]
-    )
-
-    rerun_invalidated_steps = _resolve_component_ref(
-        openapi_spec, evidence_properties.get("rerun_invalidated_steps", {})
-    )
-    rerun_invalidated_step = _resolve_component_ref(
-        openapi_spec, rerun_invalidated_steps.get("items", {})
-    )
-    assert rerun_invalidated_steps.get("type") == "array"
-    assert rerun_invalidated_step.get("title") == "FlowRunRerunInvalidatedStepPublic"
-    invalidated_properties = rerun_invalidated_step.get("properties", {})
-    assert set(invalidated_properties) >= {
-        "id",
-        "operation_id",
-        "step_id",
-        "step_order",
-        "invalidation_order",
-        "role",
-        "dependency_sources_json",
-        "prior_step_result_id",
-        "prior_attempt_id",
-        "new_attempt_no",
-        "new_attempt_id",
-    }
-    dependency_sources = _resolve_component_ref(
-        openapi_spec, invalidated_properties["dependency_sources_json"]
-    )
-    dependency_source_values = _extract_enum_values(
-        openapi_spec, dependency_sources.get("items", {})
-    )
-    assert dependency_source_values == {kind.value for kind in RerunDependencyKind}
-
-
 def test_openapi_flow_pagination_response_shape_is_current(
     openapi_spec: dict,
 ) -> None:
@@ -2761,7 +2451,6 @@ def test_openapi_flow_runtime_mutation_requests_reject_unknown_fields(
         "FlowRunReviewCheckpointEditRequest",
         "FlowRunReviewCheckpointRejectRequest",
         "FlowRunReviewCheckpointResumeRequest",
-        "FlowRunStepRerunRequest",
         "StepRunInput",
     }
 
@@ -2834,11 +2523,7 @@ def test_openapi_flow_read_models_expose_discriminated_retention_projection(
     shared_required = {
         "state",
         "effective_days",
-        "effective_minimum_days",
-        "no_purge",
-        "policy_conflict",
-        "activation_sources",
-        "barrier_sources",
+        "source",
         "contributors",
     }
     assert set(off["required"]) == shared_required
@@ -2849,23 +2534,13 @@ def test_openapi_flow_read_models_expose_discriminated_retention_projection(
     assert days["properties"]["effective_days"]["type"] == "integer"
     assert set(contributors["required"]) == {
         "organization_days",
-        "classification_days",
         "space_days",
         "flow_days",
-        "organization_minimum_days",
-        "classification_minimum_days",
-        "organization_no_purge",
-        "classification_no_purge",
     }
-    assert set(days["properties"]["activation_sources"]["items"]["enum"]) == {
+    assert set(days["properties"]["source"]["enum"]) == {
         "organization",
-        "classification",
-    }
-    assert set(days["properties"]["barrier_sources"]["items"]["enum"]) == {
-        "organization_minimum",
-        "classification_minimum",
-        "organization_no_purge",
-        "classification_no_purge",
+        "space",
+        "flow",
     }
 
 
@@ -2901,182 +2576,6 @@ def test_openapi_create_flow_run_documents_concurrency_limit(
     }
     assert retry_after.get("schema", {}).get("type") == "integer"
     assert retry_after.get("schema", {}).get("example") == 60
-
-
-def test_openapi_flow_run_step_rerun_contract(openapi_spec: dict) -> None:
-    operation = _get_operation(
-        openapi_spec,
-        "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
-        "post",
-    )
-    request_schema = (
-        operation.get("requestBody", {})
-        .get("content", {})
-        .get("application/json", {})
-        .get("schema", {})
-    )
-    request_resolved = _resolve_component_ref(openapi_spec, request_schema)
-    assert request_resolved.get("title") == "FlowRunStepRerunRequest"
-    assert request_resolved.get("additionalProperties") is False
-    assert set(request_resolved.get("required", [])) == {
-        "expected_run_revision",
-        "reason",
-    }
-
-    request_properties = request_resolved.get("properties", {})
-    expected_revision = request_properties.get("expected_run_revision", {})
-    reason = request_properties.get("reason", {})
-    assert expected_revision.get("minimum") == 1
-    assert reason.get("minLength") == 1
-    assert reason.get("maxLength") == 1024
-    assert "file_ids" not in request_properties
-    assert "step_inputs" in request_properties
-
-    response_schema = (
-        operation.get("responses", {})
-        .get("202", {})
-        .get("content", {})
-        .get("application/json", {})
-        .get("schema", {})
-    )
-    response_resolved = _resolve_component_ref(openapi_spec, response_schema)
-    assert response_resolved.get("title") == "FlowRunStepRerunResponse"
-
-    response_properties = response_resolved.get("properties", {})
-    run_description = str(response_properties.get("run", {}).get("description", ""))
-    assert "current persisted run state" in run_description.lower()
-    assert "expected_run_revision" in run_description
-
-    operation_description = " ".join(
-        str(operation.get("description", "")).lower().split()
-    )
-    assert "202 accepted" in operation_description
-    assert "idempotent replay" in operation_description
-    assert "use the response `status`" in operation_description
-
-
-@pytest.mark.parametrize(
-    ("path", "method", "expected_codes"),
-    [
-        (
-            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
-            "post",
-            frozenset(
-                {
-                    FlowApiErrorCode.RUN_RERUN_REASON_REQUIRED.value,
-                    FlowApiErrorCode.RUN_RERUN_REASON_TOO_LONG.value,
-                    FlowApiErrorCode.RUN_RERUN_STALE_REVISION.value,
-                    FlowApiErrorCode.RUN_RERUN_INVALID_TRANSITION.value,
-                    FlowApiErrorCode.RUN_RERUN_STEP_NOT_FOUND.value,
-                    FlowApiErrorCode.RUN_RERUN_STEP_INCOMPLETE.value,
-                    FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID.value,
-                }
-            ),
-        ),
-        (
-            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
-            "patch",
-            frozenset(
-                {
-                    FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
-                    FlowApiErrorCode.REVIEW_STALE_REVISION.value,
-                    FlowApiErrorCode.REVIEW_EXPIRED.value,
-                    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value,
-                    FlowApiErrorCode.REVIEW_EDIT_NOT_ALLOWED.value,
-                    FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED.value,
-                    FlowApiErrorCode.REVIEW_EDIT_OUTPUT_TOO_LARGE.value,
-                    FlowApiErrorCode.REVIEW_STEP_RESULT_NOT_FOUND.value,
-                }
-            ),
-        ),
-        (
-            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
-            "post",
-            frozenset(
-                {
-                    FlowApiErrorCode.REVIEW_STALE_REVISION.value,
-                    FlowApiErrorCode.REVIEW_EXPIRED.value,
-                    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value,
-                }
-            ),
-        ),
-        (
-            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
-            "post",
-            frozenset(
-                {
-                    FlowApiErrorCode.REVIEW_STALE_REVISION.value,
-                    FlowApiErrorCode.REVIEW_EXPIRED.value,
-                    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value,
-                    FlowApiErrorCode.REVIEW_REJECT_REASON_REQUIRED.value,
-                    FlowApiErrorCode.REVIEW_REJECT_REASON_TOO_LONG.value,
-                }
-            ),
-        ),
-        (
-            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
-            "post",
-            frozenset(
-                {
-                    FlowApiErrorCode.REVIEW_IDEMPOTENCY_KEY_REQUIRED.value,
-                    FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY.value,
-                    FlowApiErrorCode.REVIEW_STALE_REVISION.value,
-                    FlowApiErrorCode.REVIEW_EXPIRED.value,
-                    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value,
-                    FlowApiErrorCode.REVIEW_NOT_APPROVED.value,
-                    FlowApiErrorCode.REVIEW_ALREADY_RESUMED.value,
-                    FlowApiErrorCode.REVIEW_REJECTED.value,
-                    FlowApiErrorCode.REVIEW_CANCELLED.value,
-                }
-            ),
-        ),
-    ],
-)
-def test_openapi_flow_runtime_mutation_error_examples_match_public_codes(
-    openapi_spec: dict,
-    path: str,
-    method: str,
-    expected_codes: frozenset[str],
-) -> None:
-    operation = _get_operation(openapi_spec, path, method)
-    response = operation.get("responses", {}).get("400", {})
-    description = str(response.get("description", ""))
-    examples = _error_example_values(operation, status_code="400")
-
-    assert set(examples) == set(expected_codes)
-    for code, example in examples.items():
-        assert example.get("code") == code
-        assert code in description
-
-    if FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID.value in examples:
-        context = examples[FlowApiErrorCode.RUN_RERUN_STEP_INPUTS_INVALID.value].get(
-            "context", {}
-        )
-        assert "step_ids" in context
-    if FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY.value in examples:
-        context = examples[FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY.value].get(
-            "context", {}
-        )
-        assert context.get("max_length") == 255
-    if path.endswith("/resume/"):
-        context = examples[FlowApiErrorCode.REVIEW_NOT_ACTIVE.value].get("context", {})
-        assert context.get("status") == "cancelled"
-
-
-def test_openapi_flow_run_revision_documents_rerun_compare_token(
-    openapi_spec: dict,
-) -> None:
-    schema = (
-        openapi_spec.get("components", {}).get("schemas", {}).get("FlowRunPublic", {})
-    )
-    properties = schema.get("properties", {})
-    revision = properties.get("revision", {})
-
-    assert revision.get("type") == "integer"
-    assert "revision" in set(schema.get("required", []))
-    description = str(revision.get("description", ""))
-    assert "compare token" in description.lower()
-    assert "expected_run_revision" in description
 
 
 def test_openapi_flow_step_create_schema_exposes_enum_constraints(
@@ -3328,7 +2827,6 @@ def test_openapi_flow_attempt_exposes_discriminated_resolved_input_lineage(
         "tracked",
         "not_tracked",
         "corrupt",
-        "retention_purged",
     }
     assert set(variants_by_status["tracked"].get("required", [])) == {
         "status",
@@ -3342,11 +2840,6 @@ def test_openapi_flow_attempt_exposes_discriminated_resolved_input_lineage(
         .get("maxItems")
         == 2048
     )
-    assert set(variants_by_status["retention_purged"].get("required", [])) == {
-        "status",
-        "resolved_input_aggregate_count",
-        "resolved_input_edge_count",
-    }
     assert "edges" not in variants_by_status["corrupt"].get("properties", {})
 
 
@@ -3393,11 +2886,6 @@ def test_openapi_flow_run_step_public_exposes_runtime_input_file_ids(
             "FlowStepAttemptPublic",
             "error_code",
             "Stable machine-readable attempt failure code",
-        ),
-        (
-            "FlowRunRerunOperationPublic",
-            "failure_code",
-            "Stable machine-readable rerun failure code",
         ),
     ],
 )
@@ -3460,7 +2948,6 @@ def test_openapi_non_result_step_identity_exceptions_stay_nullable(
     ("path", "method"),
     [
         ("/api/v1/flows/{id}/runs/", "post"),
-        ("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/", "post"),
         ("/api/v1/flows/{id}/run-contract/", "get"),
         ("/api/v1/flows/{id}/steps/{step_id}/runtime-files/", "post"),
         ("/api/v1/flows/{id}/graph/", "get"),
@@ -3531,50 +3018,6 @@ def test_openapi_flow_evidence_exposes_definition_integrity(
         == evidence_example["definition_snapshot"]
     )
     assert export_example["bundle"]["definition_integrity"] == example_integrity
-
-
-def test_openapi_flow_evidence_requires_closed_input_revision_union(
-    openapi_spec: dict,
-) -> None:
-    schemas = openapi_spec.get("components", {}).get("schemas", {})
-    operation = schemas["FlowRunRerunOperationPublic"]
-    revision_property = operation["properties"]["input_revision"]
-
-    assert "input_revision" in operation["required"]
-    assert revision_property["discriminator"]["propertyName"] == "status"
-    variants = [
-        _resolve_component_ref(openapi_spec, variant)
-        for variant in revision_property["oneOf"]
-    ]
-    variants_by_status = {
-        next(
-            iter(
-                _extract_enum_values(
-                    openapi_spec,
-                    variant["properties"]["status"],
-                )
-            )
-        ): variant
-        for variant in variants
-    }
-
-    assert set(variants_by_status) == {"tracked", "not_recorded", "unavailable"}
-    assert set(variants_by_status["tracked"]["required"]) == {
-        "status",
-        "prior_input_hash",
-        "resulting_input_hash",
-        "changed_paths",
-        "prior_input_payload",
-    }
-    assert set(variants_by_status["not_recorded"]["required"]) == {"status"}
-    assert set(variants_by_status["unavailable"]["required"]) == {
-        "status",
-        "reason",
-    }
-    assert _extract_enum_values(
-        openapi_spec,
-        variants_by_status["unavailable"]["properties"]["reason"],
-    ) == {"invalid_persisted_revision"}
 
 
 def test_openapi_flow_evidence_export_documents_json_attachment(
@@ -3666,12 +3109,12 @@ def test_openapi_flow_evidence_export_documents_json_attachment(
         "not_tracked",
         "tracked",
         "corrupt",
-        "retention_purged",
     }
     retention_summary = _resolve_component_ref(
         openapi_spec, manifest_properties["retention_state_summary"]
     )
-    assert "artifact_content_purged_count" in retention_summary.get("properties", {})
+    assert retention_summary.get("required") == ["tracking_state", "note"]
+    assert set(retention_summary.get("properties", {})) == {"tracking_state", "note"}
     artifact_summary = _resolve_component_ref(
         openapi_spec, manifest_properties["artifact_availability_summary"]
     )
@@ -3743,7 +3186,6 @@ def test_openapi_flow_evidence_export_documents_single_typed_summary(
         "rag_sources",
         "rag_usage_tracking",
         "citations",
-        "rerun_lineage",
         "review_checkpoints",
         "final_output",
         "step_overview",
@@ -3983,10 +3425,6 @@ def test_openapi_flow_run_operation_error_responses_use_general_error_model(
     paths = openapi_spec.get("paths", {})
     run_operation_codes: dict[tuple[str, str], tuple[str, ...]] = {
         ("/api/v1/flows/{id}/runs/{run_id}/cancel/", "post"): ("403", "404"),
-        (
-            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/rerun/",
-            "post",
-        ): ("400", "403", "404"),
         ("/api/v1/flows/{id}/runs/{run_id}/redispatch/", "post"): ("403", "404"),
         ("/api/v1/flows/{id}/runs/{run_id}/evidence/", "get"): ("403", "404"),
     }

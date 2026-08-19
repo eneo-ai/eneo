@@ -148,7 +148,6 @@ class _DataRetentionService:
         return FlowRunHistoryPurgeBlockedCounts(
             skipped_undelivered_audit=31,
             skipped_unresolved_webhook=41,
-            skipped_active_rerun=37,
         )
 
     async def purge_abandoned_flow_runtime_uploads(
@@ -237,7 +236,6 @@ async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions
     )
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 31
     assert result["deleted"]["flow_runs_skipped_unresolved_webhook"] == 41
-    assert result["deleted"]["flow_runs_skipped_active_rerun"] == 37
     assert result["deleted"]["flow_provider_calls"] == 13
     assert result["deleted"]["flow_resolved_input_aggregates"] == 17
     assert result["deleted"]["flow_resolved_input_edges"] == 19
@@ -373,7 +371,6 @@ async def test_cleanup_old_data_preserves_committed_flow_purge_counts_after_late
     assert result["deleted"]["flow_template_asset_files_deleted"] == 31
     assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 0
     assert result["deleted"]["flow_runs_skipped_unresolved_webhook"] == 0
-    assert result["deleted"]["flow_runs_skipped_active_rerun"] == 0
     assert result["deleted"]["flow_debug_rows"] == 7
     assert result["deleted"]["flow_attempt_provenance"] == 11
     assert result["deleted"]["flow_audit_outbox_delivered_rows"] == 23

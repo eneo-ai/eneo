@@ -66,7 +66,6 @@ async def test_present_evidence_actor_summaries_uses_one_lookup_for_all_sections
     tenant_id = uuid4()
     requester_service_id = uuid4()
     decider_service_id = uuid4()
-    rerun_service_id = uuid4()
     repo = AsyncMock()
     repo.list_service_principals_by_ids.return_value = {
         requester_service_id: SimpleNamespace(
@@ -77,21 +76,12 @@ async def test_present_evidence_actor_summaries_uses_one_lookup_for_all_sections
             id=decider_service_id,
             display_name="Decider service",
         ),
-        rerun_service_id: SimpleNamespace(
-            id=rerun_service_id,
-            display_name="Rerun service",
-        ),
     }
     payload = {
         "review_checkpoints": [
             {
                 "requester_service_id": str(requester_service_id),
                 "decided_by_service_id": str(decider_service_id),
-            }
-        ],
-        "rerun_operations": [
-            {
-                "requested_by_service_id": str(rerun_service_id),
             }
         ],
     }
@@ -109,11 +99,7 @@ async def test_present_evidence_actor_summaries_uses_one_lookup_for_all_sections
     assert checkpoint["decided_by_service_principal"]["display_name"] == (
         "Decider service"
     )
-    rerun_operation = enriched["rerun_operations"][0]
-    assert rerun_operation["requested_by_service_principal"]["display_name"] == (
-        "Rerun service"
-    )
     repo.list_service_principals_by_ids.assert_awaited_once()
     assert set(
         repo.list_service_principals_by_ids.await_args.kwargs["service_principal_ids"]
-    ) == {requester_service_id, decider_service_id, rerun_service_id}
+    ) == {requester_service_id, decider_service_id}

@@ -1,17 +1,10 @@
 from typing import Annotated, Protocol, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends
 
 from eneo.authentication import auth_dependencies
-from eneo.data_retention.infrastructure.data_retention_service import (
-    FLOW_RETENTION_PREVIEW_STALE_CODE,
-    FlowRetentionChangeConfirmation,
-)
 from eneo.files.mime_support import supported_mimes
-from eneo.flows.domain.flow_classification_retention_policy import (
-    FlowClassificationRetentionPolicy,
-)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
@@ -25,10 +18,6 @@ from eneo.settings.setting_service import (
     SettingService,
 )
 from eneo.settings.settings import (
-    FlowClassificationRetentionPoliciesPublic,
-    FlowClassificationRetentionPolicyPreviewRequest,
-    FlowClassificationRetentionPolicyPublic,
-    FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
@@ -39,8 +28,6 @@ from eneo.settings.settings import (
     FlowMappedExecutionPolicyUpdate,
     FlowRagEvidencePolicyPublic,
     FlowRagEvidencePolicyUpdate,
-    FlowRetentionImpactPreviewPublic,
-    FlowRetentionOrganizationPreviewRequest,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyPublic,
@@ -91,9 +78,6 @@ class _FlowSettingsServiceProtocol(Protocol):
         self, payload: FlowEvidencePolicyUpdate
     ) -> FlowEvidencePolicyPublic: ...
     async def get_flow_retention_policy(self) -> FlowRetentionPolicyPublic: ...
-    async def preview_flow_retention_policy(
-        self, payload: FlowRetentionOrganizationPreviewRequest
-    ) -> FlowRetentionImpactPreviewPublic: ...
     async def update_flow_retention_policy(
         self, payload: FlowRetentionPolicyUpdate
     ) -> FlowRetentionPolicyPublic: ...
@@ -141,52 +125,6 @@ def _flow_settings_invalid_payload_response(
         message=message,
         eneo_error_code=ErrorCodes.BAD_REQUEST,
         code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
-    )
-
-
-def _flow_settings_not_found_response(description: str) -> dict[str, object]:
-    return _settings_error_response(
-        description=description,
-        message="Not found.",
-        eneo_error_code=ErrorCodes.NOT_FOUND,
-        code="not_found",
-    )
-
-
-def _flow_retention_conflict_response() -> dict[str, object]:
-    return _settings_error_response(
-        description=(
-            "The destructive change requires a fresh exact preview, or the "
-            "control-plane/preview state changed before confirmation."
-        ),
-        message="Request a new Flow retention preview and confirm it.",
-        eneo_error_code=ErrorCodes.CONFLICT,
-        code=FLOW_RETENTION_PREVIEW_STALE_CODE,
-    )
-
-
-def _flow_retention_confirmation(
-    payload: FlowRetentionPolicyUpdate | FlowClassificationRetentionPolicyUpdate,
-) -> FlowRetentionChangeConfirmation | None:
-    if payload.confirmation is None:
-        return None
-    return FlowRetentionChangeConfirmation(
-        expected_control_plane_version=(
-            payload.confirmation.expected_control_plane_version
-        ),
-        expected_preview_hash=payload.confirmation.expected_preview_hash,
-        previewed_at=payload.confirmation.previewed_at,
-    )
-
-
-def _flow_classification_retention_policy_public(
-    policy: FlowClassificationRetentionPolicy,
-) -> FlowClassificationRetentionPolicyPublic:
-    return FlowClassificationRetentionPolicyPublic(
-        security_classification_id=policy.security_classification_id,
-        data_retention_days=policy.data_retention_days,
-        minimum_retention_days=policy.minimum_retention_days,
-        no_purge=policy.no_purge,
     )
 
 
@@ -698,11 +636,11 @@ async def update_flow_evidence_policy(
     operation_id="get_flow_retention_policy",
     summary="Get flow retention policy",
     description=(
-        "Return the tenant-admin Flow deletion envelope, independent preservation "
-        "barriers, and debug-evidence cleanup value. Null organization and "
-        "classification delete-after values mean automatic run-history deletion is "
-        "Off. Minimum-retention and no-purge values can block deletion without "
-        "activating it. This endpoint does not itself delete data."
+        "Return the tenant fallback for layered Flow run-history retention, the "
+        "runtime-upload cleanup window, and the independent debug-evidence value. "
+        "A Flow-specific value overrides its Space value, and a Space value "
+        "overrides the tenant fallback. Null means automatic deletion is disabled "
+        "at that layer; this endpoint never previews or reconstructs deleted data."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -714,29 +652,6 @@ async def get_flow_retention_policy(
     return await service.get_flow_retention_policy()
 
 
-@settings_admin_router.post(
-    "/flow-retention-policy/preview",
-    response_model=FlowRetentionImpactPreviewPublic,
-    operation_id="preview_flow_retention_policy",
-    summary="Preview a flow retention policy change",
-    description=(
-        "Read a bounded, set-based impact preview for exact proposed organization "
-        "delete-after, minimum-retention, no-purge, and never-attached runtime-upload "
-        "values. The preview includes current, proposed, newly eligible, and "
-        "no-longer-eligible counts, distinct file bytes, fixed clock anchors, latent "
-        "Flow/Space values, and blockers. It changes no policy and deletes no data."
-    ),
-    responses={403: _flow_settings_admin_forbidden_response()},
-)
-async def preview_flow_retention_policy(
-    payload: FlowRetentionOrganizationPreviewRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> FlowRetentionImpactPreviewPublic:
-    validate_permission(container.user(), Permission.ADMIN)
-    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
-    return await service.preview_flow_retention_policy(payload)
-
-
 @settings_admin_router.patch(
     "/flow-retention-policy",
     response_model=FlowRetentionPolicyPublic,
@@ -744,11 +659,10 @@ async def preview_flow_retention_policy(
     summary="Update flow retention policy",
     description=(
         "Update tenant Flow retention inputs. Omitted fields are unchanged and null "
-        "means Off. Enabling or shortening a delete-after value, and every change to "
-        "minimum-retention or no-purge, requires the exact preview confirmation "
-        "returned by /flow-retention-policy/preview. Disabling or lengthening only an "
-        "ordinary delete-after value does not require confirmation. "
-        "run_debug_evidence_days remains independent JSONB cleanup."
+        "means Off. Flow values override Space values, which override this tenant "
+        "fallback. run_debug_evidence_days remains independent JSONB cleanup. The "
+        "shared retention worker applies changes on its next scheduled pass; there "
+        "is no classification barrier, tombstone, or preview/confirmation workflow."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(
@@ -756,7 +670,6 @@ async def preview_flow_retention_policy(
             "At least one flow retention policy field must be provided.",
         ),
         403: _flow_settings_admin_forbidden_response(),
-        409: _flow_retention_conflict_response(),
     },
 )
 async def update_flow_retention_policy(
@@ -766,117 +679,6 @@ async def update_flow_retention_policy(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_retention_policy(payload)
-
-
-@settings_admin_router.get(
-    "/flow-classification-retention-policies",
-    response_model=FlowClassificationRetentionPoliciesPublic,
-    operation_id="list_flow_classification_retention_policies",
-    summary="List flow classification retention policies",
-    description=(
-        "List tenant Flow classification retention inputs. A row's delete-after value "
-        "activates automatic run-history deletion for matching spaces, including while "
-        "security_enabled is false. A barrier-only row with minimum-retention or "
-        "no-purge does not activate deletion. Debug-evidence cleanup is independent, "
-        "and listing policies does not delete data."
-    ),
-    responses={403: _flow_settings_admin_forbidden_response()},
-)
-async def list_flow_classification_retention_policies(
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> FlowClassificationRetentionPoliciesPublic:
-    validate_permission(container.user(), Permission.ADMIN)
-    service = container.flow_classification_retention_policy_service()
-    policies = await service.list_policies()
-    return FlowClassificationRetentionPoliciesPublic(
-        policies=[
-            _flow_classification_retention_policy_public(policy) for policy in policies
-        ]
-    )
-
-
-@settings_admin_router.put(
-    "/flow-classification-retention-policies/{security_classification_id}",
-    response_model=FlowClassificationRetentionPolicyPublic | None,
-    operation_id="put_flow_classification_retention_policy",
-    summary="Set flow classification retention policy",
-    description=(
-        "Create, replace, or remove the desired retention state for one tenant security "
-        "classification. Enabling or shortening its delete-after value, and every "
-        "minimum-retention or no-purge change, requires the exact preview confirmation. "
-        "A barrier-only state never activates deletion. Setting all three values Off "
-        "removes the row through this same operation. This endpoint itself deletes no "
-        "run data and does not configure debug-evidence redaction."
-    ),
-    responses={
-        403: _flow_settings_admin_forbidden_response(),
-        404: _flow_settings_not_found_response(
-            "Security classification does not exist for this tenant."
-        ),
-        409: _flow_retention_conflict_response(),
-    },
-)
-async def put_flow_classification_retention_policy(
-    security_classification_id: Annotated[
-        UUID,
-        Path(description="Tenant security classification id to bind the policy to."),
-    ],
-    payload: FlowClassificationRetentionPolicyUpdate,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> FlowClassificationRetentionPolicyPublic | None:
-    validate_permission(container.user(), Permission.ADMIN)
-    service = container.flow_classification_retention_policy_service()
-    policy = await service.set_policy(
-        security_classification_id=security_classification_id,
-        data_retention_days=payload.data_retention_days,
-        minimum_retention_days=payload.minimum_retention_days,
-        no_purge=payload.no_purge,
-        confirmation=_flow_retention_confirmation(payload),
-    )
-    return (
-        _flow_classification_retention_policy_public(policy)
-        if policy is not None
-        else None
-    )
-
-
-@settings_admin_router.post(
-    "/flow-classification-retention-policies/{security_classification_id}/preview",
-    response_model=FlowRetentionImpactPreviewPublic,
-    operation_id="preview_flow_classification_retention_policy",
-    summary="Preview a flow classification retention policy change",
-    description=(
-        "Use the same exact-state, set-based Flow retention gate as organization "
-        "policy changes before enabling or shortening classification delete-after, or "
-        "changing minimum-retention or no-purge. This bounded read returns the "
-        "control-plane version, preview hash, fixed clock anchor, current/proposed "
-        "eligibility, distinct file bytes, latent Flow/Space values, and blockers "
-        "needed to confirm the proposal without deleting data."
-    ),
-    responses={
-        403: _flow_settings_admin_forbidden_response(),
-        404: _flow_settings_not_found_response(
-            "Security classification does not exist for this tenant."
-        ),
-    },
-)
-async def preview_flow_classification_retention_policy(
-    security_classification_id: Annotated[
-        UUID,
-        Path(description="Tenant security classification id to preview."),
-    ],
-    payload: FlowClassificationRetentionPolicyPreviewRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-) -> FlowRetentionImpactPreviewPublic:
-    validate_permission(container.user(), Permission.ADMIN)
-    service = container.flow_classification_retention_policy_service()
-    preview = await service.preview_policy(
-        security_classification_id=security_classification_id,
-        data_retention_days=payload.data_retention_days,
-        minimum_retention_days=payload.minimum_retention_days,
-        no_purge=payload.no_purge,
-    )
-    return FlowRetentionImpactPreviewPublic.from_domain(preview)
 
 
 @settings_admin_router.patch(

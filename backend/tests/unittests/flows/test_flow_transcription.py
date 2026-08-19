@@ -156,7 +156,6 @@ def _build_executor(
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
-    flow_run_rerun_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
@@ -209,7 +208,6 @@ def _build_executor(
         session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,

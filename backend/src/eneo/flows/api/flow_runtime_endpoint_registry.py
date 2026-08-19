@@ -22,7 +22,6 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_PROVIDER_CALLS_PATH,
     FLOW_RUN_REDISPATCH_PATH,
     FLOW_RUN_STATUS_CAPABILITIES_PATH,
-    FLOW_RUN_STEP_RERUN_PATH,
     FLOW_RUN_STEPS_PATH,
     FLOW_RUNS_PATH,
     PUBLISHED_FLOW_RUNTIME_PATH,
@@ -187,13 +186,6 @@ FLOW_RUNTIME_ENDPOINT_CONTRACTS: tuple[FlowRuntimeEndpointContract, ...] = (
         operation_id="cancel_flow_run",
         success_status=status.HTTP_200_OK,
         runtime_path_fields=(_field("cancel_run_template"),),
-    ),
-    FlowRuntimeEndpointContract(
-        route_path=FLOW_RUN_STEP_RERUN_PATH,
-        method="post",
-        operation_id="rerun_flow_run_step",
-        success_status=status.HTTP_202_ACCEPTED,
-        runtime_path_fields=(_field("rerun_step_template"),),
     ),
     FlowRuntimeEndpointContract(
         route_path=FLOW_RUN_REDISPATCH_PATH,

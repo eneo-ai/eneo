@@ -21,12 +21,6 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.flow_step_attempt_input import MappedExecutionMode
 from eneo.flows.domain.rag_evidence import SourceUsageState
-from eneo.flows.flow_retention_tombstone import (
-    FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
-    FlowAttemptRetentionMarker,
-    RunDebugAttemptRetentionCounts,
-    match_attempt_retention_counts,
-)
 from eneo.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
@@ -330,17 +324,10 @@ class FlowResolvedInputLineageTracked(_FlowResolvedInputEdgesFields):
     status: Literal["tracked"]
 
 
-class FlowResolvedInputLineageRetentionPurged(_FlowResolvedInputModel):
-    status: Literal["retention_purged"]
-    resolved_input_aggregate_count: int = Field(strict=True, ge=0)
-    resolved_input_edge_count: int = Field(strict=True, ge=0)
-
-
 FlowResolvedInputLineage: TypeAlias = Annotated[
     FlowResolvedInputLineageNotTracked
     | FlowResolvedInputLineageTracked
-    | FlowResolvedInputEdgesCorruptionMarker
-    | FlowResolvedInputLineageRetentionPurged,
+    | FlowResolvedInputEdgesCorruptionMarker,
     Field(discriminator="status"),
 ]
 
@@ -425,7 +412,7 @@ def parse_resolved_input_edges(raw: Any) -> FlowResolvedInputEdgesParseResult:
 
 
 FlowAttemptProvenanceParseStatus: TypeAlias = Literal[
-    "not_tracked", "tracked", "corrupt", "retention_purged"
+    "not_tracked", "tracked", "corrupt"
 ]
 FlowAttemptProvenanceCorruptionCode: TypeAlias = Literal[
     "flow_attempt_provenance_invalid_type",
@@ -433,7 +420,6 @@ FlowAttemptProvenanceCorruptionCode: TypeAlias = Literal[
     "flow_attempt_provenance_schema_version_unsupported",
     "flow_attempt_provenance_unknown_top_level_keys",
     "flow_attempt_provenance_invalid_current_payload",
-    "flow_attempt_provenance_invalid_retention_marker",
 ]
 
 
@@ -531,33 +517,18 @@ class FlowAttemptProvenanceParseResult:
     status: FlowAttemptProvenanceParseStatus
     provenance: FlowAttemptProvenance | None = None
     marker: FlowAttemptProvenanceCorruptionMarker | None = None
-    retention_marker: FlowAttemptRetentionMarker | None = None
 
     def __post_init__(self) -> None:
         if self.status == "tracked" and (
-            self.provenance is None
-            or self.marker is not None
-            or self.retention_marker is not None
+            self.provenance is None or self.marker is not None
         ):
             raise ValueError("Tracked attempt provenance requires a provenance value.")
         if self.status == "corrupt" and (
-            self.marker is None
-            or self.provenance is not None
-            or self.retention_marker is not None
+            self.marker is None or self.provenance is not None
         ):
             raise ValueError("Corrupt attempt provenance requires a marker value.")
-        if self.status == "retention_purged" and (
-            self.retention_marker is None
-            or self.provenance is not None
-            or self.marker is not None
-        ):
-            raise ValueError(
-                "Retention-purged attempt provenance requires a retention marker."
-            )
         if self.status == "not_tracked" and (
-            self.provenance is not None
-            or self.marker is not None
-            or self.retention_marker is not None
+            self.provenance is not None or self.marker is not None
         ):
             raise ValueError("Untracked attempt provenance cannot carry payload.")
 
@@ -577,34 +548,17 @@ class FlowAttemptProvenanceParseResult:
     ) -> "FlowAttemptProvenanceParseResult":
         return cls(status="corrupt", marker=marker)
 
-    @classmethod
-    def retention_purged(
-        cls, marker: FlowAttemptRetentionMarker
-    ) -> "FlowAttemptProvenanceParseResult":
-        return cls(status="retention_purged", retention_marker=marker)
-
     def to_export_payload(self) -> dict[str, Any] | None:
         if self.status == "tracked" and self.provenance is not None:
             return self.provenance.to_payload()
         if self.status == "corrupt" and self.marker is not None:
             return self.marker.to_payload()
-        if self.status == "retention_purged" and self.retention_marker is not None:
-            return self.retention_marker.to_payload()
         return None
 
 
 @dataclass(frozen=True)
 class FlowAttemptScopedProvenance:
     parse_result: FlowAttemptProvenanceParseResult
-    retention_counts: RunDebugAttemptRetentionCounts | None = None
-
-    def __post_init__(self) -> None:
-        if (self.parse_result.status == "retention_purged") != (
-            self.retention_counts is not None
-        ):
-            raise ValueError(
-                "Scoped retention-purged provenance requires validated counts."
-            )
 
 
 def project_resolved_input_lineage(
@@ -623,34 +577,7 @@ def project_resolved_input_lineage(
     if resolved_inputs.status == "corrupt":
         assert resolved_inputs.marker is not None
         return resolved_inputs.marker
-    counts = scoped_attempt_provenance.retention_counts
-    if counts is not None:
-        return FlowResolvedInputLineageRetentionPurged(
-            status="retention_purged",
-            resolved_input_aggregate_count=counts.resolved_input_aggregate_count,
-            resolved_input_edge_count=counts.resolved_input_edge_count,
-        )
     return FlowResolvedInputLineageNotTracked(status="not_tracked")
-
-
-class FlowAttemptRuntimeEvidencePurgedError(RuntimeError):
-    def __init__(
-        self,
-        *,
-        run_id: UUID,
-        step_id: UUID,
-        attempt_no: int,
-        tenant_id: UUID,
-    ):
-        self.run_id = run_id
-        self.step_id = step_id
-        self.attempt_no = attempt_no
-        self.tenant_id = tenant_id
-        super().__init__(
-            "Attempt runtime evidence cannot be written after retention purge "
-            f"(run_id={run_id}, step_id={step_id}, "
-            f"attempt_no={attempt_no}, tenant_id={tenant_id})."
-        )
 
 
 @dataclass(frozen=True)
@@ -719,35 +646,16 @@ def normalize_attempt_provenance(
     return parse_result.provenance if parse_result.status == "tracked" else None
 
 
-def require_attempt_runtime_evidence_not_purged(
-    raw: Any,
-    *,
-    run_id: UUID,
-    step_id: UUID,
-    attempt_no: int,
-    tenant_id: UUID,
-) -> None:
-    """Reject writes that would resurrect an attempt's purged runtime evidence."""
-    parsed = parse_attempt_provenance(raw)
-    if parsed.status == "retention_purged":
-        raise FlowAttemptRuntimeEvidencePurgedError(
-            run_id=run_id,
-            step_id=step_id,
-            attempt_no=attempt_no,
-            tenant_id=tenant_id,
-        )
-
-
 def resolve_attempt_terminalization_evidence(
     existing: dict[str, Any] | None,
     incoming: dict[str, Any] | None,
 ) -> FlowAttemptTerminalizationEvidence:
     """Preserve unavailable evidence during attempt terminalization."""
     existing_result = parse_attempt_provenance(existing)
-    if existing_result.status in ("corrupt", "retention_purged"):
+    if existing_result.status == "corrupt":
         return FlowAttemptTerminalizationEvidence(
             provenance_json=existing,
-            write_runtime_payloads=existing_result.status == "corrupt",
+            write_runtime_payloads=True,
         )
     if incoming is None:
         return FlowAttemptTerminalizationEvidence(
@@ -784,20 +692,6 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
             )
         )
     if schema_version != FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION:
-        if schema_version == FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION:
-            try:
-                return FlowAttemptProvenanceParseResult.retention_purged(
-                    FlowAttemptRetentionMarker.model_validate(raw_payload)
-                )
-            except (TypeError, ValueError, ValidationError):
-                return FlowAttemptProvenanceParseResult.corrupt(
-                    _corruption_marker(
-                        error_code="flow_attempt_provenance_invalid_retention_marker",
-                        message="Attempt retention marker failed schema validation.",
-                        raw=raw_payload,
-                        persisted_schema_version=schema_version,
-                    )
-                )
         return FlowAttemptProvenanceParseResult.corrupt(
             _corruption_marker(
                 error_code="flow_attempt_provenance_schema_version_unsupported",
@@ -862,33 +756,9 @@ def parse_attempt_provenance_for_attempt(
     run_id: UUID,
     attempt_id: UUID,
 ) -> FlowAttemptScopedProvenance:
-    """Parse provenance and reject a retention marker for another attempt."""
-    parse_result = parse_attempt_provenance(raw)
-    if parse_result.status != "retention_purged":
-        return FlowAttemptScopedProvenance(parse_result=parse_result)
-    assert parse_result.retention_marker is not None
-
-    retention_counts = match_attempt_retention_counts(
-        parse_result.retention_marker,
-        tenant_id=tenant_id,
-        run_id=run_id,
-        attempt_id=attempt_id,
-    )
-    if retention_counts is not None:
-        return FlowAttemptScopedProvenance(
-            parse_result=parse_result,
-            retention_counts=retention_counts,
-        )
-    return FlowAttemptScopedProvenance(
-        parse_result=FlowAttemptProvenanceParseResult.corrupt(
-            _corruption_marker(
-                error_code="flow_attempt_provenance_invalid_retention_marker",
-                message="Attempt retention marker identity does not match its attempt.",
-                raw=raw,
-                persisted_schema_version=FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
-            )
-        )
-    )
+    """Parse provenance for an attempt-scoped read."""
+    del tenant_id, run_id, attempt_id
+    return FlowAttemptScopedProvenance(parse_result=parse_attempt_provenance(raw))
 
 
 def _normalize_attempt_provenance_v3(raw: dict[str, Any]) -> FlowAttemptProvenance:

@@ -250,30 +250,6 @@ describe("flowRuntimeErrorMapping", () => {
     expect(messages).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
   });
 
-  it("maps invalid rerun step inputs through the Flow API descriptor", () => {
-    const error = new EneoError(
-      "Rerun step_inputs may only target the rerun root step.",
-      "RESPONSE",
-      400,
-      0,
-      {
-        code: "flow_run_rerun_step_inputs_invalid",
-        context: { step_ids: ["downstream-step"] }
-      },
-      { endpoint: "POST@test" }
-    );
-
-    expect(describeFlowApiError(error)).toMatchObject({
-      code: "flow_run_rerun_step_inputs_invalid",
-      messageKey: "flow_error_flow_run_rerun_step_inputs_invalid",
-      context: { step_ids: ["downstream-step"] }
-    });
-    expect([
-      "Rerun files can only be attached to the step being rerun. Remove files from other steps and try again.",
-      "Filer vid omkörning kan bara kopplas till steget som körs om. Ta bort filer från andra steg och försök igen."
-    ]).toContain(getFlowRuntimeErrorMessage(error, "fallback"));
-  });
-
   it.each([
     [
       "flow_run_invalid_idempotency_key",
@@ -287,13 +263,6 @@ describe("flowRuntimeErrorMapping", () => {
       [
         "One or more selected files were uploaded for another flow. Upload them through this flow and try again.",
         "En eller flera valda filer laddades upp för ett annat flöde. Ladda upp dem via det här flödet och försök igen."
-      ]
-    ],
-    [
-      "flow_run_rerun_step_incomplete",
-      [
-        "The selected rerun step does not have a completed current result. Reload the run and choose a completed step.",
-        "Det valda omkörningssteget har inget slutfört aktuellt resultat. Läs om körningen och välj ett slutfört steg."
       ]
     ]
   ])("maps newly cataloged %s through the localized Flow API descriptor", (code, messages) => {

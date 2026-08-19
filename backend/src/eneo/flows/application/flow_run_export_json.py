@@ -23,7 +23,6 @@ from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceExportSummary,
     EvidenceFinalOutputSummary,
     EvidenceRagSourceSummary,
-    EvidenceRerunLineageSummary,
     EvidenceStepInputLineageSummary,
     EvidenceStepKnowledgeRetrievalSummary,
     EvidenceStepOverview,
@@ -45,10 +44,6 @@ from eneo.flows.domain.rag_evidence import (
     iter_step_rag_payloads,
 )
 from eneo.flows.enums import FlowRunReviewCheckpointState
-from eneo.flows.flow_retention_tombstone import (
-    FlowRetentionTombstone,
-    extract_retention_tombstones,
-)
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowAttemptProvenanceParseResult,
@@ -78,8 +73,8 @@ from eneo.flows.template_reference_analyzer import (
 from eneo.main.config import get_settings
 
 _RETENTION_NOT_TRACKED_NOTE = (
-    "No retention tombstones are present in this export; rows purged before "
-    "tombstone tracking remain indistinguishable from never-tracked evidence."
+    "Deletion provenance is not tracked; purged rows remain indistinguishable "
+    "from evidence that was never recorded."
 )
 _ARTIFACT_ROW_TRACKED_NOTE = (
     "Artifact availability is derived from result-file rows joined to file metadata."
@@ -229,8 +224,6 @@ def _provenance_persisted_version_status(
 ) -> EvidenceProvenancePersistedVersionStatus:
     if any(result.status == "corrupt" for result in parse_results):
         return "corrupt"
-    if any(result.status == "retention_purged" for result in parse_results):
-        return "retention_purged"
     if any(result.status == "tracked" for result in parse_results):
         return "tracked"
     return "not_tracked"
@@ -241,60 +234,11 @@ def _retention_state_summary(
     *,
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
 ) -> EvidenceRetentionStateSummary:
-    tombstones = _collect_retention_tombstones(
-        bundle_payload,
-        provenance_parse_results=provenance_parse_results,
-    )
-    retention_purged_count = sum(
-        1 for marker in tombstones if marker.retention_state == "retention_purged"
-    )
-    artifact_content_purged_count = sum(
-        1
-        for marker in tombstones
-        if marker.retention_state == "artifact_content_purged"
-    )
-    redacted_for_deletion_count = sum(
-        1 for marker in tombstones if marker.retention_state == "redacted_for_deletion"
-    )
-    if not tombstones:
-        return EvidenceRetentionStateSummary(
-            tracking_state="not_tracked",
-            tombstone_count=0,
-            retention_purged_count=0,
-            artifact_content_purged_count=0,
-            redacted_for_deletion_count=0,
-            note=_RETENTION_NOT_TRACKED_NOTE,
-        )
-
+    del bundle_payload, provenance_parse_results
     return EvidenceRetentionStateSummary(
-        tracking_state="tracked",
-        tombstone_count=len(tombstones),
-        retention_purged_count=retention_purged_count,
-        artifact_content_purged_count=artifact_content_purged_count,
-        redacted_for_deletion_count=redacted_for_deletion_count,
-        note=(
-            "Retention tombstones are present: "
-            f"{len(tombstones)} total, "
-            f"{retention_purged_count} retention-purged, "
-            f"{artifact_content_purged_count} artifact-content-purged, "
-            f"{redacted_for_deletion_count} redacted-for-deletion."
-        ),
+        tracking_state="not_tracked",
+        note=_RETENTION_NOT_TRACKED_NOTE,
     )
-
-
-def _collect_retention_tombstones(
-    bundle_payload: dict[str, Any],
-    *,
-    provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
-) -> tuple[FlowRetentionTombstone, ...]:
-    tombstones: list[FlowRetentionTombstone] = []
-    for result in provenance_parse_results:
-        if result.status == "retention_purged" and result.retention_marker is not None:
-            tombstones.append(result.retention_marker.tombstone)
-    for step_result in _as_json_object_list(bundle_payload.get("step_results")):
-        output_payload = step_result.get("output_payload_json")
-        tombstones.extend(extract_retention_tombstones(output_payload))
-    return tuple(tombstones)
 
 
 def _artifact_availability_summary(
@@ -360,9 +304,6 @@ def _build_summary_payload(
     step_results = _as_json_object_list(bundle_payload.get("step_results"))
     step_attempts = _as_json_object_list(bundle_payload.get("step_attempts"))
     result_files = _result_file_records(bundle_payload)
-    rerun_lineage = EvidenceRerunLineageSummary.model_validate(
-        _build_rerun_lineage_summary(bundle_payload)
-    )
     debug_export = _as_json_object_or_empty(bundle_payload.get("debug_export"))
     debug_run = _as_json_object_or_empty(debug_export.get("run"))
     debug_summary = _as_json_object_or_empty(debug_run.get("summary"))
@@ -429,7 +370,6 @@ def _build_summary_payload(
             provenance_parse_results=provenance_parse_results,
         ),
         citations=citations,
-        rerun_lineage=rerun_lineage,
         review_checkpoints=review_checkpoint_summary,
         final_output=final_output_typed,
         step_overview=step_overview,
@@ -488,50 +428,6 @@ def _collect_models_used(step_attempts: Any) -> list[str]:
                 models.append(raw_value.strip())
                 break
     return list(dict.fromkeys(models))
-
-
-def _build_rerun_lineage_summary(bundle_payload: dict[str, Any]) -> dict[str, Any]:
-    operations = _rerun_operation_records(bundle_payload)
-    invalidated_steps = _rerun_invalidated_step_records(bundle_payload)
-    operation_statuses = [
-        str(status)
-        for operation in operations
-        if (status := operation.get("status")) is not None
-    ]
-    return {
-        "operations_count": len(operations),
-        "queued_operations_count": operation_statuses.count("queued"),
-        "running_operations_count": operation_statuses.count("running"),
-        "completed_operations_count": operation_statuses.count("completed"),
-        "failed_operations_count": operation_statuses.count("failed"),
-        "cancelled_operations_count": operation_statuses.count("cancelled"),
-        "active_operations_count": sum(
-            1 for status in operation_statuses if status in {"queued", "running"}
-        ),
-        "terminal_operations_count": sum(
-            1
-            for status in operation_statuses
-            if status in {"completed", "failed", "cancelled"}
-        ),
-        "invalidated_steps_count": len(invalidated_steps),
-        "completed_replacement_count": sum(
-            1
-            for invalidated_step in invalidated_steps
-            if invalidated_step.get("new_attempt_id") is not None
-        ),
-    }
-
-
-def _rerun_operation_records(
-    bundle_payload: dict[str, Any],
-) -> list[FlowPersistedJsonObject]:
-    return _as_json_object_list(bundle_payload.get("rerun_operations"))
-
-
-def _rerun_invalidated_step_records(
-    bundle_payload: dict[str, Any],
-) -> list[FlowPersistedJsonObject]:
-    return _as_json_object_list(bundle_payload.get("rerun_invalidated_steps"))
 
 
 def _review_checkpoint_records(
@@ -654,9 +550,6 @@ def derive_rag_usage_tracking(
 ) -> dict[str, Any]:
     rag_payloads = _rag_payloads_from_parse_results(provenance_parse_results)
     has_corrupt = any(result.status == "corrupt" for result in provenance_parse_results)
-    retention_purged_attempt_count = sum(
-        1 for result in provenance_parse_results if result.status == "retention_purged"
-    )
     if not rag_payloads:
         summary = untracked_rag_summary()
         if has_corrupt:
@@ -664,12 +557,6 @@ def derive_rag_usage_tracking(
             summary["note"] = (
                 "One or more attempts have corrupt knowledge/RAG provenance; "
                 "source usage cannot be determined."
-            )
-        elif retention_purged_attempt_count:
-            summary["tracking_state"] = "retention_purged"
-            summary["note"] = (
-                "Knowledge/RAG provenance was retention-purged; absence of sources "
-                "does not prove knowledge was unused."
             )
     else:
         summary = _merge_tracked_rag_summaries(rag_payloads)
@@ -684,8 +571,6 @@ def derive_rag_usage_tracking(
             summary["tracking_state"] = "tracked_with_sources"
         else:
             summary["tracking_state"] = "tracked_no_sources"
-    if retention_purged_attempt_count:
-        summary["retention_purged_attempt_count"] = retention_purged_attempt_count
     return summary
 
 

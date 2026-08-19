@@ -100,7 +100,6 @@ def test_flow_api_router_modules_export_only_router() -> None:
         "eneo.flows.api.flow_definition_router",
         "eneo.flows.api.flow_router",
         "eneo.flows.api.flow_run_lifecycle_router",
-        "eneo.flows.api.flow_run_rerun_router",
         "eneo.flows.api.flow_run_review_router",
         "eneo.flows.api.flow_upload_router",
     }
@@ -221,7 +220,6 @@ def test_flow_request_models_expose_openapi_examples() -> None:
         flow_models.FlowCreateRequest,
         flow_models.FlowUpdateRequest,
         flow_models.FlowRunCreateRequest,
-        flow_models.FlowRunStepRerunRequest,
         flow_models.FlowAssistantCreateRequest,
         file_models.SignedURLRequest,
         assistant_models.AssistantUpdatePublic,
@@ -245,7 +243,6 @@ def test_flow_response_models_expose_openapi_examples() -> None:
         flow_models.FlowRunPublic,
         flow_models.FlowRunStepPublic,
         flow_models.FlowRunRedispatchResponse,
-        flow_models.FlowRunStepRerunResponse,
         flow_template_asset_models.FlowTemplateAssetPublic,
         flow_template_asset_models.FlowTemplateInspectionPublic,
         flow_models.FlowRunContractPublic,

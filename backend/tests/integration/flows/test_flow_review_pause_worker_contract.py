@@ -321,7 +321,6 @@ async def _create_review_pause_runtime_context(
         session=session,
         flow_repo=worker_container.flow_repo(),
         flow_run_repo=worker_container.flow_run_repo(),
-        flow_run_rerun_repo=worker_container.flow_run_rerun_repo(),
         flow_run_review_checkpoint_repo=worker_container.flow_run_review_checkpoint_repo(),
         flow_run_terminalizer=worker_container.flow_run_terminalizer(),
         flow_version_repo=worker_container.flow_version_repo(),

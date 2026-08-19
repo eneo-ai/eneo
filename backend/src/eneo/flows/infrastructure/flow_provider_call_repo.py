@@ -35,10 +35,6 @@ from eneo.flows.domain.provider_call import (
     TranscriptionProviderCallRequest,
 )
 from eneo.flows.enums import FlowStepAttemptStatus
-from eneo.flows.flow_retention_tombstone import (
-    FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION,
-    parse_attempt_retention_counts,
-)
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgeIndexes,
     parse_resolved_input_edges,
@@ -208,93 +204,38 @@ class FlowProviderCallRepository:
                 )
             )
         )
-        retained_stmt = (
-            sa.select(
-                FlowStepAttempts.flow_run_id.label("run_id"),
-                sa.literal("retained").label("usage_source"),
-                FlowStepAttempts.id.label("attempt_id"),
-                FlowStepAttempts.provenance_json,
-                sa.literal(0).label("completion_call_count"),
-                sa.literal(0).label("transcription_call_count"),
-                sa.literal(0).label("num_tokens_input"),
-                sa.literal(0).label("num_tokens_output"),
-                sa.literal(0).label("audio_seconds"),
-                sa.literal(False).label("input_incomplete"),
-                sa.literal(False).label("output_incomplete"),
-                sa.literal(False).label("audio_incomplete"),
-            )
-            .where(FlowStepAttempts.flow_run_id.in_(tuple(run_ids)))
-            .where(FlowStepAttempts.tenant_id == tenant_id)
-            .where(
-                FlowStepAttempts.provenance_json["schema_version"].as_string()
-                == FLOW_ATTEMPT_RETENTION_MARKER_SCHEMA_VERSION
-            )
-            .where(
-                ~sa.exists().where(
-                    FlowProviderCalls.flow_step_attempt_id == FlowStepAttempts.id
-                )
-            )
-        )
         rows = await self.session.stream(
-            retained_stmt.union_all(live_stmt).execution_options(
-                yield_per=_TOKEN_USAGE_STREAM_BATCH_SIZE
-            )
+            live_stmt.execution_options(yield_per=_TOKEN_USAGE_STREAM_BATCH_SIZE)
         )
 
         token_usage_by_run_id: dict[UUID, FlowRunTokenUsage] = {}
         audio_usage_by_run_id: dict[UUID, FlowRunTranscriptionUsage] = {}
-        retained_token_usage_unknown: set[UUID] = set()
-        retained_audio_usage_unknown: set[UUID] = set()
         async for row in rows:
             run_id: UUID = row.run_id
             row_token_usage: FlowRunTokenUsage | None
             row_audio_usage: FlowRunTranscriptionUsage | None
-            if row.usage_source == "live":
-                row_token_usage = (
-                    FlowRunTokenUsage.from_counts(
-                        num_tokens_input=int(row.num_tokens_input),
-                        num_tokens_output=int(row.num_tokens_output),
-                        input_completeness=(
-                            "incomplete" if row.input_incomplete else "complete"
-                        ),
-                        output_completeness=(
-                            "incomplete" if row.output_incomplete else "complete"
-                        ),
-                    )
-                    if int(row.completion_call_count) > 0
-                    else None
+            row_token_usage = (
+                FlowRunTokenUsage.from_counts(
+                    num_tokens_input=int(row.num_tokens_input),
+                    num_tokens_output=int(row.num_tokens_output),
+                    input_completeness=(
+                        "incomplete" if row.input_incomplete else "complete"
+                    ),
+                    output_completeness=(
+                        "incomplete" if row.output_incomplete else "complete"
+                    ),
                 )
-                row_audio_usage = (
-                    FlowRunTranscriptionUsage.from_counts(
-                        audio_seconds=float(row.audio_seconds),
-                        completeness=(
-                            "incomplete" if row.audio_incomplete else "complete"
-                        ),
-                    )
-                    if int(row.transcription_call_count) > 0
-                    else None
+                if int(row.completion_call_count) > 0
+                else None
+            )
+            row_audio_usage = (
+                FlowRunTranscriptionUsage.from_counts(
+                    audio_seconds=float(row.audio_seconds),
+                    completeness=("incomplete" if row.audio_incomplete else "complete"),
                 )
-            else:
-                counts = parse_attempt_retention_counts(
-                    row.provenance_json,
-                    tenant_id=tenant_id,
-                    run_id=run_id,
-                    attempt_id=row.attempt_id,
-                )
-                if counts is None:
-                    # This row claims to be a retained attempt, but its summary is
-                    # not trustworthy. Preserve any live totals while making their
-                    # incompleteness explicit.
-                    retained_token_usage_unknown.add(run_id)
-                    retained_audio_usage_unknown.add(run_id)
-                    continue
-                if counts.provider_call_count > 0:
-                    if counts.token_usage_state == "unknown":
-                        retained_token_usage_unknown.add(run_id)
-                    if counts.transcription_usage_state == "unknown":
-                        retained_audio_usage_unknown.add(run_id)
-                row_token_usage = counts.token_usage
-                row_audio_usage = counts.transcription_usage
+                if int(row.transcription_call_count) > 0
+                else None
+            )
             if row_token_usage is not None:
                 previous_token_usage = token_usage_by_run_id.get(run_id)
                 token_usage_by_run_id[run_id] = (
@@ -318,22 +259,6 @@ class FlowProviderCallRepository:
                     )
                 )
 
-        for run_id in retained_token_usage_unknown:
-            token_usage = token_usage_by_run_id.get(run_id)
-            if token_usage is not None:
-                token_usage_by_run_id[run_id] = FlowRunTokenUsage.from_counts(
-                    num_tokens_input=token_usage.num_tokens_input,
-                    num_tokens_output=token_usage.num_tokens_output,
-                    input_completeness="incomplete",
-                    output_completeness="incomplete",
-                )
-        for run_id in retained_audio_usage_unknown:
-            audio_usage = audio_usage_by_run_id.get(run_id)
-            if audio_usage is not None:
-                audio_usage_by_run_id[run_id] = FlowRunTranscriptionUsage.from_counts(
-                    audio_seconds=audio_usage.audio_seconds,
-                    completeness="incomplete",
-                )
         return {
             run_id: FlowRunUsage(
                 token_usage=token_usage_by_run_id.get(run_id),

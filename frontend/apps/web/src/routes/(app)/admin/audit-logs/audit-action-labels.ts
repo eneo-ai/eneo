@@ -445,10 +445,6 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_redispatched,
     description: m.audit_action_flow_run_redispatched_description
   },
-  flow_run_rerun_requested: {
-    name: m.audit_action_flow_run_rerun_requested,
-    description: m.audit_action_flow_run_rerun_requested_description
-  },
   flow_run_cancelled: {
     name: m.audit_action_flow_run_cancelled,
     description: m.audit_action_flow_run_cancelled_description

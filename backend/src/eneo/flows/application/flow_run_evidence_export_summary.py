@@ -38,21 +38,6 @@ class EvidenceRagSourceSummary(BaseModel):
     usage_state: str | None = None
 
 
-class EvidenceRerunLineageSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    operations_count: int
-    queued_operations_count: int
-    running_operations_count: int
-    completed_operations_count: int
-    failed_operations_count: int
-    cancelled_operations_count: int
-    active_operations_count: int
-    terminal_operations_count: int
-    invalidated_steps_count: int
-    completed_replacement_count: int
-
-
 class EvidenceStepInputLineageSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -180,7 +165,6 @@ class EvidenceExportSummary(BaseModel):
     rag_sources: list[EvidenceRagSourceSummary]
     rag_usage_tracking: JsonObject
     citations: JsonObject
-    rerun_lineage: EvidenceRerunLineageSummary
     review_checkpoints: EvidenceReviewCheckpointSummary
     final_output: EvidenceFinalOutputSummary
     step_overview: list[EvidenceStepOverview]

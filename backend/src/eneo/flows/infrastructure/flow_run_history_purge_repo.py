@@ -19,7 +19,6 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
-    FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
@@ -31,10 +30,7 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.questions_table import QuestionsFiles
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_repo import primary_file_content_size_expression
-from eneo.flows.enums import (
-    TERMINAL_FLOW_RUN_STATUS_VALUES,
-    FlowRunRerunOperationStatus,
-)
+from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.infrastructure.flow_version_repo import (
     scan_flow_version_template_references,
 )
@@ -163,23 +159,6 @@ def flow_run_unresolved_webhook_exists(run_id_col: object) -> sa.Exists:
         .where(
             FlowRunWebhookDeliveries.delivery_status
             == FlowOutboxDeliveryStatus.PENDING.value
-        )
-        .exists()
-    )
-
-
-def flow_run_active_rerun_exists(run_id_col: object) -> sa.Exists:
-    return (
-        sa.select(sa.literal(1))
-        .select_from(FlowRunRerunOperations)
-        .where(FlowRunRerunOperations.flow_run_id == run_id_col)
-        .where(
-            FlowRunRerunOperations.status.in_(
-                (
-                    FlowRunRerunOperationStatus.QUEUED.value,
-                    FlowRunRerunOperationStatus.RUNNING.value,
-                )
-            )
         )
         .exists()
     )
@@ -648,7 +627,6 @@ class FlowRunHistoryPurgeRepository:
             .where(FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES))
             .where(sa.not_(flow_run_undelivered_audit_exists(FlowRuns.id)))
             .where(sa.not_(flow_run_unresolved_webhook_exists(FlowRuns.id)))
-            .where(sa.not_(flow_run_active_rerun_exists(FlowRuns.id)))
         )
         return set(result.all())
 
@@ -895,22 +873,9 @@ def _abandoned_runtime_upload_eligibility(
         0,
         Tenants.flow_runtime_upload_abandonment_days,
     )
-    minimum_satisfied = sa.or_(
-        Tenants.flow_run_history_minimum_retention_days.is_(None),
-        FlowRuntimeUploadedFiles.created_at
-        <= sa.literal(now)
-        - sa.func.make_interval(
-            0,
-            0,
-            0,
-            Tenants.flow_run_history_minimum_retention_days,
-        ),
-    )
     return (
         Tenants.flow_runtime_upload_abandonment_days.is_not(None),
-        Tenants.flow_run_history_no_purge.is_(False),
         horizon_due,
-        minimum_satisfied,
         sa.not_(attached_to_run),
     )
 

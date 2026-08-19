@@ -34,20 +34,11 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial
     run_history_retention: {
       state: "days",
       effective_days: 30,
-      effective_minimum_days: null,
-      no_purge: false,
-      policy_conflict: false,
-      activation_sources: ["organization"],
-      barrier_sources: [],
+      source: "organization",
       contributors: {
         organization_days: 30,
-        classification_days: null,
         space_days: null,
-        flow_days: null,
-        organization_minimum_days: null,
-        classification_minimum_days: null,
-        organization_no_purge: false,
-        classification_no_purge: false
+        flow_days: null
       }
     },
     created_at: null,
@@ -347,20 +338,11 @@ describe("FlowEditor basic settings commands", () => {
         run_history_retention: {
           state: "off",
           effective_days: null,
-          effective_minimum_days: null,
-          no_purge: false,
-          policy_conflict: false,
-          activation_sources: [],
-          barrier_sources: [],
+          source: "none",
           contributors: {
             organization_days: null,
-            classification_days: null,
             space_days: 14,
-            flow_days: 30,
-            organization_minimum_days: null,
-            classification_minimum_days: null,
-            organization_no_purge: false,
-            classification_no_purge: false
+            flow_days: 30
           }
         }
       }),

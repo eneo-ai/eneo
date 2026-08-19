@@ -2,23 +2,17 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
 import pytest
 
-from eneo.flows.domain.flow_classification_retention_policy import (
-    FlowClassificationRetentionPolicy,
-)
 from eneo.roles.permissions import Permission
 from eneo.settings.settings import (
-    FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsPublic,
     FlowInputLimitsUpdate,
-    FlowRetentionEffectiveStatePublic,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyPublic,
@@ -30,8 +24,6 @@ from eneo.settings.settings_router import (
     get_flow_input_limits,
     get_flow_retention_policy,
     get_flow_runtime_policy,
-    list_flow_classification_retention_policies,
-    put_flow_classification_retention_policy,
     update_flow_document_render_limits,
     update_flow_evidence_policy,
     update_flow_input_limits,
@@ -298,16 +290,7 @@ async def test_get_flow_retention_policy_delegates_to_service() -> None:
     service.get_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=7,
         flow_run_history_retention_days=None,
-        flow_run_history_minimum_retention_days=None,
-        flow_run_history_no_purge=False,
         flow_runtime_upload_abandonment_days=None,
-        effective_state=FlowRetentionEffectiveStatePublic(
-            run_history_deletion_active=False,
-            runtime_upload_abandonment_active=False,
-            classification_policy_count=0,
-            activation_sources=(),
-            barrier_sources=(),
-        ),
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -327,16 +310,7 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
     service.update_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=14,
         flow_run_history_retention_days=None,
-        flow_run_history_minimum_retention_days=None,
-        flow_run_history_no_purge=False,
         flow_runtime_upload_abandonment_days=None,
-        effective_state=FlowRetentionEffectiveStatePublic(
-            run_history_deletion_active=False,
-            runtime_upload_abandonment_active=False,
-            classification_policy_count=0,
-            activation_sources=(),
-            barrier_sources=(),
-        ),
     )
     container.settings_service.return_value = service
     container.user.return_value = SimpleNamespace(
@@ -348,68 +322,3 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
 
     assert response.run_debug_evidence_days == 14
     service.update_flow_retention_policy.assert_awaited_once_with(payload)
-
-
-@pytest.mark.asyncio
-async def test_list_flow_classification_retention_policies_delegates_to_flow_service() -> (
-    None
-):
-    classification_id = uuid4()
-    container = MagicMock()
-    service = AsyncMock()
-    service.list_policies.return_value = [
-        FlowClassificationRetentionPolicy(
-            tenant_id=uuid4(),
-            security_classification_id=classification_id,
-            data_retention_days=7,
-        )
-    ]
-    container.flow_classification_retention_policy_service.return_value = service
-    container.user.return_value = SimpleNamespace(
-        id="u", tenant_id="t", permissions=[Permission.ADMIN]
-    )
-
-    response = await list_flow_classification_retention_policies(container=container)
-
-    assert response.policies[0].security_classification_id == classification_id
-    assert response.policies[0].data_retention_days == 7
-    service.list_policies.assert_awaited_once_with()
-
-
-@pytest.mark.asyncio
-async def test_put_flow_classification_retention_policy_delegates_to_flow_service() -> (
-    None
-):
-    classification_id = uuid4()
-    container = MagicMock()
-    service = AsyncMock()
-    service.set_policy.return_value = FlowClassificationRetentionPolicy(
-        tenant_id=uuid4(),
-        security_classification_id=classification_id,
-        data_retention_days=14,
-    )
-    container.flow_classification_retention_policy_service.return_value = service
-    container.user.return_value = SimpleNamespace(
-        id="u", tenant_id="t", permissions=[Permission.ADMIN]
-    )
-    payload = FlowClassificationRetentionPolicyUpdate(
-        data_retention_days=14,
-        minimum_retention_days=None,
-        no_purge=False,
-    )
-
-    response = await put_flow_classification_retention_policy(
-        security_classification_id=classification_id,
-        payload=payload,
-        container=container,
-    )
-
-    assert response is not None
-    assert response.data_retention_days == 14
-    service.set_policy.assert_awaited_once_with(
-        security_classification_id=classification_id,
-        data_retention_days=14,
-        minimum_retention_days=None,
-        no_purge=False,
-        confirmation=None,
-    )

@@ -93,9 +93,11 @@ def completion_model_factory(admin_user):
         is_enabled: bool = True,
         is_default: bool = False,
         family: str = None,
+        tenant_id=None,
         **kwargs,
     ) -> CompletionModels:
         """Create a completion model with the specified properties."""
+        resolved_tenant_id = tenant_id or admin_user.tenant_id
         # Auto-determine family based on provider if not specified
         if family is None:
             family_map = {
@@ -123,12 +125,12 @@ def completion_model_factory(admin_user):
 
         # Get or create provider for this tenant (required by check constraint)
         provider_id = await _get_or_create_provider(
-            session, admin_user.tenant_id, provider
+            session, resolved_tenant_id, provider
         )
 
         # Create the completion model with settings directly on it
         model = CompletionModels(
-            tenant_id=admin_user.tenant_id,
+            tenant_id=resolved_tenant_id,
             provider_id=provider_id,
             name=name,
             nickname=nickname,

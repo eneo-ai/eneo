@@ -819,8 +819,6 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
             "step_attempts": len(evidence_bundle.step_attempts),
             "runtime_input_files": len(runtime_input_file_ids),
             "result_files": len(evidence_bundle.result_files),
-            "rerun_operations": len(evidence_bundle.rerun_operations),
-            "rerun_invalidated_steps": len(evidence_bundle.rerun_invalidated_steps),
             "review_checkpoints": len(evidence_bundle.review_checkpoints),
             "webhook_deliveries": len(evidence_bundle.webhook_deliveries),
             "provider_calls": evidence_bundle.provider_calls.count,

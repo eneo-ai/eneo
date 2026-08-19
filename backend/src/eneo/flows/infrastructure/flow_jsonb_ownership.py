@@ -9,7 +9,6 @@ class FlowJsonbStorageCategory(StrEnum):
     IMMUTABLE_SNAPSHOT = "immutable_snapshot"
     RUNTIME_PAYLOAD = "runtime_payload"
     REVIEW_CHECKPOINT = "review_checkpoint"
-    RERUN_STATE = "rerun_state"
     PROVENANCE_EVIDENCE = "provenance_evidence"
     IMPORT_STATE = "import_state"
     DERIVED_INDEX = "derived_index"
@@ -408,58 +407,6 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         ),
     ),
     _owner(
-        "flow_run_rerun_operations",
-        "input_payload_json",
-        owner_module="eneo.flows.application.flow_run_rerun_service",
-        envelope_name="FlowRunRerunInputEnvelope",
-        owner_symbols=("FlowRunRerunService._normalize_rerun_inline_payload",),
-        storage_category=FlowJsonbStorageCategory.RERUN_STATE,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
-        rationale=(
-            "Rerun input overrides are captured with the operation so replay and "
-            "idempotency can be audited without changing the original run input."
-        ),
-    ),
-    _owner(
-        "flow_run_rerun_operations",
-        "changed_input_paths",
-        owner_module="eneo.flows.domain.flow_run_input_revision",
-        envelope_name="FlowRunInputRevision",
-        owner_symbols=(
-            "build_flow_run_input_revision",
-            "changed_input_paths",
-            "parse_flow_run_input_revision",
-        ),
-        storage_category=FlowJsonbStorageCategory.RERUN_STATE,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
-        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
-        rationale=(
-            "The changed field paths are a flat list of strings derived from the "
-            "two payloads, useful for showing what a rerun altered without "
-            "reading either payload."
-        ),
-    ),
-    _owner(
-        "flow_run_rerun_operations",
-        "prior_input_payload_json",
-        owner_module="eneo.flows.domain.flow_run_input_revision",
-        envelope_name="FlowRunInputRevision",
-        owner_symbols=(
-            "build_flow_run_input_revision",
-            "parse_flow_run_input_revision",
-        ),
-        storage_category=FlowJsonbStorageCategory.RERUN_STATE,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
-        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
-        rationale=(
-            "The run row keeps only current inputs, so each rerun stores the "
-            "payload it replaced; walking reruns in order rebuilds every input "
-            "revision. Same data class as the run's own input payload, on a row "
-            "that cascade-deletes with the run."
-        ),
-    ),
-    _owner(
         "flow_step_attempt_resolved_inputs",
         "resolved_input_edges_jsonb",
         owner_module="eneo.flows.flow_run_provenance",
@@ -512,7 +459,7 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "capability-safe fallback model configuration before provider work. "
             "Terminal paths add resolved input only when provider-call activation "
             "never occurred. It differs from the mutable current step result during "
-            "reruns and review."
+            "review."
         ),
     ),
     _owner(
@@ -527,24 +474,6 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         rationale=(
             "Attempt output preserves each try's raw runtime result before the "
             "current step result is updated or superseded."
-        ),
-    ),
-    _owner(
-        "flow_run_rerun_invalidated_steps",
-        "dependency_sources_json",
-        owner_module="eneo.flows.flow_run_rerun_graph",
-        envelope_name="RerunInvalidationDependencySources",
-        owner_symbols=(
-            "RerunInvalidatedStep",
-            "RerunInvalidationGraph",
-            "build_rerun_invalidation_graph",
-        ),
-        storage_category=FlowJsonbStorageCategory.RERUN_STATE,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
-        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
-        rationale=(
-            "Dependency sources are a bounded string set derived from the rerun "
-            "graph and stored with each invalidation row for reviewability."
         ),
     ),
     _owner(

@@ -360,7 +360,6 @@ async def _execute_flow_run_async_traced(
                 session=session,
                 flow_repo=runtime_container.flow_repo(),
                 flow_run_repo=flow_run_repo,
-                flow_run_rerun_repo=runtime_container.flow_run_rerun_repo(),
                 flow_run_review_checkpoint_repo=runtime_container.flow_run_review_checkpoint_repo(),
                 flow_run_terminalizer=runtime_container.flow_run_terminalizer(),
                 flow_version_repo=runtime_container.flow_version_repo(),

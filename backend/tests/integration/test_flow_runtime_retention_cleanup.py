@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -16,19 +15,13 @@ from eneo.data_retention.infrastructure import (
 )
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
-    FlowRetentionOrganizationProposal,
 )
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
-from eneo.database.tables.flow_classification_retention_policy_table import (
-    FlowClassificationRetentionPolicies,
-)
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
-    FlowProviderCalls,
     FlowRunAuditOutbox,
-    FlowRunRerunOperations,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRunStepInputFiles,
@@ -36,7 +29,6 @@ from eneo.database.tables.flow_tables import (
     FlowRuntimeUploadedFiles,
     FlowRunWebhookDeliveries,
     Flows,
-    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
     FlowSteps,
@@ -48,7 +40,6 @@ from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContents,
 )
-from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileContentVariant, FileType
@@ -59,24 +50,13 @@ from eneo.flows.application.flow_run_audit_outbox_delivery import (
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRunTokenUsage
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.enums import (
-    FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
 )
-from eneo.flows.flow_retention_tombstone import (
-    FLOW_RETENTION_ACTOR_SOURCE,
-    FlowAttemptRetentionMarker,
-    FlowRetentionTombstone,
-    RunDebugAttemptRetentionCounts,
-    extract_retention_tombstones,
-)
 from eneo.flows.infrastructure import (
     flow_run_history_purge_repo as flow_run_history_purge_repo_module,
-)
-from eneo.flows.infrastructure.flow_provider_call_repo import (
-    FlowProviderCallRepository,
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
@@ -923,45 +903,6 @@ async def _add_flow_audit_outbox_row(
     return outbox.id
 
 
-async def _add_active_rerun_operation(
-    async_session: AsyncSession,
-    *,
-    fixture: FlowRuntimeRetentionFixture,
-    user_id: UUID,
-    status: FlowRunRerunOperationStatus = FlowRunRerunOperationStatus.QUEUED,
-) -> UUID:
-    operation = FlowRunRerunOperations(
-        tenant_id=fixture.run.tenant_id,
-        flow_id=fixture.run.flow_id,
-        flow_run_id=fixture.run.id,
-        rerun_step_id=fixture.step_id,
-        rerun_step_order=1,
-        root_attempt_no=1,
-        root_attempt_id=fixture.step_attempt.id,
-        status=status.value,
-        request_fingerprint=f"rerun-{uuid4()}",
-        expected_run_revision=fixture.run.revision,
-        accepted_run_revision=fixture.run.revision + 1,
-        reason="Retry after manual review.",
-        input_payload_json=None,
-        root_step_input_override_requested=False,
-        requested_by_principal_type="user",
-        requested_by_user_id=user_id,
-        requested_by_service_id=None,
-        failure_code=None,
-        failure_message=None,
-        started_at=fixture.run.finished_at
-        if status == FlowRunRerunOperationStatus.RUNNING
-        else None,
-        finished_at=None,
-        created_at=fixture.run.created_at,
-        updated_at=fixture.run.created_at,
-    )
-    async_session.add(operation)
-    await async_session.flush()
-    return operation.id
-
-
 async def _set_webhook_delivery_pending(
     async_session: AsyncSession,
     *,
@@ -988,35 +929,6 @@ async def _set_webhook_delivery_pending(
         )
     )
     return claim_token
-
-
-async def _assign_space_classification_retention_policy(
-    async_session: AsyncSession,
-    *,
-    tenant_id: UUID,
-    space: Spaces,
-    data_retention_days: int,
-    name: str = "Sensitive Flow history",
-) -> SecurityClassification:
-    classification = SecurityClassification(
-        name=f"{name} {uuid4()}",
-        description="Retention test classification",
-        security_level=0,
-        tenant_id=tenant_id,
-    )
-    async_session.add(classification)
-    await async_session.flush()
-
-    space.security_classification_id = classification.id
-    async_session.add(
-        FlowClassificationRetentionPolicies(
-            tenant_id=tenant_id,
-            security_classification_id=classification.id,
-            data_retention_days=data_retention_days,
-        )
-    )
-    await async_session.flush()
-    return classification
 
 
 async def _count_for_run(
@@ -1245,7 +1157,6 @@ async def test_cleanup_old_flow_runtime_data_purges_old_flow_run_history_and_pre
     assert counts["flow_review_checkpoints_deleted"] == 1
     assert counts["flow_runs_skipped_undelivered_audit"] == 0
     assert counts["flow_runs_skipped_unresolved_webhook"] == 0
-    assert counts["flow_runs_skipped_active_rerun"] == 0
     assert counts["debug_step_results"] == 0
     assert counts["debug_step_attempts"] == 0
 
@@ -1343,63 +1254,22 @@ async def test_cleanup_old_flow_runtime_data_reclaims_only_past_horizon_unbound_
     abandoned_file_id = abandoned.file.id
     retained_file_id = retained.file.id
 
-    async def set_policy_and_preview(
-        *, abandonment_days: int | None, minimum_days: int | None, no_purge: bool
-    ):
-        await async_session.execute(
-            update(Tenants)
-            .where(Tenants.id == test_tenant.id)
-            .values(
-                flow_runtime_upload_abandonment_days=abandonment_days,
-                flow_run_history_minimum_retention_days=minimum_days,
-                flow_run_history_no_purge=no_purge,
-            )
-        )
-        await async_session.flush()
-        return await flow_retention_service.preview_flow_retention_organization_change(
-            tenant_id=test_tenant.id,
-            proposal=FlowRetentionOrganizationProposal(
-                flow_run_history_retention_days=2555,
-                flow_runtime_upload_abandonment_days=abandonment_days,
-                flow_run_history_minimum_retention_days=minimum_days,
-                flow_run_history_no_purge=no_purge,
-            ),
-            previewed_at=now,
-        )
-
-    no_purge_preview = await set_policy_and_preview(
-        abandonment_days=1, minimum_days=None, no_purge=True
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_runtime_upload_abandonment_days=None)
     )
-    assert no_purge_preview.runtime_uploads.current_eligible_count == 0
-    assert no_purge_preview.policy_blockers.runtime_upload_no_purge_count == 1
+    await async_session.flush()
     assert (await flow_retention_service.cleanup_old_flow_runtime_data())[
         "flow_runtime_source_bindings_deleted"
     ] == 0
 
-    minimum_preview = await set_policy_and_preview(
-        abandonment_days=1, minimum_days=3, no_purge=False
+    await async_session.execute(
+        update(Tenants)
+        .where(Tenants.id == test_tenant.id)
+        .values(flow_runtime_upload_abandonment_days=1)
     )
-    assert minimum_preview.runtime_uploads.current_eligible_count == 0
-    assert (
-        minimum_preview.policy_blockers.runtime_upload_minimum_not_satisfied_count == 1
-    )
-    assert (await flow_retention_service.cleanup_old_flow_runtime_data())[
-        "flow_runtime_source_bindings_deleted"
-    ] == 0
-
-    disabled_preview = await set_policy_and_preview(
-        abandonment_days=None, minimum_days=None, no_purge=False
-    )
-    assert disabled_preview.runtime_uploads.current_eligible_count == 0
-    assert (await flow_retention_service.cleanup_old_flow_runtime_data())[
-        "flow_runtime_source_bindings_deleted"
-    ] == 0
-
-    enabled_preview = await set_policy_and_preview(
-        abandonment_days=1, minimum_days=None, no_purge=False
-    )
-    assert enabled_preview.runtime_uploads.current_eligible_count == 1
-    assert enabled_preview.runtime_uploads.proposed_eligible_bytes == 321
+    await async_session.flush()
 
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()
     await _flush_and_clear_identity_map(async_session)
@@ -1464,11 +1334,7 @@ async def test_abandoned_runtime_upload_purge_reports_primary_not_total_variant_
     await async_session.execute(
         update(Tenants)
         .where(Tenants.id == test_tenant.id)
-        .values(
-            flow_runtime_upload_abandonment_days=1,
-            flow_run_history_minimum_retention_days=None,
-            flow_run_history_no_purge=False,
-        )
+        .values(flow_runtime_upload_abandonment_days=1)
     )
     await async_session.flush()
     [file_info] = await FileRepository(async_session).get_infos_by_ids(
@@ -2090,182 +1956,6 @@ async def test_cleanup_old_flow_runtime_data_uses_space_default_when_flow_retent
 
 
 @pytest.mark.asyncio
-async def test_flow_run_history_purge_uses_classification_policy_without_flow_or_space_retention(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    await async_session.execute(
-        update(Tenants)
-        .where(Tenants.id == test_tenant.id)
-        .values(flow_run_history_retention_days=None)
-    )
-    await _assign_space_classification_retention_policy(
-        async_session,
-        tenant_id=test_tenant.id,
-        space=flow_retention_space,
-        data_retention_days=1,
-    )
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=None,
-    )
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["flow_runs_purged"] == 1
-    assert await async_session.get(FlowRuns, fixture.run.id) is None
-
-
-@pytest.mark.asyncio
-async def test_flow_run_history_purge_classification_policy_tightens_flow_retention(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    await _assign_space_classification_retention_policy(
-        async_session,
-        tenant_id=test_tenant.id,
-        space=flow_retention_space,
-        data_retention_days=1,
-    )
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=365,
-    )
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["flow_runs_purged"] == 1
-    assert await async_session.get(FlowRuns, fixture.run.id) is None
-
-
-@pytest.mark.asyncio
-async def test_flow_run_history_purge_classification_policy_cannot_loosen_flow_retention(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    await _assign_space_classification_retention_policy(
-        async_session,
-        tenant_id=test_tenant.id,
-        space=flow_retention_space,
-        data_retention_days=2555,
-    )
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=31,
-        flow_retention_days=30,
-    )
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["flow_runs_purged"] == 1
-    assert await async_session.get(FlowRuns, fixture.run.id) is None
-
-
-@pytest.mark.asyncio
-async def test_flow_run_history_purge_keeps_classification_policy_when_security_disabled(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    await _assign_space_classification_retention_policy(
-        async_session,
-        tenant_id=test_tenant.id,
-        space=flow_retention_space,
-        data_retention_days=1,
-    )
-    await async_session.execute(
-        update(Tenants)
-        .where(Tenants.id == test_tenant.id)
-        .values(security_enabled=False)
-    )
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=None,
-    )
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["flow_runs_purged"] == 1
-    assert await async_session.get(FlowRuns, fixture.run.id) is None
-
-
-@pytest.mark.asyncio
-async def test_flow_run_history_purge_classification_delete_can_loosen_dynamic_policy(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    classification = await _assign_space_classification_retention_policy(
-        async_session,
-        tenant_id=test_tenant.id,
-        space=flow_retention_space,
-        data_retention_days=1,
-    )
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=None,
-    )
-    await async_session.execute(
-        delete(SecurityClassification).where(
-            SecurityClassification.id == classification.id
-        )
-    )
-    await async_session.flush()
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["flow_runs_purged"] == 0
-    assert await async_session.get(FlowRuns, fixture.run.id)
-
-
-@pytest.mark.asyncio
 async def test_flow_run_history_purge_uses_space_retention_one_day_boundary(
     async_session: AsyncSession,
     test_tenant,
@@ -2631,87 +2321,13 @@ async def test_purge_old_flow_run_history_batch_drains_only_eligible_runs(
     assert second_batch.counts.flow_runs_purged == 1
     assert drained_batch.counts.flow_runs_purged == 0
     assert blocked_counts.skipped_undelivered_audit == 1
-    assert blocked_counts.skipped_active_rerun == 0
     assert await async_session.get(FlowRuns, purge_first.run.id) is None
     assert await async_session.get(FlowRuns, purge_second.run.id) is None
     assert await async_session.get(FlowRuns, skipped.run.id) is not None
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_skips_terminal_runs_with_active_rerun_operation(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-):
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=1,
-    )
-    await _add_active_rerun_operation(
-        async_session,
-        fixture=fixture,
-        user_id=admin_user.id,
-        status=FlowRunRerunOperationStatus.QUEUED,
-    )
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["flow_runs_purged"] == 0
-    assert counts["flow_runs_skipped_active_rerun"] == 1
-    assert await async_session.get(FlowRuns, fixture.run.id)
-
-
-@pytest.mark.asyncio
-async def test_flow_run_history_purge_rechecks_active_rerun_before_cascade(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-):
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=1,
-    )
-    await _add_active_rerun_operation(
-        async_session,
-        fixture=fixture,
-        user_id=admin_user.id,
-        status=FlowRunRerunOperationStatus.QUEUED,
-    )
-
-    result = await FlowRunHistoryPurgeRepository(async_session).purge_run_history(
-        [fixture.run.id]
-    )
-
-    assert result.counts == FlowRunHistoryPurgeCounts(flow_runs_considered=1)
-    assert result.affected_flow_tenant_ids == frozenset()
-    assert await async_session.get(FlowRuns, fixture.run.id)
-    assert await async_session.get(Files, fixture.runtime_input_file.id)
-    assert await _flow_runtime_upload_exists(
-        async_session,
-        file_id=fixture.runtime_input_file.id,
-        flow_id=fixture.flow.id,
-        tenant_id=test_tenant.id,
-    )
-
-
-@pytest.mark.asyncio
-async def test_flow_run_history_blocked_counts_use_audit_webhook_rerun_precedence(
+async def test_flow_run_history_blocked_counts_use_audit_webhook_precedence(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2745,11 +2361,6 @@ async def test_flow_run_history_blocked_counts_use_audit_webhook_rerun_precedenc
             now=now,
             claim_expires_at=None,
         )
-        await _add_active_rerun_operation(
-            async_session,
-            fixture=fixture,
-            user_id=admin_user.id,
-        )
     await _add_flow_audit_outbox_row(
         async_session,
         run=audit_blocked.run,
@@ -2764,7 +2375,6 @@ async def test_flow_run_history_blocked_counts_use_audit_webhook_rerun_precedenc
     assert counts["flow_runs_purged"] == 0
     assert counts["flow_runs_skipped_undelivered_audit"] == 1
     assert counts["flow_runs_skipped_unresolved_webhook"] == 1
-    assert counts["flow_runs_skipped_active_rerun"] == 0
     assert await async_session.get(FlowRuns, audit_blocked.run.id)
     assert await async_session.get(FlowRuns, webhook_blocked.run.id)
 
@@ -2851,285 +2461,10 @@ async def test_cleanup_old_flow_runtime_data_redacts_tenant_debug_before_later_f
     assert refreshed_step_result.model_parameters_json is None
     assert refreshed_step_result.output_payload_json is not None
     assert refreshed_step_result.output_payload_json["text"] == "kept output"
-    tombstones = extract_retention_tombstones(refreshed_step_result.output_payload_json)
-    assert [item.retention_state for item in tombstones] == ["retention_purged"]
-    assert {item.actor_source for item in tombstones} == {FLOW_RETENTION_ACTOR_SOURCE}
-    assert {item.tenant_id for item in tombstones} == {str(test_tenant.id)}
-    assert {item.run_id for item in tombstones} == {str(fixture.run.id)}
-    assert {item.trace_id for item in tombstones} == {str(fixture.run.trace_id)}
     assert refreshed_attempt is not None
-    attempt_marker = FlowAttemptRetentionMarker.model_validate(
-        refreshed_attempt.provenance_json
-    )
-    assert attempt_marker.status == "retention_purged"
-    assert attempt_marker.tombstone.actor_source == FLOW_RETENTION_ACTOR_SOURCE
-    assert attempt_marker.tombstone.object_id == str(fixture.step_attempt.id)
-    assert isinstance(attempt_marker.tombstone.counts, RunDebugAttemptRetentionCounts)
-    assert attempt_marker.tombstone.counts.cleared_field_count == 3
+    assert refreshed_attempt.provenance_json is None
     assert refreshed_attempt.input_payload_json is None
     assert refreshed_attempt.output_payload_json is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("resolved_input_edge_count", [0, 1])
-async def test_debug_retention_deletes_attempt_provider_and_resolved_input_evidence(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-    resolved_input_edge_count: int,
-):
-    fixture = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=10,
-        flow_retention_days=30,
-        flow_settings={
-            "retention_policy": {
-                "run_debug_evidence_days": 7,
-            }
-        },
-    )
-    provider_call = FlowProviderCalls(
-        flow_step_attempt_id=fixture.step_attempt.id,
-        resolved_inputs_attempt_id=fixture.step_attempt.id,
-        call_kind="completion",
-        ordinal=1,
-        status="completed",
-        request_schema_version=2,
-        provider_request_hash="a" * 64,
-        requested_model="openai/gpt-5-mini",
-        provider="openai",
-        response_format="none",
-        requested_capabilities=[],
-        resolved_input_edge_indexes=([0] if resolved_input_edge_count else []),
-        call_reason="initial",
-        mapped_execution_mode=None,
-        mapped_item_index=None,
-        mapped_source_index=None,
-        mapped_source_id=None,
-        response_model="gpt-5-mini-2026-07-01",
-        provider_response_id="response-retention-1",
-        num_tokens_input=12,
-        num_tokens_output=4,
-        input_source="provider",
-        output_source="provider",
-        outcome_reason=None,
-        requested_at=fixture.step_attempt.started_at,
-        finished_at=fixture.step_attempt.finished_at,
-    )
-    resolved_inputs = FlowStepAttemptResolvedInputs(
-        flow_step_attempt_id=fixture.step_attempt.id,
-        resolved_input_edges_jsonb={
-            "schema_version": 1,
-            "edges": (
-                [
-                    {
-                        "binding_ref": "question",
-                        "source": {
-                            "kind": "flow_input",
-                            "selector": {
-                                "kind": "json_path",
-                                "path": ["question"],
-                            },
-                        },
-                        "selection": {
-                            "encoding": "utf8",
-                            "sha256": "b" * 64,
-                            "byte_size": 18,
-                        },
-                    }
-                ]
-                if resolved_input_edge_count
-                else []
-            ),
-        },
-    )
-    async_session.add(resolved_inputs)
-    await async_session.flush()
-    async_session.add(provider_call)
-    async_session.add(
-        FlowProviderCalls(
-            flow_step_attempt_id=fixture.step_attempt.id,
-            resolved_inputs_attempt_id=fixture.step_attempt.id,
-            call_kind="completion",
-            ordinal=2,
-            status="completed",
-            request_schema_version=2,
-            provider_request_hash="c" * 64,
-            requested_model="openai/gpt-5-mini",
-            provider="openai",
-            response_format="none",
-            requested_capabilities=[],
-            resolved_input_edge_indexes=[],
-            call_reason="tool_round",
-            mapped_execution_mode=None,
-            mapped_item_index=None,
-            mapped_source_index=None,
-            mapped_source_id=None,
-            response_model="gpt-5-mini-2026-07-01",
-            provider_response_id="response-retention-2",
-            num_tokens_input=None,
-            num_tokens_output=None,
-            input_source="not_reported",
-            output_source="not_reported",
-            outcome_reason=None,
-            requested_at=fixture.step_attempt.started_at,
-            finished_at=fixture.step_attempt.finished_at,
-        )
-    )
-    # One transcription request whose first attempt never reported an outcome,
-    # then the retry of that same audio that completed. Same audio, same
-    # routing, so both attempts carry the same request identity and duration.
-    async_session.add(
-        FlowProviderCalls(
-            flow_step_attempt_id=fixture.step_attempt.id,
-            call_kind="transcription",
-            ordinal=3,
-            status="outcome_unknown",
-            request_schema_version=2,
-            provider_request_hash="d" * 64,
-            requested_model="openai/whisper-1",
-            provider="openai",
-            response_format="none",
-            requested_capabilities=[],
-            resolved_input_edge_indexes=[],
-            call_reason="initial",
-            audio_seconds=Decimal("51.250"),
-            outcome_reason="provider_error",
-            requested_at=fixture.step_attempt.started_at,
-            finished_at=fixture.step_attempt.finished_at,
-        )
-    )
-    async_session.add(
-        FlowProviderCalls(
-            flow_step_attempt_id=fixture.step_attempt.id,
-            call_kind="transcription",
-            ordinal=4,
-            status="completed",
-            request_schema_version=2,
-            provider_request_hash="d" * 64,
-            requested_model="openai/whisper-1",
-            provider="openai",
-            response_format="none",
-            requested_capabilities=[],
-            resolved_input_edge_indexes=[],
-            call_reason="initial",
-            response_model="whisper-1",
-            provider_response_id="transcription-retention-1",
-            audio_seconds=Decimal("51.250"),
-            input_source="not_applicable",
-            output_source="not_applicable",
-            requested_at=fixture.step_attempt.started_at,
-            finished_at=fixture.step_attempt.finished_at,
-        )
-    )
-    await async_session.flush()
-
-    usage_before_purge = await FlowProviderCallRepository(
-        async_session
-    ).list_usage_for_runs(
-        run_ids=[fixture.run.id],
-        tenant_id=test_tenant.id,
-    )
-    now = datetime.now(timezone.utc)
-    fixture.step_attempt.provenance_json = FlowAttemptRetentionMarker(
-        tombstone=FlowRetentionTombstone(
-            tenant_id=str(test_tenant.id),
-            run_id=str(fixture.run.id),
-            trace_id=str(fixture.run.trace_id),
-            data_class="run_debug_evidence",
-            object_type="flow_step_attempt",
-            object_id=str(uuid4()),
-            policy_source="test_foreign_marker",
-            cutoff=now,
-            actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-            counts=RunDebugAttemptRetentionCounts(
-                cleared_field_count=99,
-                provider_call_count=9,
-                resolved_input_aggregate_count=9,
-                resolved_input_edge_count=9,
-                token_usage_state="recorded",
-                token_usage=FlowRunTokenUsage.from_counts(
-                    num_tokens_input=999,
-                    num_tokens_output=999,
-                    input_completeness="complete",
-                    output_completeness="complete",
-                ),
-            ),
-            timestamp=now,
-            retention_state="retention_purged",
-        )
-    ).to_payload()
-    await async_session.flush()
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["debug_provider_calls"] == 4
-    assert counts["debug_resolved_input_aggregates"] == 1
-    assert counts["debug_resolved_input_edges"] == resolved_input_edge_count
-    assert await async_session.get(FlowProviderCalls, provider_call.id) is None
-    assert (
-        await async_session.get(
-            FlowStepAttemptResolvedInputs,
-            fixture.step_attempt.id,
-        )
-        is None
-    )
-    refreshed_attempt = await async_session.get(
-        FlowStepAttempts, fixture.step_attempt.id
-    )
-    assert refreshed_attempt is not None
-    attempt_marker = FlowAttemptRetentionMarker.model_validate(
-        refreshed_attempt.provenance_json
-    )
-    attempt_counts = attempt_marker.tombstone.counts
-    assert isinstance(attempt_counts, RunDebugAttemptRetentionCounts)
-    assert attempt_counts.cleared_field_count == 3
-    assert attempt_counts.provider_call_count == 4
-    assert attempt_counts.resolved_input_aggregate_count == 1
-    assert attempt_counts.resolved_input_edge_count == resolved_input_edge_count
-    assert attempt_counts.token_usage_state == "recorded"
-    assert attempt_counts.token_usage == usage_before_purge[fixture.run.id].token_usage
-    assert attempt_counts.token_usage.input_completeness == "incomplete"
-    assert attempt_counts.token_usage.output_completeness == "incomplete"
-    # The audio survives the purge in the same summary, counting the completed
-    # attempt once and marking the total a lower bound because its first
-    # attempt's outcome was never learned.
-    assert attempt_counts.transcription_usage_state == "recorded"
-    assert attempt_counts.transcription_usage == (
-        usage_before_purge[fixture.run.id].transcription_usage
-    )
-    assert attempt_counts.transcription_usage.audio_seconds == 51.25
-    assert attempt_counts.transcription_usage.completeness == "incomplete"
-
-    usage_after_purge = await FlowProviderCallRepository(
-        async_session
-    ).list_usage_for_runs(
-        run_ids=[fixture.run.id],
-        tenant_id=test_tenant.id,
-    )
-    assert usage_after_purge == usage_before_purge
-
-    first_marker = refreshed_attempt.provenance_json
-    repeated_counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-    repeated_attempt = await async_session.get(
-        FlowStepAttempts, fixture.step_attempt.id
-    )
-
-    assert repeated_counts["debug_step_attempts"] == 0
-    assert repeated_counts["debug_provider_calls"] == 0
-    assert repeated_counts["debug_resolved_input_aggregates"] == 0
-    assert repeated_counts["debug_resolved_input_edges"] == 0
-    assert repeated_attempt is not None
-    assert repeated_attempt.provenance_json == first_marker
 
 
 @pytest.mark.asyncio
@@ -3168,11 +2503,7 @@ async def test_cleanup_old_flow_runtime_data_redacts_attempt_payloads_without_pr
     assert refreshed_attempt is not None
     assert refreshed_attempt.input_payload_json is None
     assert refreshed_attempt.output_payload_json is None
-    attempt_marker = FlowAttemptRetentionMarker.model_validate(
-        refreshed_attempt.provenance_json
-    )
-    assert isinstance(attempt_marker.tombstone.counts, RunDebugAttemptRetentionCounts)
-    assert attempt_marker.tombstone.counts.cleared_field_count == 2
+    assert refreshed_attempt.provenance_json is None
 
 
 @pytest.mark.asyncio

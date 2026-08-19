@@ -232,19 +232,6 @@ export function initSettings(client) {
     },
 
     /**
-     * Preview an exact tenant-admin Flow retention proposal without changing policy.
-     * @param {import('../types/resources').FlowRetentionOrganizationPreviewRequest} proposal
-     * @throws {EneoError}
-     * @returns {Promise<import('../types/resources').FlowRetentionImpactPreview>}
-     */
-    previewFlowRetentionPolicy: async (proposal) => {
-      return await client.fetch("/api/v1/settings/flow-retention-policy/preview", {
-        method: "post",
-        requestBody: { "application/json": proposal }
-      });
-    },
-
-    /**
      * Update the tenant-admin Flow retention control plane.
      * @param {import('../types/resources').FlowRetentionPolicyUpdate} patch
      * @throws {EneoError}
@@ -255,63 +242,6 @@ export function initSettings(client) {
         method: "patch",
         requestBody: { "application/json": patch }
       });
-      return res;
-    },
-
-    /**
-     * List full run-history retention policies keyed by security classification.
-     * @throws {EneoError}
-     * @returns {Promise<import('../types/resources').FlowClassificationRetentionPolicies>}
-     */
-    listFlowClassificationRetentionPolicies: async () => {
-      const res = await client.fetch("/api/v1/settings/flow-classification-retention-policies", {
-        method: "get"
-      });
-      return res;
-    },
-
-    /**
-     * Preview an exact classification retention proposal without changing policy.
-     * @param {string} securityClassificationId
-     * @param {import('../types/resources').FlowClassificationRetentionPolicyPreviewRequest} proposal
-     * @throws {EneoError}
-     * @returns {Promise<import('../types/resources').FlowRetentionImpactPreview>}
-     */
-    previewFlowClassificationRetentionPolicy: async (securityClassificationId, proposal) => {
-      return await client.fetch(
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}/preview",
-        {
-          method: "post",
-          params: {
-            path: {
-              security_classification_id: securityClassificationId
-            }
-          },
-          requestBody: { "application/json": proposal }
-        }
-      );
-    },
-
-    /**
-     * Replace the desired retention policy for one security classification.
-     * @param {string} securityClassificationId
-     * @param {import('../types/resources').FlowClassificationRetentionPolicyUpdate} payload
-     * @throws {EneoError}
-     * @returns {Promise<import('../types/resources').FlowClassificationRetentionPolicy | null>}
-     */
-    putFlowClassificationRetentionPolicy: async (securityClassificationId, payload) => {
-      const res = await client.fetch(
-        "/api/v1/settings/flow-classification-retention-policies/{security_classification_id}",
-        {
-          method: "put",
-          params: {
-            path: {
-              security_classification_id: securityClassificationId
-            }
-          },
-          requestBody: { "application/json": payload }
-        }
-      );
       return res;
     },
 

@@ -4,12 +4,6 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    FlowRetentionClassificationPolicyState,
-    FlowRetentionControlPlaneState,
-    FlowRetentionOrganizationChangeDecision,
-    FlowRetentionOrganizationProposal,
-)
 from eneo.flows import flow_runtime_policy
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_evidence_policy import (
@@ -27,12 +21,10 @@ from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings import (
-    FlowClassificationRetentionPolicyUpdate,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
     FlowMappedExecutionPolicyUpdate,
-    FlowRetentionEffectiveStatePublic,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyUpdate,
@@ -64,34 +56,6 @@ def _upload_admission(
         knowledge_file_maximum_bytes=10_000_000,
         knowledge_audio_maximum_bytes=25_000_000,
     )
-
-
-def test_barrier_only_classification_is_not_projected_as_deletion_activation() -> None:
-    state = FlowRetentionControlPlaneState(
-        organization_run_history_days=None,
-        runtime_upload_abandonment_days=None,
-        classification_policies=(
-            FlowRetentionClassificationPolicyState(
-                security_classification_id=TEST_UUID,
-                data_retention_days=None,
-                minimum_retention_days=90,
-                no_purge=True,
-            ),
-        ),
-        latent_space_retention_days=(),
-        latent_flow_retention_days=(),
-    )
-
-    assert FlowRetentionEffectiveStatePublic.from_domain(state).model_dump() == {
-        "run_history_deletion_active": False,
-        "runtime_upload_abandonment_active": False,
-        "classification_policy_count": 0,
-        "activation_sources": (),
-        "barrier_sources": (
-            "classification_minimum",
-            "classification_no_purge",
-        ),
-    }
 
 
 class MockRepo:
@@ -169,55 +133,7 @@ class MockAuditService:
 
 
 class MockDataRetentionService:
-    async def get_flow_retention_control_plane_state(self, *, tenant_id, lock=False):
-        return FlowRetentionControlPlaneState(
-            organization_run_history_days=None,
-            runtime_upload_abandonment_days=None,
-            classification_policies=(),
-            latent_space_retention_days=(),
-            latent_flow_retention_days=(),
-        )
-
-    async def prepare_flow_retention_organization_change(
-        self,
-        *,
-        tenant_id,
-        run_history_patch,
-        upload_abandonment_patch,
-        minimum_retention_patch,
-        no_purge_patch,
-        confirmation,
-    ):
-        old_policy = FlowRetentionOrganizationProposal(
-            flow_run_history_retention_days=None,
-            flow_runtime_upload_abandonment_days=None,
-            flow_run_history_minimum_retention_days=None,
-            flow_run_history_no_purge=False,
-        )
-        new_policy = FlowRetentionOrganizationProposal(
-            flow_run_history_retention_days=(
-                run_history_patch.value if run_history_patch.is_set else None
-            ),
-            flow_runtime_upload_abandonment_days=(
-                upload_abandonment_patch.value
-                if upload_abandonment_patch.is_set
-                else None
-            ),
-            flow_run_history_minimum_retention_days=(
-                minimum_retention_patch.value
-                if minimum_retention_patch.is_set
-                else None
-            ),
-            flow_run_history_no_purge=(
-                no_purge_patch.value if no_purge_patch.is_set else False
-            ),
-        )
-        return FlowRetentionOrganizationChangeDecision(
-            old_policy=old_policy,
-            new_policy=new_policy,
-            destructive_change=False,
-            preview=None,
-        )
+    pass
 
 
 def _assert_extra_forbidden(model: type[BaseModel], payload: dict[str, object]) -> None:
@@ -235,14 +151,6 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
         (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
         (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
         (FlowEvidencePolicyUpdate, {"allow_sensitive_flow_exports": True}),
-        (
-            FlowClassificationRetentionPolicyUpdate,
-            {
-                "data_retention_days": 7,
-                "minimum_retention_days": None,
-                "no_purge": False,
-            },
-        ),
         (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": 14}),
     )
 
@@ -289,15 +197,6 @@ def test_flow_retention_policy_public_rejects_invalid_debug_evidence_days(
                 "run_debug_evidence_days": value,
                 "flow_run_history_retention_days": None,
                 "flow_runtime_upload_abandonment_days": None,
-                "flow_run_history_minimum_retention_days": None,
-                "flow_run_history_no_purge": False,
-                "effective_state": {
-                    "run_history_deletion_active": False,
-                    "runtime_upload_abandonment_active": False,
-                    "classification_policy_count": 0,
-                    "activation_sources": [],
-                    "barrier_sources": [],
-                },
             }
         )
 
@@ -1310,10 +1209,9 @@ async def test_update_flow_retention_policy_persists_and_audits():
         FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY: FLOW_RETENTION_POLICY_STORAGE_VERSION,
     }
     metadata = calls[0]["metadata"]
-    assert set(metadata) == {"old_policy", "new_policy", "preview", "activation"}
+    assert set(metadata) == {"old_policy", "new_policy"}
     assert metadata["old_policy"]["run_debug_evidence_days"] is None
     assert metadata["new_policy"]["run_debug_evidence_days"] == 14
-    assert metadata["preview"] is None
 
 
 async def test_update_flow_retention_policy_can_clear_override():

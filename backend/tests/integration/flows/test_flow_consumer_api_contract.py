@@ -19,7 +19,6 @@ from eneo.database.tables.users_table import users_roles_table
 from eneo.files.file_models import FileInfo, FileType
 from eneo.flows.api import (
     flow_run_lifecycle_router,
-    flow_run_rerun_router,
     flow_run_review_router,
 )
 from eneo.flows.domain.flow import FlowStepResult
@@ -896,17 +895,15 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert status_capabilities_response.status_code == 200, (
         status_capabilities_response.text
     )
-    rerun_eligibility = {
-        row["status"]: row["is_rerun_eligible"]
-        for row in status_capabilities_response.json()["statuses"]
-    }
-    assert rerun_eligibility == {
-        "queued": False,
-        "running": False,
-        "awaiting_review": False,
-        "completed": True,
-        "failed": True,
-        "cancelled": False,
+    assert {
+        row["status"] for row in status_capabilities_response.json()["statuses"]
+    } == {
+        "queued",
+        "running",
+        "awaiting_review",
+        "completed",
+        "failed",
+        "cancelled",
     }
 
     assert published_payload["runtime_paths"]["create_run"].endswith(
@@ -2066,65 +2063,6 @@ async def test_flow_runtime_file_delete_rejects_attached_run_input(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_runtime_file_delete_rejects_attached_rerun_input(
-    client,
-    db_container,
-    admin_token,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        flow_run_lifecycle_router,
-        "dispatch_flow_run_recoverably_after_commit",
-        _noop_dispatch_flow_run_recoverably_after_commit,
-    )
-    monkeypatch.setattr(
-        flow_run_rerun_router,
-        "dispatch_flow_run_recoverably_after_commit",
-        _noop_dispatch_flow_run_recoverably_after_commit,
-    )
-
-    flow, run, step_id, _initial_upload = await _create_completed_runtime_input_run(
-        client=client,
-        db_container=db_container,
-        admin_token=admin_token,
-    )
-    flow_id = flow["id"]
-    rerun_upload = await _upload_runtime_document(
-        client,
-        flow_id=flow_id,
-        step_id=step_id,
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-
-    rerun_response = await client.post(
-        f"/api/v1/flows/{flow_id}/runs/{run['id']}/steps/{step_id}/rerun/",
-        json={
-            "expected_run_revision": run["revision"],
-            "reason": "Replace the source document for the rerun.",
-            "step_inputs": {step_id: {"file_ids": [rerun_upload["id"]]}},
-        },
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert rerun_response.status_code == 202, rerun_response.text
-    assert rerun_response.json()["status"] == "queued"
-
-    delete_response = await client.delete(
-        f"/api/v1/flows/{flow_id}/runtime-files/{rerun_upload['id']}/",
-        headers={
-            "Authorization": f"Bearer {admin_token}",
-            "X-Correlation-ID": "flow-runtime-file-rerun-attached-delete",
-        },
-    )
-    assert delete_response.status_code == 409, delete_response.text
-    payload = delete_response.json()
-    assert payload["eneo_error_code"] == ErrorCodes.CONFLICT
-    assert payload["code"] == "flow_runtime_file_attached"
-    assert payload["context"] == {"flow_id": flow_id, "file_id": rerun_upload["id"]}
-    assert payload["request_id"] == "flow-runtime-file-rerun-attached-delete"
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_flow_runtime_file_delete_removes_unselected_post_run_upload(
     client,
     db_container,
@@ -2143,29 +2081,12 @@ async def test_flow_runtime_file_delete_removes_unselected_post_run_upload(
         admin_token=admin_token,
     )
     flow_id = flow["id"]
-    selected_rerun_upload = await _upload_runtime_document(
-        client,
-        flow_id=flow_id,
-        step_id=step_id,
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
     unselected_upload = await _upload_runtime_document(
         client,
         flow_id=flow_id,
         step_id=step_id,
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-
-    rerun_response = await client.post(
-        f"/api/v1/flows/{flow_id}/runs/{run['id']}/steps/{step_id}/rerun/",
-        json={
-            "expected_run_revision": run["revision"],
-            "reason": "Rerun with a selected replacement document.",
-            "step_inputs": {step_id: {"file_ids": [selected_rerun_upload["id"]]}},
-        },
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert rerun_response.status_code == 202, rerun_response.text
 
     delete_response = await client.delete(
         f"/api/v1/flows/{flow_id}/runtime-files/{unselected_upload['id']}/",
@@ -2766,29 +2687,3 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
     assert resumed_payload["checkpoint"]["id"] == checkpoint_id
     assert resumed_payload["checkpoint"]["decided_by_principal_type"] == "service_key"
     assert resumed_payload["run"]["id"] == run["id"]
-
-    await _mark_run_completed(db_container=db_container, run_id=run["id"])
-    other_key_rerun_response = await client.post(
-        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/steps/{flow['steps'][0]['id']}/rerun/",
-        json={
-            "expected_run_revision": resumed_payload["run"]["revision"],
-            "reason": "Other service key cannot rerun this run",
-        },
-        headers=other_service_headers,
-    )
-    assert other_key_rerun_response.status_code == 403, other_key_rerun_response.text
-    assert other_key_rerun_response.json()["code"] == "flow_run_access_denied"
-
-    rerun_response = await client.post(
-        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/steps/{flow['steps'][0]['id']}/rerun/",
-        json={
-            "expected_run_revision": resumed_payload["run"]["revision"],
-            "reason": "Service-key rerun of own run",
-        },
-        headers=service_headers,
-    )
-    assert rerun_response.status_code == 202, rerun_response.text
-    rerun_payload = rerun_response.json()
-    assert rerun_payload["run"]["id"] == run["id"]
-    assert rerun_payload["rerun_step_id"] == flow["steps"][0]["id"]
-    assert rerun_payload["status"] == "queued"

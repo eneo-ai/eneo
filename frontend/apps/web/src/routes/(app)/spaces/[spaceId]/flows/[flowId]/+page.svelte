@@ -32,12 +32,7 @@
   import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
   import CircleAlert from "lucide-svelte/icons/circle-alert";
   import ListTree from "lucide-svelte/icons/list-tree";
-  import {
-    EneoError,
-    type FlowRun,
-    type FlowRunRetention,
-    type TranscriptionModel
-  } from "@eneo/eneo-js";
+  import { EneoError, type FlowRun, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
@@ -132,29 +127,6 @@
       const message =
         error instanceof EneoError ? error.getReadableMessage() : "Kunde inte ta bort steget.";
       toast.error(message);
-    }
-  }
-
-  function retentionActivationSourceLabel(
-    source: NonNullable<FlowRunRetention>["activation_sources"][number]
-  ): string {
-    return source === "organization"
-      ? m.flow_retention_contributor_organization()
-      : m.flow_retention_contributor_classification();
-  }
-
-  function retentionBarrierSourceLabel(
-    source: NonNullable<FlowRunRetention>["barrier_sources"][number]
-  ): string {
-    switch (source) {
-      case "organization_minimum":
-        return m.flow_retention_contributor_organization_minimum();
-      case "classification_minimum":
-        return m.flow_retention_contributor_classification_minimum();
-      case "organization_no_purge":
-        return m.flow_retention_source_organization_no_purge();
-      case "classification_no_purge":
-        return m.flow_retention_source_classification_no_purge();
     }
   }
 
@@ -705,74 +677,13 @@
                                         })
                                 })}
                               </p>
-                              <p class="text-secondary mt-1 text-xs leading-relaxed">
-                                {m.flow_retention_effective_barriers({
-                                  minimum: runHistoryRetention.effective_minimum_days ?? "—",
-                                  noPurge: runHistoryRetention.no_purge
-                                    ? m.flow_retention_no_purge_on()
-                                    : m.flow_retention_no_purge_off()
-                                })}
-                              </p>
-                              {#if runHistoryRetention.policy_conflict}
-                                <p class="text-warning-default mt-1 text-xs font-medium">
-                                  {m.flow_retention_policy_conflict()}
-                                </p>
-                              {/if}
-                              <dl class="mt-2 grid gap-1 text-xs sm:grid-cols-2">
-                                <div>
-                                  <dt class="text-secondary font-medium">
-                                    {m.flow_retention_activation_sources()}
-                                  </dt>
-                                  <dd class="text-primary">
-                                    {runHistoryRetention.activation_sources
-                                      .map(retentionActivationSourceLabel)
-                                      .join(", ") || m.flow_retention_source_none()}
-                                  </dd>
-                                </div>
-                                <div>
-                                  <dt class="text-secondary font-medium">
-                                    {m.flow_retention_barrier_sources()}
-                                  </dt>
-                                  <dd class="text-primary">
-                                    {runHistoryRetention.barrier_sources
-                                      .map(retentionBarrierSourceLabel)
-                                      .join(", ") || m.flow_retention_source_none()}
-                                  </dd>
-                                </div>
-                              </dl>
-                              <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                              <dl class="mt-2 grid grid-cols-3 gap-x-4 gap-y-1 text-xs">
                                 <div class="flex justify-between gap-2">
                                   <dt class="text-secondary">
                                     {m.flow_retention_contributor_organization()}
                                   </dt>
                                   <dd class="text-primary tabular-nums">
                                     {runHistoryRetention.contributors.organization_days ?? "—"}
-                                  </dd>
-                                </div>
-                                <div class="flex justify-between gap-2">
-                                  <dt class="text-secondary">
-                                    {m.flow_retention_contributor_organization_minimum()}
-                                  </dt>
-                                  <dd class="text-primary tabular-nums">
-                                    {runHistoryRetention.contributors.organization_minimum_days ??
-                                      "—"}
-                                  </dd>
-                                </div>
-                                <div class="flex justify-between gap-2">
-                                  <dt class="text-secondary">
-                                    {m.flow_retention_contributor_classification_minimum()}
-                                  </dt>
-                                  <dd class="text-primary tabular-nums">
-                                    {runHistoryRetention.contributors.classification_minimum_days ??
-                                      "—"}
-                                  </dd>
-                                </div>
-                                <div class="flex justify-between gap-2">
-                                  <dt class="text-secondary">
-                                    {m.flow_retention_contributor_classification()}
-                                  </dt>
-                                  <dd class="text-primary tabular-nums">
-                                    {runHistoryRetention.contributors.classification_days ?? "—"}
                                   </dd>
                                 </div>
                                 <div class="flex justify-between gap-2">

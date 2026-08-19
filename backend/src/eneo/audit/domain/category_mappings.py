@@ -100,7 +100,6 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_FAILED.value: "user_actions",
     ActionType.FLOW_RUN_CANCELLED.value: "user_actions",
     ActionType.FLOW_RUN_REDISPATCHED.value: "user_actions",
-    ActionType.FLOW_RUN_RERUN_REQUESTED.value: "user_actions",
     ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN.value: "system_actions",
     ActionType.FLOW_CLASSIFICATION_OVERRIDE.value: "user_actions",
     ActionType.FLOW_RUN_DOCUMENT_GENERATED.value: "user_actions",

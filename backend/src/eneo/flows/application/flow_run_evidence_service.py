@@ -55,10 +55,6 @@ from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunRepository,
     StepAttemptEvidenceSize,
 )
-from eneo.flows.infrastructure.flow_run_rerun_repo import (
-    FlowRunRerunEvidenceAdmissionReason,
-    FlowRunRerunRepository,
-)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -150,7 +146,6 @@ class FlowRunEvidenceService:
         flow_repo: FlowRepository,
         flow_run_repo: FlowRunRepository,
         provider_call_repo: FlowProviderCallRepository,
-        flow_run_rerun_repo: FlowRunRerunRepository,
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         flow_version_repo: FlowVersionRepository,
         file_repo: FileRepository,
@@ -160,7 +155,6 @@ class FlowRunEvidenceService:
         self.user = user
         self.flow_run_repo = flow_run_repo
         self.provider_call_repo = provider_call_repo
-        self.flow_run_rerun_repo = flow_run_rerun_repo
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
@@ -381,11 +375,6 @@ class FlowRunEvidenceService:
             tenant_id=self.user.tenant_id,
             candidate_limit=measurement_candidate_limit,
         )
-        rerun_measurements = await self.flow_run_rerun_repo.measure_evidence_sections(
-            run_id=resolved_run.id,
-            tenant_id=self.user.tenant_id,
-            candidate_limit=measurement_candidate_limit,
-        )
         review_measurement = (
             await self.flow_run_review_checkpoint_repo.measure_evidence(
                 run_id=resolved_run.id,
@@ -444,22 +433,6 @@ class FlowRunEvidenceService:
                 stored_json_bytes=0,
                 logical_json_bytes=(
                     run_measurements.runtime_input_file_logical_json_bytes
-                ),
-            ),
-            _EvidenceSectionUsage(
-                section="rerun_operations",
-                row_count=rerun_measurements.operation_row_count,
-                stored_json_bytes=rerun_measurements.operation_stored_json_bytes,
-                logical_json_bytes=rerun_measurements.operation_logical_json_bytes,
-            ),
-            _EvidenceSectionUsage(
-                section="rerun_invalidated_steps",
-                row_count=rerun_measurements.invalidated_step_row_count,
-                stored_json_bytes=(
-                    rerun_measurements.invalidated_step_stored_json_bytes
-                ),
-                logical_json_bytes=(
-                    rerun_measurements.invalidated_step_logical_json_bytes
                 ),
             ),
             _EvidenceSectionUsage(
@@ -594,55 +567,6 @@ class FlowRunEvidenceService:
                 attempt_ids=tuple(attempt.id for attempt in step_attempts),
             )
         )
-        rerun_admission_reason: FlowRunRerunEvidenceAdmissionReason | None = None
-        if is_view:
-            rerun_admission = (
-                await self.flow_run_rerun_repo.list_rerun_operations_for_evidence_view(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                    limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
-                    logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
-                )
-            )
-            rerun_operations = list(rerun_admission.operations)
-            rerun_admission_reason = rerun_admission.omission_reason
-        else:
-            rerun_operations = (
-                await self.flow_run_rerun_repo.list_rerun_operations_for_run(
-                    run_id=resolved_run.id,
-                    tenant_id=self.user.tenant_id,
-                )
-            )
-        if is_view:
-            self._record_view_omission(
-                omissions=view_omissions,
-                usage=self._section_usage(section_usages, "rerun_operations"),
-                returned_count=len(rerun_operations),
-                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
-                admission_reason=rerun_admission_reason,
-            )
-        admitted_operation_ids = (
-            [item.id for item in rerun_operations]
-            if access_kind == "evidence_view"
-            else None
-        )
-        rerun_invalidated_steps = (
-            await self.flow_run_rerun_repo.list_rerun_invalidated_steps_for_run(
-                run_id=resolved_run.id,
-                tenant_id=self.user.tenant_id,
-                operation_ids=admitted_operation_ids,
-                **view_read_kwargs,
-            )
-        )
-        if is_view:
-            rerun_usage = self._section_usage(section_usages, "rerun_operations")
-            self._record_view_omission(
-                omissions=view_omissions,
-                usage=self._section_usage(section_usages, "rerun_invalidated_steps"),
-                returned_count=len(rerun_invalidated_steps),
-                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
-                parent_omitted=len(rerun_operations) < rerun_usage.row_count,
-            )
         review_checkpoints = (
             await self.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run(
                 run_id=resolved_run.id,
@@ -736,8 +660,6 @@ class FlowRunEvidenceService:
             step_attempts=step_attempts,
             resolved_input_edges_by_attempt_id=resolved_input_edges_by_attempt_id,
             result_files=result_files,
-            rerun_operations=rerun_operations,
-            rerun_invalidated_steps=rerun_invalidated_steps,
             review_checkpoints=review_checkpoints,
             webhook_deliveries=webhook_deliveries,
             provider_calls=provider_calls,
@@ -767,19 +689,11 @@ class FlowRunEvidenceService:
             tenant_id=self.user.tenant_id,
             ceiling=ceiling,
         )
-        rerun_counts = await self.flow_run_rerun_repo.measure_evidence_row_counts(
-            run_id=run_id,
-            tenant_id=self.user.tenant_id,
-            ceiling=ceiling,
-        )
         counts: tuple[tuple[EvidenceSectionIdentifier, int, int], ...] = (
             ("step_results", run_counts.step_results, ceiling),
             ("step_attempts", run_counts.step_attempts, ceiling),
             ("result_files", run_counts.result_files, ceiling),
             ("runtime_input_files", run_counts.runtime_input_files, ceiling),
-            ("rerun_operations", rerun_counts.operations, ceiling),
-            ("rerun_operations", rerun_counts.nested_overrides, ceiling),
-            ("rerun_invalidated_steps", rerun_counts.invalidated_steps, ceiling),
             (
                 "review_checkpoints",
                 await self.flow_run_review_checkpoint_repo.measure_evidence_row_count(
@@ -844,7 +758,6 @@ class FlowRunEvidenceService:
         returned_count: int,
         row_limit: int,
         parent_omitted: bool = False,
-        admission_reason: FlowRunRerunEvidenceAdmissionReason | None = None,
     ) -> None:
         rows_omitted = max(0, usage.row_count - returned_count)
         if rows_omitted == 0:
@@ -853,24 +766,6 @@ class FlowRunEvidenceService:
         if parent_omitted:
             omissions.append(
                 RunViewEvidenceParentOmission(
-                    section=usage.section,
-                    rows_omitted=rows_omitted,
-                    count_truncated=count_truncated,
-                )
-            )
-            return
-        if admission_reason == "logical_bytes":
-            omissions.append(
-                RunViewEvidenceLogicalByteOmission(
-                    section=usage.section,
-                    rows_omitted=rows_omitted,
-                    count_truncated=count_truncated,
-                )
-            )
-            return
-        if admission_reason == "row_limit":
-            omissions.append(
-                RunViewEvidenceRowOmission(
                     section=usage.section,
                     rows_omitted=rows_omitted,
                     count_truncated=count_truncated,

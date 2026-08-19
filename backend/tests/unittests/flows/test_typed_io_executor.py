@@ -37,15 +37,10 @@ from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
-    RerunStepInputOverride,
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_input_envelope import (
-    RerunInputOverride,
-    build_rerun_execution_input_envelope,
-)
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
@@ -99,7 +94,6 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
-    flow_run_rerun_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
 
     async def _activate_step_attempt(**kwargs):
@@ -137,7 +131,6 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
         session=session,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
-        flow_run_rerun_repo=flow_run_rerun_repo,
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_version_repo=flow_version_repo,
         space_repo=space_repo,
@@ -1303,19 +1296,10 @@ async def test_resolve_step_input_uses_relational_selection_over_stale_payload(u
     old_file_id = uuid4()
     new_file_id = uuid4()
     step = _runtime_step(input_type="document")
-    execution_payload = build_rerun_execution_input_envelope(
-        current={
-            "case_id": "before",
-            "step_inputs": {str(step.step_id): {"file_ids": [str(old_file_id)]}},
-        },
-        override=RerunInputOverride(
-            inline_payload_json={"case_id": "after"},
-            root_step_input=RerunStepInputOverride(
-                step_id=step.step_id,
-                file_ids=(new_file_id,),
-            ),
-        ),
-    )
+    execution_payload = {
+        "case_id": "after",
+        "step_inputs": {str(step.step_id): {"file_ids": [str(old_file_id)]}},
+    }
     run = _run(
         status=FlowRunStatus.RUNNING,
         user=user,

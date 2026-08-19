@@ -27,7 +27,6 @@ from eneo.flows.application.flow_review_expiry_reconciliation import (
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunReviewCheckpoint, FlowStep
-from eneo.flows.domain.rerun_exceptions import FlowRunRerunInvalidTransitionError
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointAlreadyResumedError,
     FlowReviewCheckpointExpiredError,
@@ -62,9 +61,7 @@ from eneo.flows.flow_run_error import (
     FlowRunError,
     dump_flow_run_dispatch_error,
 )
-from eneo.flows.flow_run_input_envelope import RerunInputOverride
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
-from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -422,7 +419,6 @@ def _review_run_service(
         flow_run_review_checkpoint_repo=checkpoint_repo,
         flow_run_terminalizer=FlowRunTerminalizer(
             run_repo,
-            FlowRunRerunRepository(session=session),
             run_repo.audit_outbox_repo,
             checkpoint_repo,
         ),
@@ -1971,7 +1967,6 @@ async def test_awaiting_review_run_cancels_active_checkpoint_by_terminalizer(
 
         result = await FlowRunTerminalizer(
             repo,
-            FlowRunRerunRepository(session=session),
             repo.audit_outbox_repo,
             checkpoint_repo,
         ).terminalize_run(
@@ -2059,7 +2054,6 @@ async def test_failed_running_run_cancels_active_checkpoint_by_terminalizer(
 
         result = await FlowRunTerminalizer(
             repo,
-            FlowRunRerunRepository(session=session),
             repo.audit_outbox_repo,
             checkpoint_repo,
         ).terminalize_run(
@@ -2632,7 +2626,6 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
         )
         result = await FlowRunTerminalizer(
             repo,
-            FlowRunRerunRepository(session=session),
             repo.audit_outbox_repo,
             checkpoint_repo,
         ).terminalize_run(
@@ -2678,46 +2671,3 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
         "flow_run_review_checkpoint_rejected",
     ]
     assert terminal_outbox_source == FlowRunLifecycleSource.REVIEW_REJECTED.value
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_awaiting_review_run_rejects_rerun_without_waiting_branch(
-    db_container,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
-):
-    async with db_container() as container:
-        session = container.session()
-        scenario = await _create_review_checkpoint_scenario(
-            session=session,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-            admin_user=admin_user,
-        )
-        await session.execute(
-            sa.update(FlowRuns)
-            .where(FlowRuns.id == scenario.flow_run_id)
-            .values(status=FlowRunStatus.AWAITING_REVIEW.value)
-        )
-        rerun_repo = FlowRunRerunRepository(session=session)
-
-        with pytest.raises(FlowRunRerunInvalidTransitionError) as exc_info:
-            await rerun_repo.accept_or_replay_rerun_operation(
-                tenant_id=scenario.tenant_id,
-                flow_id=scenario.flow_id,
-                flow_run_id=scenario.flow_run_id,
-                rerun_step_id=scenario.step_ids[0],
-                rerun_step_order=1,
-                request_fingerprint=f"rerun-{uuid4()}",
-                expected_run_revision=scenario.run.revision,
-                reason="should reject while awaiting review",
-                rerun_input_override=RerunInputOverride(),
-                requested_by_principal=FlowPrincipal.from_user(admin_user),
-                invalidated_steps=(),
-            )
-
-    assert exc_info.value.status == FlowRunStatus.AWAITING_REVIEW.value

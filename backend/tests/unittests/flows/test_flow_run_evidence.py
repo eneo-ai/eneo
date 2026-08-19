@@ -33,8 +33,6 @@ from eneo.flows.application.flow_run_export_json import render_evidence_json_exp
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
-    FlowRunRerunInvalidatedStep,
-    FlowRunRerunOperation,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowRunTokenUsage,
@@ -42,7 +40,6 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
     FlowVersion,
 )
-from eneo.flows.domain.flow_run_input_revision import FlowRunInputRevisionNotRecorded
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptCompletionConfiguration,
     FlowStepAttemptExecutionInput,
@@ -50,20 +47,9 @@ from eneo.flows.domain.flow_step_attempt_input import (
 )
 from eneo.flows.enums import (
     FlowOutputType,
-    FlowRunRerunInvalidationRole,
-    FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
-    RerunDependencyKind,
-)
-from eneo.flows.flow_retention_tombstone import (
-    FLOW_RETENTION_ACTOR_SOURCE,
-    FLOW_RETENTION_TOMBSTONES_KEY,
-    FlowAttemptRetentionMarker,
-    FlowRetentionTombstone,
-    GeneratedArtifactRetentionCounts,
-    RunDebugAttemptRetentionCounts,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_provenance import (
@@ -378,65 +364,6 @@ def test_evidence_bundle_projects_exact_resolved_input_lineage_per_attempt() -> 
     }
 
 
-def test_evidence_bundle_explains_retention_purged_resolved_input_lineage() -> None:
-    run, version = _evidence_run_and_version()
-    attempt = _attempt_with_provenance(run, None)
-    attempt = attempt.model_copy(
-        update={
-            "provenance_json": _attempt_retention_marker_payload(
-                run,
-                object_id=str(attempt.id),
-                resolved_input_aggregate_count=1,
-                resolved_input_edge_count=7,
-            )
-        }
-    )
-
-    evidence = build_evidence_bundle(
-        run=run,
-        version=version,
-        step_results=[],
-        step_attempts=[attempt],
-        resolved_input_edges_by_attempt_id={
-            attempt.id: parse_resolved_input_edges(None)
-        },
-    ).to_dict()
-
-    assert evidence["step_attempts"][0]["resolved_input_lineage"] == {
-        "status": "retention_purged",
-        "resolved_input_aggregate_count": 1,
-        "resolved_input_edge_count": 7,
-    }
-
-
-def test_evidence_export_rejects_a_retention_marker_for_another_attempt() -> None:
-    run, version = _evidence_run_and_version()
-    attempt = _attempt_with_provenance(
-        run,
-        _attempt_retention_marker_payload(run),
-    )
-
-    export = _render_raw_export(
-        run,
-        version,
-        step_attempts=[attempt],
-    )
-
-    exported_attempt = export["bundle"]["step_attempts"][0]
-    assert exported_attempt["provenance_json"]["status"] == "corrupt"
-    assert (
-        exported_attempt["provenance_json"]["error_code"]
-        == "flow_attempt_provenance_invalid_retention_marker"
-    )
-    assert exported_attempt["resolved_input_lineage"] == {"status": "not_tracked"}
-    assert export["manifest"]["provenance_persisted_version_status"] == "corrupt"
-    assert export["manifest"]["retention_state_summary"]["tombstone_count"] == 0
-    assert export["manifest"]["retention_state_summary"]["retention_purged_count"] == 0
-    rag_tracking = export["summary"]["rag_usage_tracking"]
-    assert rag_tracking["tracking_state"] == "unknown_corrupt"
-    assert "retention_purged_attempt_count" not in rag_tracking
-
-
 def test_evidence_bundle_requires_lineage_for_exactly_admitted_attempts() -> None:
     run, version = _evidence_run_and_version()
     attempt = _attempt_with_provenance(run, None)
@@ -452,75 +379,6 @@ def test_evidence_bundle_requires_lineage_for_exactly_admitted_attempts() -> Non
             step_attempts=[attempt],
             resolved_input_edges_by_attempt_id={},
         )
-
-
-def _attempt_retention_marker_payload(
-    run: FlowRun,
-    *,
-    object_id: str | None = None,
-    resolved_input_aggregate_count: int = 0,
-    resolved_input_edge_count: int = 0,
-) -> dict[str, Any]:
-    now = datetime.now(timezone.utc)
-    return FlowAttemptRetentionMarker(
-        tombstone=FlowRetentionTombstone(
-            tenant_id=str(run.tenant_id),
-            run_id=str(run.id),
-            trace_id=str(run.trace_id),
-            data_class="run_debug_evidence",
-            object_type="flow_step_attempt",
-            object_id=object_id or str(uuid4()),
-            policy_source="tenant.flow_settings.retention_policy.run_debug_evidence_days",
-            cutoff=now,
-            actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-            counts=RunDebugAttemptRetentionCounts(
-                cleared_field_count=1,
-                provider_call_count=0,
-                resolved_input_aggregate_count=resolved_input_aggregate_count,
-                resolved_input_edge_count=resolved_input_edge_count,
-            ),
-            timestamp=now,
-            retention_state="retention_purged",
-        )
-    ).to_payload()
-
-
-def _attempt_with_retention_marker(
-    run: FlowRun,
-    *,
-    resolved_input_aggregate_count: int = 0,
-    resolved_input_edge_count: int = 0,
-) -> FlowStepAttempt:
-    attempt = _attempt_with_provenance(run, None)
-    return attempt.model_copy(
-        update={
-            "provenance_json": _attempt_retention_marker_payload(
-                run,
-                object_id=str(attempt.id),
-                resolved_input_aggregate_count=resolved_input_aggregate_count,
-                resolved_input_edge_count=resolved_input_edge_count,
-            )
-        }
-    )
-
-
-def _step_result_retention_tombstone_payload(run: FlowRun) -> dict[str, Any]:
-    now = datetime.now(timezone.utc)
-    tombstone = FlowRetentionTombstone(
-        tenant_id=str(run.tenant_id),
-        run_id=str(run.id),
-        trace_id=str(run.trace_id),
-        data_class="generated_artifact",
-        object_type="flow_step_result",
-        object_id=str(uuid4()),
-        policy_source="tenant.flow_settings.retention_policy.generated_artifact_days",
-        cutoff=now,
-        actor_source=FLOW_RETENTION_ACTOR_SOURCE,
-        counts=GeneratedArtifactRetentionCounts(referenced_file_count=1),
-        timestamp=now,
-        retention_state="artifact_content_purged",
-    )
-    return {FLOW_RETENTION_TOMBSTONES_KEY: [tombstone.to_payload()]}
 
 
 def _step_result_for_run(
@@ -761,8 +619,6 @@ def test_build_debug_export_uses_latest_evidence_timestamp() -> None:
     version_timestamp = datetime(2026, 3, 17, 10, 6, tzinfo=timezone.utc)
     result_timestamp = datetime(2026, 3, 17, 10, 7, tzinfo=timezone.utc)
     attempt_timestamp = datetime(2026, 3, 17, 10, 8, tzinfo=timezone.utc)
-    operation_timestamp = datetime(2026, 3, 17, 10, 9, tzinfo=timezone.utc)
-    invalidation_timestamp = datetime(2026, 3, 17, 10, 10, tzinfo=timezone.utc)
     run = run.model_copy(update={"updated_at": run_timestamp})
     version = version.model_copy(update={"updated_at": version_timestamp})
     result = _step_result_for_run(run).model_copy(
@@ -771,62 +627,14 @@ def test_build_debug_export_uses_latest_evidence_timestamp() -> None:
     attempt = _attempt_with_provenance(run, {}).model_copy(
         update={"updated_at": attempt_timestamp}
     )
-    operation = FlowRunRerunOperation(
-        id=uuid4(),
-        tenant_id=run.tenant_id,
-        flow_id=run.flow_id,
-        flow_run_id=run.id,
-        rerun_step_id=attempt.step_id or uuid4(),
-        rerun_step_order=attempt.step_order,
-        root_attempt_no=2,
-        root_attempt_id=attempt.id,
-        status=FlowRunRerunOperationStatus.COMPLETED,
-        request_fingerprint="fingerprint",
-        expected_run_revision=1,
-        accepted_run_revision=2,
-        reason="refresh evidence",
-        input_payload_json=None,
-        input_revision=FlowRunInputRevisionNotRecorded(status="not_recorded"),
-        root_step_input_override_requested=False,
-        root_step_input_override=None,
-        requested_by_principal_type=PrincipalType.USER,
-        requested_by_user_id=uuid4(),
-        failure_code=None,
-        failure_message=None,
-        started_at=operation_timestamp,
-        finished_at=operation_timestamp,
-        created_at=operation_timestamp,
-        updated_at=operation_timestamp,
-    )
-    invalidated_step = FlowRunRerunInvalidatedStep(
-        id=uuid4(),
-        operation_id=operation.id,
-        tenant_id=run.tenant_id,
-        flow_id=run.flow_id,
-        flow_run_id=run.id,
-        step_id=operation.rerun_step_id,
-        step_order=operation.rerun_step_order,
-        invalidation_order=0,
-        role=FlowRunRerunInvalidationRole.ROOT,
-        dependency_sources_json=[RerunDependencyKind.INPUT_BINDINGS_QUESTION],
-        prior_step_result_id=result.id,
-        prior_attempt_id=attempt.id,
-        new_attempt_no=2,
-        new_attempt_id=attempt.id,
-        created_at=invalidation_timestamp,
-        updated_at=invalidation_timestamp,
-    )
-
     export = build_debug_export(
         run=run,
         version=version,
         step_results=[result],
         step_attempts=[attempt],
-        rerun_operations=[operation],
-        rerun_invalidated_steps=[invalidated_step],
     )
 
-    assert export["generated_at"] == invalidation_timestamp.isoformat()
+    assert export["generated_at"] == attempt_timestamp.isoformat()
 
 
 def test_parse_step_order_handles_strings_and_bools():
@@ -1157,7 +965,7 @@ def test_parse_attempt_provenance_marks_current_schema_validation_failure() -> N
     assert result.marker.error_code == "flow_attempt_provenance_invalid_current_payload"
 
 
-def test_parse_attempt_provenance_marks_invalid_retention_marker() -> None:
+def test_parse_attempt_provenance_rejects_removed_retention_marker_schema() -> None:
     result = parse_attempt_provenance(
         {"schema_version": "flow-attempt-retention-marker.v1"}
     )
@@ -1165,7 +973,7 @@ def test_parse_attempt_provenance_marks_invalid_retention_marker() -> None:
     assert result.status == "corrupt"
     assert result.marker is not None
     assert (
-        result.marker.error_code == "flow_attempt_provenance_invalid_retention_marker"
+        result.marker.error_code == "flow_attempt_provenance_schema_version_unsupported"
     )
 
 
@@ -1512,13 +1320,9 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
     )
     assert export["manifest"]["retention_state_summary"] == {
         "tracking_state": "not_tracked",
-        "tombstone_count": 0,
-        "retention_purged_count": 0,
-        "artifact_content_purged_count": 0,
-        "redacted_for_deletion_count": 0,
         "note": (
-            "No retention tombstones are present in this export; rows purged before "
-            "tombstone tracking remain indistinguishable from never-tracked evidence."
+            "Deletion provenance is not tracked; purged rows remain "
+            "indistinguishable from evidence that was never recorded."
         ),
     }
     assert export["manifest"]["artifact_availability_summary"] == {
@@ -1652,124 +1456,6 @@ def test_evidence_export_manifest_tracks_valid_and_absent_provenance() -> None:
         == FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
     )
     assert export["bundle"]["step_attempts"][1]["provenance_json"] is None
-
-
-def test_attempt_retention_marker_parses_as_retention_purged() -> None:
-    run, _version = _evidence_run_and_version()
-
-    result = parse_attempt_provenance(_attempt_retention_marker_payload(run))
-
-    assert result.status == "retention_purged"
-    assert result.to_export_payload() is not None
-    assert result.to_export_payload()["status"] == "retention_purged"
-    assert result.retention_marker is not None
-    assert result.retention_marker.tombstone.actor_source == FLOW_RETENTION_ACTOR_SOURCE
-
-
-def test_evidence_export_manifest_corrupt_precedes_retention_purged() -> None:
-    run, version = _evidence_run_and_version()
-    corrupt_attempt = _attempt_with_provenance(run, {"rag": {"status": "success"}})
-    purged_attempt = _attempt_with_retention_marker(run)
-
-    export = _render_raw_export(
-        run,
-        version,
-        step_attempts=[corrupt_attempt, purged_attempt],
-    )
-
-    assert export["manifest"]["provenance_persisted_version_status"] == "corrupt"
-    assert export["manifest"]["retention_state_summary"]["tombstone_count"] == 1
-    assert (
-        export["bundle"]["step_attempts"][1]["provenance_json"]["status"]
-        == "retention_purged"
-    )
-
-
-def test_evidence_export_manifest_retention_purged_precedes_tracked() -> None:
-    run, version = _evidence_run_and_version()
-    tracked_attempt = _attempt_with_provenance(
-        run,
-        {
-            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "llm": {"tool_calls": [{"name": "lookup"}]},
-        },
-    )
-    purged_attempt = _attempt_with_retention_marker(run)
-
-    export = _render_raw_export(
-        run,
-        version,
-        step_attempts=[tracked_attempt, purged_attempt],
-    )
-
-    assert (
-        export["manifest"]["provenance_persisted_version_status"] == "retention_purged"
-    )
-    assert export["bundle"]["step_attempts"][0]["provenance_json"]["llm"]["tool_calls"][
-        "preview"
-    ] == [{"name": "lookup"}]
-    assert export["manifest"]["retention_state_summary"]["retention_purged_count"] == 1
-
-
-def test_evidence_export_retention_summary_counts_payload_tombstones() -> None:
-    run, version = _evidence_run_and_version()
-    result = _step_result_for_run(
-        run,
-        output_payload_json=_step_result_retention_tombstone_payload(run),
-    )
-
-    first_export = _render_raw_export(run, version, step_results=[result])
-    second_export = _render_raw_export(run, version, step_results=[result])
-
-    summary = first_export["manifest"]["retention_state_summary"]
-    assert summary == {
-        "tracking_state": "tracked",
-        "tombstone_count": 1,
-        "retention_purged_count": 0,
-        "artifact_content_purged_count": 1,
-        "redacted_for_deletion_count": 0,
-        "note": (
-            "Retention tombstones are present: 1 total, 0 retention-purged, "
-            "1 artifact-content-purged, 0 redacted-for-deletion."
-        ),
-    }
-    assert (
-        second_export["manifest"]["retention_state_summary"]["note"] == summary["note"]
-    )
-
-
-def test_evidence_export_redacted_preserves_retention_marker_fields() -> None:
-    run, version = _evidence_run_and_version()
-    attempt = _attempt_with_retention_marker(run)
-    raw_bundle = build_evidence_bundle(
-        run=run,
-        version=version,
-        step_results=[],
-        step_attempts=[attempt],
-    )
-    export = render_evidence_json_export(
-        bundle=redact_evidence_bundle(raw_bundle),
-        context=_redacted_export_context(),
-    )
-
-    marker = export["bundle"]["step_attempts"][0]["provenance_json"]
-    assert marker["status"] == "retention_purged"
-    assert marker["tombstone"]["actor_source"] == FLOW_RETENTION_ACTOR_SOURCE
-    assert marker["tombstone"]["tenant_id"] == str(run.tenant_id)
-    assert marker["tombstone"]["run_id"] == str(run.id)
-    assert marker["tombstone"]["trace_id"] == str(run.trace_id)
-    assert marker["tombstone"]["counts"] == {
-        "cleared_field_count": 1,
-        "provider_call_count": 0,
-        "resolved_input_aggregate_count": 0,
-        "resolved_input_edge_count": 0,
-        "token_usage_state": "unknown",
-        "transcription_usage_state": "unknown",
-    }
-    assert not any(
-        path.startswith("bundle.step_attempts.0.provenance_json.tombstone")
-        for path in export["redaction"]["masked_paths"]
-    )
 
 
 def test_evidence_export_rag_tracking_reports_not_tracked_without_provenance() -> None:
@@ -1925,98 +1611,6 @@ def test_evidence_export_rag_tracking_reports_unknown_for_all_corrupt_attempts()
     assert tracking["tracking_state"] == "unknown_corrupt"
     assert tracking["retrieval_tracked"] is False
     assert export["summary"]["rag_sources"] == []
-
-
-def test_evidence_export_rag_tracking_reports_retention_purged_attempts() -> None:
-    run, version = _evidence_run_and_version()
-
-    export = _render_raw_export(
-        run,
-        version,
-        step_attempts=[_attempt_with_retention_marker(run)],
-    )
-
-    tracking = export["summary"]["rag_usage_tracking"]
-    assert tracking["tracking_state"] == "retention_purged"
-    assert tracking["retrieval_tracked"] is False
-    assert tracking["retention_purged_attempt_count"] == 1
-    assert "does not prove knowledge was unused" in tracking["note"]
-
-
-def test_evidence_export_rag_tracking_keeps_tracked_state_with_retention_purged() -> (
-    None
-):
-    run, version = _evidence_run_and_version()
-    tracked = _attempt_with_provenance(
-        run,
-        {
-            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "rag": {
-                "status": "success",
-                "references": [
-                    {
-                        "id": "source-1",
-                        "title": "Knowledge Source",
-                        "usage_state": "retrieved_candidate",
-                    }
-                ],
-            },
-        },
-    )
-    purged = _attempt_with_retention_marker(run)
-
-    export = _render_raw_export(run, version, step_attempts=[tracked, purged])
-
-    tracking = export["summary"]["rag_usage_tracking"]
-    assert tracking["tracking_state"] == "tracked_with_sources"
-    assert tracking["retention_purged_attempt_count"] == 1
-
-
-def test_evidence_export_rag_tracking_corrupt_and_retention_purged_precedence() -> None:
-    run, version = _evidence_run_and_version()
-    corrupt = _attempt_with_provenance(run, {"rag": {"status": "success"}})
-    purged = _attempt_with_retention_marker(run)
-
-    unknown_export = _render_raw_export(
-        run,
-        version,
-        step_attempts=[corrupt, purged],
-    )
-
-    assert (
-        unknown_export["summary"]["rag_usage_tracking"]["tracking_state"]
-        == "unknown_corrupt"
-    )
-    assert (
-        unknown_export["summary"]["rag_usage_tracking"][
-            "retention_purged_attempt_count"
-        ]
-        == 1
-    )
-
-    tracked = _attempt_with_provenance(
-        run,
-        {
-            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
-            "rag": {"status": "success", "references": []},
-        },
-    )
-    partial_export = _render_raw_export(
-        run,
-        version,
-        step_attempts=[tracked, corrupt, purged],
-    )
-
-    assert (
-        partial_export["summary"]["rag_usage_tracking"]["tracking_state"]
-        == "partial_corrupt"
-    )
-    assert (
-        partial_export["summary"]["rag_usage_tracking"][
-            "retention_purged_attempt_count"
-        ]
-        == 1
-    )
 
 
 def test_evidence_export_includes_review_checkpoint_lineage() -> None:
@@ -2358,7 +1952,6 @@ def test_evidence_export_summary_is_single_typed_contract() -> None:
         "rag_sources",
         "rag_usage_tracking",
         "citations",
-        "rerun_lineage",
         "review_checkpoints",
         "final_output",
         "step_overview",
@@ -2571,14 +2164,9 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
         "redaction_policy_version": "flow-evidence-redaction.v3",
         "retention_state_summary": {
             "tracking_state": "not_tracked",
-            "tombstone_count": 0,
-            "retention_purged_count": 0,
-            "artifact_content_purged_count": 0,
-            "redacted_for_deletion_count": 0,
             "note": (
-                "No retention tombstones are present in this export; rows purged "
-                "before tombstone tracking remain indistinguishable from "
-                "never-tracked evidence."
+                "Deletion provenance is not tracked; purged rows remain "
+                "indistinguishable from evidence that was never recorded."
             ),
         },
         "artifact_availability_summary": {

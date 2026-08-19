@@ -1,8 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { FlowRetentionImpactPreview, FlowRetentionPolicy } from "@eneo/eneo-js";
   import { beforeNavigate } from "$app/navigation";
-  import { resolve } from "$app/paths";
   import ChevronDown from "lucide-svelte/icons/chevron-down";
   import TriangleAlert from "lucide-svelte/icons/triangle-alert";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -14,19 +12,12 @@
   import {
     NumberField,
     SettingsForm,
-    ToggleField,
     ToggleNumberField
   } from "$lib/components/layout/Settings/form.svelte";
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
-  import FlowRetentionImpactDialog from "$lib/features/flows/components/FlowRetentionImpactDialog.svelte";
-  import FlowClassificationRetentionSettings from "$lib/features/flows/components/FlowClassificationRetentionSettings.svelte";
-  import {
-    confirmationFromFlowRetentionPreview,
-    FLOW_RETENTION_MAX_DAYS,
-    organizationRetentionChangeIsDestructive
-  } from "$lib/features/flows/flowRetentionPolicy";
+  import { FLOW_RETENTION_MAX_DAYS } from "$lib/features/flows/flowRetentionPolicy";
   import { m } from "$lib/paraglide/messages";
   import { saveFlowAdminSettings, type FlowAdminSettingsUpdates } from "./flowSettingsAdminSave";
 
@@ -49,12 +40,9 @@
   const EVIDENCE_MAX_PASSAGE_BYTES = 65536;
   const EVIDENCE_MAX_STEP_BYTES = 4194304;
 
-  let policy = $state<FlowRetentionPolicy>(initial.flowRetentionPolicy);
-  let classificationDirtyCount = $state(0);
+  let policy = $state(initial.flowRetentionPolicy);
   let runtimeLimitsOpen = $state(false);
   let saving = $state(false);
-  let preview = $state<FlowRetentionImpactPreview | null>(null);
-  let previewOpen = $state(false);
 
   // --- Gallring ---
   const runHistory = new ToggleNumberField({
@@ -69,12 +57,6 @@
     max: FLOW_RETENTION_MAX_DAYS,
     suggestion: 30
   });
-  const minimumRetention = new NumberField({
-    initial: initial.flowRetentionPolicy.flow_run_history_minimum_retention_days,
-    min: 1,
-    max: FLOW_RETENTION_MAX_DAYS
-  });
-  const noPurge = new ToggleField(initial.flowRetentionPolicy.flow_run_history_no_purge);
 
   // --- Uppladdningar & körning ---
   const fileMaxSize = new NumberField({
@@ -147,8 +129,6 @@
   const form = new SettingsForm([
     runHistory,
     uploadCleanup,
-    minimumRetention,
-    noPurge,
     fileMaxSize,
     maxFilesPerRun,
     audioMaxSize,
@@ -162,11 +142,7 @@
     evidenceStepSize
   ]);
 
-  const totalDirtyCount = $derived(form.dirtyCount + classificationDirtyCount);
-
-  const retentionDirty = $derived(
-    runHistory.dirty || uploadCleanup.dirty || minimumRetention.dirty || noPurge.dirty
-  );
+  const retentionDirty = $derived(runHistory.dirty || uploadCleanup.dirty);
 
   const timeoutOrderError = $derived(
     defaultStepTimeout.value != null &&
@@ -179,7 +155,7 @@
   const blocked = $derived(form.invalid || timeoutOrderError !== null);
 
   const runHistoryStatus = $derived.by(() => {
-    if (!policy.effective_state.run_history_deletion_active) {
+    if (policy.flow_run_history_retention_days == null) {
       return { active: false, label: m.flow_retention_status_not_deleting() };
     }
     const days = policy.flow_run_history_retention_days;
@@ -188,27 +164,16 @@
       label:
         days != null
           ? m.flow_retention_status_deleting_days({ days })
-          : m.flow_retention_status_deleting_classification()
+          : m.flow_retention_status_not_deleting()
     };
   });
 
   const uploadStatus = $derived.by(() => {
     const days = policy.flow_runtime_upload_abandonment_days;
-    if (!policy.effective_state.runtime_upload_abandonment_active || days == null) {
+    if (days == null) {
       return { active: false, label: m.flow_retention_status_not_cleaning() };
     }
     return { active: true, label: m.flow_retention_status_cleanup_days({ days }) };
-  });
-
-  const protectionStatus = $derived.by(() => {
-    const paused = policy.effective_state.barrier_sources.some(
-      (source) => source === "organization_no_purge" || source === "classification_no_purge"
-    );
-    if (paused) return m.flow_retention_status_protection_paused();
-    if (policy.effective_state.barrier_sources.length > 0) {
-      return m.flow_retention_status_protection_minimum();
-    }
-    return m.flow_retention_status_protection_none();
   });
 
   function formatSeconds(value: number): string {
@@ -274,29 +239,6 @@
     })
   );
 
-  function activationSourceLabel(
-    source: FlowRetentionPolicy["effective_state"]["activation_sources"][number]
-  ): string {
-    return source === "organization"
-      ? m.flow_retention_contributor_organization()
-      : m.flow_retention_contributor_classification();
-  }
-
-  function barrierSourceLabel(
-    source: FlowRetentionPolicy["effective_state"]["barrier_sources"][number]
-  ): string {
-    switch (source) {
-      case "organization_minimum":
-        return m.flow_retention_contributor_organization_minimum();
-      case "classification_minimum":
-        return m.flow_retention_contributor_classification_minimum();
-      case "organization_no_purge":
-        return m.flow_retention_source_organization_no_purge();
-      case "classification_no_purge":
-        return m.flow_retention_source_classification_no_purge();
-    }
-  }
-
   type Patches = {
     retention: boolean;
     rest: FlowAdminSettingsUpdates;
@@ -347,21 +289,14 @@
     };
   }
 
-  async function persist(patches: Patches, confirmed: boolean) {
+  async function persist(patches: Patches) {
     if (patches.retention) {
       policy = await eneo.settings.updateFlowRetentionPolicy({
         flow_run_history_retention_days: runHistory.value ?? null,
-        flow_run_history_minimum_retention_days: minimumRetention.value ?? null,
-        flow_run_history_no_purge: noPurge.value,
-        flow_runtime_upload_abandonment_days: uploadCleanup.value ?? null,
-        ...(confirmed && preview
-          ? { confirmation: confirmationFromFlowRetentionPreview(preview) }
-          : {})
+        flow_runtime_upload_abandonment_days: uploadCleanup.value ?? null
       });
       runHistory.commit(policy.flow_run_history_retention_days);
       uploadCleanup.commit(policy.flow_runtime_upload_abandonment_days);
-      minimumRetention.commit(policy.flow_run_history_minimum_retention_days);
-      noPurge.commit(policy.flow_run_history_no_purge);
     }
 
     const updated = await saveFlowAdminSettings(eneo.settings, patches.rest);
@@ -386,8 +321,6 @@
       evidenceStepSize.commit(updated.ragEvidence.max_recorded_passage_bytes_per_step);
     }
 
-    previewOpen = false;
-    preview = null;
     toast.success(m.saved_successfully());
   }
 
@@ -397,40 +330,7 @@
     if (!patches) return;
     saving = true;
     try {
-      if (
-        patches.retention &&
-        organizationRetentionChangeIsDestructive(
-          policy,
-          runHistory.value ?? null,
-          uploadCleanup.value ?? null,
-          minimumRetention.value ?? null,
-          noPurge.value
-        )
-      ) {
-        preview = await eneo.settings.previewFlowRetentionPolicy({
-          flow_run_history_retention_days: runHistory.value ?? null,
-          flow_run_history_minimum_retention_days: minimumRetention.value ?? null,
-          flow_run_history_no_purge: noPurge.value,
-          flow_runtime_upload_abandonment_days: uploadCleanup.value ?? null
-        });
-        previewOpen = true;
-        return;
-      }
-      await persist(patches, false);
-    } catch (error) {
-      toastError(error);
-    } finally {
-      saving = false;
-    }
-  }
-
-  async function confirmDestructiveChange() {
-    if (saving || !preview) return;
-    const patches = collectPatches();
-    if (!patches) return;
-    saving = true;
-    try {
-      await persist(patches, true);
+      await persist(patches);
     } catch (error) {
       toastError(error);
     } finally {
@@ -455,14 +355,6 @@
     }
   }
 
-  async function refreshEffectiveRetentionPolicy() {
-    policy = await eneo.settings.getFlowRetentionPolicy();
-  }
-
-  function setClassificationDirtyCount(count: number) {
-    classificationDirtyCount = count;
-  }
-
   function setRuntimeLimitsOpen(open: boolean) {
     if (!open && (defaultStepTimeout.dirty || maxStepTimeout.dirty || timeoutOrderError)) return;
     runtimeLimitsOpen = open;
@@ -475,7 +367,7 @@
   });
 
   beforeNavigate((navigation) => {
-    if (totalDirtyCount === 0) return;
+    if (form.dirtyCount === 0) return;
     if (!confirm(m.flow_settings_leave_confirm())) navigation.cancel();
   });
 </script>
@@ -509,7 +401,7 @@
             </Alert.Root>
           {/if}
           <Card.Root size="sm" class="mx-4 gap-0 py-0 lg:mx-0.5">
-            <Card.Content class="grid p-0 sm:grid-cols-3">
+            <Card.Content class="grid p-0 sm:grid-cols-2">
               <div class="border-default flex min-w-0 flex-col gap-2 p-4 sm:border-r">
                 <span class="text-secondary text-xs font-medium">
                   {m.flow_retention_status_run_history()}
@@ -528,46 +420,7 @@
                   {uploadStatus.label}
                 </Badge>
               </div>
-              <div class="border-default flex min-w-0 flex-col gap-2 border-t p-4 sm:border-t-0">
-                <span class="text-secondary text-xs font-medium">
-                  {m.flow_retention_status_protection()}
-                </span>
-                <Badge variant="outline">{protectionStatus}</Badge>
-              </div>
             </Card.Content>
-            {#if policy.effective_state.activation_sources.length > 0 || policy.effective_state.barrier_sources.length > 0 || policy.effective_state.classification_policy_count > 0}
-              <Card.Content
-                class="text-secondary border-default flex flex-wrap gap-x-6 gap-y-1 border-t py-3 text-xs"
-              >
-                {#if policy.effective_state.activation_sources.length > 0}
-                  <p>
-                    <span class="text-primary font-medium"
-                      >{m.flow_retention_activation_sources()}:</span
-                    >
-                    {policy.effective_state.activation_sources
-                      .map(activationSourceLabel)
-                      .join(", ")}
-                  </p>
-                {/if}
-                {#if policy.effective_state.barrier_sources.length > 0}
-                  <p>
-                    <span class="text-primary font-medium"
-                      >{m.flow_retention_barrier_sources()}:</span
-                    >
-                    {policy.effective_state.barrier_sources.map(barrierSourceLabel).join(", ")}
-                  </p>
-                {/if}
-                {#if policy.effective_state.classification_policy_count > 0}
-                  <p>
-                    {policy.effective_state.classification_policy_count === 1
-                      ? m.flow_retention_classification_policy_count_one()
-                      : m.flow_retention_classification_policy_count({
-                          count: policy.effective_state.classification_policy_count
-                        })}
-                  </p>
-                {/if}
-              </Card.Content>
-            {/if}
           </Card.Root>
         </Settings.Group>
 
@@ -596,81 +449,6 @@
             info={m.flow_retention_upload_anchor_description()}
             field={uploadCleanup}
           />
-        </Settings.Group>
-
-        <Settings.Group
-          title={m.flow_retention_group_preservation()}
-          description={m.flow_retention_group_preservation_description()}
-          density="compact"
-        >
-          <Settings.NumberRow
-            title={m.flow_retention_minimum_title()}
-            description={m.flow_retention_minimum_description()}
-            placeholder={m.flow_retention_no_minimum()}
-            unit={m.flow_retention_days_suffix()}
-            info={m.flow_retention_minimum_info()}
-            field={minimumRetention}
-          />
-          <Settings.ToggleRow
-            title={m.flow_retention_no_purge_title()}
-            description={m.flow_retention_no_purge_description()}
-            label={m.flow_retention_no_purge_checkbox()}
-            field={noPurge}
-          />
-          {#if noPurge.value}
-            <Alert.Root class="mx-4 max-w-3xl lg:mx-0.5">
-              <TriangleAlert aria-hidden="true" />
-              <Alert.Description>{m.flow_retention_no_purge_warning()}</Alert.Description>
-            </Alert.Root>
-          {/if}
-        </Settings.Group>
-
-        <Settings.Group
-          title={m.flow_retention_group_classifications()}
-          description={m.flow_retention_group_classifications_description()}
-          density="compact"
-        >
-          <FlowClassificationRetentionSettings
-            initialPolicies={initial.flowClassificationRetentionPolicies}
-            classifications={initial.securityClassifications.security_classifications}
-            securityEnabled={initial.securityClassifications.security_enabled}
-            onDirtyCountChange={setClassificationDirtyCount}
-            onPoliciesChanged={refreshEffectiveRetentionPolicy}
-          />
-        </Settings.Group>
-
-        <Settings.Group
-          title={m.flow_retention_effective_group()}
-          description={m.flow_retention_effective_group_description()}
-          density="compact"
-        >
-          <div class="grid gap-3 px-4 lg:grid-cols-2 lg:px-0.5">
-            <Card.Root size="sm">
-              <Card.Header>
-                <Card.Title>{m.flow_retention_audit_title()}</Card.Title>
-                <Card.Description class="leading-relaxed">
-                  {m.flow_retention_audit_description()}
-                </Card.Description>
-              </Card.Header>
-              <Card.Content>
-                <Button
-                  variant="link"
-                  class="h-auto px-0"
-                  href={resolve("/(app)/admin/audit-logs")}
-                >
-                  {m.flow_retention_audit_link()}
-                </Button>
-              </Card.Content>
-            </Card.Root>
-            <Card.Root size="sm">
-              <Card.Header>
-                <Card.Title>{m.flow_retention_preservation_title()}</Card.Title>
-                <Card.Description class="leading-relaxed">
-                  {m.flow_retention_preservation_hold_caveat()}
-                </Card.Description>
-              </Card.Header>
-            </Card.Root>
-          </div>
         </Settings.Group>
       </Settings.Page>
     </Page.Tab>
@@ -908,12 +686,3 @@
     </div>
   {/if}
 </Page.Root>
-
-{#if preview}
-  <FlowRetentionImpactDialog
-    bind:open={previewOpen}
-    {preview}
-    confirming={saving}
-    onConfirm={confirmDestructiveChange}
-  />
-{/if}

@@ -41,7 +41,6 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
-from eneo.flows.infrastructure.flow_run_rerun_repo import FlowRunRerunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -392,9 +391,6 @@ def _delivery_service(
         ),
         flow_run_terminalizer=FlowRunTerminalizer(
             flow_run_repo,
-            FlowRunRerunRepository(
-                session=flow_run_repo.session,
-            ),
             audit_outbox_repo,
             review_checkpoint_repo,
         ),

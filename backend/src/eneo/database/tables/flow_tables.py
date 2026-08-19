@@ -50,8 +50,6 @@ from eneo.flows.enums import (
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     TERMINAL_FLOW_RUN_STATUS_VALUES,
     FlowRunLifecycleSource,
-    FlowRunRerunInvalidationRole,
-    FlowRunRerunOperationStatus,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowStepAttemptStatus,
@@ -74,12 +72,6 @@ FLOW_STEP_INPUT_TYPE_VALUES = FLOW_INPUT_TYPE_VALUES
 FLOW_STEP_OUTPUT_MODE_VALUES = FLOW_OUTPUT_MODE_VALUES
 FLOW_STEP_OUTPUT_TYPE_VALUES = FLOW_OUTPUT_TYPE_VALUES
 FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
-FLOW_RUN_RERUN_OPERATION_STATUS_VALUES = tuple(
-    item.value for item in FlowRunRerunOperationStatus
-)
-FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES = tuple(
-    item.value for item in FlowRunRerunInvalidationRole
-)
 FLOW_RUN_LIFECYCLE_SOURCE_VALUES = tuple(item.value for item in FlowRunLifecycleSource)
 FLOW_DATA_RETENTION_DAYS_RANGE_CHECK = (
     "data_retention_days IS NULL OR "
@@ -965,151 +957,6 @@ class FlowStepResults(BasePublic):
     )
 
 
-class FlowRunRerunOperations(BasePublic):
-    """Stores rerun requests for existing Flow runs. Writer: FlowRunRerunRepository. Purpose: record rerun intent, invalidation, and terminal rerun outcome."""
-
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(
-            Tenants.id,
-            ondelete="CASCADE",
-            name="fk_rerun_operations_tenant",
-        ),
-        nullable=False,
-        index=True,
-    )
-    flow_id: Mapped[UUID] = mapped_column(
-        ForeignKey(
-            Flows.id,
-            ondelete="CASCADE",
-            name="fk_rerun_operations_flow",
-        ),
-        nullable=False,
-        index=True,
-    )
-    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
-    rerun_step_id: Mapped[UUID] = mapped_column(nullable=False)
-    rerun_step_order: Mapped[int] = mapped_column(nullable=False)
-    root_attempt_no: Mapped[int] = mapped_column(nullable=False)
-    root_attempt_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            "flow_step_attempts.id",
-            ondelete="SET NULL",
-            name="fk_rerun_operations_root_attempt",
-        ),
-        nullable=True,
-    )
-    status: Mapped[str] = mapped_column(
-        sa.String(32),
-        nullable=False,
-        server_default=FlowRunRerunOperationStatus.QUEUED.value,
-    )
-    request_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    expected_run_revision: Mapped[int] = mapped_column(nullable=False)
-    accepted_run_revision: Mapped[int] = mapped_column(nullable=False)
-    reason: Mapped[str] = mapped_column(sa.Text(), nullable=False)
-    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=True
-    )
-    root_step_input_override_requested: Mapped[bool] = mapped_column(nullable=False)
-    # The run row keeps only the current inputs, so each accepted rerun records
-    # the payload it replaced. Walking reruns in order and finishing at the run
-    # row rebuilds every input revision. Null on operations accepted before the
-    # chain existed, and on operations that never reached acceptance.
-    prior_input_hash: Mapped[Optional[str]] = mapped_column(
-        sa.String(64), nullable=True
-    )
-    resulting_input_hash: Mapped[Optional[str]] = mapped_column(
-        sa.String(64), nullable=True
-    )
-    changed_input_paths: Mapped[Optional[list[str]]] = mapped_column(
-        JSONB, nullable=True
-    )
-    prior_input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=True
-    )
-    requested_by_principal_type: Mapped[str] = mapped_column(
-        sa.String(32), nullable=False
-    )
-    requested_by_user_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            Users.id,
-            ondelete="RESTRICT",
-            name="fk_rerun_operations_requested_by_user",
-        ),
-        nullable=True,
-    )
-    requested_by_service_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            "service_principals.id",
-            ondelete="RESTRICT",
-            name="fk_rerun_operations_requested_by_service",
-        ),
-        nullable=True,
-    )
-    failure_code: Mapped[Optional[str]] = mapped_column(sa.String(64), nullable=True)
-    failure_message: Mapped[Optional[str]] = mapped_column(nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
-    finished_at: Mapped[Optional[datetime]] = mapped_column(
-        sa.DateTime(timezone=True), nullable=True
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            f"status IN ({_check_values(FLOW_RUN_RERUN_OPERATION_STATUS_VALUES)})",
-            name="ck_flow_run_rerun_operations_status",
-        ),
-        CheckConstraint(
-            "("
-            "requested_by_principal_type = 'user' "
-            "AND requested_by_user_id IS NOT NULL "
-            "AND requested_by_service_id IS NULL"
-            ") OR ("
-            "requested_by_principal_type = 'service_key' "
-            "AND requested_by_user_id IS NULL "
-            "AND requested_by_service_id IS NOT NULL"
-            ")",
-            name="ck_flow_run_rerun_operations_requester_principal",
-        ),
-        ForeignKeyConstraint(
-            ["flow_run_id", "tenant_id"],
-            ["flow_runs.id", "flow_runs.tenant_id"],
-            ondelete="CASCADE",
-            name="fk_flow_run_rerun_operations_run_tenant",
-        ),
-        ForeignKeyConstraint(
-            ["flow_run_id", "flow_id"],
-            ["flow_runs.id", "flow_runs.flow_id"],
-            ondelete="CASCADE",
-            name="fk_flow_run_rerun_operations_run_flow",
-        ),
-        UniqueConstraint(
-            "tenant_id",
-            "flow_run_id",
-            "request_fingerprint",
-            name="uq_flow_run_rerun_operations_request_fingerprint",
-        ),
-        Index("ix_flow_run_rerun_operations_run_status", "flow_run_id", "status"),
-        Index(
-            "uq_flow_run_rerun_operations_one_active_per_run",
-            "flow_run_id",
-            unique=True,
-            postgresql_where=sa.text("status IN ('queued', 'running')"),
-        ),
-        Index(
-            "ix_flow_run_rerun_operations_tenant_created_at",
-            "tenant_id",
-            "created_at",
-        ),
-        Index(
-            "ix_flow_run_rerun_operations_run_step",
-            "flow_run_id",
-            "rerun_step_id",
-        ),
-    )
-
-
 class FlowStepAttempts(BasePublic):
     """Stores individual step execution attempts. Writer: FlowRunRepository. Purpose: preserve retry diagnostics, timings, prompts, and raw attempt payloads."""
 
@@ -1131,30 +978,6 @@ class FlowStepAttempts(BasePublic):
     step_id: Mapped[UUID] = mapped_column(nullable=False)
     step_order: Mapped[int] = mapped_column(nullable=False)
     attempt_no: Mapped[int] = mapped_column(nullable=False)
-    rerun_operation_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            FlowRunRerunOperations.id,
-            ondelete="SET NULL",
-            name="fk_step_attempts_rerun_operation",
-        ),
-        nullable=True,
-    )
-    predecessor_attempt_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            "flow_step_attempts.id",
-            ondelete="SET NULL",
-            name="fk_step_attempts_predecessor",
-        ),
-        nullable=True,
-    )
-    superseded_by_attempt_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            "flow_step_attempts.id",
-            ondelete="SET NULL",
-            name="fk_step_attempts_superseded_by",
-        ),
-        nullable=True,
-    )
     celery_task_id: Mapped[Optional[str]] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
@@ -1224,12 +1047,6 @@ class FlowStepAttempts(BasePublic):
             "flow_run_id",
             "step_order",
             "attempt_no",
-        ),
-        Index("ix_flow_step_attempts_rerun_operation", "rerun_operation_id"),
-        Index("ix_flow_step_attempts_predecessor_attempt", "predecessor_attempt_id"),
-        Index(
-            "ix_flow_step_attempts_superseded_by_attempt",
-            "superseded_by_attempt_id",
         ),
     )
 
@@ -1459,115 +1276,6 @@ class FlowProviderCalls(BasePublic):
             "ix_flow_provider_calls_started_requested_at",
             "requested_at",
             postgresql_where=sa.text("status = 'started'"),
-        ),
-    )
-
-
-class FlowRunRerunInvalidatedSteps(BasePublic):
-    """Stores step invalidation markers from reruns. Writer: FlowRunRerunRepository. Purpose: preserve rerun lineage without deleting earlier step history immediately."""
-
-    operation_id: Mapped[UUID] = mapped_column(
-        ForeignKey(
-            FlowRunRerunOperations.id,
-            ondelete="CASCADE",
-            name="fk_rerun_invalidated_steps_operation",
-        ),
-        nullable=False,
-        index=True,
-    )
-    tenant_id: Mapped[UUID] = mapped_column(
-        ForeignKey(
-            Tenants.id,
-            ondelete="CASCADE",
-            name="fk_rerun_invalidated_steps_tenant",
-        ),
-        nullable=False,
-        index=True,
-    )
-    flow_id: Mapped[UUID] = mapped_column(
-        ForeignKey(
-            Flows.id,
-            ondelete="CASCADE",
-            name="fk_rerun_invalidated_steps_flow",
-        ),
-        nullable=False,
-        index=True,
-    )
-    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
-    step_id: Mapped[UUID] = mapped_column(nullable=False)
-    step_order: Mapped[int] = mapped_column(nullable=False)
-    invalidation_order: Mapped[int] = mapped_column(nullable=False)
-    role: Mapped[str] = mapped_column(sa.String(32), nullable=False)
-    dependency_sources_json: Mapped[list[str]] = mapped_column(
-        JSONB,
-        nullable=False,
-        server_default=sa.text("'[]'::jsonb"),
-    )
-    prior_step_result_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            FlowStepResults.id,
-            ondelete="SET NULL",
-            name="fk_rerun_invalidated_steps_prior_result",
-        ),
-        nullable=True,
-    )
-    prior_attempt_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            FlowStepAttempts.id,
-            ondelete="SET NULL",
-            name="fk_rerun_invalidated_steps_prior_attempt",
-        ),
-        nullable=True,
-    )
-    new_attempt_no: Mapped[Optional[int]] = mapped_column(nullable=True)
-    new_attempt_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(
-            FlowStepAttempts.id,
-            ondelete="SET NULL",
-            name="fk_rerun_invalidated_steps_new_attempt",
-        ),
-        nullable=True,
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            f"role IN ({_check_values(FLOW_RUN_RERUN_INVALIDATION_ROLE_VALUES)})",
-            name="ck_flow_run_rerun_invalidated_steps_role",
-        ),
-        ForeignKeyConstraint(
-            ["flow_run_id", "tenant_id"],
-            ["flow_runs.id", "flow_runs.tenant_id"],
-            ondelete="CASCADE",
-            name="fk_flow_run_rerun_invalidated_steps_run_tenant",
-        ),
-        ForeignKeyConstraint(
-            ["flow_run_id", "flow_id"],
-            ["flow_runs.id", "flow_runs.flow_id"],
-            ondelete="CASCADE",
-            name="fk_flow_run_rerun_invalidated_steps_run_flow",
-        ),
-        UniqueConstraint(
-            "operation_id",
-            "step_id",
-            name="uq_flow_run_rerun_invalidated_steps_operation_step",
-        ),
-        UniqueConstraint(
-            "operation_id",
-            "invalidation_order",
-            name="uq_flow_run_rerun_invalidated_steps_operation_order",
-        ),
-        Index(
-            "ix_flow_run_rerun_invalidated_steps_run_step",
-            "flow_run_id",
-            "step_id",
-        ),
-        Index(
-            "ix_flow_run_rerun_invalidated_steps_prior_attempt",
-            "prior_attempt_id",
-        ),
-        Index(
-            "ix_flow_run_rerun_invalidated_steps_new_attempt",
-            "new_attempt_id",
         ),
     )
 

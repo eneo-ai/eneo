@@ -14,21 +14,6 @@ class FlowInputSource(str, Enum):
     HTTP_GET = "http_get"
 
 
-class RerunDependencyKind(str, Enum):
-    INPUT_SOURCE_PREVIOUS_STEP = "input_source.previous_step"
-    INPUT_SOURCE_ALL_PREVIOUS_STEPS = "input_source.all_previous_steps"
-    INPUT_BINDINGS_QUESTION = "input_bindings.question"
-    INPUT_CONFIG_URL = "input_config.url"
-    INPUT_CONFIG_HEADERS = "input_config.headers"
-    INPUT_CONFIG_BODY_TEMPLATE = "input_config.body.template"
-    OUTPUT_CONFIG_URL = "output_config.url"
-    OUTPUT_CONFIG_HEADERS = "output_config.headers"
-    OUTPUT_CONFIG_BODY_TEMPLATE = "output_config.body.template"
-    OUTPUT_CONFIG_BINDINGS = "output_config.bindings"
-    ASSISTANT_SNAPSHOT_INSTRUCTIONS = "assistant_snapshot.instructions"
-    RUNTIME_ALIAS_PREVIOUS_STEP = "runtime_alias.previous_step"
-
-
 class FlowAuthoringInputSource(str, Enum):
     FLOW_INPUT = FlowInputSource.FLOW_INPUT.value
     PREVIOUS_STEP = FlowInputSource.PREVIOUS_STEP.value
@@ -157,21 +142,6 @@ class FlowRunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-# Rerun operation values currently mirror run statuses, but the operation
-# lifecycle is a separate persisted contract.
-class FlowRunRerunOperationStatus(str, Enum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class FlowRunRerunInvalidationRole(str, Enum):
-    ROOT = "root"
-    DOWNSTREAM = "downstream"
-
-
 @dataclass(frozen=True)
 class FlowRunStatusCapability:
     status: FlowRunStatus
@@ -181,7 +151,6 @@ class FlowRunStatusCapability:
     is_cancellable: bool
     is_awaiting_review: bool
     can_request_redispatch: bool
-    is_rerun_eligible: bool
 
 
 FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = (
@@ -195,7 +164,6 @@ FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = 
                 is_cancellable=True,
                 is_awaiting_review=False,
                 can_request_redispatch=True,
-                is_rerun_eligible=False,
             ),
             FlowRunStatus.RUNNING: FlowRunStatusCapability(
                 status=FlowRunStatus.RUNNING,
@@ -205,7 +173,6 @@ FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = 
                 is_cancellable=True,
                 is_awaiting_review=False,
                 can_request_redispatch=False,
-                is_rerun_eligible=False,
             ),
             FlowRunStatus.AWAITING_REVIEW: FlowRunStatusCapability(
                 status=FlowRunStatus.AWAITING_REVIEW,
@@ -215,7 +182,6 @@ FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = 
                 is_cancellable=True,
                 is_awaiting_review=True,
                 can_request_redispatch=False,
-                is_rerun_eligible=False,
             ),
             FlowRunStatus.COMPLETED: FlowRunStatusCapability(
                 status=FlowRunStatus.COMPLETED,
@@ -225,7 +191,6 @@ FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = 
                 is_cancellable=False,
                 is_awaiting_review=False,
                 can_request_redispatch=False,
-                is_rerun_eligible=True,
             ),
             FlowRunStatus.FAILED: FlowRunStatusCapability(
                 status=FlowRunStatus.FAILED,
@@ -235,7 +200,6 @@ FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = 
                 is_cancellable=False,
                 is_awaiting_review=False,
                 can_request_redispatch=False,
-                is_rerun_eligible=True,
             ),
             FlowRunStatus.CANCELLED: FlowRunStatusCapability(
                 status=FlowRunStatus.CANCELLED,
@@ -245,7 +209,6 @@ FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = 
                 is_cancellable=False,
                 is_awaiting_review=False,
                 can_request_redispatch=False,
-                is_rerun_eligible=False,
             ),
         }
     )
@@ -272,29 +235,10 @@ TERMINAL_FLOW_RUN_STATUSES = frozenset(
 TERMINAL_FLOW_RUN_STATUS_VALUES = tuple(
     status.value for status in FlowRunStatus if status in TERMINAL_FLOW_RUN_STATUSES
 )
-RERUN_OPERATION_TERMINAL_STATUS_BY_RUN_STATUS: Mapping[
-    FlowRunStatus, FlowRunRerunOperationStatus
-] = MappingProxyType(
-    {
-        FlowRunStatus.COMPLETED: FlowRunRerunOperationStatus.COMPLETED,
-        FlowRunStatus.FAILED: FlowRunRerunOperationStatus.FAILED,
-        FlowRunStatus.CANCELLED: FlowRunRerunOperationStatus.CANCELLED,
-    }
-)
 CANCELLABLE_FLOW_RUN_STATUSES = frozenset(
     status
     for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
     if capability.is_cancellable
-)
-RERUN_ELIGIBLE_FLOW_RUN_STATUSES = frozenset(
-    status
-    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
-    if capability.is_rerun_eligible
-)
-RERUN_ELIGIBLE_FLOW_RUN_STATUS_VALUES = tuple(
-    status.value
-    for status in FlowRunStatus
-    if status in RERUN_ELIGIBLE_FLOW_RUN_STATUSES
 )
 
 
