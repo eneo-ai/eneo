@@ -163,14 +163,21 @@ skip_covered = false
 [tool.mutmut]
 source_paths = ["src/eneo"]
 only_mutate = [
-    "src/eneo/flows/flow_access_policy.py",
-    "src/eneo/flows/flow_metadata.py",
-    "src/eneo/flows/flow_settings.py",
+    "src/eneo/flow_packages/application/flow_package_import_planner.py",
+    "src/eneo/flow_packages/domain/flow_package_checksum.py",
+    "src/eneo/flow_packages/domain/flow_package_envelope.py",
+    "src/eneo/flow_packages/infrastructure/flow_package_zip_reader.py",
+    "src/eneo/flows/flow_run_redaction.py",
+    "src/eneo/flows/application/flow_run_access_policy.py",
 ]
 pytest_add_cli_args_test_selection = [
-    "tests/unittests/flows/test_flow_access_policy.py",
-    "tests/unittests/flows/test_flow_metadata.py",
-    "tests/unittests/tenants/test_tenant_flow_settings.py",
+    "tests/unittests/flow_packages/test_flow_package_api.py",
+    "tests/unittests/flow_packages/test_flow_package_export_service.py",
+    "tests/unittests/flow_packages/test_flow_package_import_planner.py",
+    "tests/unittests/flow_packages/test_flow_package_models.py",
+    "tests/unittests/flow_packages/test_flow_package_zip_reader.py",
+    "tests/unittests/flows/test_flow_run_access_policy.py",
+    "tests/unittests/flows/test_flow_run_redaction.py",
 ]
 
 # Dead-code / dependency analysis. Both are advisory (not wired into pre-commit)

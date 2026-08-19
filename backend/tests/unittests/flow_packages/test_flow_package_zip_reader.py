@@ -10,10 +10,15 @@ from io import BytesIO
 from typing import cast
 
 import pytest
+from pydantic import BaseModel
 
+from eneo.flow_packages.domain import flow_package_checksum as checksum
 from eneo.flow_packages.domain.flow_package_checksum import (
+    canonical_json_bytes,
     compose_content_checksum,
     hash_json_value,
+    json_object_from_model,
+    sha256_hex,
 )
 from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
 from eneo.flow_packages.domain.flow_package_errors import (
@@ -43,6 +48,11 @@ from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
 from eneo.json_types import JsonObject
 
 
+class _ChecksumModel(BaseModel):
+    name: str
+    enabled: bool
+
+
 def test_valid_package_parses_to_typed_envelope() -> None:
     spec = _flow_spec()
     package_bytes = _package_bytes(spec=spec)
@@ -52,6 +62,56 @@ def test_valid_package_parses_to_typed_envelope() -> None:
     assert envelope.spec == spec
     assert envelope.spec_hash == spec.spec_hash()
     assert envelope.manifest.package_id == "se.demo.flow"
+
+
+def test_canonical_checksum_contract_is_byte_exact() -> None:
+    payload = {"z": "å", "a": [True, None, 1, 1.5]}
+
+    canonical = canonical_json_bytes(payload)
+
+    assert canonical == b'{"a":[true,null,1,1.5],"z":"\xc3\xa5"}'
+    assert hash_json_value(payload) == sha256_hex(canonical)
+
+
+def test_checksum_model_conversion_is_a_strict_json_object() -> None:
+    assert json_object_from_model(_ChecksumModel(name="demo", enabled=True)) == {
+        "name": "demo",
+        "enabled": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_message"),
+    [
+        (["not", "an", "object"], "Expected a JSON object."),
+        ({1: "non-string-key"}, "JSON object keys must be strings."),
+        (
+            {"unsupported": ("tuple",)},
+            "Unsupported JSON value type: tuple.",
+        ),
+    ],
+)
+def test_checksum_object_conversion_rejects_non_json_objects(
+    value: object,
+    expected_message: str,
+) -> None:
+    with pytest.raises(TypeError, match=expected_message):
+        checksum._json_object(value)  # pyright: ignore[reportPrivateUsage]
+
+
+def test_content_checksum_covers_every_named_subdocument_hash() -> None:
+    actual = compose_content_checksum(
+        spec_hash="spec",
+        manifest_hash="manifest",
+        requirements_hash="requirements",
+        provenance_hash="provenance",
+    )
+    expected_payload = (
+        b'{"manifest_hash":"manifest","provenance_hash":"provenance",'
+        b'"requirements_hash":"requirements","spec_hash":"spec"}'
+    )
+
+    assert actual == sha256_hex(expected_payload)
 
 
 def test_package_round_trip_preserves_flow_draft_spec() -> None:
@@ -375,6 +435,43 @@ def test_bad_zip_is_rejected() -> None:
     assert_zip_unsafe(b"not a zip", FlowPackageZipUnsafeReason.BAD_ZIP)
 
 
+def test_zip_safety_boundaries_are_exact() -> None:
+    assert (
+        reader._decompression_ratio_too_high(  # pyright: ignore[reportPrivateUsage]
+            uncompressed_size=0,
+            compressed_size=0,
+        )
+        is False
+    )
+    assert (
+        reader._decompression_ratio_too_high(  # pyright: ignore[reportPrivateUsage]
+            uncompressed_size=1,
+            compressed_size=0,
+        )
+        is True
+    )
+    assert (
+        reader._decompression_ratio_too_high(  # pyright: ignore[reportPrivateUsage]
+            uncompressed_size=reader.MAX_DECOMPRESSION_RATIO,
+            compressed_size=1,
+        )
+        is False
+    )
+    assert (
+        reader._decompression_ratio_too_high(  # pyright: ignore[reportPrivateUsage]
+            uncompressed_size=reader.MAX_DECOMPRESSION_RATIO + 1,
+            compressed_size=1,
+        )
+        is True
+    )
+
+    entry = zipfile.ZipInfo("folder/file.json")
+    assert (
+        reader._validate_entry_path(entry)  # pyright: ignore[reportPrivateUsage]
+        == "folder/file.json"
+    )
+
+
 def test_too_many_entries_is_rejected() -> None:
     assert_zip_unsafe(
         _zip_raw(
@@ -387,6 +484,8 @@ def test_too_many_entries_is_rejected() -> None:
             }
         ),
         FlowPackageZipUnsafeReason.TOO_MANY_ENTRIES,
+        count=5,
+        max_entries=reader.MAX_ZIP_ENTRIES,
     )
 
 
@@ -401,6 +500,7 @@ def test_directory_entry_is_rejected() -> None:
             }
         ),
         FlowPackageZipUnsafeReason.DIRECTORY_ENTRY,
+        path="folder/",
     )
 
 
@@ -418,6 +518,7 @@ def test_symlink_entry_is_rejected() -> None:
             ]
         ),
         FlowPackageZipUnsafeReason.SYMLINK_ENTRY,
+        path=reader.MANIFEST_PATH,
     )
 
 
@@ -442,6 +543,7 @@ def test_unsafe_paths_are_rejected(
             }
         ),
         reason,
+        path=path,
     )
 
 
@@ -456,6 +558,7 @@ def test_duplicate_entry_is_rejected() -> None:
             ]
         ),
         FlowPackageZipUnsafeReason.DUPLICATE_ENTRY,
+        path=reader.MANIFEST_PATH,
     )
 
 
@@ -506,6 +609,7 @@ def test_unknown_entry_is_rejected() -> None:
     assert_zip_unsafe(
         _zip_docs(docs),
         FlowPackageZipUnsafeReason.UNKNOWN_ENTRY,
+        path="unknown.json",
     )
 
 
@@ -516,6 +620,7 @@ def test_missing_required_entry_is_rejected() -> None:
     assert_zip_unsafe(
         _zip_docs(docs),
         FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
+        path=reader.PROVENANCE_PATH,
     )
 
 
@@ -541,6 +646,8 @@ def test_compressed_entry_too_large_is_rejected(
     assert_zip_unsafe(
         _zip_raw({reader.MANIFEST_PATH: b'{"schema_version":1}'}),
         FlowPackageZipUnsafeReason.COMPRESSED_ENTRY_TOO_LARGE,
+        path=reader.MANIFEST_PATH,
+        max_size=8,
     )
 
 
@@ -552,6 +659,9 @@ def test_uncompressed_entry_too_large_is_rejected(
     assert_zip_unsafe(
         _zip_raw({reader.MANIFEST_PATH: b'{"schema_version":1}'}),
         FlowPackageZipUnsafeReason.UNCOMPRESSED_ENTRY_TOO_LARGE,
+        path=reader.MANIFEST_PATH,
+        size=9,
+        max_size=8,
     )
 
 
@@ -563,6 +673,9 @@ def test_total_uncompressed_too_large_is_rejected(
     assert_zip_unsafe(
         _zip_raw({reader.MANIFEST_PATH: b'{"schema_version":1}'}),
         FlowPackageZipUnsafeReason.TOTAL_UNCOMPRESSED_TOO_LARGE,
+        path=reader.MANIFEST_PATH,
+        size=9,
+        max_size=8,
     )
 
 
@@ -574,6 +687,9 @@ def test_decompression_ratio_too_high_is_rejected(
     assert_zip_unsafe(
         _zip_raw({reader.MANIFEST_PATH: b"a" * 100}),
         FlowPackageZipUnsafeReason.DECOMPRESSION_RATIO_TOO_HIGH,
+        path=reader.MANIFEST_PATH,
+        ratio=2,
+        max_ratio=1,
     )
 
 
@@ -583,18 +699,25 @@ def test_json_too_large_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     assert_zip_unsafe(
         _zip_raw({reader.MANIFEST_PATH: b'{"schema_version":1}'}),
         FlowPackageZipUnsafeReason.JSON_TOO_LARGE,
+        path=reader.MANIFEST_PATH,
+        size=20,
+        max_size=8,
     )
 
 
 def assert_zip_unsafe(
     package_bytes: bytes,
     reason: FlowPackageZipUnsafeReason,
+    **expected_context: str | int,
 ) -> None:
     with pytest.raises(FlowPackageValidationError) as exc_info:
         reader.read_flow_package(package_bytes)
 
     assert exc_info.value.code is FlowPackageErrorCode.ZIP_UNSAFE
+    assert str(exc_info.value) == "Flow package zip is unsafe."
     assert exc_info.value.context["reason"] == reason.value
+    for key, expected_value in expected_context.items():
+        assert exc_info.value.context[key] == expected_value
 
 
 def _package_bytes(

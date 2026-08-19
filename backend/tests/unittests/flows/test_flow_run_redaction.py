@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from urllib.parse import unquote
 
+import pytest
+
 from eneo.flows.application.flow_webhook_delivery_policy import (
     sanitize_webhook_delivery_error,
 )
 from eneo.flows.flow_run_redaction import (
+    MaskedField,
+    StringRedactionResult,
+    is_sensitive_key,
     redact_payload,
     redact_payload_with_manifest,
     redact_string,
+    redact_string_with_reason,
     redact_url_secrets,
 )
 
@@ -229,3 +235,171 @@ def test_redact_payload_keeps_traceability_ids_but_redacts_session_tokens() -> N
     assert redacted.value["session_id"] == "runtime-session-456"
     assert redacted.value["session_token"] == "[REDACTED]"
     assert redacted.masked_paths == ("session_token",)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "authorization",
+        "api_key",
+        "apikey",
+        "password",
+        "passwd",
+        "secret",
+        "cookie",
+        "cookies",
+        "credential",
+        "credentials",
+        "bearer",
+        "token",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "auth_token",
+        "session_token",
+        "csrf_token",
+        "x_api_key",
+        "client_secret",
+        "webhook_secret",
+        "private_key",
+        "secret_key",
+        "signature",
+        "signed_url",
+        "prefix_token",
+        "prefix_secret",
+        "prefix_password",
+        "prefix_passwd",
+        "prefix_cookie",
+        "prefix_credential",
+        "prefix_credentials",
+        "prefix_authorization",
+        "prefix_api_key",
+        "prefix_apikey",
+        "prefix_signature",
+        "prefix_signed_url",
+        "customer-access-token-value",
+        "customer-refresh-token-value",
+        "customer-id-token-value",
+        "customer-auth-token-value",
+        "customer-session-token-value",
+        "service.clientSecret.value",
+        "service-webhook-secret-value",
+        "private key material",
+        "service-secret-key-material",
+        "customer-signed-url-value",
+        "request authorization header",
+        "user password value",
+        "user passwd value",
+        "browser cookie value",
+        "service credential value",
+        "service credentials value",
+    ],
+)
+def test_sensitive_key_vocabulary_is_fail_closed(key: str) -> None:
+    assert is_sensitive_key(key) is True
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        None,
+        "",
+        "token_count",
+        "secret_label",
+        "builder_session_id",
+        "session_id",
+        "public_key_id",
+    ],
+)
+def test_sensitive_key_vocabulary_preserves_traceability_fields(
+    key: str | None,
+) -> None:
+    assert is_sensitive_key(key) is False
+
+
+def test_redaction_manifest_records_exact_nested_paths_keys_and_reasons() -> None:
+    result = redact_payload_with_manifest(
+        {
+            "safe": [
+                "Bearer bearer-secret",
+                {"clientSecret": "client-secret"},
+            ],
+            7: "password=assignment-secret",
+            "count": 3,
+        },
+        path="root",
+    )
+
+    assert result.value == {
+        "safe": ["Bearer [REDACTED]", {"clientSecret": "[REDACTED]"}],
+        "7": "password=[REDACTED]",
+        "count": 3,
+    }
+    assert result.masked_paths == (
+        "root.safe[0]",
+        "root.safe[1].clientSecret",
+        "root.7",
+    )
+    assert result.masked_fields == (
+        MaskedField(
+            path="root.safe[0]",
+            key="safe",
+            reason="authorization_credential",
+        ),
+        MaskedField(
+            path="root.safe[1].clientSecret",
+            key="clientSecret",
+            reason="sensitive_key",
+        ),
+        MaskedField(
+            path="root.7",
+            key="7",
+            reason="sensitive_assignment",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "key", "expected_value", "expected_reason"),
+    [
+        ("plain", "password", "[REDACTED]", "sensitive_key"),
+        (
+            "password=secret-value",
+            "message",
+            "password=[REDACTED]",
+            "sensitive_assignment",
+        ),
+        (
+            "https://example.test/cb?token=secret-value",
+            "message",
+            "https://example.test/cb?token=%5BREDACTED%5D",
+            "sensitive_url",
+        ),
+        (
+            "Bearer bearer-secret",
+            "message",
+            "Bearer [REDACTED]",
+            "authorization_credential",
+        ),
+        ("plain", "message", "plain", None),
+    ],
+)
+def test_redact_string_reports_the_exact_redaction_reason(
+    value: str,
+    key: str,
+    expected_value: str,
+    expected_reason: str | None,
+) -> None:
+    assert redact_string_with_reason(value, key=key) == StringRedactionResult(
+        value=expected_value,
+        reason=expected_reason,
+    )
+
+
+def test_url_redaction_preserves_safe_url_structure_exactly() -> None:
+    assert redact_url_secrets(
+        "https://user:pass@example.test:8443/path?blank=&safe=yes&token=secret#frag"
+    ) == ("https://example.test:8443/path?blank=&safe=yes&token=%5BREDACTED%5D#frag")
+    assert redact_url_secrets("https://example.test/path?blank=&safe=yes#frag") == (
+        "https://example.test/path?blank=&safe=yes#frag"
+    )
