@@ -36,7 +36,6 @@ source_modules =
     eneo.flows.flow_metadata
     eneo.flows.flow_resource_bindings
     eneo.flows.flow_retention_policy
-    eneo.flows.flow_retention_tombstone
     eneo.flows.flow_review_expiry_policy
     eneo.flows.flow_review_policy
     eneo.flows.flow_run_contract_service
@@ -47,8 +46,6 @@ source_modules =
     eneo.flows.flow_run_payload_validation
     eneo.flows.flow_run_provenance
     eneo.flows.flow_run_redaction
-    eneo.flows.flow_run_rerun_graph
-    eneo.flows.flow_run_rerun_request
     eneo.flows.flow_run_step_input_file
     eneo.flows.flow_run_step_inputs
     eneo.flows.flow_run_step_result_file
