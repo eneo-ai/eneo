@@ -309,6 +309,10 @@ def render_confirmed_requirements_system_prompt_block(
     else:
         lines.append("-")
 
+    if summary.named_content_fields:
+        lines.extend(["", "### Innehåll som resultatet ska bevara"])
+        lines.extend(f"- {field.label}" for field in summary.named_content_fields)
+
     manual_setup_notes = user_relevant_requirement_notes(summary.manual_setup_notes)
     if manual_setup_notes:
         lines.extend(["", "### Manuell uppsättning"])
@@ -344,6 +348,10 @@ def render_confirmed_requirements_proposal_prompt_block(
             f"  - {decision.topic}: {decision.decision}"
             for decision in summary.key_decisions
         )
+
+    if summary.named_content_fields:
+        lines.append("- named_content_fields:")
+        lines.extend(f"  - {field.label}" for field in summary.named_content_fields)
 
     relevant_assumptions = user_relevant_requirement_notes(summary.assumptions)
     if relevant_assumptions:

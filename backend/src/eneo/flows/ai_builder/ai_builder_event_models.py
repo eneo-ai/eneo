@@ -206,8 +206,8 @@ class NamedContentFieldPayload(BaseModel):
     stores it. It is not a promise that a field by that name reaches the
     compiled result: whether an obligation is projected at all depends on the
     output mode, the presence of a declared schema, and the confidence the name
-    was admitted with. `label` is what the summary sentence says about the same
-    obligation, rendered by the same owner, so list and prose cannot disagree.
+    was admitted with. `label` is a bounded readable rendering for display; the
+    exact `id`, not this label, participates in confirmation identity.
 
     `origin` says how the name got here — read out of the user's own writing,
     or typed into this card. It is display provenance, not a requirement: both
@@ -327,14 +327,14 @@ class RequirementsSummaryPayload(RequirementsDisclosureContent):
     # Required, because a summary the client cannot name is a summary the user
     # cannot confirm: the confirmation request carries this exact version back.
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
-    # The content obligations the user named, as items beside the sentence
-    # that already states them. This is also the edit surface: the user sends
+    # The content obligations the user named, as readable items below the lead
+    # summary. This is also the edit surface: the user sends
     # the ids they leave standing back as a `named_content_fields_edit`, and
     # the disclosure is rebuilt from the resulting set.
     #
     # It deliberately sits outside `RequirementsDisclosureContent`, so it does
-    # not enter the version hash. The same names already reach identity
-    # through the summary prose; hashing them again would make a projection of
+    # not enter the version hash. The same names already reach the private
+    # identity rendering; hashing them again would make a projection of
     # one fact look like a second fact the user attested to.
     named_content_fields: list[NamedContentFieldPayload] = Field(
         default_factory=list[NamedContentFieldPayload],

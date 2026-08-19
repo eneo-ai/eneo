@@ -70,6 +70,7 @@ from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolArgumentsError,
+    build_native_strict_tool_schema,
     build_propose_flow_tool_schema,
     validate_native_strict_schema,
     validate_propose_flow_tool_arguments,
@@ -245,7 +246,8 @@ def _compile_through_the_whole_path(
 
     projection = named_result_projection(state)
     schema = _prepared_schema(projection)
-    validate_native_strict_schema(schema["function"]["parameters"])
+    strict_schema = build_native_strict_tool_schema(schema)
+    validate_native_strict_schema(strict_schema["function"]["parameters"])
     arguments = _arguments(
         result_keys=result_keys,
         model_output_fields=model_output_fields,
@@ -363,7 +365,7 @@ def test_the_user_is_told_that_a_field_they_nested_will_be_top_level(
         ui_language="sv",
         discovery_assumptions=(),
     )
-    assert "namngett innehåll" in disclosure.summary
+    assert "De namngivna delarna byggs på översta nivån" in disclosure.summary
     assert "översta nivån" in disclosure.summary
     assert "utdataschema" in disclosure.summary
 
@@ -392,7 +394,9 @@ def test_an_edit_confirmation_shows_no_placement_limitation() -> None:
         is_edit_mode=True,
     )
 
-    assert "namngett innehåll" in disclosure.summary
+    assert [field.id for field in disclosure.named_content_fields] == [
+        name for name, _shape in PUBLIC_RECORD_OBLIGATIONS
+    ]
     assert "översta nivån" not in disclosure.summary
 
 
@@ -1227,11 +1231,10 @@ def test_the_postcondition_reports_the_path_it_lost_not_just_the_name() -> None:
     assert failure.value.log_context["field_names"] == "assessment.risks"
 
 
-def test_the_named_content_the_summary_states_is_also_readable_as_items() -> None:
-    # The names reached the client only inside a Swedish sentence, so a reader
-    # had to parse prose to list them. The list is the same names, in the same
-    # order, said the same way — a second source of truth would let list and
-    # sentence disagree about what the result must carry.
+def test_named_content_is_listed_without_repeating_it_in_the_summary() -> None:
+    # The structured list is the readable owner of these details. Repeating all
+    # names in the lead paragraph defeats the list's progressive disclosure and
+    # makes long identifier-heavy requirements difficult to scan.
     state = _state(MEETING_ACTION_OBLIGATIONS, primary_runtime_input="audio")
 
     disclosure = build_requirements_disclosure(state, ui_language="sv")
@@ -1243,7 +1246,7 @@ def test_the_named_content_the_summary_states_is_also_readable_as_items() -> Non
         "agenda_items (användaren skrev en lista)"
     )
     for field in disclosure.named_content_fields:
-        assert field.label in disclosure.summary
+        assert field.label not in disclosure.summary
 
 
 def test_naming_no_content_leaves_the_item_list_empty() -> None:
@@ -1304,7 +1307,7 @@ def test_a_field_the_user_typed_into_the_card_is_marked_as_theirs() -> None:
         ("Beslutsdatum", "card_edit"),
     ]
     for field in disclosure.named_content_fields:
-        assert field.label in disclosure.summary
+        assert field.label not in disclosure.summary
 
 
 def test_editing_the_field_list_is_a_disclosure_the_user_has_not_confirmed() -> None:

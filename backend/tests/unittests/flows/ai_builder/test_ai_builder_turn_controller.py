@@ -879,23 +879,23 @@ def test_server_confirmation_discloses_truncated_template_placeholders_in_swedis
 
 
 @pytest.mark.parametrize(
-    ("ui_language", "named_text", "contract_text"),
+    ("ui_language", "placement_text", "contract_text"),
     [
         (
             "sv",
-            "Användaren har namngett innehåll som slutresultatet ska bevara",
+            "De namngivna delarna byggs på översta nivån",
             "Typer, struktur och obligatoriska fält är inte fastställda.",
         ),
         (
             "en",
-            "The user named content that the final result must preserve",
+            "The named content is built at the top level",
             "Types, structure, and required fields are not fixed.",
         ),
     ],
 )
 def test_server_confirmation_distinguishes_named_results_from_full_schema(
     ui_language: str,
-    named_text: str,
+    placement_text: str,
     contract_text: str,
 ) -> None:
     state = _state(primary_runtime_input="text", terminal_output="structured_json")
@@ -912,7 +912,11 @@ def test_server_confirmation_distinguishes_named_results_from_full_schema(
     decision = _decision(state=state, ui_language=ui_language)
 
     assert isinstance(decision, ConfirmRequirements)
-    assert named_text in decision.payload.summary
+    assert placement_text in decision.payload.summary
+    assert [field.id for field in decision.payload.named_content_fields] == [
+        "case_id",
+        "status",
+    ]
     assert contract_text not in decision.payload.summary
 
 
@@ -935,15 +939,14 @@ def test_server_confirmation_discloses_every_named_result_with_its_shape(
     decision = _decision(state=state, ui_language=ui_language)
 
     assert isinstance(decision, ConfirmRequirements)
-    summary = decision.payload.summary
-    assert all(f"field_{index}" in summary for index in range(9))
-    assert "(+" not in summary
+    fields = decision.payload.named_content_fields
+    assert [field.id for field in fields] == [f"field_{index}" for index in range(9)]
     shape_text = (
         "field_8 (användaren skrev en lista)"
         if ui_language == "sv"
         else "field_8 (the user wrote a list)"
     )
-    assert shape_text in summary
+    assert fields[-1].label == shape_text
 
 
 def test_server_confirmation_discloses_truncated_template_placeholders_in_english() -> (
