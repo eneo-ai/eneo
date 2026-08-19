@@ -16,7 +16,11 @@ from mcp.client.streamable_http import (
 )
 from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.message import SessionMessage
-from mcp.types import ServerNotification, ToolListChangedNotification
+from mcp.types import (
+    LATEST_PROTOCOL_VERSION,
+    ServerNotification,
+    ToolListChangedNotification,
+)
 
 from eneo.main.config import get_settings
 from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
@@ -532,19 +536,27 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     The MCP library's anyio TaskGroups can swallow the actual HTTP error
     (e.g. 401) and replace it with a cancel scope error. This makes a
     direct HTTP request to surface the real issue.
+
+    Any HTTP status is diagnostic signal here: auth is evaluated before
+    method dispatch, so a 401/403 is trustworthy even from a server that
+    rejects the probe body itself.
     """
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
             async with client.stream(
                 "POST",
                 url,
-                headers={**headers, "Content-Type": "application/json"},
+                headers={
+                    **headers,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
                 json={
                     "jsonrpc": "2.0",
                     "method": "initialize",
                     "id": 1,
                     "params": {
-                        "protocolVersion": "2024-11-05",
+                        "protocolVersion": LATEST_PROTOCOL_VERSION,
                         "capabilities": {},
                         "clientInfo": {"name": "eneo", "version": "0.1"},
                     },
@@ -561,6 +573,10 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
                     return f"Server error (HTTP {response.status_code})."
                 if response.status_code >= 400:
                     return f"Server returned HTTP {response.status_code}."
+                return (
+                    f"Server at {url} is reachable "
+                    f"(HTTP {response.status_code}) but the MCP handshake failed."
+                )
     except httpx.ConnectError:
         return f"Could not connect to {url}. Verify the URL and that the server is running."
     except httpx.TimeoutException:
