@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import wave
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -15,6 +16,7 @@ from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowStepAttemptResolvedInputs,
 )
+from eneo.database.tables.token_usage_table import ProviderTokenUsages
 from eneo.flows.domain.flow import (
     Flow,
     FlowProviderCallTokenUsage,
@@ -55,6 +57,7 @@ from eneo.model_providers.domain.provider_call_observer import (
     CompletionCallRequestFacts,
     CompletionCallResultFacts,
 )
+from eneo.token_usage.infrastructure.token_usage_analyzer import TokenUsageAnalyzer
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
 )
@@ -87,6 +90,8 @@ class _StartedAttempt:
     step_id: UUID
     attempt_no: int
     tenant_id: UUID
+    principal_user_id: UUID
+    completion_model_id: UUID
 
 
 async def _activate_resolved_inputs(
@@ -242,6 +247,8 @@ async def _create_started_attempt(
         step_id=step.id,
         attempt_no=attempt.attempt_no,
         tenant_id=admin_user.tenant_id,
+        principal_user_id=admin_user.id,
+        completion_model_id=model.id,
     )
     if activate_resolved_inputs:
         await _activate_resolved_inputs(
@@ -900,6 +907,9 @@ async def test_provider_call_recorder_commits_outside_executor_session(
         step_id=context.step_id,
         attempt_no=context.attempt_no,
         tenant_id=context.tenant_id,
+        principal_user_id=context.principal_user_id,
+        principal_service_id=None,
+        completion_model_id=context.completion_model_id,
         mapped_call=None,
         resolved_input_edge_indexes=(),
     )
@@ -931,10 +941,45 @@ async def test_provider_call_recorder_commits_outside_executor_session(
         persisted = await FlowProviderCallRepository(verification_session).get_call(
             call_id=call_id
         )
+        platform_usage = await verification_session.scalar(
+            sa.select(ProviderTokenUsages).where(
+                ProviderTokenUsages.source_type == "flow_provider_call",
+                ProviderTokenUsages.source_id == call_id,
+                ProviderTokenUsages.tenant_id == context.tenant_id,
+            )
+        )
+        usage_summary = await TokenUsageAnalyzer(
+            verification_session
+        ).get_model_token_usage(
+            context.tenant_id,
+            datetime.now(timezone.utc) - timedelta(days=1),
+            datetime.now(timezone.utc) + timedelta(days=1),
+        )
+        assert platform_usage is not None
+        platform_usage_values = (
+            platform_usage.completion_model_id,
+            platform_usage.principal_user_id,
+            platform_usage.input_tokens,
+            platform_usage.output_tokens,
+        )
 
     assert persisted.status == "completed"
     assert persisted.ordinal == 1
     assert persisted.provider_response_id == "isolated-session-response"
+    assert platform_usage_values == (
+        context.completion_model_id,
+        context.principal_user_id,
+        13,
+        5,
+    )
+    model_usage = next(
+        usage
+        for usage in usage_summary.models
+        if usage.model_id == context.completion_model_id
+    )
+    assert model_usage.input_token_usage == 13
+    assert model_usage.output_token_usage == 5
+    assert model_usage.request_count == 1
 
 
 @pytest.mark.asyncio
@@ -1284,6 +1329,9 @@ async def test_a_retried_transcription_is_durable_from_the_adapter_to_the_run_to
         step_id=context.step_id,
         attempt_no=context.attempt_no,
         tenant_id=context.tenant_id,
+        principal_user_id=context.principal_user_id,
+        principal_service_id=None,
+        completion_model_id=None,
         mapped_call=None,
         resolved_input_edge_indexes=(),
     )

@@ -146,7 +146,7 @@ def _snapshot_completion_capabilities(
     if supported_params is None:
         return None
     reasoning_effort_options: list[str] | None = None
-    if supported_params is not None and "reasoning_effort" in supported_params:
+    if "reasoning_effort" in supported_params:
         try:
             reasoning_effort_options = reasoning_effort_options_from_model_info(
                 get_model_info(model_route)

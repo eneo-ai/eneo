@@ -164,11 +164,17 @@ skip_covered = false
 source_paths = ["src/eneo"]
 only_mutate = [
     "src/eneo/flow_packages/application/flow_package_import_planner.py",
-    "src/eneo/flow_packages/domain/flow_package_checksum.py",
     "src/eneo/flow_packages/domain/flow_package_envelope.py",
     "src/eneo/flow_packages/infrastructure/flow_package_zip_reader.py",
     "src/eneo/flows/flow_run_redaction.py",
     "src/eneo/flows/application/flow_run_access_policy.py",
+    "src/eneo/authentication/principal.py",
+    "src/eneo/audit/application/guaranteed_delivery.py",
+    "src/eneo/resource_packages/checksum.py",
+    "src/eneo/resource_packages/archive.py",
+    "src/eneo/assistants/assistant_package_adapter.py",
+    "src/eneo/token_usage/infrastructure/provider_token_usage_repo.py",
+    "src/eneo/flows/infrastructure/flow_provider_call_recorder.py",
 ]
 pytest_add_cli_args_test_selection = [
     "tests/unittests/flow_packages/test_flow_package_api.py",
@@ -178,6 +184,12 @@ pytest_add_cli_args_test_selection = [
     "tests/unittests/flow_packages/test_flow_package_zip_reader.py",
     "tests/unittests/flows/test_flow_run_access_policy.py",
     "tests/unittests/flows/test_flow_run_redaction.py",
+    "tests/unittests/flows/test_flow_provider_call_recorder.py",
+    "tests/unit/authentication/test_principal.py",
+    "tests/unit/audit/test_guaranteed_delivery.py",
+    "tests/unit/assistants/test_assistant_package_adapter.py",
+    "tests/unit/resource_packages/test_archive.py",
+    "tests/unit/token_usage/test_provider_token_usage_repo.py",
 ]
 
 # Dead-code / dependency analysis. Both are advisory (not wired into pre-commit)

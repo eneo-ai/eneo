@@ -937,8 +937,9 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
     state = _state()
     step = _step(output_type="text")
     assistant = MagicMock()
+    completion_model_id = uuid4()
     assistant.completion_model = SimpleNamespace(
-        id=None,
+        id=completion_model_id,
         litellm_model_name="openai/gpt-test",
         name="gpt-test",
         provider_type="openai",
@@ -1007,8 +1008,18 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
 
     observed_builder_arguments = []
 
-    def _build_provider_call_observer(mapped_call, resolved_input_edge_indexes):
-        observed_builder_arguments.append((mapped_call, resolved_input_edge_indexes))
+    def _build_provider_call_observer(
+        mapped_call,
+        resolved_input_edge_indexes,
+        observed_completion_model_id,
+    ):
+        observed_builder_arguments.append(
+            (
+                mapped_call,
+                resolved_input_edge_indexes,
+                observed_completion_model_id,
+            )
+        )
         return observer
 
     async def _fail_after_receipt(**_kwargs):
@@ -1044,7 +1055,9 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
     assert result.num_tokens_output is None
     assert observer.started.await_args.args[0].provider_request_hash == "f" * 64
     assert model_names == ["openai/gpt-test"]
-    assert observed_builder_arguments == [(deps.mapped_call_context, (0,))]
+    assert observed_builder_arguments == [
+        (deps.mapped_call_context, (0,), completion_model_id)
+    ]
 
 
 @pytest.mark.asyncio

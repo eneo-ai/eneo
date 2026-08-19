@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import stat
-import zipfile
 from collections.abc import Mapping
-from io import BytesIO
-from pathlib import PurePosixPath
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -33,6 +29,17 @@ from eneo.flow_packages.domain.flow_package_requirements import (
 from eneo.flows.flow_authoring_spec import (
     AssistantSpecLocalRefNotPortableError,
     has_flow_mcp_unsupported_error,
+)
+from eneo.resource_packages.archive import (
+    ResourcePackageArchiveError,
+    ResourcePackageArchiveLimits,
+    read_bounded_json_archive,
+)
+from eneo.resource_packages.archive import (
+    decompression_ratio_too_high as _resource_package_ratio_too_high,
+)
+from eneo.resource_packages.archive import (
+    validate_archive_entry_path as _validate_resource_package_entry_path,
 )
 
 MAX_ZIP_ENTRIES = 4
@@ -81,89 +88,52 @@ def read_flow_package(package_bytes: bytes) -> FlowPackageEnvelope:
 
 def _read_bounded_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
     try:
-        package = zipfile.ZipFile(BytesIO(package_bytes))
-    except zipfile.BadZipFile as exc:
-        raise _zip_unsafe(FlowPackageZipUnsafeReason.BAD_ZIP) from exc
-
-    with package:
-        entries = package.infolist()
-        if len(entries) > MAX_ZIP_ENTRIES:
-            raise _zip_unsafe(
-                FlowPackageZipUnsafeReason.TOO_MANY_ENTRIES,
-                count=len(entries),
+        payloads = read_bounded_json_archive(
+            package_bytes,
+            limits=ResourcePackageArchiveLimits(
                 max_entries=MAX_ZIP_ENTRIES,
-            )
+                max_compressed_entry_bytes=MAX_PER_ENTRY_COMPRESSED_BYTES,
+                max_uncompressed_entry_bytes=MAX_PER_ENTRY_UNCOMPRESSED_BYTES,
+                max_total_uncompressed_bytes=MAX_TOTAL_UNCOMPRESSED_BYTES,
+                max_json_bytes=MAX_JSON_BYTES,
+                max_decompression_ratio=MAX_DECOMPRESSION_RATIO,
+            ),
+        )
+    except ResourcePackageArchiveError as exc:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason(exc.reason.value),
+            **exc.context,
+        ) from exc
+    if MANIFEST_PATH not in payloads:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
+            path=MANIFEST_PATH,
+        )
+    return payloads
 
-        payloads: dict[str, bytes] = {}
-        total_uncompressed_bytes = 0
-        for entry in entries:
-            normalized_path = _validate_entry_path(entry)
-            if entry.compress_size > MAX_PER_ENTRY_COMPRESSED_BYTES:
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.COMPRESSED_ENTRY_TOO_LARGE,
-                    path=normalized_path,
-                    size=entry.compress_size,
-                    max_size=MAX_PER_ENTRY_COMPRESSED_BYTES,
-                )
-            if normalized_path in payloads:
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.DUPLICATE_ENTRY,
-                    path=normalized_path,
-                )
-            remaining_budget = MAX_TOTAL_UNCOMPRESSED_BYTES - total_uncompressed_bytes
-            if remaining_budget <= 0:
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.TOTAL_UNCOMPRESSED_TOO_LARGE,
-                    max_size=MAX_TOTAL_UNCOMPRESSED_BYTES,
-                )
-            read_limit = min(
-                MAX_PER_ENTRY_UNCOMPRESSED_BYTES,
-                remaining_budget,
-            )
-            with package.open(entry, "r") as file:
-                payload = file.read(read_limit + 1)
 
-            if len(payload) > MAX_PER_ENTRY_UNCOMPRESSED_BYTES:
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.UNCOMPRESSED_ENTRY_TOO_LARGE,
-                    path=normalized_path,
-                    size=len(payload),
-                    max_size=MAX_PER_ENTRY_UNCOMPRESSED_BYTES,
-                )
-            if len(payload) > remaining_budget:
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.TOTAL_UNCOMPRESSED_TOO_LARGE,
-                    path=normalized_path,
-                    size=total_uncompressed_bytes + len(payload),
-                    max_size=MAX_TOTAL_UNCOMPRESSED_BYTES,
-                )
+def _decompression_ratio_too_high(  # pyright: ignore[reportUnusedFunction]
+    *,
+    uncompressed_size: int,
+    compressed_size: int,
+) -> bool:
+    return _resource_package_ratio_too_high(
+        uncompressed_size=uncompressed_size,
+        compressed_size=compressed_size,
+        max_ratio=MAX_DECOMPRESSION_RATIO,
+    )
 
-            total_uncompressed_bytes += len(payload)
-            if _decompression_ratio_too_high(
-                uncompressed_size=len(payload),
-                compressed_size=entry.compress_size,
-            ):
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.DECOMPRESSION_RATIO_TOO_HIGH,
-                    path=normalized_path,
-                    ratio=MAX_DECOMPRESSION_RATIO + 1,
-                    max_ratio=MAX_DECOMPRESSION_RATIO,
-                )
-            if len(payload) > MAX_JSON_BYTES:
-                raise _zip_unsafe(
-                    FlowPackageZipUnsafeReason.JSON_TOO_LARGE,
-                    path=normalized_path,
-                    size=len(payload),
-                    max_size=MAX_JSON_BYTES,
-                )
-            payloads[normalized_path] = payload
 
-        if MANIFEST_PATH not in payloads:
-            raise _zip_unsafe(
-                FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
-                path=MANIFEST_PATH,
-            )
-        return payloads
+def _validate_entry_path(  # pyright: ignore[reportUnusedFunction]
+    entry: object,
+) -> str:
+    try:
+        return _validate_resource_package_entry_path(entry)  # type: ignore[arg-type]
+    except ResourcePackageArchiveError as exc:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason(exc.reason.value),
+            **exc.context,
+        ) from exc
 
 
 def _validate_flow_profile_entries(payloads: Mapping[str, bytes]) -> None:
@@ -179,43 +149,6 @@ def _validate_flow_profile_entries(payloads: Mapping[str, bytes]) -> None:
             FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
             path=sorted(missing_files)[0],
         )
-
-
-def _validate_entry_path(entry: zipfile.ZipInfo) -> str:
-    raw_path = entry.filename
-    if entry.is_dir():
-        raise _zip_unsafe(FlowPackageZipUnsafeReason.DIRECTORY_ENTRY, path=raw_path)
-    if _is_symlink(entry):
-        raise _zip_unsafe(FlowPackageZipUnsafeReason.SYMLINK_ENTRY, path=raw_path)
-    if "\\" in raw_path:
-        raise _zip_unsafe(FlowPackageZipUnsafeReason.BACKSLASH_PATH, path=raw_path)
-
-    path = PurePosixPath(raw_path)
-    if path.is_absolute():
-        raise _zip_unsafe(FlowPackageZipUnsafeReason.ABSOLUTE_PATH, path=raw_path)
-    if ".." in path.parts:
-        raise _zip_unsafe(FlowPackageZipUnsafeReason.PATH_TRAVERSAL, path=raw_path)
-    normalized = path.as_posix()
-    if not normalized or normalized == ".":
-        raise _zip_unsafe(FlowPackageZipUnsafeReason.UNKNOWN_ENTRY, path=raw_path)
-    return normalized
-
-
-def _is_symlink(entry: zipfile.ZipInfo) -> bool:
-    mode = entry.external_attr >> 16
-    return stat.S_ISLNK(mode)
-
-
-def _decompression_ratio_too_high(
-    *,
-    uncompressed_size: int,
-    compressed_size: int,
-) -> bool:
-    if uncompressed_size == 0:
-        return False
-    if compressed_size == 0:
-        return True
-    return (uncompressed_size / compressed_size) > MAX_DECOMPRESSION_RATIO
 
 
 def _parse_subdocument(

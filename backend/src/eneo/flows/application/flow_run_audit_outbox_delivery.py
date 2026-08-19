@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Literal, TypeAlias
 from uuid import UUID, uuid4
 
+from eneo.audit.application.guaranteed_delivery import (
+    GuaranteedAuditDeliveryResult,
+    GuaranteedAuditDeliveryService,
+)
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
@@ -28,21 +32,7 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 FlowAuditOutboxMetadataValue: TypeAlias = str | int | None
 
 
-@dataclass(frozen=True, slots=True)
-class FlowRunAuditOutboxDeliveryResult:
-    attempted_count: int = 0
-    delivered_count: int = 0
-    retry_scheduled_count: int = 0
-    dead_lettered_count: int = 0
-
-    def to_task_payload(self) -> dict[str, int | str]:
-        return {
-            "status": "ok",
-            "attempted": self.attempted_count,
-            "delivered": self.delivered_count,
-            "retry_scheduled": self.retry_scheduled_count,
-            "dead_lettered": self.dead_lettered_count,
-        }
+FlowRunAuditOutboxDeliveryResult = GuaranteedAuditDeliveryResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +67,9 @@ class FlowRunAuditOutboxGenerationConflictError(Exception):
         self.current_dead_lettered_at = current_dead_lettered_at
 
 
-class FlowRunAuditOutboxDeliveryService:
+class FlowRunAuditOutboxDeliveryService(
+    GuaranteedAuditDeliveryService[FlowRunAuditOutboxDeliveryRow]
+):
     """Deliver Flow lifecycle audit rows outside tenant audit feature flags.
 
     PRD-003 treats lifecycle audit as part of the committed runtime state, so
@@ -91,54 +83,16 @@ class FlowRunAuditOutboxDeliveryService:
         audit_outbox_repo: FlowRunAuditOutboxRepository,
         audit_log_repo: AuditLogRepository,
     ):
-        self.audit_outbox_repo = audit_outbox_repo
-        self.audit_log_repo = audit_log_repo
-
-    async def deliver_due(
-        self,
-        *,
-        now: datetime,
-        limit: int = FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
-    ) -> FlowRunAuditOutboxDeliveryResult:
-        rows = await self.audit_outbox_repo.list_due_delivery_rows(
-            now=now,
-            limit=limit,
-        )
-        delivered = 0
-        retry_scheduled = 0
-        dead_lettered = 0
-        for row in rows:
-            try:
-                async with self.audit_outbox_repo.session.begin_nested():
-                    await self._deliver_row(row=row, now=now)
-            except ValueError as exc:
-                async with self.audit_outbox_repo.session.begin_nested():
-                    await self._record_failure(
-                        row=row,
-                        now=now,
-                        error=exc,
-                        force_dead_letter=True,
-                    )
-                dead_lettered += 1
-            except Exception as exc:
-                async with self.audit_outbox_repo.session.begin_nested():
-                    did_dead_letter = await self._record_failure(
-                        row=row,
-                        now=now,
-                        error=exc,
-                        force_dead_letter=False,
-                    )
-                if did_dead_letter:
-                    dead_lettered += 1
-                else:
-                    retry_scheduled += 1
-            else:
-                delivered += 1
-        return FlowRunAuditOutboxDeliveryResult(
-            attempted_count=len(rows),
-            delivered_count=delivered,
-            retry_scheduled_count=retry_scheduled,
-            dead_lettered_count=dead_lettered,
+        self._flow_audit_outbox_repo = audit_outbox_repo
+        super().__init__(
+            audit_outbox_repo=audit_outbox_repo,
+            audit_log_repo=audit_log_repo,
+            build_audit_log=build_audit_log_from_outbox,
+            retry_delay_seconds=lambda attempt_no: (
+                flow_audit_outbox_retry_delay_seconds(failed_attempt_no=attempt_no)
+            ),
+            sanitize_error=sanitize_delivery_error,
+            default_batch_size=FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
         )
 
     async def list_dead_letters(
@@ -147,7 +101,7 @@ class FlowRunAuditOutboxDeliveryService:
         limit: int,
         offset: int,
     ) -> FlowRunAuditOutboxDeadLetterPage:
-        page = await self.audit_outbox_repo.list_dead_letters(
+        page = await self._flow_audit_outbox_repo.list_dead_letters(
             limit=limit,
             offset=offset,
         )
@@ -172,7 +126,7 @@ class FlowRunAuditOutboxDeliveryService:
         reason: str,
         now: datetime,
     ) -> FlowRunAuditOutboxRedriveResult:
-        session = self.audit_outbox_repo.session
+        session = self._flow_audit_outbox_repo.session
         transaction = (
             session.begin_nested() if session.in_transaction() else session.begin()
         )
@@ -192,7 +146,7 @@ class FlowRunAuditOutboxDeliveryService:
         reason: str,
         now: datetime,
     ) -> FlowRunAuditOutboxRedriveResult:
-        transition = await self.audit_outbox_repo.redrive_dead_lettered(
+        transition = await self._flow_audit_outbox_repo.redrive_dead_lettered(
             outbox_id=outbox_id,
             expected_dead_lettered_at=expected_dead_lettered_at,
             now=now,
@@ -245,47 +199,6 @@ class FlowRunAuditOutboxDeliveryService:
             next_delivery_at=transition.next_delivery_at,
             operator_audit_id=operator_audit_id,
         )
-
-    async def _deliver_row(
-        self,
-        *,
-        row: FlowRunAuditOutboxDeliveryRow,
-        now: datetime,
-    ) -> None:
-        audit_log = build_audit_log_from_outbox(row)
-        await self.audit_log_repo.create_if_absent(audit_log)
-        await self.audit_outbox_repo.mark_delivery_succeeded(
-            outbox_id=row.id,
-            delivered_at=now,
-            attempt_no=row.delivery_attempts + 1,
-        )
-
-    async def _record_failure(
-        self,
-        *,
-        row: FlowRunAuditOutboxDeliveryRow,
-        now: datetime,
-        error: Exception,
-        force_dead_letter: bool,
-    ) -> bool:
-        attempt_no = row.delivery_attempts + 1
-        retry_delay = (
-            None
-            if force_dead_letter
-            else flow_audit_outbox_retry_delay_seconds(failed_attempt_no=attempt_no)
-        )
-        dead_lettered_at = now if retry_delay is None else None
-        next_delivery_at = (
-            None if retry_delay is None else now + timedelta(seconds=retry_delay)
-        )
-        await self.audit_outbox_repo.record_delivery_failure(
-            outbox_id=row.id,
-            attempt_no=attempt_no,
-            error_message=sanitize_delivery_error(error),
-            next_delivery_at=next_delivery_at,
-            dead_lettered_at=dead_lettered_at,
-        )
-        return dead_lettered_at is not None
 
 
 def build_audit_log_from_outbox(row: FlowRunAuditOutboxDeliveryRow) -> AuditLog:

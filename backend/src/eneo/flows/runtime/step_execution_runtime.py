@@ -270,6 +270,7 @@ class BuildProviderCallObserverFn(Protocol):
         self,
         mapped_call: MappedProviderCallProvenance | None,
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
+        completion_model_id: UUID,
     ) -> ProviderCallObserver: ...
 
 
@@ -543,9 +544,15 @@ async def call_assistant_with_timeout(
             raise FlowRuntimeInvariantError(
                 "Provider I/O cannot start before resolved input evidence is activated."
             )
+        completion_model = prepared.assistant.completion_model
+        if completion_model is None:
+            raise FlowRuntimeInvariantError(
+                "Provider I/O requires a resolved completion model."
+            )
         provider_call_observer = deps.build_provider_call_observer(
             deps.mapped_call_context,
             prepared.resolved_input_edge_indexes,
+            completion_model.id,
         )
 
     llm_task: asyncio.Task[Any] = asyncio.create_task(

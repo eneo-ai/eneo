@@ -43,6 +43,9 @@ from eneo.model_providers.domain.provider_call_observer import (
 from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallUnknownReason as ObservedUnknownReason,
 )
+from eneo.token_usage.infrastructure.provider_token_usage_repo import (
+    ProviderTokenUsageRepository,
+)
 
 _PERSISTENCE_RETRY_DELAYS_SECONDS = (0.0, 0.05, 0.2)
 _TRANSIENT_SQLSTATES = frozenset(
@@ -76,6 +79,9 @@ class FlowProviderCallRecorder:
         step_id: UUID,
         attempt_no: int,
         tenant_id: UUID,
+        principal_user_id: UUID | None,
+        principal_service_id: UUID | None,
+        completion_model_id: UUID | None,
         mapped_call: MappedProviderCallProvenance | None,
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
     ):
@@ -83,6 +89,9 @@ class FlowProviderCallRecorder:
         self.step_id = step_id
         self.attempt_no = attempt_no
         self.tenant_id = tenant_id
+        self.principal_user_id = principal_user_id
+        self.principal_service_id = principal_service_id
+        self.completion_model_id = completion_model_id
         self.mapped_call = mapped_call
         self.resolved_input_edge_indexes = resolved_input_edge_indexes
         self._started_evidence: dict[UUID, tuple[int, str]] = {}
@@ -175,10 +184,42 @@ class FlowProviderCallRecorder:
 
         async def persist() -> None:
             async with sessionmanager.session() as session, session.begin():
-                await FlowProviderCallRepository(session).complete_call(
+                completed_call = await FlowProviderCallRepository(
+                    session
+                ).complete_call(
                     call_id=call_id,
                     receipt=receipt,
                 )
+                if isinstance(result, CompletionCallResultFacts):
+                    if self.completion_model_id is None:
+                        raise ValueError(
+                            "Completion provider usage requires a completion model id."
+                        )
+                    if (
+                        self.principal_user_id is None
+                        and self.principal_service_id is None
+                    ) or (
+                        self.principal_user_id is not None
+                        and self.principal_service_id is not None
+                    ):
+                        raise ValueError(
+                            "Provider usage requires exactly one principal identity."
+                        )
+                    if completed_call.finished_at is None:
+                        raise RuntimeError(
+                            "Completed provider call is missing its completion time."
+                        )
+                    await ProviderTokenUsageRepository(session).record(
+                        tenant_id=self.tenant_id,
+                        principal_user_id=self.principal_user_id,
+                        principal_service_id=self.principal_service_id,
+                        completion_model_id=self.completion_model_id,
+                        source_type="flow_provider_call",
+                        source_id=call_id,
+                        input_tokens=result.num_tokens_input,
+                        output_tokens=result.num_tokens_output,
+                        occurred_at=completed_call.finished_at,
+                    )
 
         await self._persist_with_retry(
             operation=persist,

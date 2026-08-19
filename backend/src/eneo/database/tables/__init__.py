@@ -48,6 +48,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.sharepoint_subscription_table",
     "eneo.database.tables.spaces_table",
     "eneo.database.tables.sync_log_table",
+    "eneo.database.tables.token_usage_table",
     "eneo.database.tables.tenant_sharepoint_app_table",
     "eneo.database.tables.tenant_table",
     "eneo.database.tables.user_groups_table",

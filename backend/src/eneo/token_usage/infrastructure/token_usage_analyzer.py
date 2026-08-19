@@ -6,6 +6,7 @@ from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.token_usage_table import ProviderTokenUsages
 from eneo.token_usage.domain.token_usage_models import (
     ModelTokenUsage,
     TokenUsageSummary,
@@ -112,10 +113,46 @@ class TokenUsageAnalyzer:
             )
         )
 
-        # Combine the results from both queries using union_all
-        combined_usage_query = union_all(questions_query, app_runs_query).alias(
-            "combined_usage"
+        provider_usage_query = (
+            select(
+                ProviderTokenUsages.completion_model_id.label("model_id"),
+                CompletionModels.name.label("model_name"),
+                CompletionModels.nickname.label("model_nickname"),
+                CompletionModels.org.label("model_org"),
+                ModelProviders.name.label("model_provider"),
+                func.sum(func.coalesce(ProviderTokenUsages.input_tokens, 0)).label(
+                    "input_tokens"
+                ),
+                func.sum(func.coalesce(ProviderTokenUsages.output_tokens, 0)).label(
+                    "output_tokens"
+                ),
+                func.count(ProviderTokenUsages.id).label("request_count"),
+            )
+            .join(
+                CompletionModels,
+                ProviderTokenUsages.completion_model_id == CompletionModels.id,
+            )
+            .outerjoin(
+                ModelProviders,
+                CompletionModels.provider_id == ModelProviders.id,
+            )
+            .where(ProviderTokenUsages.tenant_id == tenant_id)
+            .where(ProviderTokenUsages.occurred_at >= start_date)
+            .where(ProviderTokenUsages.occurred_at <= end_date)
+            .group_by(
+                ProviderTokenUsages.completion_model_id,
+                CompletionModels.name,
+                CompletionModels.nickname,
+                CompletionModels.org,
+                ModelProviders.name,
+            )
         )
+
+        combined_usage_query = union_all(
+            questions_query,
+            app_runs_query,
+            provider_usage_query,
+        ).alias("combined_usage")
 
         # Sum up the input/output tokens and request counts for each model
         final_query = select(

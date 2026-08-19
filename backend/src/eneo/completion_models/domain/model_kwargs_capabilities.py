@@ -139,22 +139,6 @@ def _default_supported_model_kwargs(*, reasoning: bool) -> SupportedModelKwargs:
     )
 
 
-def _tenant_supported_model_kwargs() -> SupportedModelKwargs:
-    return SupportedModelKwargs(
-        temperature=_slider_capability(minimum=0, maximum=2, step=0.01),
-        top_p=_slider_capability(minimum=0, maximum=1, step=0.01),
-        presence_penalty=_slider_capability(minimum=-2, maximum=2, step=0.1),
-        frequency_penalty=_slider_capability(minimum=-2, maximum=2, step=0.1),
-        top_k=ModelKwargCapability(
-            supported=True,
-            control="slider",
-            minimum=1,
-            maximum=100,
-            step=1,
-        ),
-    )
-
-
 def snapshot_supported_model_kwargs(
     supported_params: list[str] | None,
     *,

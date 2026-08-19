@@ -1,30 +1,21 @@
 from __future__ import annotations
 
-from enum import StrEnum
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from eneo.flow_packages.domain.flow_package_errors import (
-    FlowPackageErrorContextValue,
-)
 from eneo.flows.flow_resource_bindings import LocalResourceBinding
+from eneo.resource_packages.import_record import (
+    ResourcePackageImportFailurePayload,
+    ResourcePackageImportSource,
+    ResourcePackageImportStatus,
+)
 
-
-class FlowPackageImportSource(StrEnum):
-    FILE_UPLOAD = "file_upload"
-
-
-class FlowPackageImportStatus(StrEnum):
-    DRAFT_CREATED = "draft_created"
-    FAILED = "failed"
+FlowPackageImportSource = ResourcePackageImportSource
+FlowPackageImportStatus = ResourcePackageImportStatus
+FlowPackageImportFailurePayload = ResourcePackageImportFailurePayload
 
 
 def _empty_bindings() -> list[LocalResourceBinding]:
     return []
-
-
-def _empty_failure_context() -> dict[str, FlowPackageErrorContextValue]:
-    return {}
 
 
 class FlowPackageImportSelection(BaseModel):
@@ -59,21 +50,3 @@ class FlowPackageImportSelection(BaseModel):
             ),
         )
         return self
-
-
-class FlowPackageImportFailurePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    code: str
-    message: str
-    context: dict[str, FlowPackageErrorContextValue] = Field(
-        default_factory=_empty_failure_context
-    )
-
-    @field_validator("code", "message")
-    @classmethod
-    def normalize_non_empty_text(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("Flow package import failure text must not be empty.")
-        return normalized
