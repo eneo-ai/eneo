@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any, AsyncContextManager, Callable, Optional, Protocol, cast
+from typing import Any, AsyncContextManager, Callable, Optional, cast
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -29,10 +29,9 @@ _settings = get_settings()
 MCP_CONNECTION_TIMEOUT_DEFAULT = _settings.mcp_client_connect_timeout_seconds
 MCP_LIST_TOOLS_TIMEOUT_DEFAULT = _settings.mcp_client_list_tools_timeout_seconds
 MCP_TOOL_CALL_TIMEOUT_DEFAULT = _settings.mcp_client_call_timeout_seconds
-MCP_TERMINATE_TIMEOUT_SECONDS = 5.0
 MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES = 64 * 1024
 MCP_INITIALIZE_RESPONSE_MAX_BYTES = 1024 * 1024
-MCP_PING_RESPONSE_MAX_BYTES = 64 * 1024
+MCP_DELETE_RESPONSE_MAX_BYTES = 64 * 1024
 
 # Defensive caps for resource content blocks. An adversarial MCP server can
 # emit arbitrarily large `text` / `_meta` payloads. Cap the parsed resource
@@ -46,10 +45,6 @@ MCPStreams = tuple[
     MemoryObjectSendStream[SessionMessage],
     GetSessionIdCallback,
 ]
-
-
-class _SessionIdTransport(Protocol):
-    session_id: str | None
 
 
 def _skip_json_whitespace(data: bytes | bytearray | memoryview, offset: int) -> int:
@@ -324,6 +319,21 @@ async def _bound_mcp_response(
     response: httpx.Response, *, tools_max_bytes: int, tools_max_count: int
 ) -> None:
     """Install method-specific pre-decode ceilings on untrusted MCP responses."""
+    if response.request.method == "DELETE":
+        # The SDK terminates a server-assigned session with a plain (buffering)
+        # ``client.delete()`` on transport teardown and only reads the status
+        # code, so cap the body an adversarial server could otherwise stream.
+        if isinstance(response.stream, httpx.AsyncByteStream):
+            response.stream = _BoundedMCPResponseStream(
+                response.stream,
+                method="DELETE",
+                max_bytes=MCP_DELETE_RESPONSE_MAX_BYTES,
+                max_count=None,
+                request_id=None,
+                content_type=response.headers.get("content-type", "application/json"),
+            )
+        return
+
     request_payload = _json_rpc_request_payload(response.request)
     if request_payload is None:
         return
@@ -335,9 +345,6 @@ async def _bound_mcp_response(
         max_count: int | None = tools_max_count
     elif method == "initialize":
         max_bytes = MCP_INITIALIZE_RESPONSE_MAX_BYTES
-        max_count = None
-    elif method == "ping":
-        max_bytes = MCP_PING_RESPONSE_MAX_BYTES
         max_count = None
     else:
         return
@@ -436,7 +443,6 @@ async def _open_streamable_http_client(
     *,
     headers: dict[str, str],
     timeout_seconds: float,
-    terminate_on_close: bool,
     tool_catalog_max_count: int,
     tool_catalog_max_bytes: int,
 ) -> AsyncGenerator[MCPStreams]:
@@ -461,7 +467,6 @@ async def _open_streamable_http_client(
         async with streamable_http_client(
             url,
             http_client=http_client,
-            terminate_on_close=terminate_on_close,
         ) as streams:
             yield streams
 
@@ -521,30 +526,6 @@ def _extract_error_message(exc: BaseException) -> str:
     return str(exc)
 
 
-def _is_session_not_found(exc: BaseException) -> bool:
-    """True when an error means the server no longer knows our session id.
-
-    Per the MCP streamable-HTTP transport, a request bearing an unknown
-    ``Mcp-Session-Id`` is answered with HTTP 404 and the client is expected to
-    start a fresh session. We treat only this definitive signal as grounds to
-    abandon a resumed (sticky) session: transient errors must NOT, or we would
-    orphan per-session server state such as a user's attached files.
-    """
-    msg = (_extract_error_message(exc) or str(exc)).lower()
-    return (
-        "404" in msg
-        or "session not found" in msg
-        or "no valid session" in msg
-        or "session has been terminated" in msg
-        or "invalid session id" in msg
-    )
-
-
-def _is_response_limit_error(exc: BaseException) -> bool:
-    """True when the transport rejected a response before SDK decoding."""
-    return "wire response exceeds" in (_extract_error_message(exc) or str(exc)).lower()
-
-
 async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     """Quick HTTP request to diagnose the real error when MCP protocol fails.
 
@@ -599,7 +580,6 @@ class MCPClient:
         timeout: int | None = None,
         list_tools_timeout: int | None = None,
         tool_call_timeout: int | None = None,
-        resume_mcp_session_id: str | None = None,
         on_tools_list_changed: Callable[[], None] | None = None,
         identity_headers: dict[str, str] | None = None,
     ):
@@ -613,9 +593,6 @@ class MCPClient:
             identity_headers: Acting user/tenant X-Eneo-* headers. Sent on every
                 request ONLY when this server has ``forward_identity=True`` —
                 identity is PII egress, opted into per server.
-            resume_mcp_session_id: If set, sent as the initial ``Mcp-Session-Id``
-                header so the server resumes the prior logical session for state
-                that outlives a single transport connection.
             on_tools_list_changed: Fired (best-effort) when the server pushes a
                 ``notifications/tools/list_changed``. Progressive-discovery
                 servers emit this after a tool like ``load_tools`` activates new
@@ -628,29 +605,20 @@ class MCPClient:
         self.timeout = timeout or MCP_CONNECTION_TIMEOUT_DEFAULT
         self.list_tools_timeout = list_tools_timeout or MCP_LIST_TOOLS_TIMEOUT_DEFAULT
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
-        self.resume_mcp_session_id = resume_mcp_session_id
         self._on_tools_list_changed = on_tools_list_changed
         self.identity_headers = identity_headers or {}
         # Set when a tools/list_changed notification arrives on this session.
         # The proxy also re-lists the servers it just called, so this flag is a
         # protocol-correct optimization rather than the sole trigger.
         self.tools_list_changed_pending: bool = False
-        # Captured from the initialize() handshake (fresh connect only). Default
-        # False — including resumed sessions, which skip initialize; those rely
-        # on the dirty flag above, set by the actual notification, instead.
+        # Captured from the initialize() handshake.
         self.supports_tools_list_changed: bool = False
         self.session: Optional[ClientSession] = None
         self._streams_context: AsyncContextManager[MCPStreams] | None = None
         self._session_context = None
         # Populated after a successful connect() / initialize() round-trip.
-        # assigned_mcp_session_id is the MCP-protocol session id the server
-        # returned and we should persist.
         self.server_info_name: Optional[str] = None
         self.server_info_version: Optional[str] = None
-        self.assigned_mcp_session_id: Optional[str] = None
-        # Set by the streamable HTTP transport; reading it after initialize()
-        # returns the session id the SDK captured from the server response.
-        self._get_session_id_callable: Optional[GetSessionIdCallback] = None
 
     async def _handle_session_message(self, message: Any) -> None:
         """ClientSession message handler.
@@ -676,20 +644,7 @@ class MCPClient:
             await asyncio.sleep(0)
 
     async def _build_auth_headers(self) -> dict[str, str]:
-        """Build authentication headers for this connection.
-
-        This intentionally does NOT set ``Mcp-Session-Id``. Session resume is
-        carried solely by seeding the SDK transport's ``session_id`` field (see
-        ``_connect_internal``), which the SDK then sends on every request and
-        keeps in sync with the server's response value.
-
-        Setting the header here as well would duplicate it: the dict passed to
-        ``streamablehttp_client`` becomes both the httpx client's default
-        headers and the per-request base, and the SDK independently re-adds
-        ``mcp-session-id`` from ``session_id``. httpx then folds the two copies
-        into a single comma-joined value (``id, id``), which servers validating
-        the session-id shape reject with HTTP 400.
-        """
+        """Build authentication headers for this connection."""
         headers: dict[str, str] = {}
 
         token: Optional[str] = None
@@ -764,27 +719,17 @@ class MCPClient:
         Errors are NOT wrapped here — they propagate to connect() which
         has the diagnostic fallback for unhelpful cancel scope errors.
 
-        Two flavors:
-          1. Fresh connect (no resume_mcp_session_id): open transport, run
-             ``initialize()``, capture the server-assigned session id.
-          2. Resume (resume_mcp_session_id set): open transport with
-             ``terminate_on_close=False`` so the previous turn's DELETE didn't
-             evict the server-side session, pre-seed the SDK transport's
-             session_id with the persisted value, and SKIP ``initialize()``.
-             Calling ``initialize()`` on resume can cause some servers to mint
-             a fresh Mcp-Session-Id and lose per-session state. See the
-             cross-turn contract in ``ChatSessionMcpStateRepo``.
+        Every connection is fresh: open the transport, run ``initialize()``,
+        and let the SDK terminate any server-assigned protocol session on
+        teardown. Servers that hold cross-turn state key it to explicit
+        handles returned in tool results, not to the transport session.
         """
         headers = await self._build_auth_headers()
 
-        # terminate_on_close=False: the SDK otherwise sends DELETE /mcp on
-        # transport teardown, which evicts the server-side session and breaks
-        # the next turn's resume. Server idle TTL bounds the leak.
         streams_context = _open_streamable_http_client(
             url=self.mcp_server.http_url,
             headers=headers,
             timeout_seconds=float(self.timeout),
-            terminate_on_close=False,
             tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
         )
@@ -793,24 +738,6 @@ class MCPClient:
 
         self._streams_context = streams_context
         read, write, get_session_id = streams
-        # ``get_session_id`` is the bound ``transport.get_session_id`` method;
-        # its ``__self__`` is the StreamableHTTPTransport instance, which is
-        # the only handle we have on the transport's session_id field (the
-        # outer ``streamablehttp_client`` async generator does not expose it
-        # directly). Pre-seeding session_id is required for resume — see the
-        # docstring.
-        self._get_session_id_callable = get_session_id
-        transport = cast(
-            _SessionIdTransport | None, getattr(get_session_id, "__self__", None)
-        )
-        if transport is None:
-            await streams_context.__aexit__(None, None, None)
-            self._streams_context = None
-            raise MCPClientError(
-                "MCP SDK transport not accessible — get_session_id is not a "
-                "bound method. The SDK version may be incompatible with eneo's "
-                "cross-turn resume mechanism."
-            )
         logger.debug(
             f"Streamable HTTP transport connected to {self.mcp_server.http_url}"
         )
@@ -831,75 +758,6 @@ class MCPClient:
         self._session_context = session_context
         self.session = session
 
-        if self.resume_mcp_session_id:
-            # Resume path: pre-seed the SDK's session_id so every outgoing
-            # request carries the persisted Mcp-Session-Id exactly once (the
-            # SDK adds it from session_id; we must NOT also pass it in the
-            # headers dict, or httpx folds the two copies into one rejected
-            # comma-joined value). DO NOT call initialize() —
-            # serverInfo/protocol_version stay None on this
-            # transport — that's fine because the server negotiated them on
-            # the original turn for this logical session, and the SDK only
-            # sends MCP-Protocol-Version when it has a value (skipping is
-            # acceptable for a resumed session).
-            transport.session_id = self.resume_mcp_session_id
-            self.assigned_mcp_session_id = self.resume_mcp_session_id
-
-            # Validate the resumed session before handing it back. We keep one
-            # logical Mcp-Session-Id across turns so server-side per-session
-            # state — notably files a user attached on an earlier turn
-            # (file-workbench MCP) — stays reachable. If the server restarted,
-            # redeployed, or evicted this idle session, the id is dead (HTTP 404
-            # per the streamable-HTTP spec) and that state is already gone, so
-            # mint a fresh session. Reconnect fresh ONLY on that definitive
-            # signal: a transient error must keep the sticky id, or we would
-            # orphan a still-valid session and its attached files.
-            try:
-                await self.session.send_ping()
-            except (KeyboardInterrupt, SystemExit):
-                raise
-            except BaseException as exc:
-                if _is_session_not_found(exc):
-                    logger.warning(
-                        "Resumed MCP session for %s is gone server-side "
-                        "(session_id=%s); dropping the dead id and reconnecting "
-                        "fresh: %s",
-                        self.mcp_server.name,
-                        self.resume_mcp_session_id,
-                        _extract_error_message(exc) or exc,
-                    )
-                    await self._cleanup_contexts()
-                    self.resume_mcp_session_id = None
-                    self.assigned_mcp_session_id = None
-                    # resume_mcp_session_id is now None, so this takes the
-                    # fresh-connect path and the proxy persists the new id.
-                    await self._connect_internal()
-                    return
-                if _is_response_limit_error(exc):
-                    await self._cleanup_contexts()
-                    raise
-                # Transient or ambiguous failure: keep the sticky session id and
-                # proceed. The session is probably still valid, and real tool
-                # calls carry their own error handling.
-                logger.info(
-                    "Ping on resumed MCP session for %s failed transiently; "
-                    "keeping sticky session_id=%s: %s",
-                    self.mcp_server.name,
-                    self.resume_mcp_session_id,
-                    _extract_error_message(exc) or exc,
-                )
-                return
-
-            logger.info(
-                "Resumed MCP session for %s (session_id=%s, validated, "
-                "skipped initialize)",
-                self.mcp_server.name,
-                self.resume_mcp_session_id,
-            )
-            return
-
-        # Fresh-connect path: negotiate via initialize() and capture the
-        # server-assigned session id.
         try:
             init_result = await self.session.initialize()
         except BaseException:
@@ -915,9 +773,9 @@ class MCPClient:
             pass
 
         try:
-            self.assigned_mcp_session_id = get_session_id()
+            session_id = get_session_id()
         except Exception:
-            self.assigned_mcp_session_id = None
+            session_id = None
 
         # Whether this server advertised tools.listChanged. Only servers that
         # opt in get re-listed by the proxy's belt-and-suspenders path; static
@@ -936,7 +794,7 @@ class MCPClient:
             self.mcp_server.name,
             self.server_info_name,
             self.server_info_version,
-            self.assigned_mcp_session_id,
+            session_id,
         )
 
     async def list_tools(self) -> list[dict[str, Any]]:
@@ -1174,29 +1032,6 @@ class MCPClient:
                 )
 
         logger.debug(f"Disconnected from MCP server: {self.mcp_server.name}")
-
-    async def terminate_protocol_session(self, mcp_session_id: str) -> None:
-        """Terminate a server-side MCP protocol session.
-
-        Transport teardown keeps protocol sessions alive so later chat turns
-        can resume them. Conversation deletion must therefore explicitly send
-        HTTP DELETE with the persisted ``Mcp-Session-Id``. One-shot proxy
-        lifecycles use the same operation for their ephemeral assigned IDs.
-        HTTP 404 is treated as idempotent success because the server has
-        already forgotten it.
-        """
-        headers = await self._build_auth_headers()
-        headers["Mcp-Session-Id"] = mcp_session_id
-
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(MCP_TERMINATE_TIMEOUT_SECONDS)
-        ) as client:
-            async with client.stream(
-                "DELETE", self.mcp_server.http_url, headers=headers
-            ) as response:
-                if response.status_code in {404, 405}:
-                    return
-                response.raise_for_status()
 
     async def __aenter__(self):
         """Async context manager entry."""
