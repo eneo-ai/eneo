@@ -548,6 +548,7 @@ const aiBuilderErrorCodes = [
   "named_result_key_unsupported",
   "not_found",
   "no_planner_model_available",
+  "pdf_template_unsupported",
   "schema_limit_exceeded",
   "plan_not_proposed",
   "plan_session_mismatch",

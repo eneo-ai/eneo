@@ -9796,6 +9796,7 @@ export interface components {
       | "planner_rejected"
       | "planner_stream_failed"
       | "planner_upstream_error"
+      | "pdf_template_unsupported"
       | "proposal_tool_missing"
       | "question_recovery_exhausted"
       | "question_recovery_unavailable"

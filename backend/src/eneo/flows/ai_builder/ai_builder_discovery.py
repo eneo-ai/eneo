@@ -819,6 +819,11 @@ def recommended_option_for_suggestion(
     )
     if slot is None:
         return None
+    if (
+        suggestion.question_id == "pdf_generation_mode"
+        and slot.value == "pdf_template_requested"
+    ):
+        return None
     named = [option for option in suggestion.options if option.value == slot.value]
     if len(named) != 1:
         return None

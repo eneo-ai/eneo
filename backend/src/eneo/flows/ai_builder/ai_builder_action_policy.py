@@ -217,6 +217,12 @@ def _architecture_refusal_code(
     derived_commit: ArchitectureCommitDraft | None,
     unresolved_core_slots: frozenset[str],
 ) -> AIBuilderErrorCode | None:
+    if (
+        session_state.commit_grade_slot_value("terminal_output") == "pdf_document"
+        and session_state.commit_grade_slot_value("pdf_generation_mode")
+        == "pdf_template_requested"
+    ):
+        return AIBuilderErrorCode.PDF_TEMPLATE_UNSUPPORTED
     if not unresolved_core_slots and derived_commit is None:
         return AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
 

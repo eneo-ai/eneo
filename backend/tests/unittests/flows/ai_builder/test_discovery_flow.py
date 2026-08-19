@@ -329,6 +329,30 @@ def test_question_recommends_nothing_when_the_slot_is_unread() -> None:
     assert followup.question_data.recommended_option_id is None
 
 
+def test_question_does_not_recommend_an_unsupported_pdf_template() -> None:
+    planning_state = PlanningState.empty()
+    planning_state.resolved_slots = {
+        "pdf_generation_mode": ResolvedSlot(
+            name="pdf_generation_mode",
+            value="pdf_template_requested",
+            source="model",
+            confidence="high",
+            evidence=["quote:user_message:user-1:en specifik PDF-mall"],
+            evidence_level="explicit",
+        ),
+    }
+
+    followup = build_registry_question_followup(
+        "pdf_generation_mode",
+        [ConversationMessage(role="user", content="Jag behöver en specifik PDF-mall")],
+        planning_state=planning_state,
+    )
+
+    assert followup is not None
+    assert followup.question_data.recommended_option_id is None
+    assert followup.question_data.recommended_option_evidence is None
+
+
 def test_an_offered_option_says_what_choosing_it_produces() -> None:
     # A first-time user reading "Strukturerad JSON" cannot tell what they end up
     # with. The catalog's example travels to the offered option, so the

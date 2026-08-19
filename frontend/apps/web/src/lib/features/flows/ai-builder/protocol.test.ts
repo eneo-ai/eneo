@@ -207,6 +207,34 @@ describe("AI Builder stream protocol", () => {
     ]);
   });
 
+  it("preserves the unsupported PDF template error as a typed Builder error", () => {
+    const rawEvent: AIBuilderStreamEvent = {
+      event: "error",
+      data: JSON.stringify({
+        schema_version: 2,
+        code: "pdf_template_unsupported",
+        category: "bad_request",
+        message: "Filling a fixed PDF template is not supported.",
+        phase: "planner",
+        eneo_error_code: 9007,
+        request_id: "request-pdf-template"
+      })
+    };
+
+    expect(parseAIBuilderStreamEvent(rawEvent)).toEqual({
+      event: "error",
+      data: {
+        schema_version: 2,
+        code: "pdf_template_unsupported",
+        category: "bad_request",
+        message: "Filling a fixed PDF template is not supported.",
+        phase: "planner",
+        eneo_error_code: 9007,
+        request_id: "request-pdf-template"
+      }
+    });
+  });
+
   // The backend model refuses a disclosure whose input or output is blank or
   // whitespace-only. A parser that accepted them would render a contract row
   // with nothing in it.

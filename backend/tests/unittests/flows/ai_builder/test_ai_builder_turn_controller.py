@@ -338,6 +338,44 @@ def test_unsupported_architecture_returns_localized_refusal(
     )
 
 
+@pytest.mark.parametrize(
+    ("ui_language", "expected_message"),
+    [
+        (
+            "en",
+            "Filling a fixed PDF template is not supported. Choose a normal "
+            "generated PDF. If a fixed template is mandatory, use a DOCX "
+            "template-based Flow instead.",
+        ),
+        (
+            "sv",
+            "Det går inte att fylla i en fast PDF-mall. Välj en vanlig genererad "
+            "PDF. Om en fast mall är ett krav behöver du i stället använda ett "
+            "flöde som bygger på en DOCX-mall.",
+        ),
+    ],
+)
+def test_pdf_template_refusal_explains_supported_alternatives(
+    ui_language: str,
+    expected_message: str,
+) -> None:
+    state = _state(
+        primary_runtime_input="audio",
+        terminal_output="pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "pdf_template_requested",
+    )
+
+    decision = _decision(state=state, ui_language=ui_language)
+
+    assert decision == RefuseArchitectureCommit(
+        code=AIBuilderErrorCode.PDF_TEMPLATE_UNSUPPORTED,
+        message=expected_message,
+    )
+
+
 def test_transcript_checkpoint_refusal_has_actionable_localized_message() -> None:
     state = _state(
         primary_runtime_input="documents",

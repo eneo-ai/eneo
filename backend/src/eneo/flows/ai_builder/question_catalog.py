@@ -503,16 +503,17 @@ _DOCX_OUTPUT_MODE = QuestionTemplate(
 
 _PDF_GENERATION_MODE = QuestionTemplate(
     id="pdf_generation_mode",
-    question_sv="När du säger PDF-mall, vilket upplägg menar du?",
-    question_en="When you say PDF template, which setup do you mean?",
+    question_sv="Kan resultatet vara en vanlig genererad PDF?",
+    question_en="Can the result be a normal generated PDF?",
     help_sv=(
-        "Inbyggd mallfyllning finns bara för DOCX. Om slutresultatet måste "
-        "följa en specifik PDF-layout hanteras mallen utanför flödet."
+        "Eneo kan skapa en PDF utan fast mall, men kan inte fylla i en befintlig "
+        "PDF-mall. Om en fast mall är ett krav kan ett flöde som bygger på en "
+        "DOCX/Word-mall vara ett alternativ."
     ),
     help_en=(
-        "Native template filling is only available for DOCX. If the final "
-        "result must follow a specific PDF layout, the template is handled "
-        "outside the flow."
+        "Eneo can generate a PDF without a fixed template, but cannot fill an "
+        "existing PDF template. If a fixed template is mandatory, a Flow based "
+        "on a DOCX/Word template may be an alternative."
     ),
     options=(
         _option(
@@ -527,16 +528,16 @@ _PDF_GENERATION_MODE = QuestionTemplate(
         ),
         _option(
             id="pdf_template_requested",
-            label_sv="Specifik PDF-mall krävs",
-            label_en="A specific PDF template is required",
+            label_sv="Jag måste använda en specifik PDF-mall",
+            label_en="I must use a specific PDF template",
             description_sv=(
-                "Slutresultatet behöver följa en bestämd PDF-mall eller "
-                "layout. Inbyggd mallfyllning stöds bara för DOCX/Word."
+                "Det stöds inte av Eneo i dag. Välj detta bara om kravet inte "
+                "kan ändras; Eneo stoppar innan ett flöde skapas eller ändras."
             ),
             description_en=(
-                "The final result must follow a specific PDF template or "
-                "layout. Native template filling is only supported for "
-                "DOCX/Word."
+                "Eneo does not support this today. Choose this only if the "
+                "requirement cannot change; Eneo will stop before creating or "
+                "changing a Flow."
             ),
             value="pdf_template_requested",
         ),

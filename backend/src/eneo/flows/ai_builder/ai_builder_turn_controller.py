@@ -65,6 +65,18 @@ _ARCHITECTURE_REFUSAL_MESSAGES: Mapping[AIBuilderErrorCode, Mapping[Locale, str]
         "en": _UNSUPPORTED_ARCHITECTURE_MESSAGE_EN,
         "sv": _UNSUPPORTED_ARCHITECTURE_MESSAGE_SV,
     },
+    AIBuilderErrorCode.PDF_TEMPLATE_UNSUPPORTED: {
+        "en": (
+            "Filling a fixed PDF template is not supported. Choose a normal "
+            "generated PDF. If a fixed template is mandatory, use a DOCX "
+            "template-based Flow instead."
+        ),
+        "sv": (
+            "Det går inte att fylla i en fast PDF-mall. Välj en vanlig genererad "
+            "PDF. Om en fast mall är ett krav behöver du i stället använda ett "
+            "flöde som bygger på en DOCX-mall."
+        ),
+    },
     AIBuilderErrorCode.TRANSCRIPT_CHECKPOINT_REQUIRES_AUDIO: {
         "en": (
             "A transcript review checkpoint requires audio as the runtime input. "

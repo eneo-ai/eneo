@@ -153,6 +153,7 @@ class AIBuilderErrorCode(StrEnum):
     PLANNER_REJECTED = "planner_rejected"
     PLANNER_STREAM_FAILED = "planner_stream_failed"
     PLANNER_UPSTREAM_ERROR = "planner_upstream_error"
+    PDF_TEMPLATE_UNSUPPORTED = "pdf_template_unsupported"
     PROPOSAL_TOOL_MISSING = "proposal_tool_missing"
     QUESTION_RECOVERY_EXHAUSTED = "question_recovery_exhausted"
     QUESTION_RECOVERY_UNAVAILABLE = "question_recovery_unavailable"
@@ -844,6 +845,12 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             category=AIBuilderErrorCategory.UPSTREAM,
             http_status=502,
             eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.PDF_TEMPLATE_UNSUPPORTED: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
             default_phase=AIBuilderErrorPhase.PLANNER,
         ),
         AIBuilderErrorCode.PROPOSAL_TOOL_MISSING: _entry(

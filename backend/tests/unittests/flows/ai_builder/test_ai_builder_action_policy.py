@@ -765,6 +765,27 @@ def test_policy_asks_selected_report_disposition_for_multi_source_pdf_report() -
     assert policy.allowed_ask_question_targets == ("report_disposition",)
 
 
+def test_policy_refuses_a_required_pdf_template() -> None:
+    state = _state_with_resolved_slots("primary_runtime_input")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "pdf_template_requested",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("refuse_architecture_commit",)
+    assert policy.architecture_refusal_code is not None
+    assert policy.architecture_refusal_code.value == "pdf_template_unsupported"
+
+
 def test_policy_accepts_classifier_inferred_report_disposition() -> None:
     state = _state_with_resolved_slots("primary_runtime_input")
     state.resolved_slots["terminal_output"] = _slot(
