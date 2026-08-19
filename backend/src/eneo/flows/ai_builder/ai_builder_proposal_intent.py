@@ -560,8 +560,6 @@ def build_create_flow_tool_schema(
         model_refs=model_refs,
         kb_refs=kb_refs,
     )
-    step_schema["properties"]["knowledge_refs"].pop("uniqueItems")
-    step_schema["properties"]["citations_requested"].pop("default")
     if is_pure_audio_transcription:
         step_schema["properties"] = {
             name: step_schema["properties"][name] for name in ("name", "instructions")
@@ -573,7 +571,6 @@ def build_create_flow_tool_schema(
                 "items": build_create_structured_field_schema(),
             }
         )
-    step_schema["required"] = list(step_schema["properties"])
     if confirmed_runtime_inputs and not is_pure_audio_transcription:
         rendered_runtime_inputs = render_confirmed_runtime_input_requirements(
             confirmed_runtime_inputs
@@ -605,10 +602,8 @@ def build_create_flow_tool_schema(
                 "type": "object",
                 "required": [
                     "flow_name",
-                    "flow_description",
                     "plan_rationale",
                     "steps",
-                    "assumptions",
                     *projected_result_keys,
                 ],
                 "properties": {

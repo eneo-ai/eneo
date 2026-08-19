@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from copy import deepcopy
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
 
 import jsonschema
 from jsonschema.validators import validator_for
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 class ProposalToolFunction(TypedDict):
     name: str
     parameters: dict[str, Any]
+    strict: NotRequired[bool]
 
 
 class ProposalToolSchema(TypedDict):
@@ -73,9 +75,79 @@ def build_propose_flow_tool_schema(
 class ProposalToolArgumentsError(ValueError):
     """The provider returned arguments outside the prepared proposal schema."""
 
+    def __init__(self, message: str, *, validator: str) -> None:
+        super().__init__(message)
+        self.validator = validator
+
 
 class NativeStrictSchemaError(ValueError):
     """The schema is outside the subset providers accept as strict tools."""
+
+
+def build_native_strict_tool_schema(
+    tool_schema: ProposalToolSchema,
+) -> ProposalToolSchema:
+    """Project a semantic tool schema into the native-strict transport subset.
+
+    The semantic schema remains the server admission contract. Strict-capable
+    routes receive a derived copy where every object property is required and
+    provider-unsupported annotations are removed; nullable types preserve the
+    optional values themselves.
+    """
+
+    function = tool_schema["function"]
+    parameters = _native_strict_schema_node(function["parameters"])
+    validate_native_strict_schema(parameters)
+    return {
+        **tool_schema,
+        "function": {
+            **function,
+            "parameters": parameters,
+            "strict": True,
+        },
+    }
+
+
+def _native_strict_schema_node(node: dict[str, Any]) -> dict[str, Any]:
+    projected = deepcopy(node)
+    projected.pop("default", None)
+    projected.pop("uniqueItems", None)
+
+    properties = projected.get("properties")
+    schema_type = projected.get("type")
+    schema_types = (
+        cast(list[object], schema_type)
+        if isinstance(schema_type, list)
+        else [schema_type]
+    )
+    if "object" in schema_types and isinstance(properties, dict):
+        typed_properties = cast(dict[str, Any], properties)
+        projected["required"] = list(typed_properties)
+        projected["properties"] = {
+            name: _native_strict_schema_node(value)
+            for name, value in typed_properties.items()
+        }
+
+    items = projected.get("items")
+    if isinstance(items, dict):
+        projected["items"] = _native_strict_schema_node(cast(dict[str, Any], items))
+    for keyword in ("anyOf", "prefixItems"):
+        branches = projected.get(keyword)
+        if isinstance(branches, list):
+            projected[keyword] = [
+                _native_strict_schema_node(cast(dict[str, Any], branch))
+                if isinstance(branch, dict)
+                else deepcopy(branch)
+                for branch in cast(list[object], branches)
+            ]
+    definitions = projected.get("$defs")
+    if isinstance(definitions, dict):
+        typed_definitions = cast(dict[str, Any], definitions)
+        projected["$defs"] = {
+            name: _native_strict_schema_node(value)
+            for name, value in typed_definitions.items()
+        }
+    return projected
 
 
 # Keywords providers reject in a native strict tool schema.
@@ -206,7 +278,8 @@ def validate_propose_flow_tool_arguments(
     actionable_error = _actionable_validation_error(error)
     path = ".".join(str(part) for part in actionable_error.absolute_path) or "root"
     raise ProposalToolArgumentsError(
-        f"{path}: {actionable_error.message} ({actionable_error.validator})"
+        f"{path}: {actionable_error.message} ({actionable_error.validator})",
+        validator=str(actionable_error.validator),
     ) from error
 
 

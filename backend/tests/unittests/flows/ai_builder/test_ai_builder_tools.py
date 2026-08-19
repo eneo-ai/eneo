@@ -100,16 +100,34 @@ class TestBuildToolSchema:
         assert "final_output_type" not in properties
         assert "input_fields" not in properties
 
-    def test_create_schema_requires_every_declared_property(self) -> None:
+    def test_create_schema_requires_only_semantic_inputs_without_defaults(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
         parameters = schema["function"]["parameters"]
         step_schema = parameters["properties"]["steps"]["items"]
 
         assert parameters["additionalProperties"] is False
-        assert set(parameters["required"]) == set(parameters["properties"])
+        assert set(parameters["required"]) == {"flow_name", "plan_rationale", "steps"}
         assert step_schema["additionalProperties"] is False
-        assert set(step_schema["required"]) == set(step_schema["properties"])
-        assert "default" not in step_schema["properties"]["citations_requested"]
+        assert set(step_schema["required"]) == {"name", "instructions"}
+
+        arguments = {
+            "flow_name": "Case assessment",
+            "plan_rationale": "Assess the submitted case.",
+            "steps": [
+                {
+                    "name": "Assess case",
+                    "instructions": "Assess the submitted case material.",
+                }
+            ],
+        }
+        validate_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema)
+        intent = parse_create_flow_intent_arguments(arguments)
+        assert intent.flow_description is None
+        assert intent.assumptions == []
+        assert intent.steps[0].output_fields is None
+        assert intent.steps[0].model_ref is None
+        assert intent.steps[0].knowledge_refs == []
+        assert intent.steps[0].citations_requested is False
 
     def test_create_schema_projects_runtime_identity_without_argument_shape_change(
         self,
