@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
+  import { getAppContext } from "$lib/core/AppContext";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getFlowsManager } from "$lib/features/flows/FlowsManager";
   import { EneoError } from "@eneo/eneo-js";
@@ -18,13 +19,20 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
+  const { user } = getAppContext();
   const flowsManager = getFlowsManager();
 
+  const canUseAIBuilder = user.hasPermission({ allOf: ["flows_manage", "flows_ai_builder"] });
+
+  // The dialog only chooses the path. The task itself is written on the
+  // builder page, so there is exactly one place that owns that text.
+  let path = $state<"choose" | "manual">("choose");
   let newFlowName = $state("");
   let createError = $state<string | null>(null);
   let isCreating = $state(false);
 
   function reset() {
+    path = canUseAIBuilder ? "choose" : "manual";
     newFlowName = "";
     createError = null;
     isCreating = false;
@@ -33,6 +41,11 @@
   function openDialog() {
     reset();
     open = true;
+  }
+
+  function startWithAI() {
+    open = false;
+    goto(resolve(`/spaces/${$currentSpace.routeId}/flows/ai-builder`));
   }
 
   async function createManually() {
@@ -74,48 +87,91 @@
       </Dialog.Description>
     </div>
 
-    <form
-      class="flex flex-col gap-2 px-6 pt-4"
-      onsubmit={(event) => {
-        event.preventDefault();
-        void createManually();
-      }}
-    >
-      <label for="flow-name-input" class="text-sm font-medium">{m.name()}</label>
-      <Input
-        id="flow-name-input"
-        bind:value={newFlowName}
-        placeholder={m.flow_create_name_placeholder()}
-        class="max-sm:h-[44px]"
-        required
-      />
-      <p class="text-secondary text-xs">{m.flow_create_path_manual_hint()}</p>
-      {#if createError}
-        <p
-          class="text-negative-stronger bg-negative-dimmer rounded-lg px-3 py-2 text-sm"
-          role="alert"
+    {#if path === "choose"}
+      <div class="flex flex-col gap-2.5 px-6 pt-4">
+        <button
+          type="button"
+          class="border-accent-default bg-accent-default/5 hover:bg-accent-default/10 focus-visible:ring-ring/50 w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          onclick={startWithAI}
         >
-          {createError}
-        </p>
-      {/if}
-    </form>
+          <span class="flex flex-wrap items-center gap-2">
+            <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">
+              {m.flow_create_path_ai_title()}
+            </span>
+            <span
+              class="text-accent-stronger bg-accent-dimmer inline-flex h-[1.375rem] items-center rounded-full px-2.5 text-xs font-semibold"
+            >
+              {m.flow_create_path_ai_recommended()}
+            </span>
+          </span>
+          <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
+            {m.flow_create_path_ai_description()}
+          </span>
+        </button>
+        <button
+          type="button"
+          class="border-default bg-primary hover:bg-secondary focus-visible:ring-ring/50 w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          onclick={() => (path = "manual")}
+        >
+          <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">
+            {m.flow_create_path_manual_title()}
+          </span>
+          <span class="text-secondary mt-1 block text-sm leading-relaxed text-pretty">
+            {m.flow_create_path_manual_description()}
+          </span>
+        </button>
+      </div>
+    {:else}
+      <form
+        class="flex flex-col gap-2 px-6 pt-4"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void createManually();
+        }}
+      >
+        <label for="flow-name-input" class="text-sm font-medium">{m.name()}</label>
+        <Input
+          id="flow-name-input"
+          bind:value={newFlowName}
+          placeholder={m.flow_create_name_placeholder()}
+          class="max-sm:h-[44px]"
+          required
+        />
+        <p class="text-secondary text-xs">{m.flow_create_path_manual_hint()}</p>
+        {#if createError}
+          <p
+            class="text-negative-stronger bg-negative-dimmer rounded-lg px-3 py-2 text-sm"
+            role="alert"
+          >
+            {createError}
+          </p>
+        {/if}
+      </form>
+    {/if}
 
     <Dialog.Footer
       class="border-dimmer mx-0 mt-4 mb-0 flex-row flex-wrap items-center gap-2.5 border-t bg-transparent px-6 py-3.5 sm:justify-start"
     >
       <span class="text-secondary text-sm">{m.flow_create_dialog_footnote()}</span>
       <div class="ml-auto flex items-center gap-2 max-sm:ml-0 max-sm:w-full max-sm:justify-end">
+        {#if path === "manual" && canUseAIBuilder}
+          <Button variant="ghost" class="max-sm:h-[44px]" onclick={() => (path = "choose")}>
+            {m.go_back()}
+          </Button>
+        {/if}
         <Button variant="outline" class="max-sm:h-[44px]" onclick={() => (open = false)}>
           {m.cancel()}
         </Button>
-        <Button
-          variant="default"
-          class="max-sm:h-[44px]"
-          disabled={!newFlowName.trim() || isCreating}
-          onclick={createManually}
-        >
-          {isCreating ? m.flow_create_path_manual_creating() : m.flow_create_path_manual_action()}
-        </Button>
+        {#if path === "manual"}
+          <Button
+            variant="default"
+            class="max-sm:h-[44px]"
+            disabled={!newFlowName.trim() || isCreating}
+            onclick={createManually}
+          >
+            {isCreating ? m.flow_create_path_manual_creating() : m.flow_create_path_manual_action()}
+          </Button>
+        {/if}
       </div>
     </Dialog.Footer>
   </Dialog.Content>

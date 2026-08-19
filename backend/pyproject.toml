@@ -172,6 +172,11 @@ only_mutate = [
     "src/eneo/assistants/assistant_package_adapter.py",
     "src/eneo/token_usage/infrastructure/provider_token_usage_repo.py",
     "src/eneo/flows/infrastructure/flow_provider_call_recorder.py",
+    "src/eneo/flows/ai_builder/ai_builder_action_policy.py",
+    "src/eneo/flows/ai_builder/ai_builder_architecture_commit.py",
+    "src/eneo/flows/ai_builder/ai_builder_commit_invariance.py",
+    "src/eneo/flows/ai_builder/ai_builder_send_lease.py",
+    "src/eneo/flows/flow_ai_builder_budget_settings.py",
 ]
 pytest_add_cli_args_test_selection = [
     "tests/unittests/flow_packages/test_flow_package_api.py",
@@ -187,6 +192,11 @@ pytest_add_cli_args_test_selection = [
     "tests/unit/assistants/test_assistant_package_adapter.py",
     "tests/unit/resource_packages/test_archive.py",
     "tests/unit/token_usage/test_provider_token_usage_repo.py",
+    "tests/unittests/flows/ai_builder/test_ai_builder_action_policy.py",
+    "tests/unittests/flows/ai_builder/test_ai_builder_architecture_commit.py",
+    "tests/unittests/flows/ai_builder/test_ai_builder_commit_invariance.py",
+    "tests/unittests/flows/ai_builder/test_ai_builder_send_lease.py",
+    "tests/unittests/tenants/test_tenant_flow_settings.py",
 ]
 
 # Dead-code / dependency analysis. Both are advisory (not wired into pre-commit)

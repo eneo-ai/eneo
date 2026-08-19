@@ -101,6 +101,8 @@ from eneo.flows import (
     FlowService,
     FlowVersionRepository,
 )
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
+from eneo.flows.ai_builder.ai_builder_service import AIBuilderService
 from eneo.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
@@ -1525,6 +1527,20 @@ class Container(containers.DeclarativeContainer):
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
         template_asset_repo=flow_template_asset_repo,
+    )
+    ai_builder_repo = providers.Factory(
+        AIBuilderRepository,
+        session=session,
+    )
+    ai_builder_service = providers.Factory(
+        AIBuilderService,
+        user=user,
+        repo=ai_builder_repo,
+        flow_service=flow_service,
+        completion_service=completion_service,
+        file_service=file_service,
+        space_service=space_service,
+        template_asset_service=flow_template_asset_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,

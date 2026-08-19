@@ -17,6 +17,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.flow_tables import (
+    BuilderSessions,
     FlowOutboxDeliveryStatus,
     FlowProviderCalls,
     FlowRunAuditOutbox,
@@ -30,6 +31,7 @@ from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
@@ -45,6 +47,29 @@ logger = logging.getLogger(__name__)
 
 # Statement batch size for retention deletes; worker transaction loops decide commit scope.
 RETENTION_BATCH_SIZE = 5000
+ACTIVE_BUILDER_SESSION_STATUS_VALUES = (
+    SessionStatus.CHATTING.value,
+    SessionStatus.AWAITING_APPROVAL.value,
+)
+RETENTION_ELIGIBLE_BUILDER_SESSION_STATUS_VALUES = (
+    SessionStatus.APPLIED.value,
+    SessionStatus.CANCELLED.value,
+    *ACTIVE_BUILDER_SESSION_STATUS_VALUES,
+)
+
+
+def _builder_session_has_no_fresh_send_lock(now: datetime) -> sa.ColumnElement[bool]:
+    return sa.or_(
+        sa.not_(BuilderSessions.status.in_(ACTIVE_BUILDER_SESSION_STATUS_VALUES)),
+        sa.and_(
+            BuilderSessions.active_request_id.is_(None),
+            BuilderSessions.lock_token.is_(None),
+        ),
+        sa.and_(
+            BuilderSessions.lock_expires_at.is_not(None),
+            BuilderSessions.lock_expires_at <= sa.literal(now),
+        ),
+    )
 
 
 class FlowRuntimeCleanupCounts(TypedDict):
@@ -508,6 +533,73 @@ class DataRetentionService:
             logger.info(f"Deleted {total_deleted} orphaned sessions")
         else:
             logger.debug("No orphaned sessions to delete")
+
+        return total_deleted
+
+    def _build_due_builder_session_retention_query(
+        self, *, now: datetime
+    ) -> sa.Select[tuple[UUID]]:
+        effective_retention_days = self._build_effective_retention_days(sa.null())
+        return (
+            sa.select(BuilderSessions.id.label("session_id"))
+            .join(Spaces, BuilderSessions.space_id == Spaces.id)
+            .outerjoin(
+                AuditRetentionPolicy, Spaces.tenant_id == AuditRetentionPolicy.tenant_id
+            )
+            .where(
+                sa.and_(
+                    BuilderSessions.status.in_(
+                        RETENTION_ELIGIBLE_BUILDER_SESSION_STATUS_VALUES
+                    ),
+                    _builder_session_has_no_fresh_send_lock(now),
+                    effective_retention_days.isnot(None),
+                    BuilderSessions.updated_at
+                    < sa.literal(now)
+                    - sa.func.make_interval(0, 0, 0, effective_retention_days),
+                )
+            )
+        )
+
+    async def count_expired_builder_sessions(self, *, now: datetime) -> int:
+        candidate_subquery = self._build_due_builder_session_retention_query(
+            now=now
+        ).subquery()
+        count = await self.session.scalar(
+            sa.select(sa.func.count()).select_from(candidate_subquery)
+        )
+        return count or 0
+
+    async def delete_expired_builder_sessions(self, *, now: datetime) -> int:
+        logger.info("Starting deletion of expired Builder sessions")
+        base_subquery = self._build_due_builder_session_retention_query(now=now)
+
+        total_deleted = 0
+        while True:
+            batch_subquery = base_subquery.order_by(
+                BuilderSessions.updated_at,
+                BuilderSessions.id,
+            ).limit(RETENTION_BATCH_SIZE)
+            result = await self.session.execute(
+                sa.delete(BuilderSessions).where(BuilderSessions.id.in_(batch_subquery))
+            )
+            batch_deleted = affected_row_count(result)
+            if batch_deleted == 0:
+                break
+
+            total_deleted += batch_deleted
+            logger.debug(
+                "Deleted batch of %s expired Builder sessions (total: %s)",
+                batch_deleted,
+                total_deleted,
+            )
+
+        if total_deleted > 0:
+            logger.info(
+                "Deleted %s expired Builder sessions",
+                total_deleted,
+            )
+        else:
+            logger.debug("No expired Builder sessions to delete")
 
         return total_deleted
 

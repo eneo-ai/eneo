@@ -89,6 +89,6 @@
 
   <slot />
   <div
-    class="pointer-events-none absolute inset-0 left-12 -z-0 flex flex-grow shadow-xl md:left-[17rem]"
+    class="pointer-events-none absolute inset-0 -z-0 flex flex-grow shadow-xl left-12 md:left-[17rem]"
   ></div>
 </div>

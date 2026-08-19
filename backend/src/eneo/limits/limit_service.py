@@ -71,7 +71,12 @@ class LimitService:
                 )
             )
 
-        return AttachmentLimits(formats=formats)
+        builder_policy = await self.settings_service.get_ai_builder_budget_policy()
+        return AttachmentLimits(
+            formats=formats,
+            ai_builder_max_count=builder_policy.max_attachments,
+            ai_builder_max_message_chars=builder_policy.max_message_chars,
+        )
 
     async def get_limits(self) -> Limits:
         return Limits(

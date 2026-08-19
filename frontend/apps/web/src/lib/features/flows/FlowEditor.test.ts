@@ -807,6 +807,7 @@ describe("FlowStepList ownership guard", () => {
     expect(stepListSource).not.toContain("flow_starter_drafting_action");
     expect(stepEditorSource).toContain("flow_empty_add_step");
     expect(stepEditorSource).toContain("flow_starter_drafting_action");
+    expect(stepEditorSource).toContain("ai_builder_empty_state_cta");
   });
 });
 

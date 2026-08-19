@@ -1,11 +1,17 @@
 <script lang="ts">
   import type { FlowSparse } from "@eneo/eneo-js";
+  import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAppContext } from "$lib/core/AppContext";
+  import { resolve } from "$app/paths";
   import * as Table from "$lib/components/ui/table/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import { IconTrash } from "@eneo/icons/trash";
   import FlowActions from "./FlowActions.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, localizeHref } from "$lib/paraglide/runtime";
@@ -19,11 +25,22 @@
 
   interface Props {
     flows: FlowSparse[];
+    drafts: RecoverableAIBuilderDraftSession[];
+    /** The drafts request failed; the list must say so instead of hiding rows. */
+    draftsUnavailable?: boolean;
     canCreate?: boolean;
     oncreate?: () => void;
+    ondiscarddraft?: (sessionId: string) => Promise<void> | void;
   }
 
-  let { flows, canCreate = false, oncreate }: Props = $props();
+  let {
+    flows,
+    drafts,
+    draftsUnavailable = false,
+    canCreate = false,
+    oncreate,
+    ondiscarddraft
+  }: Props = $props();
 
   const {
     state: { currentSpace }
@@ -32,8 +49,10 @@
 
   let query = $state("");
   let filter = $state<FlowListFilter>("all");
+  let draftPendingDiscard = $state<FlowListRow | null>(null);
+  let isDiscarding = $state(false);
 
-  const rows = $derived(buildFlowListRows(flows));
+  const rows = $derived(buildFlowListRows(flows, drafts));
   const visibleRows = $derived(filterFlowListRows(rows, { query, filter }));
   const isEmpty = $derived(rows.length === 0);
   const noMatch = $derived(!isEmpty && visibleRows.length === 0);
@@ -51,7 +70,7 @@
   );
 
   function ownerLabel(row: FlowListRow): string {
-    if (row.ownerUserId === user.id) return m.flow_list_owner_you();
+    if (row.kind === "ai_draft" || row.ownerUserId === user.id) return m.flow_list_owner_you();
     if (!row.ownerUserId) return "—";
     return memberNames.get(row.ownerUserId) ?? m.flow_list_owner_unknown();
   }
@@ -79,7 +98,14 @@
   }
 
   function statusLabel(row: FlowListRow): string {
-    return row.status === "published" ? m.flow_list_status_published() : m.flow_list_status_draft();
+    if (row.kind === "flow") {
+      return row.status === "published"
+        ? m.flow_list_status_published()
+        : m.flow_list_status_draft();
+    }
+    return row.phase === "reviewing"
+      ? m.flow_list_status_draft_reviewing()
+      : m.flow_list_status_draft_understanding();
   }
 
   function statusClass(row: FlowListRow): string {
@@ -89,11 +115,25 @@
   }
 
   function rowHref(row: FlowListRow): string {
-    return localizeHref(`/spaces/${$currentSpace.routeId}/flows/${row.id}`);
+    if (row.kind === "flow") {
+      return localizeHref(`/spaces/${$currentSpace.routeId}/flows/${row.id}`);
+    }
+    return localizeHref(`/spaces/${$currentSpace.routeId}/flows/ai-builder?session=${row.id}`);
   }
 
   function rowName(row: FlowListRow): string {
-    return row.name;
+    return row.name ?? m.ai_builder_draft_untitled();
+  }
+
+  async function confirmDiscard() {
+    if (!draftPendingDiscard || draftPendingDiscard.kind !== "ai_draft") return;
+    isDiscarding = true;
+    try {
+      await ondiscarddraft?.(draftPendingDiscard.id);
+      draftPendingDiscard = null;
+    } finally {
+      isDiscarding = false;
+    }
   }
 </script>
 
@@ -101,7 +141,39 @@
      column is dropped, so a narrow row keeps every action it had. -->
 {#snippet rowActions(row: FlowListRow)}
   <div class="flex items-center gap-1.5">
-    <FlowActions flow={row.flow} />
+    {#if row.kind === "ai_draft"}
+      <Button
+        variant="outline"
+        size="sm"
+        class="max-sm:h-[44px] max-sm:px-4"
+        href={resolve(`/spaces/${$currentSpace.routeId}/flows/ai-builder?session=${row.id}`)}
+      >
+        {m.flow_list_resume_draft()}
+      </Button>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              size="icon-sm"
+              variant="ghost"
+              class="text-muted hover:text-primary max-sm:size-[44px]"
+              aria-label={m.actions()}
+            >
+              <IconEllipsis />
+            </Button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="min-w-[10rem]">
+          <DropdownMenu.Item variant="destructive" onclick={() => (draftPendingDiscard = row)}>
+            <IconTrash class="size-4" />
+            {m.ai_builder_discard_draft()}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    {:else}
+      <FlowActions flow={row.flow} />
+    {/if}
   </div>
 {/snippet}
 
@@ -140,6 +212,10 @@
           : m.flow_list_count({ count: String(visibleRows.length) })}
       </p>
     </div>
+  {/if}
+
+  {#if draftsUnavailable}
+    <p class="text-secondary text-xs" role="status">{m.flow_list_drafts_unavailable()}</p>
   {/if}
 
   <div class="border-default bg-primary overflow-hidden rounded-xl border">
@@ -274,3 +350,23 @@
     {/if}
   </div>
 </div>
+
+<AlertDialog.Root
+  open={draftPendingDiscard !== null}
+  onOpenChange={(open) => {
+    if (!open) draftPendingDiscard = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.ai_builder_draft_discard_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.ai_builder_draft_discard_body()}</AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" disabled={isDiscarding} onclick={confirmDiscard}>
+        {m.ai_builder_draft_discard_action()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

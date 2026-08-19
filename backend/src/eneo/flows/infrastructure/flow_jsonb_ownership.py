@@ -12,6 +12,7 @@ class FlowJsonbStorageCategory(StrEnum):
     PROVENANCE_EVIDENCE = "provenance_evidence"
     IMPORT_STATE = "import_state"
     DERIVED_INDEX = "derived_index"
+    BUILDER_SESSION_STATE = "builder_session_state"
 
 
 class FlowJsonbSchemaVersionPolicy(StrEnum):
@@ -25,6 +26,8 @@ class FlowJsonbSchemaVersionPolicy(StrEnum):
 class FlowJsonbCorruptionBehavior(StrEnum):
     REJECT_BEFORE_WRITE = "reject_before_write"
     FAIL_RUN_OR_STEP = "fail_run_or_step"
+    FAIL_SESSION_LOAD = "fail_session_load"
+    FAIL_PLAN_LOAD = "fail_plan_load"
     KEEP_AUDITABLE_FAILURE = "keep_auditable_failure"
     MARK_EVIDENCE_UNAVAILABLE = "mark_evidence_unavailable"
     NORMALIZE_TO_EMPTY = "normalize_to_empty"
@@ -558,6 +561,83 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         rationale=(
             "Next-step ids are a small resume snapshot from the published graph; "
             "there is no separate row identity to constrain relationally."
+        ),
+    ),
+    _owner(
+        "builder_sessions",
+        "conversation",
+        owner_module="eneo.flows.ai_builder.ai_builder_domain_models",
+        envelope_name="ConversationMessage",
+        owner_symbols=("ConversationMessage",),
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
+        rationale=(
+            "Builder conversation history is stored as a JSON array of "
+            "ConversationMessage entries; persisted rows fail session loading "
+            "when required stable message ids are missing."
+        ),
+    ),
+    _owner(
+        "builder_sessions",
+        "planning_state_jsonb",
+        owner_module="eneo.flows.ai_builder.planning_state",
+        envelope_name="PlanningState",
+        owner_symbols=("PlanningState",),
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
+        rationale=(
+            "Builder planning state is a full-snapshot PlanningState document "
+            "with embedded FCM, planner-contract, and builder schema versions."
+        ),
+    ),
+    _owner(
+        "builder_sessions",
+        "latest_turn_request_jsonb",
+        owner_module="eneo.flows.ai_builder.ai_builder_api_models",
+        envelope_name="SendMessageRequest",
+        owner_symbols=("SendMessageRequest", "SendMessageRequest.retry_snapshot"),
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.OWNER_VALIDATED_SHAPE,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
+        rationale=(
+            "The latest accepted Builder turn retains one bounded strict request "
+            "snapshot for same-key replay and explicit outcome-unknown recovery."
+        ),
+    ),
+    _owner(
+        "builder_sessions",
+        "latest_turn_error_jsonb",
+        owner_module="eneo.flows.ai_builder.ai_builder_error_contract",
+        envelope_name="AIBuilderPublicError",
+        owner_symbols=("AIBuilderPublicError",),
+        storage_category=FlowJsonbStorageCategory.BUILDER_SESSION_STATE,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_SESSION_LOAD,
+        rationale=(
+            "A committed Builder turn may retain one typed public error for exact "
+            "same-key replay; invalid stored errors fail session hydration."
+        ),
+    ),
+    _owner(
+        "builder_plans",
+        "proposal_json",
+        owner_module="eneo.flows.ai_builder.ai_builder_domain_models",
+        envelope_name="FlowBuilderProposal",
+        owner_symbols=(
+            "FlowBuilderProposal",
+            "FlowBuilderProposal.from_persisted_json",
+            "FlowBuilderProposal.storage_json",
+        ),
+        storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.EMBEDDED_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.FAIL_PLAN_LOAD,
+        rationale=(
+            "Builder plans persist one current-version-only immutable proposal "
+            "snapshot. Writes and reads validate the typed envelope and 1 MiB "
+            "payload cap; invalid stored proposals fail plan hydration, while "
+            "spec_hash rejects silent row drift."
         ),
     ),
 )

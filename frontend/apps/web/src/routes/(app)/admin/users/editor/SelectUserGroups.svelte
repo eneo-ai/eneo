@@ -160,7 +160,7 @@
         </li>
       {:else}
         <li
-          class="hover:bg-hover-default flex items-center gap-1 rounded-md px-2 py-1 hover:cursor-pointer"
+          class="flex items-center gap-1 rounded-md px-2 py-1 hover:cursor-pointer hover:bg-hover-default"
         >
           {m.no_results_found()}
         </li>

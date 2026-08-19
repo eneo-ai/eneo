@@ -355,27 +355,27 @@ async def test_flow_repository_replaces_resource_bindings(
                 _resource_binding(slot="model-a"),
                 _resource_binding(slot="model-b"),
             ),
-            source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            source=FlowResourceBindingSource.AI_BUILDER,
         )
         await repo.replace_resource_bindings(
             flow_id=created.id,
             tenant_id=admin_user.tenant_id,
             bindings=(_resource_binding(slot="model-c"),),
-            source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            source=FlowResourceBindingSource.AI_BUILDER,
         )
 
         rows = await _resource_binding_rows(session, flow_id=created.id)
         assert [row.slot for row in rows] == ["model-c"]
         assert rows[0].tenant_id == admin_user.tenant_id
         assert rows[0].space_id == space.id
-        assert rows[0].source == FlowResourceBindingSource.PACKAGE_IMPORT.value
+        assert rows[0].source == FlowResourceBindingSource.AI_BUILDER.value
         assert rows[0].slot_label == "Model C"
 
         await repo.replace_resource_bindings(
             flow_id=created.id,
             tenant_id=admin_user.tenant_id,
             bindings=tuple(),
-            source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            source=FlowResourceBindingSource.AI_BUILDER,
         )
 
         assert await _resource_binding_rows(session, flow_id=created.id) == []
@@ -421,7 +421,7 @@ async def test_flow_repository_lists_resource_bindings_as_typed_values(
                 _resource_binding(slot="model-b", local_id=second_id),
                 _resource_binding(slot="model-a", local_id=first_id),
             ),
-            source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            source=FlowResourceBindingSource.AI_BUILDER,
         )
 
         bindings = await repo.list_resource_bindings(
@@ -486,7 +486,7 @@ async def test_flow_repository_resource_binding_replacement_is_atomic_on_insert_
                     local_id=original_local_id,
                 ),
             ),
-            source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            source=FlowResourceBindingSource.AI_BUILDER,
         )
 
         nested = await session.begin_nested()
@@ -498,7 +498,7 @@ async def test_flow_repository_resource_binding_replacement_is_atomic_on_insert_
                     _resource_binding(slot="duplicate-model"),
                     _resource_binding(slot="duplicate-model"),
                 ),
-                source=FlowResourceBindingSource.PACKAGE_IMPORT,
+                source=FlowResourceBindingSource.AI_BUILDER,
             )
         except IntegrityError:
             await nested.rollback()
@@ -549,7 +549,7 @@ async def test_flow_repository_resource_binding_write_is_tenant_scoped(
                 flow_id=created.id,
                 tenant_id=uuid4(),
                 bindings=(_resource_binding(slot="model-a"),),
-                source=FlowResourceBindingSource.PACKAGE_IMPORT,
+                source=FlowResourceBindingSource.AI_BUILDER,
             )
 
         assert await _resource_binding_rows(session, flow_id=created.id) == []

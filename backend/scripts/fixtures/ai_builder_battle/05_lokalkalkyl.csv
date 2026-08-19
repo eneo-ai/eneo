@@ -1,0 +1,4 @@
+diarienummer,dokumentdatum,dokumenttyp,post,belopp_sek,kalla,status
+BUN-2026-00037-1,2026-02-03,Lokalkalkyl,avvecklingsarbete,180000,preliminar_kalkyl,beraknat
+BUN-2026-00037-1,2026-02-03,Lokalkalkyl,anpassning_mottagande_lokaler,420000,preliminar_kalkyl,beraknat
+BUN-2026-00037-1,2026-02-03,Lokalkalkyl,overgangsstod,,saknas,finansieringskalla_ej_faststalld

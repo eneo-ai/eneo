@@ -31,6 +31,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportSource,
     FlowPackageImportStatus,
 )
+from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_KIND_VALUES,
     PROVIDER_CALL_REASON_VALUES,
@@ -2016,5 +2017,241 @@ class FlowRunWebhookDeliveries(BasePublic):
             "ix_flow_run_webhook_deliveries_dead_lettered",
             "dead_lettered_at",
             postgresql_where=sa.text("delivery_status = 'dead_lettered'"),
+        ),
+    )
+
+
+BUILDER_SESSION_STATUS_VALUES = tuple(item.value for item in SessionStatus)
+BUILDER_PLAN_STATUS_VALUES = tuple(item.value for item in PlanStatus)
+BUILDER_TARGET_KIND_VALUES = ("create", "edit")
+BUILDER_TURN_STATE_VALUES = (
+    "open",
+    "processing",
+    "committed",
+    "failed_before_provider",
+    "provider_outcome_unknown",
+)
+
+
+class BuilderSessions(BasePublic):
+    """Stores Flow AI Builder conversations. Writer: Flow AI Builder session service. Purpose: keep builder chat, planning state, locks, and target Flow linkage."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    target_kind: Mapped[str] = mapped_column(
+        sa.String(16),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="chatting",
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    conversation: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default="[]",
+    )
+    active_request_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    lock_token: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    locked_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    lock_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    latest_plan_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    planning_state_jsonb: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    planning_state_version: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        nullable=False,
+        server_default="0",
+    )
+    latest_turn_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    latest_turn_request_fingerprint: Mapped[Optional[str]] = mapped_column(
+        sa.String(64),
+        nullable=True,
+    )
+    latest_turn_request_jsonb: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    latest_turn_state: Mapped[Optional[str]] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    latest_turn_message_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    latest_turn_error_jsonb: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_builder_sessions_id_tenant_id"),
+        Index(
+            "ix_builder_sessions_tenant_actor_updated",
+            "tenant_id",
+            "actor_user_id",
+            "updated_at",
+            "created_at",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_sessions_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["latest_plan_id", "id"],
+            ["builder_plans.id", "builder_plans.session_id"],
+            name="fk_builder_sessions_latest_plan_session",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        CheckConstraint(
+            f"target_kind IN ({','.join(repr(v) for v in BUILDER_TARGET_KIND_VALUES)})",
+            name="ck_builder_sessions_target_kind",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(BUILDER_SESSION_STATUS_VALUES)})",
+            name="ck_builder_sessions_status",
+        ),
+        CheckConstraint(
+            "("
+            "active_request_id IS NULL "
+            "AND lock_token IS NULL "
+            "AND locked_at IS NULL "
+            "AND lock_expires_at IS NULL"
+            ") OR ("
+            "active_request_id IS NOT NULL "
+            "AND lock_token IS NOT NULL "
+            "AND locked_at IS NOT NULL "
+            "AND lock_expires_at IS NOT NULL"
+            ")",
+            name="ck_builder_sessions_send_lock_all_or_none",
+        ),
+        CheckConstraint(
+            "(latest_turn_id IS NULL "
+            "AND latest_turn_request_fingerprint IS NULL "
+            "AND latest_turn_request_jsonb IS NULL "
+            "AND latest_turn_state IS NULL "
+            "AND latest_turn_message_id IS NULL "
+            "AND latest_turn_error_jsonb IS NULL) "
+            "OR (latest_turn_id IS NOT NULL "
+            "AND latest_turn_request_fingerprint IS NOT NULL "
+            "AND latest_turn_request_jsonb IS NOT NULL "
+            "AND latest_turn_state IS NOT NULL "
+            "AND latest_turn_message_id IS NOT NULL)",
+            name="ck_builder_sessions_latest_turn_all_or_none",
+        ),
+        CheckConstraint(
+            "latest_turn_error_jsonb IS NULL OR latest_turn_state = 'committed'",
+            name="ck_builder_sessions_latest_turn_error_committed",
+        ),
+        CheckConstraint(
+            "latest_turn_state IS NULL OR "
+            f"latest_turn_state IN ({','.join(repr(v) for v in BUILDER_TURN_STATE_VALUES)})",
+            name="ck_builder_sessions_latest_turn_state",
+        ),
+        CheckConstraint(
+            "latest_turn_request_fingerprint IS NULL "
+            "OR char_length(latest_turn_request_fingerprint) = 64",
+            name="ck_builder_sessions_latest_turn_fingerprint_length",
+        ),
+    )
+
+
+class BuilderSessionFiles(BaseCrossReference):
+    """Stores files attached to Flow AI Builder sessions. Writer: Flow AI Builder session service. Purpose: keep uploaded builder context files tenant-scoped."""
+
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("builder_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    file_id: Mapped[UUID] = mapped_column(primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["session_id", "tenant_id"],
+            ["builder_sessions.id", "builder_sessions.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_session_files_session_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_session_files_file_tenant",
+        ),
+        Index("ix_builder_session_files_file_id", "file_id"),
+    )
+
+
+class BuilderPlans(BasePublic):
+    """Stores Flow AI Builder proposed plans. Writer: Flow AI Builder planner. Purpose: preserve one canonical proposal snapshot."""
+
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("builder_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="proposed",
+    )
+    proposal_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        comment="Serialized FlowBuilderProposal.",
+    )
+    spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_builder_plans_id_tenant_id"),
+        UniqueConstraint("id", "session_id", name="uq_builder_plans_id_session_id"),
+        ForeignKeyConstraint(
+            ["session_id", "tenant_id"],
+            ["builder_sessions.id", "builder_sessions.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_plans_session_tenant",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(BUILDER_PLAN_STATUS_VALUES)})",
+            name="ck_builder_plans_status",
         ),
     )

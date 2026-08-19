@@ -41,6 +41,7 @@ class LocalResourceKind(str, Enum):
 
 
 class FlowResourceBindingSource(str, Enum):
+    AI_BUILDER = "ai_builder"
     PACKAGE_IMPORT = "package_import"
     MANUAL_ADMIN = "manual_admin"
 

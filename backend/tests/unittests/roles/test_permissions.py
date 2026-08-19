@@ -143,6 +143,7 @@ def test_flow_granular_permissions_accept_legacy_flows_permission():
     assert has_permission(permissions, Permission.FLOWS_VIEW) is True
     assert has_permission(permissions, Permission.FLOWS_RUN) is True
     assert has_permission(permissions, Permission.FLOWS_MANAGE) is True
+    assert has_permission(permissions, Permission.FLOWS_AI_BUILDER) is True
     assert has_permission(permissions, Permission.FLOWS_TRACE) is True
 
 
@@ -272,6 +273,7 @@ class TestPermissionSemantics:
             "flows_view",
             "flows_run",
             "flows_manage",
+            "flows_ai_builder",
             "flows_trace",
             "storage",
             "assistant_debug",

@@ -12,12 +12,16 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from eneo.database.database import sessionmanager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
+    BuilderSessionFiles,
+    BuilderSessions,
     FlowTemplateAssets,
     FlowVersions,
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
+from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
+from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
@@ -136,6 +140,60 @@ async def _delete_file(
         if lock_timeout:
             await session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
         await session.execute(sa.delete(Files).where(Files.id == file_id))
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_promoted_template_survives_builder_session_deletion_and_fences_file(
+    db_container,
+) -> None:
+    async with db_container() as setup_container:
+        user, space, flow, file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+        )
+        repo = AIBuilderRepository(setup_container.session())
+        builder_session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=space.id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+        )
+        await setup_container.session().execute(
+            sa.insert(BuilderSessionFiles).values(
+                session_id=builder_session.id,
+                file_id=file.id,
+                tenant_id=user.tenant_id,
+            )
+        )
+
+    async with db_container(user=user) as container:
+        asset = await container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id,
+            file_id=file.id,
+        )
+        await container.session().execute(
+            sa.delete(BuilderSessions).where(BuilderSessions.id == builder_session.id)
+        )
+        await container.session().flush()
+
+        persisted_asset_file_id = await container.session().scalar(
+            sa.select(FlowTemplateAssets.file_id).where(
+                FlowTemplateAssets.id == asset.id
+            )
+        )
+        persisted_file_id = await container.session().scalar(
+            sa.select(Files.id).where(Files.id == file.id)
+        )
+        assert persisted_asset_file_id == file.id
+        assert persisted_file_id == file.id
+
+        with pytest.raises(IntegrityError):
+            async with container.session().begin_nested():
+                await container.session().execute(
+                    sa.delete(Files).where(Files.id == file.id)
+                )
+                await container.session().flush()
 
 
 @pytest.mark.integration
@@ -281,7 +339,7 @@ async def test_materialized_template_attachment_publishes_with_pinned_identity(
         await container.flow_service().replace_resource_bindings(
             flow_id=flow.id,
             bindings=(materialized.binding,),
-            source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            source=FlowResourceBindingSource.AI_BUILDER,
         )
 
         published = await container.flow_service().publish_flow(flow_id=updated.id)

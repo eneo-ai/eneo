@@ -1,0 +1,397 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
+from eneo.flows.ai_builder.ai_builder_discovery_models import (
+    DiscoveryLanguage,
+    DiscoveryQuestionOption,
+    DiscoveryQuestionSuggestion,
+    QuestionExposure,
+)
+from eneo.flows.ai_builder.question_catalog import (
+    QUESTION_CATALOG,
+    render_question,
+)
+
+
+def localized_text(language: DiscoveryLanguage, swedish: str, english: str) -> str:
+    return swedish if language == "sv" else english
+
+
+def _option(
+    *,
+    language: DiscoveryLanguage,
+    id: str,
+    swedish_label: str,
+    english_label: str,
+    swedish_description: str,
+    english_description: str,
+    value: str,
+) -> DiscoveryQuestionOption:
+    return DiscoveryQuestionOption(
+        id=id,
+        label=localized_text(language, swedish_label, english_label),
+        description=localized_text(language, swedish_description, english_description),
+        value=value,
+    )
+
+
+def _catalog_question(
+    slot_name: str,
+    *,
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    template = QUESTION_CATALOG[slot_name]
+    rendered = render_question(slot_name, language)
+    return DiscoveryQuestionSuggestion(
+        question_id=slot_name,
+        question=rendered.question,
+        options=tuple(
+            DiscoveryQuestionOption(
+                id=option.id,
+                label=option.label,
+                description=option.description,
+                value=option.value,
+                example=option.example,
+            )
+            for option in rendered.options
+        ),
+        exposure=template.exposure,
+        allow_custom=rendered.allow_custom,
+    )
+
+
+def processing_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return DiscoveryQuestionSuggestion(
+        question_id="processing_scope",
+        question=localized_text(
+            language,
+            "Hur ska flödet hantera underlaget per körning?",
+            "How should the flow handle the source material per run?",
+        ),
+        options=(
+            _option(
+                language=language,
+                id="single_case",
+                swedish_label="Ett paket åt gången",
+                english_label="One package at a time",
+                swedish_description="Varje körning behandlar ett huvudpaket, avtal eller materialpaket i taget.",
+                english_description="Each run processes one main package, contract, or source bundle at a time.",
+                value="single_case",
+            ),
+            _option(
+                language=language,
+                id="multiple_cases",
+                swedish_label="Flera paket i samma körning",
+                english_label="Multiple packages in one run",
+                swedish_description="En körning ska kunna hantera flera separata paket eller materialgrupper tillsammans.",
+                english_description="One run should handle several separate packages or source bundles together.",
+                value="multiple_cases",
+            ),
+        ),
+    )
+
+
+def primary_runtime_input_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("primary_runtime_input", language=language)
+
+
+def flow_input_architecture_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return DiscoveryQuestionSuggestion(
+        question_id="flow_input_architecture",
+        question=localized_text(
+            language,
+            "I en körning kan flödet antingen transkribera ljud eller läsa uppladdade dokument, inte båda. Vad ska det ta emot?",
+            "In one run the flow can either transcribe a recording or read uploaded documents, not both. Which should it accept?",
+        ),
+        options=(
+            _option(
+                language=language,
+                id="document_primary_input",
+                swedish_label="Dokumenten",
+                english_label="The documents",
+                swedish_description="Flödet läser de uppladdade dokumenten. Ljudet transkriberas då inte i flödet.",
+                english_description="The flow reads the uploaded documents. The recording is then not transcribed in the flow.",
+                value="document_primary_input",
+            ),
+            _option(
+                language=language,
+                id="audio_primary_input",
+                swedish_label="Ljudet",
+                english_label="The recording",
+                swedish_description="Flödet transkriberar ljudet. Dokumenten laddas då inte upp i samma körning.",
+                english_description="The flow transcribes the recording. The documents are then not uploaded in the same run.",
+                value="audio_primary_input",
+            ),
+        ),
+    )
+
+
+def document_material_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("document_material_scope", language=language)
+
+
+def report_disposition_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("report_disposition", language=language)
+
+
+def post_processing_goal_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("post_processing_goal", language=language)
+
+
+def structured_io_contract_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("structured_io_contract", language=language)
+
+
+def mapped_file_limit_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("mapped_file_limit", language=language)
+
+
+def comparison_scope_conflict_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    base = _catalog_question("comparison_scope", language=language)
+    return DiscoveryQuestionSuggestion(
+        question_id=base.question_id,
+        question=localized_text(
+            language,
+            "Du valde en fil per körning men vill också jämföra dokument. Vilken jämförelsearkitektur vill du ha?",
+            "You chose one file per run but also want document comparison. Which comparison architecture do you want?",
+        ),
+        options=base.options,
+        selection_mode=base.selection_mode,
+        allow_custom=base.allow_custom,
+        exposure=base.exposure,
+    )
+
+
+def comparison_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("comparison_scope", language=language)
+
+
+def terminal_output_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("terminal_output", language=language)
+
+
+def external_delivery_internal_output_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    base = terminal_output_question(language)
+    return DiscoveryQuestionSuggestion(
+        question_id=base.question_id,
+        question=localized_text(
+            language,
+            "AI Builder kan inte skapa ett utgående API-leveranssteg automatiskt ännu. Vilket internt resultat ska flödet skapa för vidare hantering?",
+            "AI Builder cannot automatically create an outbound API delivery step yet. What internal result should the flow create for downstream handling?",
+        ),
+        options=base.options,
+        selection_mode=base.selection_mode,
+        allow_custom=base.allow_custom,
+        exposure=base.exposure,
+    )
+
+
+def docx_output_mode_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("docx_output_mode", language=language)
+
+
+def output_reader_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+    return DiscoveryQuestionSuggestion(
+        question_id="output_reader",
+        question=localized_text(
+            language,
+            "Vem är den huvudsakliga läsaren av slutresultatet?",
+            "Who is the main reader of the final output?",
+        ),
+        options=(
+            _option(
+                language=language,
+                id="manager_politician_reader",
+                swedish_label="Chef eller politiker",
+                english_label="Manager or politician",
+                swedish_description="Använd en kort, tydlig och beslutsinriktad ton för ledning.",
+                english_description="Use a concise and decision-oriented style for leaders.",
+                value="manager_politician_reader",
+            ),
+            _option(
+                language=language,
+                id="specialist_reader",
+                swedish_label="Specialist eller analytiker",
+                english_label="Specialist or analyst",
+                swedish_description="Använd en mer detaljerad och arbetsinriktad analysstil.",
+                english_description="Use a more detailed working style for professional analysis.",
+                value="specialist_reader",
+            ),
+            _option(
+                language=language,
+                id="mixed_reader",
+                swedish_label="Blandad målgrupp",
+                english_label="Mixed audience",
+                swedish_description="Balansera läsbarhet och analytisk detalj för flera typer av läsare.",
+                english_description="Balance readability and analytical detail for different readers.",
+                value="mixed_reader",
+            ),
+        ),
+    )
+
+
+def final_output_scope_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return DiscoveryQuestionSuggestion(
+        question_id="final_output_scope",
+        question=localized_text(
+            language,
+            "Hur detaljerat ska slutresultatet vara?",
+            "How detailed should the final output be?",
+        ),
+        options=(
+            _option(
+                language=language,
+                id="summary_only",
+                swedish_label="Bara sammanfattning",
+                english_label="Summary only",
+                swedish_description="Håll slutresultatet kort och fokuserat på en överblick.",
+                english_description="Keep the final output short and focused on a concise overview.",
+                value="summary_only",
+            ),
+            _option(
+                language=language,
+                id="summary_and_assessment",
+                swedish_label="Sammanfattning + analys",
+                english_label="Summary + analysis",
+                swedish_description="Kombinera en sammanfattning med analys och slutsatser.",
+                english_description="Combine a summary with analysis and conclusions.",
+                value="summary_and_assessment",
+            ),
+            _option(
+                language=language,
+                id="summary_assessment_recommendation",
+                swedish_label="Sammanfattning + analys + rekommendation",
+                english_label="Summary + analysis + recommendation",
+                swedish_description="Inkludera också en rekommendation eller förslag på nästa steg.",
+                english_description="Include a recommendation or next-step proposal.",
+                value="summary_assessment_recommendation",
+            ),
+            _option(
+                language=language,
+                id="custom_sections",
+                swedish_label="Specifika sektioner",
+                english_label="Specific sections",
+                swedish_description="Slutresultatet ska följa egna sektioner som användaren väljer.",
+                english_description="The output should follow custom sections chosen by the user.",
+                value="custom_sections",
+            ),
+        ),
+    )
+
+
+def runtime_metadata_fields_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("runtime_metadata_fields", language=language)
+
+
+def final_pdf_type_question(language: DiscoveryLanguage) -> DiscoveryQuestionSuggestion:
+    return DiscoveryQuestionSuggestion(
+        question_id="final_pdf_type",
+        question=localized_text(
+            language,
+            "Vilken typ av slut-PDF vill du ha?",
+            "What kind of final PDF do you want?",
+        ),
+        options=(
+            _option(
+                language=language,
+                id="summary_pdf",
+                swedish_label="Kort sammanfattning med nyckelpunkter",
+                english_label="Short summary with key points",
+                swedish_description="En kompakt PDF med de viktigaste insikterna.",
+                english_description="A compact PDF with the most important insights.",
+                value="summary_pdf",
+            ),
+            _option(
+                language=language,
+                id="structured_report_pdf",
+                swedish_label="Strukturerad rapport",
+                english_label="Structured report",
+                swedish_description="En rapport med tydliga rubriker, slutsatser och rekommendationer.",
+                english_description="A report with clear sections, conclusions, and recommendations.",
+                value="structured_report_pdf",
+            ),
+            _option(
+                language=language,
+                id="fact_list_pdf",
+                swedish_label="Faktalista eller punktlista",
+                english_label="Fact list or bullet summary",
+                swedish_description="Främst extraherade fakta och detaljer utan längre analys.",
+                english_description="Mainly extracted facts and details without extended analysis.",
+                value="fact_list_pdf",
+            ),
+        ),
+    )
+
+
+def pdf_generation_mode_question(
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion:
+    return _catalog_question("pdf_generation_mode", language=language)
+
+
+def question_suggestion_for_id(
+    question_id: str,
+    *,
+    language: DiscoveryLanguage,
+) -> DiscoveryQuestionSuggestion | None:
+    builders: dict[str, Callable[[DiscoveryLanguage], DiscoveryQuestionSuggestion]] = {
+        "processing_scope": processing_scope_question,
+        "primary_runtime_input": primary_runtime_input_question,
+        "flow_input_architecture": flow_input_architecture_question,
+        "document_material_scope": document_material_scope_question,
+        "report_disposition": report_disposition_question,
+        "post_processing_goal": post_processing_goal_question,
+        "structured_io_contract": structured_io_contract_question,
+        "comparison_scope": comparison_scope_question,
+        "terminal_output": terminal_output_question,
+        "docx_output_mode": docx_output_mode_question,
+        "output_reader": output_reader_question,
+        "final_output_scope": final_output_scope_question,
+        "runtime_metadata_fields": runtime_metadata_fields_question,
+        "mapped_file_limit": mapped_file_limit_question,
+        "final_pdf_type": final_pdf_type_question,
+        "pdf_generation_mode": pdf_generation_mode_question,
+    }
+    builder = builders.get(canonical_question_id(question_id))
+    if builder is None:
+        return None
+    return builder(language)
+
+
+def question_exposure_for_id(question_id: str) -> QuestionExposure:
+    suggestion = question_suggestion_for_id(question_id, language="sv")
+    if suggestion is None:
+        return "user_requirement"
+    return suggestion.exposure

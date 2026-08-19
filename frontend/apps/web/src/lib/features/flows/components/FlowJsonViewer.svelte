@@ -116,7 +116,7 @@
 
 <pre
   aria-label={ariaLabel}
-  class="border-default bg-hover-dimmer mt-1 overflow-auto rounded-lg border p-3 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap tabular-nums {maxHeightClass} {className}"><code
+  class="border-default bg-hover-dimmer mt-1 overflow-auto rounded-lg border p-3 font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-words tabular-nums {maxHeightClass} {className}"><code
     >{#each tokens as token (token.offset)}<span class={tokenClass(token.kind)}>{token.text}</span
       >{/each}</code
   ></pre>

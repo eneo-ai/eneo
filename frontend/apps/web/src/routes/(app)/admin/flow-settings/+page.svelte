@@ -93,6 +93,19 @@
     max: initial.flowRuntimePolicy.hard_ceiling_seconds
   });
 
+  // --- AI Builder ---
+  const builderMaxAttachments = new NumberField({
+    initial: initial.aiBuilderBudgetSettings.max_attachments,
+    min: 1,
+    max: initial.aiBuilderBudgetSettings.max_attachments_hard_limit,
+    required: true
+  });
+  const builderMaxMessageChars = new NumberField({
+    initial: initial.aiBuilderBudgetSettings.max_message_chars,
+    min: 1,
+    max: initial.aiBuilderBudgetSettings.max_message_chars_hard_limit,
+    required: true
+  });
   const mappedCalls = new ToggleNumberField({
     initial: initial.mappedExecutionPolicy.max_provider_calls_per_mapped_step ?? null,
     min: 2,
@@ -135,6 +148,8 @@
     audioMaxFiles,
     defaultStepTimeout,
     maxStepTimeout,
+    builderMaxAttachments,
+    builderMaxMessageChars,
     mappedCalls,
     evidenceSources,
     evidencePassages,
@@ -239,6 +254,9 @@
     })
   );
 
+  const builderMessagePages = $derived(
+    Math.max(1, Math.round((builderMaxMessageChars.value ?? 0) / 2500))
+  );
   type Patches = {
     retention: boolean;
     rest: FlowAdminSettingsUpdates;
@@ -264,6 +282,14 @@
       mappedExecution.max_provider_calls_per_mapped_step = mappedCalls.value;
     }
 
+    const builderBudget: FlowAdminSettingsUpdates["builderBudget"] = {};
+    if (builderMaxAttachments.dirty) {
+      builderBudget.max_attachments = builderMaxAttachments.value ?? undefined;
+    }
+    if (builderMaxMessageChars.dirty) {
+      builderBudget.max_message_chars = builderMaxMessageChars.value ?? undefined;
+    }
+
     const ragEvidence: FlowAdminSettingsUpdates["ragEvidence"] = {};
     if (evidenceSources.dirty) {
       ragEvidence.max_sources_with_recorded_passages = evidenceSources.value;
@@ -284,6 +310,7 @@
         inputLimits: Object.keys(inputLimits).length ? inputLimits : null,
         runtimePolicy: Object.keys(runtimePolicy).length ? runtimePolicy : null,
         mappedExecution: Object.keys(mappedExecution).length ? mappedExecution : null,
+        builderBudget: Object.keys(builderBudget).length ? builderBudget : null,
         ragEvidence: Object.keys(ragEvidence).length ? ragEvidence : null
       }
     };
@@ -313,6 +340,10 @@
     if (updated.mappedExecution) {
       mappedCalls.commit(updated.mappedExecution.max_provider_calls_per_mapped_step ?? null);
       mappedCallsSource = updated.mappedExecution.max_provider_calls_source;
+    }
+    if (updated.builderBudget) {
+      builderMaxAttachments.commit(updated.builderBudget.max_attachments);
+      builderMaxMessageChars.commit(updated.builderBudget.max_message_chars);
     }
     if (updated.ragEvidence) {
       evidenceSources.commit(updated.ragEvidence.max_sources_with_recorded_passages);
@@ -382,7 +413,7 @@
     <Page.Tabbar>
       <Page.TabTrigger tab="retention">{m.flow_settings_tab_retention()}</Page.TabTrigger>
       <Page.TabTrigger tab="uploads">{m.flow_settings_tab_uploads()}</Page.TabTrigger>
-      <Page.TabTrigger tab="execution">{m.flow_settings_tab_execution()}</Page.TabTrigger>
+      <Page.TabTrigger tab="builder">{m.flow_settings_tab_builder()}</Page.TabTrigger>
       <Page.TabTrigger tab="evidence">{m.flow_settings_tab_evidence()}</Page.TabTrigger>
     </Page.Tabbar>
   </Page.Header>
@@ -553,8 +584,34 @@
       </Settings.Page>
     </Page.Tab>
 
-    <Page.Tab id="execution">
+    <Page.Tab id="builder">
       <Settings.Page density="compact">
+        <Settings.Group
+          title={m.ai_builder_limits_group()}
+          description={m.ai_builder_limits_group_description()}
+          density="compact"
+        >
+          <Settings.NumberRow
+            title={m.ai_builder_limits_max_attachments_title()}
+            description={m.ai_builder_limits_max_attachments_description()}
+            info={m.ai_builder_limits_max_attachments_info()}
+            hint={m.ai_builder_limits_ceiling_hint({
+              value: String(data.aiBuilderBudgetSettings.max_attachments_hard_limit)
+            })}
+            field={builderMaxAttachments}
+          />
+          <Settings.NumberRow
+            title={m.ai_builder_limits_max_message_chars_title()}
+            description={m.ai_builder_limits_max_message_chars_description()}
+            unit={m.flow_settings_unit_chars()}
+            hint={m.ai_builder_limits_message_hint({
+              ceiling: String(data.aiBuilderBudgetSettings.max_message_chars_hard_limit),
+              pages: builderMessagePages
+            })}
+            field={builderMaxMessageChars}
+          />
+        </Settings.Group>
+
         <Settings.Group
           title={m.flow_mapped_execution_group()}
           description={m.flow_mapped_execution_group_description()}

@@ -213,7 +213,7 @@ async def test_create_mode_resolves_template_intent_after_flow_creation() -> Non
         flow_service=service,
         space_id=space_id,
         flow_id=None,
-        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
         template_attachment_intent=TemplateAttachmentIntent(
             file_id=file_id,
             terminal_plan_step_ref="step_b",
@@ -260,7 +260,7 @@ async def test_create_mode_propagates_update_failure_without_cleanup() -> None:
             flow_service=service,
             space_id=uuid4(),
             flow_id=None,
-            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            binding_source=FlowResourceBindingSource.AI_BUILDER,
         )
 
     service.delete_flow.assert_not_awaited()
@@ -303,7 +303,7 @@ async def test_edit_mode_updates_assistants_before_flow_and_deletes_after_flow()
         space_id=uuid4(),
         flow_id=flow_id,
         expected_revision=7,
-        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
     service.update_flow_assistant.assert_awaited_once()
@@ -407,7 +407,7 @@ async def test_step_without_knowledge_clears_resource_lists() -> None:
         flow_service=service,
         space_id=uuid4(),
         flow_id=None,
-        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
     command = service.update_flow_assistant.await_args.kwargs["update"]
@@ -461,7 +461,7 @@ async def test_materializer_clears_completion_model_for_non_completion_create_ch
         flow_service=service,
         space_id=uuid4(),
         flow_id=None,
-        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
     command = service.update_flow_assistant.await_args.kwargs["update"]
@@ -509,7 +509,7 @@ async def test_materializer_clears_completion_model_for_non_completion_update_ch
         flow_service=service,
         space_id=uuid4(),
         flow_id=flow_id,
-        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
     )
 
     command = service.update_flow_assistant.await_args.kwargs["update"]
@@ -531,7 +531,7 @@ async def test_duplicate_slot_bindings_fail_before_mutation() -> None:
             space_id=uuid4(),
             flow_id=None,
             resource_bindings=(first, second),
-            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            binding_source=FlowResourceBindingSource.AI_BUILDER,
         )
 
     assert error.value.code == "duplicate_slot_binding"
@@ -561,7 +561,7 @@ async def test_unresolved_slot_binding_fails_before_mutation() -> None:
             flow_service=service,
             space_id=uuid4(),
             flow_id=None,
-            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            binding_source=FlowResourceBindingSource.AI_BUILDER,
         )
 
     assert error.value.code == "unresolved_slot_binding"
@@ -592,7 +592,7 @@ async def test_invalid_slot_ref_fails_before_mutation() -> None:
             flow_service=service,
             space_id=uuid4(),
             flow_id=None,
-            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+            binding_source=FlowResourceBindingSource.AI_BUILDER,
         )
 
     assert error.value.code == "invalid_model_ref"
@@ -624,7 +624,7 @@ async def test_progress_snapshots_are_bounded_shared_values() -> None:
         flow_service=service,
         space_id=uuid4(),
         flow_id=None,
-        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        binding_source=FlowResourceBindingSource.AI_BUILDER,
         progress_callback=snapshots.append,
     )
 

@@ -93,6 +93,17 @@ describe("settings flow policy endpoints", () => {
     expect(fetch.mock.calls[0][1].method).toBe("get");
   });
 
+  it("gets AI Builder budget settings from canonical settings route", async () => {
+    const fetch = vi.fn(async () => ({ minimum_conversation_budget_tokens: 4000 }));
+    const settings = initSettings({ fetch });
+
+    await settings.getAIBuilderBudgetSettings();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/settings/ai-builder-budget");
+    expect(fetch.mock.calls[0][1].method).toBe("get");
+  });
+
   it("gets flow document render limits from canonical settings route", async () => {
     const fetch = vi.fn(async () => ({ max_source_chars: 500000 }));
     const settings = initSettings({ fetch });

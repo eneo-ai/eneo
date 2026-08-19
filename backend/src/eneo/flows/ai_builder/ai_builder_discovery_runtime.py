@@ -1,0 +1,944 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Awaitable, Callable, Collection, Mapping
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
+
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    build_planner_action_policy,
+)
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
+    AI_BUILDER_MAX_ATTACHMENTS,
+    AIBuilderAttachmentContext,
+    attachment_file_roles,
+    render_ai_builder_attachment_evidence,
+)
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationMetadata,
+    SlotClassificationNamedResultEvidenceMetadata,
+    StructuredQuestionAnswerMetadata,
+    question_answer_from_metadata,
+    question_response_from_metadata,
+    slot_classification_from_metadata,
+    slot_classification_metadata_from_attempt,
+)
+from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
+from eneo.flows.ai_builder.ai_builder_discovery_models import (
+    DiscoveryAnalysis,
+)
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    ConversationMessage,
+)
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
+    aggregate_unprompted_user_text,
+    is_structured_answer_echo,
+    slot_names_blocked_by_explicit_uncertainty,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
+from eneo.flows.ai_builder.ai_builder_question_state import (
+    assistant_question_id,
+    last_answered_question,
+)
+from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    DeclaredSchemaCandidate,
+    ExampleOutputJsonSource,
+    SchemaDirectionSelection,
+    declared_candidate_evidence,
+    derive_freeform_schema_candidates,
+    merge_declared_schema_candidates,
+    resolve_example_output_schema_inference,
+    resolve_structured_schema_direction,
+)
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    resolve_ai_builder_budget_policy,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    ClassifiedNamedResultDelta,
+    ClassifiedSchemaDirection,
+    SlotClassificationAttempt,
+    SlotClassificationBias,
+    SlotClassificationInput,
+    SlotClassificationResult,
+    SlotClassificationSource,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    admit_slot_classification_input,
+    classify_slots,
+    slot_classification_prompt_hash,
+    slot_classification_provider_identity,
+)
+from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_PROVENANCE_MAX_ITEMS,
+    CheckpointProducerKind,
+    PlanningState,
+)
+from eneo.flows.ai_builder.planning_state_builder import (
+    apply_model_blocked_slots,
+    apply_policy_defaults_from_resolved_slots,
+    attested_slots_without_newer_evidence,
+    build_planning_state_from_conversation,
+    carry_forward_persisted_planner_state,
+    llm_resolvable_slot_values_for_state,
+    merge_llm_resolved_slots,
+    resolve_docx_mode_from_template_evidence,
+)
+from eneo.flows.domain.flow import Flow
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+
+if TYPE_CHECKING:
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
+
+# Parser-shape invariant, fixed pending item-10 platform benchmarks.
+_MAX_CLASSIFICATION_TRANSCRIPT_SOURCES = 120
+# Parser-shape invariant, fixed pending item-10 platform benchmarks.
+_MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS = 500
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDiscoveryContext:
+    planning_state: PlanningState
+    slot_classification_result: SlotClassificationResult | None = None
+    slot_classification_metadata: SlotClassificationMetadata | None = None
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
+    schema_direction_pending: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DiscoveryRuntimeResult:
+    discovery_analysis: DiscoveryAnalysis
+    planning_state: PlanningState
+    slot_classification_metadata: SlotClassificationMetadata | None = None
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
+    schema_direction_pending: bool = False
+
+
+def _apply_example_output_schema_inference(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> PlanningState:
+    constraints = state.example_output_constraints
+    if constraints is None:
+        if state.example_output_schema_inference is None and (
+            state.output_schema_evidence is None
+            or state.output_schema_evidence.source != "inferred_example"
+        ):
+            return state
+        state.replace_schema_resolution(
+            input_evidence=state.input_schema_evidence,
+            output_evidence=(
+                None
+                if state.output_schema_evidence is not None
+                and state.output_schema_evidence.source == "inferred_example"
+                else state.output_schema_evidence
+            ),
+            example_inference=None,
+        )
+        return state
+
+    evidence_by_file_id = (
+        {item.file_id: item for item in attachment_context.evidence}
+        if attachment_context is not None
+        else {}
+    )
+    sources: list[ExampleOutputJsonSource] = []
+    for file_id in constraints.source_file_ids:
+        attachment = evidence_by_file_id.get(file_id)
+        if attachment is None:
+            continue
+        normalized_mimetype = (
+            (attachment.mimetype or "").casefold().split(";", 1)[0].strip()
+        )
+        sources.append(
+            ExampleOutputJsonSource(
+                file_id=file_id,
+                is_json=(
+                    normalized_mimetype
+                    in {"application/json", "application/schema+json"}
+                    or attachment.filename.casefold().endswith(".json")
+                ),
+                content=attachment.excerpt,
+                content_complete=(
+                    attachment.coverage == "fully_seen"
+                    and attachment.excerpt is not None
+                ),
+            )
+        )
+    resolution = resolve_example_output_schema_inference(
+        sources=tuple(sources),
+        authoritative_evidence=state.output_schema_evidence,
+    )
+    state.replace_schema_resolution(
+        input_evidence=state.input_schema_evidence,
+        output_evidence=resolution.evidence,
+        example_inference=resolution.outcome,
+    )
+    return state
+
+
+def _targeted_classification_bias(
+    conversation: list[ConversationMessage],
+    allowed_slot_values: Mapping[str, Collection[str]],
+    classification_input: SlotClassificationInput,
+) -> SlotClassificationBias | None:
+    """Bias classification toward the slot the user just answered, when unresolved.
+
+    Only fires when the user replied with free text to the last asked question
+    and that slot is still being classified, so a previous aggregate result is
+    not reused for a targeted reply.
+    """
+    answered = last_answered_question(conversation)
+    if answered is None:
+        return None
+    asked_question_id, latest_answer = answered
+    target_slot = asked_question_id
+    if target_slot not in allowed_slot_values:
+        return None
+    answer_message_id = next(
+        (
+            message.message_id
+            for message in reversed(conversation)
+            if message.role == "user"
+            and isinstance(message.content, str)
+            and message.content.strip() == latest_answer
+        ),
+        None,
+    )
+    if answer_message_id is None:
+        return None
+    answer_source = next(
+        (
+            source
+            for source in reversed(classification_input.sources)
+            if source.message_id == answer_message_id
+            and (
+                (
+                    source.kind == "structured_answer"
+                    and source.question_id == asked_question_id
+                )
+                or source.kind == "user_message"
+            )
+        ),
+        None,
+    )
+    if answer_source is None:
+        return None
+    return SlotClassificationBias(
+        target_slot_name=target_slot,
+        asked_question_id=asked_question_id,
+        answer_source_id=answer_source.source_id,
+    )
+
+
+def build_slot_classification_input(
+    conversation: list[ConversationMessage],
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> SlotClassificationInput:
+    if (
+        attachment_context is not None
+        and len(attachment_context.evidence) > AI_BUILDER_MAX_ATTACHMENTS
+    ):
+        raise AIBuilderBadRequestException(
+            AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
+            code=AIBuilderErrorCode.BAD_REQUEST,
+        )
+
+    current_user_message_id = next(
+        (
+            message.message_id
+            for message in reversed(conversation)
+            if message.role == "user"
+        ),
+        None,
+    )
+    transcript_sources: list[SlotClassificationSource] = []
+    pending_question_id: str | None = None
+    for message in conversation:
+        question_id = assistant_question_id(message)
+        if question_id is not None:
+            pending_question_id = question_id
+            continue
+        if message.role != "user":
+            continue
+        answer = question_answer_from_metadata(message.metadata)
+        response = question_response_from_metadata(message.metadata)
+        response_question_id = response.question_id if response is not None else None
+        if isinstance(message.content, str) and message.content.strip():
+            if answer is None or not is_structured_answer_echo(message.content, answer):
+                transcript_sources.append(
+                    SlotClassificationSource(
+                        source_id=f"user_message:{message.message_id}",
+                        kind="user_message",
+                        text=message.content.strip(),
+                        message_id=message.message_id,
+                        question_id=response_question_id or pending_question_id,
+                    )
+                )
+        if answer is None or answer.question_id is None:
+            pending_question_id = None
+            continue
+        for index, selected_value in enumerate(_structured_answer_values(answer)):
+            transcript_sources.append(
+                SlotClassificationSource(
+                    source_id=f"structured_answer:{message.message_id}:{index}",
+                    kind="structured_answer",
+                    text=selected_value,
+                    message_id=message.message_id,
+                    question_id=answer.question_id,
+                    selected_value=selected_value,
+                )
+            )
+        pending_question_id = None
+
+    sources = list(_bound_classification_transcript(transcript_sources))
+    if attachment_context is not None:
+        for item in sorted(
+            attachment_context.evidence,
+            key=lambda candidate: str(candidate.file_id),
+        ):
+            sources.append(
+                SlotClassificationSource(
+                    source_id=f"uploaded_file:{item.file_id}",
+                    kind="uploaded_file",
+                    text=render_ai_builder_attachment_evidence(item),
+                    file_id=item.file_id,
+                    coverage=item.coverage,
+                    truncated=item.coverage != "fully_seen",
+                )
+            )
+    return SlotClassificationInput(
+        sources=tuple(sources),
+        current_user_message_id=current_user_message_id,
+    )
+
+
+def _bound_classification_transcript(
+    sources: list[SlotClassificationSource],
+) -> tuple[SlotClassificationSource, ...]:
+    if not sources:
+        return ()
+    bounded_sources = [
+        replace(
+            source,
+            text=source.text[:_MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS],
+            selected_value=source.text[:_MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS],
+            truncated=len(source.text) > _MAX_CLASSIFICATION_STRUCTURED_VALUE_CHARS,
+        )
+        if source.kind == "structured_answer"
+        else source
+        for source in sources
+    ]
+    return tuple(bounded_sources[-_MAX_CLASSIFICATION_TRANSCRIPT_SOURCES:])
+
+
+def _structured_answer_values(
+    answer: StructuredQuestionAnswerMetadata,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    raw_values: list[str | int | float | bool | None] = []
+    if answer.selected_values is not None:
+        raw_values.extend(answer.selected_values)
+    raw_values.extend(
+        [
+            answer.selected_value,
+            answer.answer,
+            answer.custom_value,
+        ]
+    )
+    for item in raw_values:
+        if item is None:
+            continue
+        value = item.strip() if isinstance(item, str) else json.dumps(item)
+        if value and value not in values:
+            values.append(value)
+    if not values:
+        option_ids = [*(answer.selected_option_ids or [])]
+        if answer.selected_option_id is not None:
+            option_ids.append(answer.selected_option_id)
+        values.extend(value for value in option_ids if value)
+    return tuple(values)
+
+
+def _current_schema_candidates(
+    conversation: list[ConversationMessage],
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> tuple[DeclaredSchemaCandidate, ...]:
+    return merge_declared_schema_candidates(
+        derive_freeform_schema_candidates(conversation),
+        (
+            attachment_context.schema_discovery.candidates
+            if attachment_context is not None
+            else ()
+        ),
+    )
+
+
+def _latest_classified_schema_direction(
+    conversation: list[ConversationMessage],
+    *,
+    candidates: tuple[DeclaredSchemaCandidate, ...],
+) -> ClassifiedSchemaDirection | None:
+    current_fingerprints = tuple(
+        sorted(candidate.fingerprint for candidate in candidates)
+    )
+    for message in reversed(conversation):
+        metadata = slot_classification_from_metadata(message.metadata)
+        if metadata is None or metadata.schema_direction is None:
+            continue
+        direction = metadata.schema_direction.to_classified_schema_direction()
+        if (
+            direction.candidate_fingerprints != current_fingerprints
+            or direction.confidence == "low"
+        ):
+            return None
+        return direction
+    return None
+
+
+def _apply_schema_direction(
+    state: PlanningState,
+    *,
+    candidates: tuple[DeclaredSchemaCandidate, ...],
+    direction: ClassifiedSchemaDirection | SchemaDirectionSelection,
+) -> None:
+    candidates_by_fingerprint = {
+        candidate.fingerprint: candidate for candidate in candidates
+    }
+    input_candidate = (
+        candidates_by_fingerprint.get(direction.input_fingerprint)
+        if direction.input_fingerprint is not None
+        else None
+    )
+    output_candidate = (
+        candidates_by_fingerprint.get(direction.output_fingerprint)
+        if direction.output_fingerprint is not None
+        else None
+    )
+    if direction.candidate_fingerprints != tuple(sorted(candidates_by_fingerprint)):
+        return
+    assignment_evidence = (
+        tuple(item.planning_reference() for item in direction.evidence)
+        if isinstance(direction, ClassifiedSchemaDirection)
+        else direction.evidence
+    )
+    state.replace_schema_resolution(
+        input_evidence=(
+            declared_candidate_evidence(
+                input_candidate,
+                confidence=direction.confidence,
+                assignment_evidence=assignment_evidence,
+            )
+            if input_candidate is not None
+            else None
+        ),
+        output_evidence=(
+            declared_candidate_evidence(
+                output_candidate,
+                confidence=direction.confidence,
+                assignment_evidence=assignment_evidence,
+            )
+            if output_candidate is not None
+            else None
+        ),
+        example_inference=None,
+    )
+
+
+def _apply_attachment_output_evidence(
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> PlanningState:
+    attachment_output_evidence = (
+        attachment_context.output_schema_evidence
+        if attachment_context is not None
+        else None
+    )
+    if state.output_schema_evidence is None and attachment_output_evidence is not None:
+        state.replace_schema_resolution(
+            input_evidence=state.input_schema_evidence,
+            output_evidence=attachment_output_evidence,
+            example_inference=None,
+        )
+    return _apply_example_output_schema_inference(state, attachment_context)
+
+
+def _complete_runtime_discovery_context(
+    state: PlanningState,
+    *,
+    attachment_context: AIBuilderAttachmentContext | None,
+    schema_candidates: tuple[DeclaredSchemaCandidate, ...],
+    schema_direction_pending: bool,
+    slot_classification_result: SlotClassificationResult | None = None,
+    slot_classification_metadata: SlotClassificationMetadata | None = None,
+) -> RuntimeDiscoveryContext:
+    if not schema_direction_pending:
+        state = _apply_attachment_output_evidence(state, attachment_context)
+    return RuntimeDiscoveryContext(
+        planning_state=state,
+        slot_classification_result=slot_classification_result,
+        slot_classification_metadata=slot_classification_metadata,
+        schema_candidates=schema_candidates,
+        schema_direction_pending=schema_direction_pending,
+    )
+
+
+async def build_runtime_discovery_context(
+    conversation: list[ConversationMessage],
+    *,
+    flow: Flow | None = None,
+    litellm_client: Any | None = None,
+    completion_model_route: ResolvedCompletionModelRoute | None = None,
+    ui_language: str | None = None,
+    tenant_id: UUID,
+    allow_classification: bool = True,
+    attachment_context: AIBuilderAttachmentContext | None = None,
+    usage_tracker: ProposalTurnTelemetry | None = None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
+    prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy | None = None,
+) -> RuntimeDiscoveryContext:
+    budget_policy = budget_policy or resolve_ai_builder_budget_policy(None)
+    schema_candidates = (
+        prepared_schema_candidates
+        if prepared_schema_candidates is not None
+        else _current_schema_candidates(conversation, attachment_context)
+    )
+    state = build_planning_state_from_conversation(
+        conversation,
+        flow=flow,
+        attachment_file_roles=attachment_file_roles(attachment_context),
+        mapped_execution_policy=mapped_execution_policy,
+    )
+    structured_direction = resolve_structured_schema_direction(
+        conversation=conversation,
+        candidates=schema_candidates,
+    )
+    existing_direction = _latest_classified_schema_direction(
+        conversation,
+        candidates=schema_candidates,
+    )
+    accepted_direction = structured_direction or existing_direction
+    if accepted_direction is not None:
+        _apply_schema_direction(
+            state,
+            candidates=schema_candidates,
+            direction=accepted_direction,
+        )
+    schema_direction_pending = bool(schema_candidates) and accepted_direction is None
+    if (
+        not allow_classification
+        or litellm_client is None
+        or completion_model_route is None
+    ):
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+        )
+
+    text = aggregate_unprompted_user_text(conversation)
+    classification_input = build_slot_classification_input(
+        conversation,
+        attachment_context,
+    )
+    if not classification_input.sources:
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+        )
+    current_user_message_id = classification_input.current_user_message_id
+    current_turn_has_semantic_text = any(
+        source.kind == "user_message" and source.message_id == current_user_message_id
+        for source in classification_input.sources
+    )
+    # User text may correct model-derived slots; structured controls and their
+    # localized labels are already authoritative server-known evidence.
+    if not current_turn_has_semantic_text:
+        action_policy = build_planner_action_policy(
+            session_state=state,
+            selected_discovery_question_ids=(),
+            is_edit_mode=flow is not None,
+        )
+        if action_policy.allowed_action_kinds == ("refuse_architecture_commit",):
+            return _complete_runtime_discovery_context(
+                state,
+                attachment_context=attachment_context,
+                schema_candidates=schema_candidates,
+                schema_direction_pending=schema_direction_pending,
+            )
+
+    allowed_values = llm_resolvable_slot_values_for_state(state)
+    model_blocked_slots = slot_names_blocked_by_explicit_uncertainty(
+        conversation,
+        flow=flow,
+    )
+    apply_model_blocked_slots(state, model_blocked_slots=model_blocked_slots)
+    if model_blocked_slots:
+        allowed_values = {
+            slot_name: values
+            for slot_name, values in allowed_values.items()
+            if slot_name not in model_blocked_slots
+        }
+    named_result_evidence_relevant = _named_result_classification_is_relevant(state)
+    checkpoint_updates_relevant = any(
+        source.kind in {"user_message", "structured_answer"}
+        and source.message_id == classification_input.current_user_message_id
+        for source in classification_input.sources
+    )
+    provider = slot_classification_provider_identity(
+        provider_type=completion_model_route.provider_type,
+        litellm_kwargs=completion_model_route.litellm_kwargs,
+    )
+    if (
+        not allowed_values
+        and not schema_direction_pending
+        and not named_result_evidence_relevant
+        and not checkpoint_updates_relevant
+    ):
+        skipped_attempt = SlotClassificationAttempt(
+            outcome="skipped_no_resolvable_slots"
+        )
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=False,
+            slot_classification_metadata=slot_classification_metadata_from_attempt(
+                skipped_attempt,
+                prompt_hash=None,
+                classification_input=classification_input,
+                model=completion_model_route.litellm_model,
+                provider=provider,
+            ),
+        )
+    bias = _targeted_classification_bias(
+        conversation,
+        allowed_values,
+        classification_input,
+    )
+    # A removal names a producer, so the reading needs the checkpoints the flow
+    # actually has; without them "drop the review" can only guess.
+    active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = tuple(
+        intent.producer_kind
+        for intent in state.checkpoint_intents
+        if intent.operation == "set"
+    )
+    classification_input = admit_slot_classification_input(
+        classification_input=classification_input,
+        attachment_context=attachment_context,
+        allowed_slot_values=allowed_values,
+        schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        active_checkpoint_producers=active_checkpoint_producers,
+        ui_language=ui_language,
+        bias=bias,
+        litellm_model=completion_model_route.litellm_model,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        budget_policy=budget_policy,
+    )
+    prior_named_result_classification = _latest_matching_named_result_classification(
+        conversation,
+        state=state,
+    )
+    prompt_hash = slot_classification_prompt_hash(
+        classification_input=classification_input,
+        ui_language=ui_language,
+        allowed_slot_values=allowed_values,
+        schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        active_checkpoint_producers=active_checkpoint_producers,
+        litellm_model=completion_model_route.litellm_model,
+        provider=provider,
+        supported_model_kwargs=completion_model_route.supported_model_kwargs,
+        bias=bias,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
+    )
+    attempt = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=completion_model_route,
+        classification_input=classification_input,
+        allowed_slot_values=allowed_values,
+        schema_candidates=(schema_candidates if schema_direction_pending else ()),
+        active_checkpoint_producers=active_checkpoint_producers,
+        tenant_id=tenant_id,
+        ui_language=ui_language,
+        bias=bias,
+        usage_tracker=usage_tracker,
+        before_provider_call=before_provider_call,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        budget_policy=budget_policy,
+    )
+    if attempt.outcome != "resolved":
+        return _complete_runtime_discovery_context(
+            state,
+            attachment_context=attachment_context,
+            schema_candidates=schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+            slot_classification_metadata=slot_classification_metadata_from_attempt(
+                attempt,
+                prompt_hash=prompt_hash,
+                classification_input=classification_input,
+                model=completion_model_route.litellm_model,
+                provider=provider,
+            ),
+        )
+
+    result = attempt.result
+    assert result is not None
+    # This classification happens after every message in the conversation,
+    # including a confirmation carried by the current one, so acceptance
+    # protects the slots it cites nothing newer than the confirmation for.
+    cited_message_ids_by_source = {
+        source.source_id: source.message_id for source in classification_input.sources
+    }
+    settled_by_acceptance = attested_slots_without_newer_evidence(
+        result,
+        conversation=conversation,
+        cited_message_ids_by_source=cited_message_ids_by_source,
+        classified_at_index=len(conversation),
+    )
+    candidate_state = state.model_copy(deep=True)
+    merge_llm_resolved_slots(
+        candidate_state,
+        result,
+        prompt_hash=prompt_hash,
+        freeform_text=text,
+        model_blocked_slots=model_blocked_slots,
+        settled_by_acceptance=settled_by_acceptance,
+    )
+    if (
+        not _named_result_classification_is_relevant(candidate_state)
+        and result.named_result_evidence is not None
+    ):
+        result = replace(result, named_result_evidence=None)
+    named_result_evidence_snapshot = _materialized_named_result_snapshot(
+        candidate_state,
+        classified_evidence=result.named_result_evidence,
+        prior_classification=prior_named_result_classification,
+    )
+    if (
+        result.named_result_evidence is not None
+        and named_result_evidence_snapshot is None
+    ):
+        result = replace(result, named_result_evidence=None)
+    admitted_metadata = slot_classification_metadata_from_attempt(
+        replace(attempt, result=result),
+        prompt_hash=prompt_hash,
+        classification_input=classification_input,
+        model=completion_model_route.litellm_model,
+        provider=provider,
+        retained_source_inventory=(
+            prior_named_result_classification.source_inventory
+            if prior_named_result_classification is not None
+            and named_result_evidence_snapshot is not None
+            and named_result_evidence_snapshot.operation == "replace"
+            else ()
+        ),
+        named_result_evidence_snapshot=named_result_evidence_snapshot,
+    )
+    admitted_result = replace(
+        admitted_metadata.to_result(),
+        named_result_evidence=result.named_result_evidence,
+    )
+    merge_llm_resolved_slots(
+        state,
+        admitted_result,
+        prompt_hash=prompt_hash,
+        freeform_text=text,
+        model_blocked_slots=model_blocked_slots,
+        settled_by_acceptance=settled_by_acceptance,
+    )
+    classified_direction = admitted_result.schema_direction
+    if (
+        schema_direction_pending
+        and classified_direction is not None
+        and classified_direction.confidence != "low"
+    ):
+        _apply_schema_direction(
+            state,
+            candidates=schema_candidates,
+            direction=classified_direction,
+        )
+        schema_direction_pending = False
+    # Classification can name the terminal output, the template role, or both in
+    # this same turn, so the template evidence is only complete now — before
+    # defaults fill a mode the attachment already answers.
+    resolve_docx_mode_from_template_evidence(state)
+    apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
+    return _complete_runtime_discovery_context(
+        state,
+        attachment_context=attachment_context,
+        schema_candidates=schema_candidates,
+        schema_direction_pending=schema_direction_pending,
+        slot_classification_result=admitted_result,
+        slot_classification_metadata=admitted_metadata,
+    )
+
+
+def _named_result_classification_is_relevant(state: PlanningState) -> bool:
+    return state.resolved_slots.get("terminal_output") is not None
+
+
+def _current_named_result_names(
+    state: PlanningState,
+) -> tuple[str, ...]:
+    if not _named_result_classification_is_relevant(state):
+        return ()
+    return state.named_result_obligations
+
+
+def _latest_matching_named_result_classification(
+    conversation: list[ConversationMessage],
+    *,
+    state: PlanningState,
+) -> SlotClassificationMetadata | None:
+    current_names = _current_named_result_names(state)
+    if not current_names:
+        return None
+    for message in reversed(conversation):
+        classification = slot_classification_from_metadata(message.metadata)
+        fields = (
+            classification.named_result_evidence if classification is not None else None
+        )
+        if (
+            fields is not None
+            and fields.operation == "replace"
+            and fields.confidence != "low"
+            and tuple(item.name for item in fields.named_results) == current_names
+        ):
+            return classification
+    return None
+
+
+def _materialized_named_result_snapshot(
+    state: PlanningState,
+    *,
+    classified_evidence: ClassifiedNamedResultDelta | None,
+    prior_classification: SlotClassificationMetadata | None,
+) -> SlotClassificationNamedResultEvidenceMetadata | None:
+    if classified_evidence is None or classified_evidence.confidence == "low":
+        return None
+    if classified_evidence.operation == "clear":
+        return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+            operation="clear",
+            named_results=(),
+            confidence=classified_evidence.confidence,
+            reason=classified_evidence.reason,
+            evidence=classified_evidence.evidence,
+        )
+    prior_evidence = (
+        tuple(
+            item.to_classified_evidence()
+            for item in prior_classification.named_result_evidence.evidence
+        )
+        if prior_classification is not None
+        and prior_classification.named_result_evidence is not None
+        else ()
+    )
+    named_results = state.named_result_evidence
+    if not named_results:
+        return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+            operation="clear",
+            named_results=(),
+            confidence=classified_evidence.confidence,
+            reason=classified_evidence.reason,
+            evidence=classified_evidence.evidence,
+        )
+    surviving_references = {
+        reference for item in named_results for reference in item.evidence
+    }
+    evidence = [
+        item
+        for item in dict.fromkeys((*prior_evidence, *classified_evidence.evidence))
+        if item.planning_reference() in surviving_references
+    ]
+    retained_references = {item.planning_reference() for item in evidence}
+    for item in classified_evidence.evidence:
+        reference = item.planning_reference()
+        if reference in retained_references:
+            continue
+        if len(evidence) >= NAMED_RESULT_PROVENANCE_MAX_ITEMS:
+            break
+        evidence.append(item)
+        retained_references.add(reference)
+    return SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+        operation="replace",
+        named_results=named_results,
+        confidence=classified_evidence.confidence,
+        reason=classified_evidence.reason,
+        evidence=evidence,
+    )
+
+
+async def build_discovery_runtime_result(
+    conversation: list[ConversationMessage],
+    *,
+    flow: Flow | None = None,
+    litellm_client: Any | None = None,
+    completion_model_route: ResolvedCompletionModelRoute | None = None,
+    ui_language: str | None = None,
+    allow_classification: bool = True,
+    tenant_id: UUID,
+    attachment_context: AIBuilderAttachmentContext | None = None,
+    usage_tracker: ProposalTurnTelemetry | None = None,
+    before_provider_call: Callable[[], Awaitable[None]] | None = None,
+    mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
+    prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
+    persisted_planning_state: PlanningState | None = None,
+    attached_file_ids: Collection[UUID] = frozenset(),
+    max_input_tokens: int,
+    max_output_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy | None = None,
+) -> DiscoveryRuntimeResult:
+    context = await build_runtime_discovery_context(
+        conversation,
+        flow=flow,
+        litellm_client=litellm_client,
+        completion_model_route=completion_model_route,
+        ui_language=ui_language,
+        tenant_id=tenant_id,
+        allow_classification=allow_classification,
+        attachment_context=attachment_context,
+        usage_tracker=usage_tracker,
+        before_provider_call=before_provider_call,
+        mapped_execution_policy=mapped_execution_policy,
+        prepared_schema_candidates=prepared_schema_candidates,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        budget_policy=budget_policy,
+    )
+    carry_forward_persisted_planner_state(
+        context.planning_state,
+        persisted_planning_state,
+        attached_file_ids=attached_file_ids,
+    )
+    analysis = analyze_discovery(
+        conversation,
+        flow=flow,
+        planning_state=context.planning_state,
+        slot_classification_result=context.slot_classification_result,
+    )
+    return DiscoveryRuntimeResult(
+        discovery_analysis=analysis,
+        planning_state=context.planning_state,
+        slot_classification_metadata=context.slot_classification_metadata,
+        schema_candidates=context.schema_candidates,
+        schema_direction_pending=context.schema_direction_pending,
+    )

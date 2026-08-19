@@ -2298,9 +2298,9 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
         definition_checksum="checksum",
         definition_json={
             "metadata_json": {
-                "authoring_extension": {
+                "ai_builder": {
                     "origin": {
-                        "source_id": "source-123",
+                        "builder_session_id": "builder-session-123",
                     }
                 }
             },
@@ -2366,13 +2366,13 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
         export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v3"
     )
     assert (
-        export["bundle"]["definition_snapshot"]["metadata_json"]["authoring_extension"][
+        export["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"][
             "origin"
-        ]["source_id"]
-        == "source-123"
+        ]["builder_session_id"]
+        == "builder-session-123"
     )
     assert (
-        "bundle.definition_snapshot.metadata_json.authoring_extension.origin.source_id"
+        "bundle.definition_snapshot.metadata_json.ai_builder.origin.builder_session_id"
         not in export["redaction"]["masked_paths"]
     )
 

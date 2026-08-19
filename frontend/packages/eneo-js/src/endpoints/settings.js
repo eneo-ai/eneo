@@ -272,6 +272,32 @@ export function initSettings(client) {
     },
 
     /**
+     * Get AI Builder budget settings for the current tenant.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').AIBuilderBudgetSettings>}
+     */
+    getAIBuilderBudgetSettings: async () => {
+      const res = await client.fetch("/api/v1/settings/ai-builder-budget", {
+        method: "get"
+      });
+      return res;
+    },
+
+    /**
+     * Update AI Builder budget settings for the current tenant.
+     * @param {import('../types/resources').AIBuilderBudgetSettingsUpdate} patch
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').AIBuilderBudgetSettings>}
+     */
+    updateAIBuilderBudgetSettings: async (patch) => {
+      const res = await client.fetch("/api/v1/settings/ai-builder-budget", {
+        method: "patch",
+        requestBody: { "application/json": patch }
+      });
+      return res;
+    },
+
+    /**
      * Get the active execution block for an organisation Skill.
      * @param {{skillId: string}} params
      * @throws {EneoError}

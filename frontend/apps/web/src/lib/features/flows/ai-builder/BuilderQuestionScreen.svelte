@@ -1,0 +1,131 @@
+<script lang="ts">
+  import { m } from "$lib/paraglide/messages";
+  import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
+  import type { ChatMessage } from "./protocol";
+  import type { StructuredQuestionAnswerPayload } from "./structuredQuestionAnswer";
+
+  interface AnsweredQuestion {
+    questionId: string;
+    question: string;
+    answerLabel: string;
+    /** What the answer settled, e.g. "Indata vid körning" — from the decision
+     *  the server links to this question. */
+    topic?: string | null;
+    /** Eneo settled this one after the user handed it back. */
+    delegated?: boolean;
+  }
+
+  interface Props {
+    /** The message carrying the question to answer now (pending, or one being changed). */
+    questionMessage: ChatMessage;
+    /** The server's own ordinal; null for a record from before it existed. */
+    questionNumber: number | null;
+    /** Fields already answered for this question, so a re-ask edits them. */
+    answeredFields?: import("./structuredQuestionAnswer").StructuredInputFieldAnswer[] | null;
+    answered: AnsweredQuestion[];
+    /** The question being re-answered, if any; the card then shows that one. */
+    editingQuestionId?: string | null;
+    disabled?: boolean;
+    onanswer: (payload: StructuredQuestionAnswerPayload) => void;
+    /** Hand this question back to Eneo; only offered with a recommendation. */
+    ondelegate?: (questionId: string) => void;
+    isEdit?: boolean;
+    onedit: (questionId: string) => void;
+    oncanceledit?: () => void;
+  }
+
+  let {
+    questionMessage,
+    questionNumber,
+    answeredFields = null,
+    answered,
+    editingQuestionId = null,
+    disabled = false,
+    onanswer,
+    ondelegate,
+    isEdit = false,
+    onedit,
+    oncanceledit
+  }: Props = $props();
+
+  const question = $derived(questionMessage.question!);
+  const why = $derived(questionMessage.content.trim() || null);
+</script>
+
+<div
+  class="flex min-h-full shrink-0 justify-center px-7 pt-6 pb-12 max-lg:px-5 max-md:px-4 max-sm:pt-4 max-sm:pb-0"
+>
+  <div class="my-auto flex w-full max-w-[41.25rem] flex-col 2xl:max-w-[45.625rem]">
+    {#if answered.length > 0}
+      <!-- On a phone the answered chips stay on one line and scroll sideways;
+           wrapping them would push the question itself below the fold. -->
+      <div
+        class="mb-4 flex flex-wrap items-center gap-2 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:pb-1"
+      >
+        <span class="text-secondary shrink-0 text-xs">{m.ai_builder_question_answers_label()}</span>
+        {#each answered as item (item.questionId)}
+          <button
+            type="button"
+            class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem] max-sm:h-[44px] max-sm:max-w-[70vw] max-sm:px-3.5"
+            class:opacity-60={editingQuestionId === item.questionId}
+            title={item.question}
+            aria-label={m.ai_builder_question_chip_aria({
+              question: item.question,
+              answer: item.answerLabel
+            })}
+            onclick={() => onedit(item.questionId)}
+            {disabled}
+          >
+            {#if item.topic}
+              <span class="text-secondary shrink-0">{item.topic}</span>
+            {/if}
+            <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
+            {#if item.delegated}
+              <span class="text-secondary shrink-0 text-[0.6875rem]">
+                {m.ai_builder_question_delegated_badge()}
+              </span>
+            {/if}
+            <span class="text-accent-stronger shrink-0 font-semibold"
+              >{m.ai_builder_question_change()}</span
+            >
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    {#if editingQuestionId}
+      <p class="text-secondary mb-2 flex items-center gap-2 text-xs">
+        {m.ai_builder_question_editing_note()}
+        <button
+          type="button"
+          class="text-accent-stronger font-semibold hover:underline"
+          onclick={() => oncanceledit?.()}
+        >
+          {m.cancel()}
+        </button>
+      </p>
+    {/if}
+
+    <!-- The card comes last on a phone so its pinned action bar ends flush with
+         the bottom of the screen; the reassurance moves above it. -->
+    <div class="max-sm:order-last">
+      {#key question.question_id}
+        <FlowAIBuilderQuestion
+          {question}
+          {questionNumber}
+          {answeredFields}
+          plannedRemaining={questionMessage.question?.questions_planned_remaining ?? null}
+          {why}
+          {disabled}
+          {onanswer}
+          {isEdit}
+          ondelegate={editingQuestionId ? undefined : () => ondelegate?.(question.question_id)}
+        />
+      {/key}
+    </div>
+
+    <p class="text-secondary mt-3.5 px-0.5 text-[0.8125rem] text-pretty max-sm:mt-0 max-sm:mb-3.5">
+      {m.ai_builder_question_footnote()}
+    </p>
+  </div>
+</div>

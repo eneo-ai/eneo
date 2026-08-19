@@ -22,6 +22,6 @@
   {...restProps}
 >
   {#if withHandle}
-    <div class="bg-border z-10 flex h-6 w-1 shrink-0 rounded-lg"></div>
+    <div class="bg-border h-6 w-1 rounded-lg z-10 flex shrink-0"></div>
   {/if}
 </ResizablePrimitive.PaneResizer>

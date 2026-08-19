@@ -8,7 +8,7 @@ without a domain-model ceremony that would outgrow its first use.
 Why a convention rather than an object graph:
 
 - The primary consumer is the log query. ``rg '"event":
-  "flows.failure"'`` and ``rg '"failure_fingerprint": "abc12345"'``
+  "ai_builder.failure"'`` and ``rg '"failure_fingerprint": "abc12345"'``
   need to work without tooling.
 - The secondary consumer is an AI agent or human operator running
   replay / repro flows. Stable field names are the interface contract;
@@ -19,12 +19,12 @@ Why a convention rather than an object graph:
 
 Required fields on every failure event:
 
-- ``event`` — canonical namespaced string, e.g. ``flows.failure``.
+- ``event`` — canonical namespaced string, e.g. ``ai_builder.failure``.
   Shared across a component so one query surfaces every terminal
   failure for that component.
 - ``schema_version`` — integer bumped on breaking additions so log
   queries can gate on schema shape.
-- ``component`` — coarse source label (``flows``,
+- ``component`` — coarse source label (``ai_builder``, ``flows``,
   ``assistants``).
 - ``operation`` — specific operation that failed (``planner_turn``,
   ``flow_dispatch``, ``attachment_upload``).

@@ -191,7 +191,7 @@
       </div>
 
       <div
-        class="prose prose-neutral max-h-[min(65vh,42rem)] [scrollbar-gutter:stable_both-edges] overflow-y-auto px-6 pt-4 pr-10 pb-6 text-base"
+        class="prose prose-neutral max-h-[min(65vh,42rem)] overflow-y-auto px-6 pt-4 pr-10 pb-6 text-base [scrollbar-gutter:stable_both-edges]"
         aria-live="polite"
       >
         {#if loadingAnswer && message.answer.length === 0}

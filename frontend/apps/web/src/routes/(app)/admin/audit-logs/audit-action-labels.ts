@@ -525,6 +525,30 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_review_checkpoint_expired,
     description: m.audit_action_flow_run_review_checkpoint_expired_description
   },
+  ai_builder_session_created: {
+    name: m.audit_action_ai_builder_session_created,
+    description: m.audit_action_ai_builder_session_created_description
+  },
+  ai_builder_plan_approved: {
+    name: m.audit_action_ai_builder_plan_approved,
+    description: m.audit_action_ai_builder_plan_approved_description
+  },
+  ai_builder_plan_revised: {
+    name: m.audit_action_ai_builder_plan_revised,
+    description: m.audit_action_ai_builder_plan_revised_description
+  },
+  ai_builder_flow_applied: {
+    name: m.audit_action_ai_builder_flow_applied,
+    description: m.audit_action_ai_builder_flow_applied_description
+  },
+  ai_builder_attachment_detached: {
+    name: m.audit_action_ai_builder_attachment_detached,
+    description: m.audit_action_ai_builder_attachment_detached_description
+  },
+  ai_builder_session_cancelled: {
+    name: m.audit_action_ai_builder_session_cancelled,
+    description: m.audit_action_ai_builder_session_cancelled_description
+  },
   security_classification_created: {
     name: m.audit_action_security_classification_created,
     description: m.audit_action_security_classification_created_description

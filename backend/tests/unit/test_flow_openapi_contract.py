@@ -50,7 +50,9 @@ from tests.unit.api_key_test_utils import flatten_routes
 FLOW_SETTINGS_PATH_PREFIX = "/api/v1/settings/flow-"
 
 
-def _is_flow_related_path(path: str) -> bool:
+def _is_non_ai_builder_flow_related_path(path: str) -> bool:
+    if path.startswith("/api/v1/flows/ai-builder"):
+        return False
     return path.startswith("/api/v1/flows") or path.startswith(
         FLOW_SETTINGS_PATH_PREFIX
     )
@@ -69,7 +71,7 @@ def flow_route_operations() -> dict[tuple[str, str], str]:
     for route in flatten_routes(list(app.routes)):
         if not isinstance(route.route, APIRoute):
             continue
-        if not _is_flow_related_path(route.path):
+        if not _is_non_ai_builder_flow_related_path(route.path):
             continue
         for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
             operations[(route.path, method.lower())] = route.operation_id or ""
@@ -202,11 +204,11 @@ def _path_for_operation_id_and_method(
     pytest.fail(f"Missing OpenAPI {method.upper()} operationId: {operation_id}")
 
 
-def _iter_flow_operations(
+def _iter_non_ai_builder_flow_operations(
     openapi_spec: dict,
 ) -> Iterator[tuple[str, str, dict]]:
     for path, methods in openapi_spec.get("paths", {}).items():
-        if not _is_flow_related_path(path):
+        if not _is_non_ai_builder_flow_related_path(path):
             continue
         for method, operation in methods.items():
             if method not in {"delete", "get", "patch", "post", "put"}:
@@ -835,7 +837,7 @@ def test_openapi_all_flow_operations_have_reviewable_dx_docs(
     openapi_spec: dict,
 ) -> None:
     short_descriptions: list[str] = []
-    for path, method, operation in _iter_flow_operations(openapi_spec):
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
         description = str(operation.get("description") or "").strip()
         if len(description) < 150:
             short_descriptions.append(
@@ -849,7 +851,7 @@ def test_openapi_all_flow_request_bodies_have_examples(
     openapi_spec: dict,
 ) -> None:
     missing_examples: list[str] = []
-    for path, method, operation in _iter_flow_operations(openapi_spec):
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
         request_body = operation.get("requestBody", {})
         if not isinstance(request_body, dict):
             continue
@@ -869,7 +871,7 @@ def test_openapi_flow_error_examples_follow_openapi_media_object_rules(
     openapi_spec: dict,
 ) -> None:
     invalid_media_objects: list[str] = []
-    for path, method, operation in _iter_flow_operations(openapi_spec):
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
         for status_code, response in operation.get("responses", {}).items():
             if not isinstance(response, dict):
                 continue
@@ -1076,7 +1078,7 @@ def test_openapi_all_flow_success_responses_have_examples(
     openapi_spec: dict,
 ) -> None:
     missing_examples: list[str] = []
-    for path, method, operation in _iter_flow_operations(openapi_spec):
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
         for status_code, response in operation.get("responses", {}).items():
             if not str(status_code).startswith("2"):
                 continue
@@ -1098,7 +1100,7 @@ def test_openapi_all_flow_error_responses_have_examples(
     openapi_spec: dict,
 ) -> None:
     missing_examples: list[str] = []
-    for path, method, operation in _iter_flow_operations(openapi_spec):
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
         for status_code, response in operation.get("responses", {}).items():
             if str(status_code).startswith("2") or str(status_code) == "422":
                 continue
@@ -1120,7 +1122,7 @@ def test_openapi_flow_explicit_examples_validate_against_schemas(
     openapi_spec: dict,
 ) -> None:
     failures: list[str] = []
-    for path, method, operation in _iter_flow_operations(openapi_spec):
+    for path, method, operation in _iter_non_ai_builder_flow_operations(openapi_spec):
         request_body = operation.get("requestBody", {})
         if isinstance(request_body, dict):
             for example_name, schema, example in _iter_explicit_openapi_examples(
@@ -1669,6 +1671,7 @@ def test_openapi_runtime_paths_example_matches_operation_paths(
             operation_id=operation.operation_id,
             method=operation.method,
         )
+        assert not openapi_path.startswith("/api/v1/flows/ai-builder")
         expected_path = openapi_path.replace("{id}", flow_id)
         if operation.query_suffix is not None:
             expected_path = f"{expected_path}{operation.query_suffix}"
@@ -2627,6 +2630,38 @@ def test_openapi_flow_step_create_enum_values_match_contract(
         enum_values = _extract_enum_values(openapi_spec, properties.get(field, {}))
         missing = expected_values - enum_values
         assert not missing, f"{field} missing enum values: {sorted(missing)}"
+
+
+def test_openapi_flow_authoring_components_use_flow_owned_names(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    expected_components = {
+        "FlowAuthoringInputSource",
+        "FlowAuthoringInputType",
+        "FlowAuthoringOutputMode",
+    }
+    legacy_components = {
+        "AIBuilderInputSource",
+        "AIBuilderInputType",
+        "AIBuilderOutputMode",
+    }
+
+    assert expected_components <= set(schemas)
+    assert legacy_components.isdisjoint(schemas)
+
+    step_spec_properties = schemas["StepSpec"]["properties"]
+    assert step_spec_properties["input_source"] == {
+        "$ref": "#/components/schemas/FlowAuthoringInputSource"
+    }
+    assert step_spec_properties["input_type"] == {
+        "$ref": "#/components/schemas/FlowAuthoringInputType",
+        "default": "text",
+    }
+    assert step_spec_properties["output_mode"] == {
+        "$ref": "#/components/schemas/FlowAuthoringOutputMode",
+        "default": "pass_through",
+    }
 
 
 def test_openapi_flow_contract_does_not_advertise_mcp_or_policy(

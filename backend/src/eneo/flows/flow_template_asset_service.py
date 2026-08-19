@@ -33,7 +33,7 @@ from eneo.users.user import UserInDB
 
 
 class AttachedTemplateFileUnavailableError(Exception):
-    """The selected attached File disappeared before its retention fence."""
+    """The selected Builder File disappeared before its retention fence."""
 
 
 class FlowTemplateAssetService:
@@ -111,10 +111,10 @@ class FlowTemplateAssetService:
     ) -> FlowTemplateAsset:
         """Promote an authorized existing File into a Flow template asset.
 
-        Attached source files already own a durable File row. Reusing that row
+        Builder attachments already own a durable File row. Reusing that row
         keeps the asset foreign key as the retention boundary and avoids a
         second copy whose lifecycle could drift from the selected attachment.
-        Source-membership validation remains the caller's concern.
+        Session-membership validation remains the Builder lifecycle's concern.
         """
 
         flow = await self.flow_repo.get(

@@ -17,7 +17,7 @@ with_user_container = get_container(
 @router.get(
     "/",
     response_model=Limits,
-    description="Get configured upload limits.",
+    description="Get configured upload and AI Builder input limits.",
     responses=responses.get_responses([]),
 )
 async def get_limits(container: Annotated[Container, Depends(with_user_container)]):

@@ -319,6 +319,11 @@ class Settings(BaseSettings):
     # an organization has never configured its own value; None disables mapped
     # authoring platform-wide unless an organization opts in explicitly.
     flow_mapped_step_max_provider_calls_default: int | None = 100
+    ai_builder_conversation_safety_buffer_tokens: int = 2_000
+    ai_builder_minimum_conversation_budget_tokens: int = 4_000
+    ai_builder_classification_timeout_seconds: float = 60.0
+    ai_builder_proposal_timeout_seconds: float = 180.0
+    ai_builder_send_lock_lease_seconds: int = 900
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
     orphan_crawl_run_timeout_hours: int = (
@@ -687,6 +692,20 @@ class Settings(BaseSettings):
             logging.error(
                 "FLOW_LLM_REQUEST_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
                 self.flow_llm_request_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.ai_builder_classification_timeout_seconds <= 0:
+            logging.error(
+                "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.ai_builder_classification_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.ai_builder_proposal_timeout_seconds <= 0:
+            logging.error(
+                "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.ai_builder_proposal_timeout_seconds,
             )
             sys.exit(1)
 

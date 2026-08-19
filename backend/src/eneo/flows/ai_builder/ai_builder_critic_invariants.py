@@ -1,0 +1,1684 @@
+"""Conversation-spec alignment invariants consulted by the quality critic.
+
+Each `CriticInvariant` is a self-contained rule with an id, kind, evidence
+predicate, and remediation. Semantic invariants are repairable planner feedback;
+architecture invariants are backend-owned mechanics failures.
+
+`CRITIC_INVARIANTS` is the single public registry; its registration order
+pins the order planner-visible issues surface in. Callers that need a
+narrower view can filter the tuple inline and pass `invariants=` to
+`render_critic_issues`.
+
+Layering: this module imports AI Builder types (`FlowDraftSpecCore`,
+`OutputIntentResolution`) and authored flow specs. The Flow Capability Manifest
+stays engine-truth-only and does not learn about conversation signals; those
+live here with the rest of the AI Builder layer.
+
+Invariants read typed planning state and the user's own words. They never read
+the requirements disclosure: that is a localized rendering of the same typed
+state, and scanning it made identical state produce different plans per UI
+language.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, cast
+
+from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+    AIBuilderArchitectureError,
+)
+from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
+    is_bound_document_report_compose_topology,
+)
+from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
+from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
+    baseline_spec_from_flow_steps,
+    checkpoint_intent_mismatches,
+)
+from eneo.flows.ai_builder.ai_builder_critic_invariant_kinds import (
+    CRITIC_INVARIANT_KINDS,
+    CriticInvariantKind,
+)
+from eneo.flows.ai_builder.ai_builder_form_field_usage import (
+    find_unused_form_fields,
+    step_references_form_field,
+)
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
+    OutputIntentResolution,
+    needs_structured_extraction,
+    runtime_metadata_requested,
+)
+from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
+    PrimaryRuntimeInput,
+    degrades_document_entry_to_generic_file,
+    has_real_audio_transcription_step,
+    uses_pseudo_transcription_without_audio_step,
+)
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    schema_leaf_property_names,
+    schema_property_names_at_any_depth,
+)
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    ResultContract,
+    resolve_result_output_field_roles,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    user_owned_quoted_texts_from_planning_references,
+)
+from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
+    source_capture_field_satisfied,
+)
+from eneo.flows.ai_builder.planning_state import (
+    AggregationIntent,
+    CheckpointIntent,
+    ResolvedSlot,
+    SchemaEvidence,
+)
+from eneo.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
+from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
+from eneo.flows.input_binding_contract_rules import (
+    effective_question_binding,
+    source_ref_bindings,
+)
+from eneo.flows.template_reference_analyzer import (
+    TemplateReference,
+    TemplateReferenceKind,
+    analyze_template,
+)
+from eneo.flows.variable_resolver import iter_template_expressions
+
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+        AIBuilderResourceCatalog,
+    )
+    from eneo.flows.domain.flow import Flow
+
+
+@dataclass(frozen=True, slots=True)
+class CriticContext:
+    """Pre-computed view of conversation + spec + flow used by every invariant.
+
+    The critic builds the context once per call, then hands it to each
+    `CriticInvariant.evidence` — invariants never re-parse the raw
+    conversation. Any value computed more than once across the invariant
+    loop belongs here.
+    """
+
+    spec: FlowDraftSpecCore
+    flow: "Flow | None"
+    answer_signals: dict[str, set[str]]
+    text: str
+    sectioned_form_intake: bool
+    runtime_form_fields_requested: bool
+    runtime_form_fields_evidence: tuple[str, ...]
+    simple_text_transform: bool
+    output_intent: OutputIntentResolution
+    mixed_audio_doc_input: bool
+    primary_runtime_input: PrimaryRuntimeInput = "unknown"
+    aggregation_intent: AggregationIntent = "linear"
+    source_reader_required_field_names: frozenset[str] = frozenset()
+    checkpoint_intents: tuple[CheckpointIntent, ...] | None = None
+    resource_catalog: "AIBuilderResourceCatalog | None" = None
+    result_contract: ResultContract | None = None
+    resolved_slots: Mapping[str, ResolvedSlot] = field(
+        default_factory=dict[str, ResolvedSlot]
+    )
+    output_schema_evidence: SchemaEvidence | None = None
+
+
+CriticCheck = Callable[[CriticContext], bool]
+CriticRemediation = str | Callable[[CriticContext], str]
+
+
+@dataclass(frozen=True, slots=True)
+class CriticIssue:
+    id: str
+    kind: CriticInvariantKind
+    remediation: str
+    edit_topology: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CriticInvariant:
+    """Conversation-spec alignment invariant.
+
+    `evidence(context)` returns True when the invariant is violated and the
+    critic should surface `remediation` to the planner.
+
+    `kind` is not declared here: it is read from
+    `ai_builder_critic_invariant_kinds`, the one table both this registry and
+    the offline release gate answer to. An invariant missing from that table
+    raises on first use rather than defaulting to a classification.
+    """
+
+    id: str
+    description: str
+    evidence: CriticCheck
+    remediation: CriticRemediation
+    edit_topology: bool = False
+
+    @property
+    def kind(self) -> CriticInvariantKind:
+        return CRITIC_INVARIANT_KINDS[self.id]
+
+
+# ── Shared helpers ───────────────────────────────────────────────────────
+
+
+def _is_create_context(context: CriticContext) -> bool:
+    return context.flow is None
+
+
+def _checkpoint_intent_mismatch_evidence(context: CriticContext) -> bool:
+    if context.checkpoint_intents is None:
+        return False
+    # Edit specs are compared against the existing Flow's checkpoints as the
+    # preserved baseline; create specs against the intent snapshot alone.
+    baseline = (
+        baseline_spec_from_flow_steps(context.flow.steps)
+        if context.flow is not None
+        else None
+    )
+    return bool(
+        checkpoint_intent_mismatches(
+            context.spec,
+            context.checkpoint_intents,
+            baseline_spec=baseline,
+        )
+    )
+
+
+_CHECKPOINT_INTENT_MISMATCH = CriticInvariant(
+    id="checkpoint_intent_mismatch",
+    description=(
+        "Typed checkpoint intent must match the compiled output producer and mode."
+    ),
+    evidence=_checkpoint_intent_mismatch_evidence,
+    remediation=(
+        "Place each requested review checkpoint on the actual transcript, structured "
+        "result, or report-text producer with the requested review mode, apply "
+        "requested checkpoint removals, and do not add, move, or remove review "
+        "checkpoints the user did not ask to change."
+    ),
+)
+
+
+_FIELD_REUSE_MARKERS: tuple[str, ...] = (
+    "specific fields",
+    "specific json fields",
+    "use the fields",
+    "använd fälten",
+    "specifika fälten",
+    "namngivna fält",
+    "key clauses",
+    "nyckelfakta",
+)
+
+
+def _has_json_contract_step(spec: FlowDraftSpecCore) -> bool:
+    """True when the spec has a non-terminal JSON step with an output contract.
+
+    The terminal step never counts — without a downstream consumer the
+    contract provides no reuse value. Terminal-only declared contracts are
+    owned by `_spec_declares_json_output_contract`.
+    """
+    return any(
+        step.output_type == OutputType.JSON and step.output_contract is not None
+        for step in spec.steps[:-1]
+    )
+
+
+def _spec_uses_template_fill(spec: FlowDraftSpecCore) -> bool:
+    return any(step.output_mode == OutputMode.TEMPLATE_FILL for step in spec.steps)
+
+
+def _commit_grade_resolved_slot_value(
+    context: CriticContext,
+    slot_name: str,
+) -> str | None:
+    slot = context.resolved_slots.get(slot_name)
+    return slot.value if slot is not None and slot.is_commit_grade else None
+
+
+def _has_explicit_output_schema(context: CriticContext) -> bool:
+    evidence = context.output_schema_evidence
+    return evidence is not None and evidence.strength == "explicit"
+
+
+def _blocking_json_contract_requested_by_typed_evidence(
+    context: CriticContext,
+) -> bool:
+    # Blocking repair needs commit-grade evidence; ResultContract's softer
+    # guidance semantics (which admit heuristic slots) stay unchanged.
+    if (
+        _commit_grade_resolved_slot_value(context, "terminal_output")
+        == "structured_json"
+    ):
+        return True
+    if _commit_grade_resolved_slot_value(context, "structured_io_contract") is not None:
+        return True
+    return _has_explicit_output_schema(context)
+
+
+def _spec_handles_audio(spec: FlowDraftSpecCore) -> bool:
+    return any(
+        step.input_type == InputType.AUDIO
+        or step.output_mode == OutputMode.TRANSCRIBE_ONLY
+        for step in spec.steps
+    )
+
+
+def _conversation_requests_field_reuse(text: str) -> bool:
+    return any(marker in text for marker in _FIELD_REUSE_MARKERS)
+
+
+def _spec_uses_all_previous_steps(spec: FlowDraftSpecCore) -> bool:
+    return any(
+        step.input_source == InputSource.ALL_PREVIOUS_STEPS for step in spec.steps
+    )
+
+
+def _spec_uses_explicit_prior_source_ref_fan_in(spec: FlowDraftSpecCore) -> bool:
+    for step_index, step in enumerate(spec.steps):
+        if _is_renderer_step(step):
+            continue
+        if _prior_content_source_ref_count(spec=spec, step_index=step_index) >= 2:
+            return True
+    return False
+
+
+def _prior_content_source_ref_count(*, spec: FlowDraftSpecCore, step_index: int) -> int:
+    prior_content_refs = {
+        step.plan_step_ref
+        for step in spec.steps[:step_index]
+        if not _is_renderer_step(step)
+    }
+    referenced_prior_steps = {
+        source_ref.step_ref
+        for source_ref in source_ref_bindings(spec.steps[step_index].input_bindings)
+        if source_ref.step_ref in prior_content_refs
+    }
+    return len(referenced_prior_steps)
+
+
+def _spec_uses_compare_fan_in(spec: FlowDraftSpecCore) -> bool:
+    if _spec_uses_all_previous_steps(spec):
+        return True
+    return _spec_uses_explicit_prior_source_ref_fan_in(spec)
+
+
+def _is_output_only_edit(context: CriticContext) -> bool:
+    """True when the edit looks like a pure final-format change.
+
+    Requires: a flow anchor, a preserved step count ≥ 2, an explicit
+    terminal-output intent, and a terminal-output change between the
+    original and planned final steps.
+    """
+    flow = context.flow
+    explicit_output = context.output_intent.terminal_output
+    spec = context.spec
+    if flow is None or explicit_output not in {"pdf_document", "docx_document"}:
+        return False
+
+    original_steps = sorted(flow.steps, key=lambda step: step.step_order)
+    if len(spec.steps) != len(original_steps) or len(spec.steps) < 2:
+        return False
+
+    original_terminal_output = original_steps[-1].output_type
+    requested_terminal_output = "pdf" if explicit_output == "pdf_document" else "docx"
+    return original_terminal_output != requested_terminal_output
+
+
+def _non_terminal_steps_converted_to_document(context: CriticContext) -> bool:
+    if not _is_output_only_edit(context):
+        return False
+    flow = context.flow
+    assert flow is not None  # guarded by _is_output_only_edit
+    original_steps = sorted(flow.steps, key=lambda step: step.step_order)
+    for original_step, planned_step in zip(
+        original_steps[:-1], context.spec.steps[:-1], strict=False
+    ):
+        original_is_document_output = original_step.output_type in {"pdf", "docx"}
+        planned_is_document_output = planned_step.output_type in {
+            OutputType.PDF,
+            OutputType.DOCX,
+        }
+        if not original_is_document_output and planned_is_document_output:
+            return True
+    return False
+
+
+def _non_terminal_steps_adopt_template_fill(context: CriticContext) -> bool:
+    if not _is_output_only_edit(context):
+        return False
+    return any(
+        step.output_mode == OutputMode.TEMPLATE_FILL for step in context.spec.steps[:-1]
+    )
+
+
+# ── Form-fields invariants ───────────────────────────────────────────────
+
+
+def _runtime_metadata_requires_form_fields_evidence(context: CriticContext) -> bool:
+    if _is_create_context(context):
+        return False
+    return (
+        runtime_metadata_requested(context.answer_signals)
+        or context.runtime_form_fields_requested
+    ) and not (context.spec.form_fields or context.sectioned_form_intake)
+
+
+def _runtime_metadata_requires_form_fields_remediation(
+    context: CriticContext,
+) -> str:
+    # Naming the requested values is what makes this repairable: a live
+    # journey looped four identical proposals on the bare "add form
+    # fields" message (2026-08-06). Either source of the request carries the
+    # user's own wording, so quote whichever one spoke.
+    slot = context.resolved_slots.get("runtime_metadata_fields")
+    quotes = user_owned_quoted_texts_from_planning_references(
+        list(slot.evidence if slot is not None else [])
+        + list(context.runtime_form_fields_evidence)
+    )
+    quoted_evidence = (
+        " Användarens ord: " + " / ".join(f'"{quote}"' for quote in quotes[:2])
+        if quotes
+        else ""
+    )
+    return (
+        "Användaren har bett om återanvändbara metadata vid körning men planen "
+        "saknar `form_fields`. Deklarera ETT input_field per efterfrågat värde "
+        "och referera dem via uses_form_fields i steget som använder dem."
+        + quoted_evidence
+    )
+
+
+_RUNTIME_METADATA_REQUIRES_FORM_FIELDS = CriticInvariant(
+    id="runtime_metadata_requires_form_fields",
+    description=(
+        "When the user asked for values to fill in per run — as a structured "
+        "answer or as the classifier's typed form-intake verdict — the plan "
+        "must model them as `form_fields`, not hide them in prompt text. "
+        "Sectioned intake has its own rule and is left to it."
+    ),
+    evidence=_runtime_metadata_requires_form_fields_evidence,
+    remediation=_runtime_metadata_requires_form_fields_remediation,
+)
+
+
+def _sectioned_form_intake_requires_form_fields_evidence(
+    context: CriticContext,
+) -> bool:
+    if _is_create_context(context):
+        return False
+    return context.sectioned_form_intake and not context.spec.form_fields
+
+
+_SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS = CriticInvariant(
+    id="sectioned_form_intake_requires_form_fields",
+    description=(
+        "Sectioned free-text intake (one rubric/section per field) must be "
+        "modelled as `form_fields`, not as a per-section collection step."
+    ),
+    evidence=_sectioned_form_intake_requires_form_fields_evidence,
+    remediation=(
+        "Konversationen beskriver sektionerad fritextinsamling per rubrik/sektion, men planen saknar "
+        "`form_fields`. Modellera varje rubrik som ett eget textfält i `form_fields` i stället för att "
+        "bygga ett separat insamlingssteg per sektion, och låt senare steg använda dessa fält via "
+        "`uses_form_fields` för att skapa slutdokumentet."
+    ),
+)
+
+
+def _rich_workflow_requires_json_contract_step_evidence(
+    context: CriticContext,
+) -> bool:
+    # Typed eligibility, local to this rule: file material the user committed
+    # to, delivered as a document artifact.
+    result_contract = context.result_contract
+    typed_document_artifact_workflow = (
+        _commit_grade_resolved_slot_value(context, "primary_runtime_input")
+        in {"audio", "documents", "text_and_documents"}
+        and result_contract is not None
+        and result_contract.terminal_output in {"docx_document", "pdf_document"}
+    )
+    return (
+        typed_document_artifact_workflow
+        and _blocking_json_contract_requested_by_typed_evidence(context)
+        and not _has_json_contract_step(context.spec)
+    )
+
+
+_RICH_WORKFLOW_REQUIRES_JSON_CONTRACT_STEP = CriticInvariant(
+    id="rich_workflow_requires_json_contract_step",
+    description=(
+        "A rich document workflow that will reuse structured analysis must "
+        "include an intermediate JSON step with an `output_contract`."
+    ),
+    evidence=_rich_workflow_requires_json_contract_step_evidence,
+    remediation=(
+        "Behovet beskriver ett dokumentflöde som ska återanvända strukturerad analys, men planen saknar "
+        'ett tydligt JSON-steg med `output_contract`. Lägg till ett mellanliggande `output_type="json"`-steg '
+        "innan slutlig rapport eller dokumentleverans."
+    ),
+)
+
+
+# ── Terminal-output alignment ────────────────────────────────────────────
+
+
+def _pdf_terminal_alignment_evidence(context: CriticContext) -> bool:
+    if _is_create_context(context):
+        return False
+    if context.output_intent.terminal_output != "pdf_document":
+        return False
+    if not context.spec.steps:
+        return False
+    return context.spec.steps[-1].output_type != OutputType.PDF
+
+
+_PDF_TERMINAL_OUTPUT_ALIGNMENT = CriticInvariant(
+    id="pdf_terminal_output_alignment",
+    description=(
+        "When the user explicitly picks PDF as the final artefact, the terminal "
+        "step must produce `output_type=PDF`."
+    ),
+    evidence=_pdf_terminal_alignment_evidence,
+    remediation=(
+        "Användaren har valt PDF som slutartefakt men sista steget producerar inte PDF. "
+        "Justera slutstegets output_type så att det matchar användarens val."
+    ),
+)
+
+
+def _docx_terminal_alignment_evidence(context: CriticContext) -> bool:
+    if _is_create_context(context):
+        return False
+    if context.output_intent.terminal_output != "docx_document":
+        return False
+    if not context.spec.steps:
+        return False
+    return context.spec.steps[-1].output_type != OutputType.DOCX
+
+
+_DOCX_TERMINAL_OUTPUT_ALIGNMENT = CriticInvariant(
+    id="docx_terminal_output_alignment",
+    description=(
+        "When the user explicitly picks DOCX as the final artefact, the "
+        "terminal step must produce `output_type=DOCX`."
+    ),
+    evidence=_docx_terminal_alignment_evidence,
+    remediation=(
+        "Användaren har valt DOCX som slutartefakt men sista steget producerar inte DOCX. "
+        "Justera slutstegets output_type så att det matchar användarens val."
+    ),
+)
+
+
+# ── Output-only edits (flow-anchored) ────────────────────────────────────
+
+
+_NON_TERMINAL_STEP_DOCUMENT_CONVERSION_FORBIDDEN = CriticInvariant(
+    id="non_terminal_step_document_conversion_forbidden",
+    description=(
+        "When the user only asks to change the final artefact format, the "
+        "plan must not flip intermediate analysis steps to DOCX/PDF output."
+    ),
+    evidence=_non_terminal_steps_converted_to_document,
+    remediation=(
+        "Användaren verkar bara vilja ändra slutformatet men planen har bytt mellanliggande analyssteg "
+        "till dokumentutdata (DOCX/PDF). Håll upstream-stegen som text/json-analyssteg och lägg "
+        "dokumentgenereringen enbart på slutsteget."
+    ),
+)
+
+
+_NON_TERMINAL_STEP_TEMPLATE_FILL_FORBIDDEN = CriticInvariant(
+    id="non_terminal_step_template_fill_forbidden",
+    description=(
+        "`output_mode=template_fill` only makes sense on the terminal step of "
+        "an output-format edit; intermediate steps must stay analytical."
+    ),
+    evidence=_non_terminal_steps_adopt_template_fill,
+    remediation=(
+        "Användaren verkar bara vilja ändra slutformatet men planen använder `template_fill` på "
+        "mellanliggande steg. Begränsa `template_fill` till slutsteget och låt mellanliggande steg "
+        "förbli analyssteg."
+    ),
+)
+
+
+# ── Structured extraction / JSON contract ────────────────────────────────
+
+
+def _structured_extraction_requires_json_contract_step_evidence(
+    context: CriticContext,
+) -> bool:
+    spec = context.spec
+    if not spec.steps:
+        return False
+    return needs_structured_extraction(
+        context.text,
+        context.answer_signals,
+        step_count=len(spec.steps),
+        terminal_output_type=spec.steps[-1].output_type,
+    ) and not _has_json_contract_step(spec)
+
+
+_STRUCTURED_EXTRACTION_REQUIRES_JSON_CONTRACT_STEP = CriticInvariant(
+    id="structured_extraction_requires_json_contract_step",
+    description=(
+        "Conversations that imply downstream reuse of structured fields must "
+        "include a JSON contract step before the terminal output."
+    ),
+    evidence=_structured_extraction_requires_json_contract_step_evidence,
+    remediation=(
+        "Planen verkar behöva strukturerad extraktion för vidare återanvändning, men saknar ett "
+        '`output_type="json"`-steg med `output_contract`. Lägg till ett tydligt JSON-extraktionssteg '
+        "innan den slutliga text- eller dokumentproduktionen."
+    ),
+)
+
+
+def _spec_declares_json_output_contract(spec: FlowDraftSpecCore) -> bool:
+    """True when any step, terminal included, declares a JSON output contract.
+
+    The explicit-request invariant needs a DECLARED contract anywhere; the
+    downstream-reuse invariants keep requiring a non-terminal one through
+    ``_has_json_contract_step``.
+    """
+
+    return any(
+        step.output_type == OutputType.JSON and step.output_contract is not None
+        for step in spec.steps
+    )
+
+
+def _explicit_json_contract_request_without_step_evidence(
+    context: CriticContext,
+) -> bool:
+    return _blocking_json_contract_requested_by_typed_evidence(
+        context
+    ) and not _spec_declares_json_output_contract(context.spec)
+
+
+_EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP = CriticInvariant(
+    id="explicit_json_contract_request_without_step",
+    description=(
+        "When the conversation explicitly asks for JSON/fields/contracts, the "
+        "plan must include a JSON-extraction step unless the terminal step is "
+        "plainly human-readable."
+    ),
+    evidence=_explicit_json_contract_request_without_step_evidence,
+    remediation=(
+        "Konversationen nämner strukturerad extraktion (JSON, fält, kontrakt) men inget steg "
+        'använder `output_type="json"` med `output_contract`. Lägg till ett JSON-extraktionssteg '
+        "om data ska återanvändas i nästa steg eller av ett externt system."
+    ),
+)
+
+
+# ── Standalone audio ─────────────────────────────────────────────────────
+
+
+def _standalone_audio_requires_transcription_step_evidence(
+    context: CriticContext,
+) -> bool:
+    if _is_create_context(context):
+        return False
+    if context.primary_runtime_input != "audio":
+        return False
+    if _spec_handles_audio(context.spec):
+        return False
+    return not context.mixed_audio_doc_input
+
+
+_STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP = CriticInvariant(
+    id="standalone_audio_requires_transcription_step",
+    description=(
+        "When the slot classifier resolves the runtime input to audio (not "
+        "mixed with documents), the plan must include a dedicated "
+        "transcription step."
+    ),
+    evidence=_standalone_audio_requires_transcription_step_evidence,
+    remediation=(
+        "Inmatningen är ljud men inget steg transkriberar ljud till text. "
+        "Lägg till ett dedikerat transkriberingssteg som första steg i flödet med:\n"
+        '  - `input_type: "audio"`\n'
+        '  - `input_source: "flow_input"`\n'
+        '  - `output_type: "text"`\n'
+        '  - `output_mode: "transcribe_only"`\n'
+        "Efterföljande steg läser transkriptet via "
+        '`input_source="previous_step"` och `input_type="text"`. Om planen redan '
+        "har flera steg, skjut dem ett steg framåt och lägg transkriberingssteget "
+        "vid position 0."
+    ),
+)
+
+
+# ── Source-reader obligations ────────────────────────────────────────────
+
+
+def _source_reader_required_fields_must_be_captured_evidence(
+    context: CriticContext,
+) -> bool:
+    return bool(_missing_source_reader_required_field_names(context))
+
+
+def _missing_source_reader_required_field_names(
+    context: CriticContext,
+) -> tuple[str, ...]:
+    required_names = context.source_reader_required_field_names
+    if not required_names:
+        return ()
+
+    source_reader_contracts = tuple(
+        contract
+        for step in context.spec.steps
+        if _is_structured_source_reader(step)
+        and (contract := step.output_contract) is not None
+    )
+    if not source_reader_contracts:
+        return ()
+
+    captured_names: set[str] = set()
+    for contract in source_reader_contracts:
+        captured_names.update(schema_leaf_property_names(contract))
+    # Satisfaction is the shared symmetric canonical match, not exact
+    # equality: the reader keeps the model's verbatim wording, so
+    # "sammanfattning" must satisfy the canonical "summary" requirement.
+    return tuple(
+        sorted(
+            required_name
+            for required_name in required_names
+            if not any(
+                source_capture_field_satisfied(captured_name, required_name)
+                for captured_name in captured_names
+            )
+        )
+    )
+
+
+def _source_reader_required_fields_remediation(context: CriticContext) -> str:
+    missing_names = ", ".join(
+        f"`{name}`" for name in _missing_source_reader_required_field_names(context)
+    )
+    return (
+        "Källäsarens output_contract saknar obligatoriska källfält: "
+        f"{missing_names}. Behåll alla source_reader_required_fields i ett "
+        "strukturerat källäsarsteg innan ändringen kan sparas."
+    )
+
+
+def _is_structured_source_reader(step: StepSpec) -> bool:
+    return (
+        step.input_source == InputSource.FLOW_INPUT
+        and step.input_type in SOURCE_READER_INPUT_TYPES
+        and step.output_type == OutputType.JSON
+        and step.output_contract is not None
+    )
+
+
+_SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED = CriticInvariant(
+    id="source_reader_required_fields_must_be_captured",
+    description=(
+        "Source-reader output contracts must retain the server-owned fields "
+        "required by the accepted planning result contract."
+    ),
+    evidence=_source_reader_required_fields_must_be_captured_evidence,
+    remediation=_source_reader_required_fields_remediation,
+    edit_topology=True,
+)
+
+
+# ── Outcome contract invariants ──────────────────────────────────────────
+
+
+def _action_followup_requires_followup_fields_evidence(
+    context: CriticContext,
+) -> bool:
+    if (
+        context.result_contract is None
+        or context.result_contract.post_processing_goal != "action_followup"
+    ):
+        return False
+
+    # A user-DECLARED exact output schema becomes the terminal contract
+    # verbatim, and the model cannot modify it — demanding follow-up roles
+    # beyond it would loop repair forever on a constraint the model does not
+    # control. Only declared schemas carry that authority: named-result evidence
+    # and inferred examples are hints, not user-owned contracts.
+    if (
+        context.output_schema_evidence is not None
+        and context.output_schema_evidence.source == "declared_schema"
+        and context.spec.steps
+        and context.spec.steps[-1].output_type == OutputType.JSON
+    ):
+        return False
+
+    # All follow-up roles must survive into ONE outcome-bearing structured
+    # contract — the last step that declares one. A union across steps would
+    # accept roles that an earlier step captures but the outcome contract
+    # drops.
+    outcome_contract = next(
+        (
+            step.output_contract
+            for step in reversed(context.spec.steps)
+            if step.output_contract is not None
+        ),
+        None,
+    )
+    if outcome_contract is None:
+        return True
+    declared_roles = resolve_result_output_field_roles(
+        context.result_contract,
+        schema_property_names_at_any_depth(outcome_contract),
+    )
+    return (
+        not set(context.result_contract.required_output_field_roles) <= declared_roles
+    )
+
+
+_ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS = CriticInvariant(
+    id="action_followup_requires_followup_fields",
+    description=(
+        "When the user asks for action follow-up, the plan must preserve the "
+        "follow-up fields that make the output useful."
+    ),
+    evidence=_action_followup_requires_followup_fields_evidence,
+    remediation=(
+        "Användarens mål är uppföljning från materialet, men planen saknar ett tydligt "
+        "resultat för beslut, åtgärder/nästa steg, ansvariga, deadlines och öppna frågor. "
+        "Lägg till eller förtydliga ett semantiskt steg/output-kontrakt som håller isär dessa "
+        "fält och markerar saknade ansvariga eller deadlines som ospecificerade."
+    ),
+)
+
+
+# ── Field reuse across JSON steps ────────────────────────────────────────
+
+
+def _later_step_reuses_structured_output(
+    spec: FlowDraftSpecCore,
+    producer_index: int,
+) -> bool:
+    """True when a later step's typed bindings consume the producer's fields.
+
+    Only the supported binding vocabulary counts: a ``question`` template
+    whose analyzed references target the producer's structured output, or a
+    ``source_refs`` entry with ``output == "structured"`` for that step.
+    """
+
+    producer_ref = spec.steps[producer_index].plan_step_ref
+    for step_index, step in enumerate(spec.steps):
+        if step_index <= producer_index or not step.input_bindings:
+            continue
+        question = step.input_bindings.get("question")
+        if isinstance(question, str):
+            _, structured_step_indexes = _prior_step_indexes_referenced_by_template(
+                spec=spec,
+                template=question,
+                before_index=step_index,
+            )
+            if producer_index in structured_step_indexes:
+                return True
+        source_refs = cast(object, step.input_bindings.get("source_refs"))
+        if isinstance(source_refs, list):
+            for ref in cast(list[object], source_refs):
+                if not isinstance(ref, Mapping):
+                    continue
+                typed_ref = cast(Mapping[str, object], ref)
+                if (
+                    typed_ref.get("step_ref") == producer_ref
+                    and typed_ref.get("output") == "structured"
+                ):
+                    return True
+    return False
+
+
+def _field_reuse_requires_input_bindings_evidence(context: CriticContext) -> bool:
+    if not _conversation_requests_field_reuse(context.text):
+        return False
+    # Reuse is satisfied only when a contracted NON-terminal JSON producer
+    # exists AND a later step's typed bindings consume its structured output.
+    # A reuse request with no eligible producer is unsatisfiable and fires.
+    producer_indexes = [
+        index
+        for index, step in enumerate(context.spec.steps[:-1])
+        if step.output_type == OutputType.JSON and step.output_contract is not None
+    ]
+    return not any(
+        _later_step_reuses_structured_output(context.spec, index)
+        for index in producer_indexes
+    )
+
+
+_FIELD_REUSE_REQUIRES_INPUT_BINDINGS = CriticInvariant(
+    id="field_reuse_requires_input_bindings",
+    description=(
+        "When the conversation reuses named JSON fields downstream, the plan "
+        "must declare `input_bindings` / `uses_previous_fields`."
+    ),
+    evidence=_field_reuse_requires_input_bindings_evidence,
+    remediation=(
+        "Konversationen antyder återanvändning av specifika fält från strukturerad extraktion, men planen saknar "
+        "`uses_previous_fields` i efterföljande steg. Deklarera explicita JSON-fält vidare när nästa steg behöver utvalda datapunkter."
+    ),
+)
+
+
+# ── Multi-document compare ───────────────────────────────────────────────
+
+
+def _multi_document_compare_requires_all_previous_steps_evidence(
+    context: CriticContext,
+) -> bool:
+    if _is_create_context(context):
+        return False
+    return (
+        context.aggregation_intent == "compare"
+        and _spec_has_multiple_content_steps(context.spec)
+        and not _spec_uses_compare_fan_in(context.spec)
+    )
+
+
+def _is_renderer_step(step: StepSpec) -> bool:
+    """True for template-fill / DOCX / PDF stubs — document assembly steps
+    the backend wires, not compositional content steps a stitch step would
+    reference by field path."""
+    return _is_document_renderer(
+        output_type=step.output_type,
+        output_mode=step.output_mode,
+    )
+
+
+def _is_document_renderer(
+    *,
+    output_type: OutputType,
+    output_mode: OutputMode | None = None,
+) -> bool:
+    return output_mode == OutputMode.TEMPLATE_FILL or output_type in {
+        OutputType.DOCX,
+        OutputType.PDF,
+    }
+
+
+def _spec_has_multiple_content_steps(spec: FlowDraftSpecCore) -> bool:
+    content_steps = [step for step in spec.steps if not _is_renderer_step(step)]
+    return len(content_steps) >= 2
+
+
+_MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN = CriticInvariant(
+    id="multi_document_compare_requires_all_previous_steps",
+    description=(
+        "When the conversation describes comparing multiple documents, one "
+        "non-renderer step must explicitly fan in multiple prior content steps "
+        "through targeted `input_bindings.source_refs` or the legacy "
+        "`input_source=all_previous_steps` transport."
+    ),
+    evidence=_multi_document_compare_requires_all_previous_steps_evidence,
+    remediation=(
+        "Konversationen beskriver jämförelse av flera dokument, men inget "
+        "icke-renderande steg väver uttryckligen in flera tidigare resultat. "
+        "Använd riktade `input_bindings.source_refs` till de tidigare stegen "
+        'eller, för äldre manuella specifikationer, `input_source="all_previous_steps"`.'
+    ),
+    edit_topology=True,
+)
+
+
+# ── Simple text transform restraint ──────────────────────────────────────
+
+
+def _simple_text_transform_must_remain_single_step_evidence(
+    context: CriticContext,
+) -> bool:
+    if not context.simple_text_transform:
+        return False
+    if context.spec.form_fields:
+        return False
+    return not _spec_is_single_text_transform_step(context.spec)
+
+
+def _spec_is_single_text_transform_step(spec: FlowDraftSpecCore) -> bool:
+    if len(spec.steps) != 1:
+        return False
+    step = spec.steps[0]
+    return (
+        step.input_type == InputType.TEXT
+        and step.output_type == OutputType.TEXT
+        and step.output_mode == OutputMode.PASS_THROUGH
+        and step.output_contract is None
+    )
+
+
+_SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP = CriticInvariant(
+    id="simple_text_transform_must_remain_single_step",
+    description=(
+        "A direct text-to-text transform must not add unrequested JSON, "
+        "review, artifact, or multi-step structure."
+    ),
+    evidence=_simple_text_transform_must_remain_single_step_evidence,
+    remediation=(
+        "Användaren ber om en direkt textomvandling utan filer, extra fält, JSON eller granskning. "
+        "Planen ska därför vara ett enda text-till-text-steg om användaren inte uttryckligen ber om fler steg."
+    ),
+)
+
+
+def _last_compositional_step_index(spec: FlowDraftSpecCore) -> int | None:
+    """Index of the last step that composes content.
+
+    Document-output flows often end with a renderer (template_fill DOCX,
+    raw DOCX/PDF) that the backend wires. The actual content composition
+    happens one step earlier; the targeted-underlag rule must evaluate
+    that step's input wiring, not the renderer's.
+    """
+    for index in range(len(spec.steps) - 1, -1, -1):
+        if not _is_renderer_step(spec.steps[index]):
+            return index
+    return None
+
+
+_REVIEW_STEP_MARKERS: tuple[str, ...] = (
+    "granska",
+    "kontrollera",
+    "kvalitetsgranska",
+    "kvalitetspass",
+    "validera",
+    "quality",
+    "review",
+    "validate",
+    "check",
+)
+_FINAL_BODY_STEP_MARKERS: tuple[str, ...] = (
+    "sammanställ",
+    "sätt samman",
+    "harmonisera",
+    "slutversion",
+    "slutlig rapport",
+    "färdigställ",
+    "färdigställd",
+    "färdig rapport",
+    "färdig text",
+    "redo för",
+    "revidera",
+    "assemble",
+    "compose",
+    "final report",
+    "final body",
+    "final version",
+    "complete document",
+    "revise",
+    "polish",
+)
+
+
+def _terminal_renderer_must_not_consume_review_only_step_evidence(
+    context: CriticContext,
+) -> bool:
+    if len(context.spec.steps) < 2:
+        return False
+    terminal = context.spec.steps[-1]
+    previous = context.spec.steps[-2]
+    if not _is_renderer_step(terminal):
+        return False
+    if terminal.output_mode == OutputMode.TEMPLATE_FILL:
+        binding_templates = _template_fill_binding_templates(terminal)
+        consumes_previous_alias = any(
+            PREVIOUS_STEP_TEXT_ALIAS in iter_template_expressions(template)
+            for template in binding_templates
+        )
+        step_refs = {
+            step.plan_step_ref: index for index, step in enumerate(context.spec.steps)
+        }
+        form_field_names = {field.name for field in (context.spec.form_fields or [])}
+        consumes_previous_directly = any(
+            reference.kind is TemplateReferenceKind.STEP
+            and reference.path_error_code is None
+            and reference.step_order == len(context.spec.steps) - 2
+            for template in binding_templates
+            for reference in analyze_template(
+                template,
+                step_refs=step_refs,
+                form_field_names=form_field_names,
+            )
+        )
+        if not consumes_previous_alias and not consumes_previous_directly:
+            return False
+    if previous.output_type != OutputType.TEXT or _is_renderer_step(previous):
+        return False
+    return _looks_like_review_only_text_step(context.spec, previous)
+
+
+def _template_fill_binding_templates(step: StepSpec) -> tuple[str, ...]:
+    if step.output_mode != OutputMode.TEMPLATE_FILL or step.output_config is None:
+        return ()
+    bindings_value = cast(object, step.output_config.get("bindings"))
+    if not isinstance(bindings_value, dict):
+        return ()
+    bindings = cast("dict[object, object]", bindings_value)
+    return tuple(value for value in bindings.values() if isinstance(value, str))
+
+
+def is_document_body_writer(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
+    return step.plan_step_ref in (spec.document_body_writer_step_refs or ())
+
+
+def _document_renderer_must_immediately_follow_body_writer_evidence(
+    context: CriticContext,
+) -> bool:
+    for index, step in enumerate(context.spec.steps):
+        if not is_document_body_writer(context.spec, step):
+            continue
+        if index + 1 >= len(context.spec.steps):
+            return True
+        if not _is_renderer_step(context.spec.steps[index + 1]):
+            return True
+    return False
+
+
+_DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER = CriticInvariant(
+    id="document_renderer_must_immediately_follow_body_writer",
+    description=(
+        "A document body writer must remain immediately adjacent to its renderer."
+    ),
+    evidence=_document_renderer_must_immediately_follow_body_writer_evidence,
+    remediation=(
+        "Dokumentets body_writer måste följas direkt av DOCX/PDF-renderaren. "
+        "Flytta mellanliggande steg före body_writer-steget eller efter renderaren."
+    ),
+    edit_topology=True,
+)
+
+
+def _looks_like_review_only_text_step(spec: FlowDraftSpecCore, step: StepSpec) -> bool:
+    if is_document_body_writer(spec, step):
+        return False
+    text = f"{step.name}\n{step.assistant_spec.instructions}".casefold()
+    if not _contains_any(text, _REVIEW_STEP_MARKERS):
+        return False
+    return not _contains_any(text, _FINAL_BODY_STEP_MARKERS)
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+_TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP = CriticInvariant(
+    id="terminal_renderer_must_not_consume_review_only_step",
+    description=(
+        "A terminal DOCX/PDF renderer should not render a review-only step. "
+        "If a review step is last before the renderer, it must output the "
+        "revised final document body, not only comments, gaps, or quality notes."
+    ),
+    evidence=_terminal_renderer_must_not_consume_review_only_step_evidence,
+    remediation=(
+        "DOCX/PDF-steget ligger direkt efter ett granskningssteg som verkar "
+        "producera kvalitetsanteckningar snarare än den färdiga dokumenttexten. "
+        "Flytta granskningen före sammanställningen, eller ändra "
+        "granskningssteget så att det skriver en reviderad slutversion av "
+        "hela dokumentet som renderern kan använda."
+    ),
+    edit_topology=True,
+)
+
+
+def _prior_step_indexes_referenced_by_template(
+    *,
+    spec: FlowDraftSpecCore,
+    template: str,
+    before_index: int,
+) -> tuple[set[int], set[int]]:
+    step_refs = {step.plan_step_ref: index for index, step in enumerate(spec.steps)}
+    form_field_names = {field.name for field in (spec.form_fields or [])}
+    references = analyze_template(
+        template,
+        step_refs=step_refs,
+        form_field_names=form_field_names,
+    )
+    all_step_indexes: set[int] = set()
+    structured_step_indexes: set[int] = set()
+    for reference in references:
+        if reference.kind is not TemplateReferenceKind.STEP:
+            continue
+        if reference.path_error_code is not None:
+            continue
+        if reference.step_order is None or reference.step_order >= before_index:
+            continue
+        all_step_indexes.add(reference.step_order)
+        if _reference_targets_structured_output(reference):
+            structured_step_indexes.add(reference.step_order)
+    return all_step_indexes, structured_step_indexes
+
+
+def _reference_targets_structured_output(reference: TemplateReference) -> bool:
+    return reference.tail == "output.structured" or bool(reference.structured_path)
+
+
+def _structured_priors_consumed_on_composer_ancestry(
+    *,
+    spec: FlowDraftSpecCore,
+    composer_index: int,
+) -> set[int]:
+    ancestry = [composer_index]
+    visited: set[int] = set()
+    consumed_indexes: set[int] = set()
+    while ancestry:
+        step_index = ancestry.pop()
+        if step_index in visited:
+            continue
+        visited.add(step_index)
+        step = spec.steps[step_index]
+        question = effective_question_binding(step.input_bindings)
+        dependencies: set[int]
+        structured_dependencies: set[int]
+        if question is not None:
+            dependencies, structured_dependencies = (
+                _prior_step_indexes_referenced_by_template(
+                    spec=spec,
+                    template=question,
+                    before_index=step_index,
+                )
+            )
+        else:
+            dependencies = (
+                {step_index - 1}
+                if step.input_source == InputSource.PREVIOUS_STEP and step_index > 0
+                else set()
+            )
+            structured_dependencies = set()
+        consumed_indexes.update(structured_dependencies)
+        ancestry.extend(
+            dependency
+            for dependency in dependencies
+            if not _is_renderer_step(spec.steps[dependency])
+        )
+    return consumed_indexes
+
+
+def _prior_json_contract_count(spec: FlowDraftSpecCore, *, before_index: int) -> int:
+    return sum(
+        1
+        for step in spec.steps[:before_index]
+        if not _is_renderer_step(step)
+        and step.output_type == OutputType.JSON
+        and step.output_contract is not None
+    )
+
+
+def _redundant_terminal_json_format_tail_after_final_text_composer_evidence(
+    context: CriticContext,
+) -> bool:
+    spec = context.spec
+    if context.aggregation_intent == "compare":
+        return False
+    if context.output_intent.terminal_output == "structured_json":
+        return False
+    if _blocking_json_contract_requested_by_typed_evidence(context):
+        return False
+    if len(spec.steps) < 4:
+        return False
+
+    last_index = len(spec.steps) - 1
+    last_step = spec.steps[last_index]
+    if _is_renderer_step(last_step):
+        return False
+
+    tail_json_index = last_index
+    if last_step.output_type == OutputType.TEXT and last_index > 0:
+        previous = spec.steps[last_index - 1]
+        if (
+            previous.output_type == OutputType.JSON
+            and previous.output_contract is not None
+            and previous.input_source == InputSource.PREVIOUS_STEP
+        ):
+            tail_json_index = last_index - 1
+
+    tail_json_step = spec.steps[tail_json_index]
+    if tail_json_step.output_type != OutputType.JSON:
+        return False
+    if tail_json_step.output_contract is None:
+        return False
+    if tail_json_step.input_source != InputSource.PREVIOUS_STEP:
+        return False
+    if step_references_form_field(spec, tail_json_step):
+        return False
+    if tail_json_index == 0:
+        return False
+
+    composer_index = tail_json_index - 1
+    composer = spec.steps[composer_index]
+    if _is_renderer_step(composer):
+        return False
+    if composer.output_type != OutputType.TEXT:
+        return False
+    if _prior_json_contract_count(spec, before_index=composer_index) < 1:
+        return False
+    return True
+
+
+_REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER = CriticInvariant(
+    id="redundant_terminal_json_format_tail_after_final_text_composer",
+    description=(
+        "A flow that has already produced its final text answer should not "
+        "append an unrequested JSON formatting step, nor a JSON formatting "
+        "step followed by a text unwrap. This topology adds prompt cost and "
+        "one or two LLM hops without adding user-visible quality. Explicit "
+        "structured JSON terminal outputs, form-field-driven JSON outputs, "
+        "true compare flows, and document renderer terminals are owned by "
+        "their corresponding output contracts and stay outside this rule."
+    ),
+    evidence=_redundant_terminal_json_format_tail_after_final_text_composer_evidence,
+    remediation=(
+        "Flödet har redan ett textsteg som skriver slutversionen, men lägger "
+        "därefter till ett JSON-formateringssteg utan att JSON har begärts som "
+        "slutformat. Ta bort JSON-svansen och låt textsteget vara terminalt. "
+        "Behåll JSON-svansen endast om användaren uttryckligen har valt JSON "
+        "som slutformat eller om JSON-steget drivs av ett runtime-formulärfält."
+    ),
+)
+
+
+def _final_text_step_must_reference_relevant_structured_outputs_evidence(
+    context: CriticContext,
+) -> bool:
+    """Require two relevant JSON producers on the composer's ancestry.
+
+    A producer counts as consumed only when the composer or a dependency
+    ancestor explicitly references its structured output. Explicit structured
+    references replace the implicit predecessor edge; without such references,
+    a `previous_step` step depends on its immediate predecessor.
+
+    Suppression cases:
+    - aggregation_intent == compare: document-comparison flows are handled by
+      the compare fan-in invariant. Aggregate intent is not exempt because it
+      is often inferred from document-output language.
+    - <2 prior content steps emit JSON+output_contract: there is no
+      fan-in to surface, only a 2-step refinement chain.
+    - At least two JSON producers are explicitly consumed on the composer's
+      dependency ancestry.
+    """
+    spec = context.spec
+    if _redundant_terminal_json_format_tail_after_final_text_composer_evidence(context):
+        return False
+    if context.aggregation_intent == "compare":
+        return False
+    if len(spec.steps) < 2:
+        return False
+    composer_index = _last_compositional_step_index(spec)
+    if composer_index is None or composer_index == 0:
+        return False
+    composer = spec.steps[composer_index]
+    if is_bound_document_report_compose_topology(spec, composer):
+        return False
+    if composer.input_source != InputSource.PREVIOUS_STEP:
+        return False
+    if composer.output_type != OutputType.TEXT:
+        return False
+    priors = [
+        step for step in spec.steps[:composer_index] if not _is_renderer_step(step)
+    ]
+    if not priors:
+        return False
+    json_prior_indexes = {
+        index
+        for index, step in enumerate(spec.steps[:composer_index])
+        if not _is_renderer_step(step)
+        and step.output_type == OutputType.JSON
+        and step.output_contract is not None
+    }
+    if len(json_prior_indexes) < 2:
+        return False
+    terminal = spec.steps[-1]
+    if terminal.output_mode == OutputMode.TEMPLATE_FILL:
+        consumed_indexes = _structured_priors_consumed_on_composer_ancestry(
+            spec=spec,
+            composer_index=composer_index,
+        )
+        question = effective_question_binding(composer.input_bindings)
+        immediate_previous_index = composer_index - 1
+        if question is None and immediate_previous_index in json_prior_indexes:
+            consumed_indexes.add(immediate_previous_index)
+        terminal_bindings = "\n".join(_template_fill_binding_templates(terminal))
+        if terminal_bindings:
+            _, structured_step_indexes = _prior_step_indexes_referenced_by_template(
+                spec=spec,
+                template=terminal_bindings,
+                before_index=len(spec.steps) - 1,
+            )
+            consumed_indexes.update(structured_step_indexes)
+        return len(json_prior_indexes & consumed_indexes) < 2
+    consumed_indexes = _structured_priors_consumed_on_composer_ancestry(
+        spec=spec,
+        composer_index=composer_index,
+    )
+    return len(json_prior_indexes & consumed_indexes) < 2
+
+
+def _final_text_step_must_reference_relevant_structured_outputs_remediation(
+    context: CriticContext,
+) -> str:
+    if _is_create_context(context):
+        return (
+            "Strukturera om planen så att det sista komponerande textsteget "
+            "följer efter de strukturerade producentsteg vars resultat behövs. "
+            "Låt producentstegen deklarera tydliga `output_fields` och låt det "
+            "terminala textsteget sammanställa resultaten efter flera JSON-steg; "
+            "i create-läget härleder kompilatorn de typade bindningarna."
+        )
+    return (
+        'Det sista komponerande textsteget läser `input_source="previous_step"` '
+        "fastän flera tidigare steg producerar strukturerad JSON. Behåll "
+        '`input_source="previous_step"` men deklarera `uses_previous_fields` för '
+        "de fält som steget faktiskt behöver från varje relevant tidigare steg "
+        "och referera dem i `input_bindings.question` via "
+        "`{{ step_<ref>.output.structured.<fält> }}`. Eventuella DOCX/PDF-"
+        "renderingar i slutet förblir orörda — regeln gäller bara det "
+        "komponerande textsteget."
+    )
+
+
+_FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS = CriticInvariant(
+    id="final_text_step_must_reference_relevant_structured_outputs",
+    description=(
+        "When at least two prior content steps emit a structured JSON "
+        "output_contract, at least two relevant producers must be explicitly "
+        "consumed on the final compositional text step's dependency ancestry. "
+        "Explicit structured references replace the implicit predecessor "
+        "edge. Document renderer terminals are skipped — the rule evaluates "
+        "the step that builds the body."
+    ),
+    evidence=_final_text_step_must_reference_relevant_structured_outputs_evidence,
+    remediation=(
+        _final_text_step_must_reference_relevant_structured_outputs_remediation
+    ),
+)
+
+
+def _form_fields_declared_must_be_referenced_evidence(
+    context: CriticContext,
+) -> bool:
+    """Fire in edit mode when the spec declares fields no step references.
+
+    A declared but unreferenced form_field reaches the user as an
+    input control with no effect on flow behaviour. The runtime would
+    silently inject the value into a step that never consumes it,
+    polluting the prompt context. The planner gets a repair turn so it
+    can either remove the field or wire it through a step's templates.
+    """
+    if _is_create_context(context):
+        return False
+    return bool(find_unused_form_fields(context.spec))
+
+
+_FORM_FIELDS_DECLARED_MUST_BE_REFERENCED = CriticInvariant(
+    id="form_fields_declared_must_be_referenced",
+    description=(
+        "Every form_field declared on the flow must be referenced by at "
+        "least one step's templates (instructions, input_bindings, or "
+        "output_config). Unreferenced fields surface as live UI controls "
+        "with no flow behaviour and risk polluting downstream prompts at "
+        "runtime."
+    ),
+    evidence=_form_fields_declared_must_be_referenced_evidence,
+    remediation=(
+        "Ett eller flera deklarerade fält saknar koppling till något steg. "
+        "Reparera på något av följande sätt: "
+        "(a) Lägg fältet i `uses_form_fields` på minst ett steg "
+        "och referera det med exakt `{{ <namn> }}` (utan `form.`-prefix) i "
+        "stegets `instructions` eller `input_bindings.question`. "
+        "(b) Ta bort fältet helt om ingen ska läsa det. "
+        "Fält som ingen läser visas som live-kontroller utan effekt på flödets "
+        "beteende och riskerar att förorena nedströms prompts vid körning."
+    ),
+)
+
+
+# ── DOCX output-mode alignment ───────────────────────────────────────────
+
+
+def _template_fill_docx_requires_template_fill_step_evidence(
+    context: CriticContext,
+) -> bool:
+    return (
+        context.output_intent.docx_output_mode == "template_fill_docx"
+        and not _spec_uses_template_fill(context.spec)
+    )
+
+
+_TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP = CriticInvariant(
+    id="template_fill_docx_requires_template_fill_step",
+    description=(
+        "Template-based DOCX generation must include a step with "
+        "`output_mode=template_fill`."
+    ),
+    evidence=_template_fill_docx_requires_template_fill_step_evidence,
+    remediation=(
+        "Konversationen efterfrågar mallbaserad DOCX-generering men planen saknar ett steg med "
+        '`output_mode="template_fill"`. Använd template_fill när ett Word-dokument ska fyllas från en mall.'
+    ),
+)
+
+
+def _generated_docx_rejects_template_fill_evidence(context: CriticContext) -> bool:
+    return (
+        context.output_intent.docx_output_mode == "generated_docx"
+        and _spec_uses_template_fill(context.spec)
+    )
+
+
+_GENERATED_DOCX_REJECTS_TEMPLATE_FILL = CriticInvariant(
+    id="generated_docx_rejects_template_fill",
+    description=(
+        "Generated DOCX (no template) must not use `output_mode=template_fill`."
+    ),
+    evidence=_generated_docx_rejects_template_fill_evidence,
+    remediation=(
+        "Konversationen efterfrågar genererad DOCX utan mall, men planen använder fortfarande "
+        '`output_mode="template_fill"`. Använd inte template_fill när användaren uttryckligen '
+        "valt genererad DOCX utan mall."
+    ),
+)
+
+
+# ── Mixed-audio + document edit guardrails ───────────────────────────────
+
+
+def _is_mixed_audio_document_edit(context: CriticContext) -> bool:
+    return not _is_create_context(context) and context.mixed_audio_doc_input
+
+
+def _mixed_audio_doc_rejects_file_degradation_evidence(
+    context: CriticContext,
+) -> bool:
+    if not _is_mixed_audio_document_edit(context):
+        return False
+    return degrades_document_entry_to_generic_file(context.spec, flow=context.flow)
+
+
+_MIXED_AUDIO_DOC_REJECTS_FILE_DEGRADATION = CriticInvariant(
+    id="mixed_audio_doc_rejects_file_degradation",
+    description=(
+        "When the user wants to add audio alongside an existing document flow, "
+        "the plan must not degrade the document entry to a generic file input."
+    ),
+    evidence=_mixed_audio_doc_rejects_file_degradation_evidence,
+    remediation=(
+        "Användaren verkar vilja lägga till ljud/transkribering ovanpå ett befintligt dokumentflöde, "
+        'men planen degraderar den dokumentbaserade ingången till generisk `input_type="file"`. '
+        "Gör inte om ett dokumentflöde till allmän filinput bara för att få plats med ljud."
+    ),
+    edit_topology=True,
+)
+
+
+def _mixed_audio_doc_rejects_pseudo_transcription_evidence(
+    context: CriticContext,
+) -> bool:
+    if not _is_mixed_audio_document_edit(context):
+        return False
+    return uses_pseudo_transcription_without_audio_step(context.spec)
+
+
+_MIXED_AUDIO_DOC_REJECTS_PSEUDO_TRANSCRIPTION = CriticInvariant(
+    id="mixed_audio_doc_rejects_pseudo_transcription",
+    description=(
+        "Mixed audio/document edits must not fake transcription inside a "
+        "non-audio step instead of adding a real transcription step."
+    ),
+    evidence=_mixed_audio_doc_rejects_pseudo_transcription_evidence,
+    remediation=(
+        "Planen beskriver transkribering i instruktionerna men saknar ett riktigt "
+        'transkriberingssteg (`input_type="audio"`, `output_mode="transcribe_only"`, '
+        '`output_type="text"`). Faka inte transkribering inne i ett dokument- eller JSON-steg.'
+    ),
+    edit_topology=True,
+)
+
+
+def _mixed_audio_doc_requires_real_transcription_step_evidence(
+    context: CriticContext,
+) -> bool:
+    if not _is_mixed_audio_document_edit(context):
+        return False
+    return not has_real_audio_transcription_step(context.spec)
+
+
+_MIXED_AUDIO_DOC_REQUIRES_REAL_TRANSCRIPTION_STEP = CriticInvariant(
+    id="mixed_audio_doc_requires_real_transcription_step",
+    description=(
+        "When the user combines audio transcription with documents, the plan "
+        "must pick a single `flow_input` architecture — either keep documents "
+        "primary or switch to audio-first with a real transcription step."
+    ),
+    evidence=_mixed_audio_doc_requires_real_transcription_step_evidence,
+    remediation=(
+        "När användaren vill kombinera ljudtranskribering och dokument i samma ändring måste planen "
+        "först lösa inmatningsarkitekturen ärligt. Eneo-flöden stöder bara ett `flow_input`-steg, "
+        "så planen ska antingen behålla dokument som primär indata eller byta till en riktig "
+        "audio-first-arkitektur med ett transkriberingssteg — inte låtsas att båda ryms via prompttext."
+    ),
+    edit_topology=True,
+)
+
+
+# ── Public registry ──────────────────────────────────────────────────────
+
+
+CRITIC_INVARIANTS: tuple[CriticInvariant, ...] = (
+    _CHECKPOINT_INTENT_MISMATCH,
+    _RUNTIME_METADATA_REQUIRES_FORM_FIELDS,
+    _SECTIONED_FORM_INTAKE_REQUIRES_FORM_FIELDS,
+    _RICH_WORKFLOW_REQUIRES_JSON_CONTRACT_STEP,
+    _PDF_TERMINAL_OUTPUT_ALIGNMENT,
+    _DOCX_TERMINAL_OUTPUT_ALIGNMENT,
+    _NON_TERMINAL_STEP_DOCUMENT_CONVERSION_FORBIDDEN,
+    _NON_TERMINAL_STEP_TEMPLATE_FILL_FORBIDDEN,
+    _STRUCTURED_EXTRACTION_REQUIRES_JSON_CONTRACT_STEP,
+    _EXPLICIT_JSON_CONTRACT_REQUEST_WITHOUT_STEP,
+    _STANDALONE_AUDIO_REQUIRES_TRANSCRIPTION_STEP,
+    _SOURCE_READER_REQUIRED_FIELDS_MUST_BE_CAPTURED,
+    _ACTION_FOLLOWUP_REQUIRES_FOLLOWUP_FIELDS,
+    _FIELD_REUSE_REQUIRES_INPUT_BINDINGS,
+    _MULTI_DOCUMENT_COMPARE_REQUIRES_EXPLICIT_FAN_IN,
+    _SIMPLE_TEXT_TRANSFORM_MUST_REMAIN_SINGLE_STEP,
+    _DOCUMENT_RENDERER_MUST_IMMEDIATELY_FOLLOW_BODY_WRITER,
+    _TERMINAL_RENDERER_MUST_NOT_CONSUME_REVIEW_ONLY_STEP,
+    _REDUNDANT_TERMINAL_JSON_FORMAT_TAIL_AFTER_FINAL_TEXT_COMPOSER,
+    _FINAL_TEXT_STEP_MUST_REFERENCE_RELEVANT_STRUCTURED_OUTPUTS,
+    _FORM_FIELDS_DECLARED_MUST_BE_REFERENCED,
+    _TEMPLATE_FILL_DOCX_REQUIRES_TEMPLATE_FILL_STEP,
+    _GENERATED_DOCX_REJECTS_TEMPLATE_FILL,
+    _MIXED_AUDIO_DOC_REJECTS_FILE_DEGRADATION,
+    _MIXED_AUDIO_DOC_REJECTS_PSEUDO_TRANSCRIPTION,
+    _MIXED_AUDIO_DOC_REQUIRES_REAL_TRANSCRIPTION_STEP,
+)
+
+
+def evaluate_critic_invariants(
+    context: CriticContext,
+    *,
+    invariants: tuple[CriticInvariant, ...] = CRITIC_INVARIANTS,
+) -> tuple[CriticIssue, ...]:
+    return tuple(
+        CriticIssue(
+            id=invariant.id,
+            kind=invariant.kind,
+            remediation=(
+                invariant.remediation(context)
+                if callable(invariant.remediation)
+                else invariant.remediation
+            ),
+            edit_topology=invariant.edit_topology,
+        )
+        for invariant in invariants
+        if invariant.evidence(context)
+    )
+
+
+def evaluate_edit_topology_invariants(
+    context: CriticContext,
+) -> tuple[CriticIssue, ...]:
+    """Evaluate the edit subset owned by the canonical critic registry."""
+    return evaluate_critic_invariants(
+        context,
+        invariants=tuple(
+            invariant for invariant in CRITIC_INVARIANTS if invariant.edit_topology
+        ),
+    )
+
+
+def render_critic_issues(
+    context: CriticContext,
+    *,
+    invariants: tuple[CriticInvariant, ...] = CRITIC_INVARIANTS,
+) -> list[str]:
+    return [
+        issue.remediation
+        for issue in evaluate_critic_invariants(context, invariants=invariants)
+    ]
+
+
+def enforce_architecture_critic_invariants(
+    context: CriticContext,
+    *,
+    invariants: tuple[CriticInvariant, ...] = CRITIC_INVARIANTS,
+    issues: tuple[CriticIssue, ...] | None = None,
+) -> None:
+    """Raise ``AIBuilderArchitectureError`` if any architecture invariant fired.
+
+    Pass ``issues`` (already-evaluated critic issues) to reuse a single critic
+    evaluation; when omitted the invariants are evaluated here.
+    """
+    evaluated = (
+        issues
+        if issues is not None
+        else evaluate_critic_invariants(context, invariants=invariants)
+    )
+    architecture_issues = tuple(
+        issue for issue in evaluated if issue.kind == "architecture"
+    )
+    if not architecture_issues:
+        return
+
+    issue_ids = ",".join(issue.id for issue in architecture_issues)
+    raise AIBuilderArchitectureError(
+        public_code="architecture_critic_invariant_failed",
+        detail=f"Architecture critic invariants failed: {issue_ids}",
+        log_context={
+            "critic_issue_ids": issue_ids,
+            "critic_issue_count": len(architecture_issues),
+            "flow_name": context.spec.flow_name,
+            "step_count": len(context.spec.steps),
+        },
+    )

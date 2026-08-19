@@ -96,6 +96,76 @@ def test_tenant_update_public_does_not_accept_raw_flow_settings():
         TenantUpdatePublic.model_validate({"flow_settings": {"input_limits": {}}})
 
 
+def test_tenant_in_db_validates_ai_builder_flow_settings():
+    tenant = TenantInDB(
+        id=uuid4(),
+        name="Tenant",
+        display_name="Tenant",
+        quota_limit=1024**3,
+        modules=[],
+        api_credentials={},
+        federation_config={},
+        crawler_settings={},
+        api_key_policy={},
+        flow_settings={
+            "ai_builder": {
+                "conversation_safety_buffer_tokens": 1500,
+                "minimum_conversation_budget_tokens": 6000,
+                "max_attachments": 37,
+                "max_message_chars": 12_000,
+                "max_template_inspection_uncompressed_bytes": 64 * 1024 * 1024,
+                "max_template_placeholders": 750,
+            }
+        },
+        state=TenantState.ACTIVE,
+    )
+
+    assert (
+        tenant.flow_settings["ai_builder"]["conversation_safety_buffer_tokens"] == 1500
+    )
+    assert tenant.flow_settings["ai_builder"]["max_attachments"] == 37
+    assert tenant.flow_settings["ai_builder"]["max_template_placeholders"] == 750
+
+
+def test_tenant_in_db_rejects_invalid_ai_builder_flow_settings():
+    with pytest.raises(ValueError, match="flow_settings.ai_builder"):
+        TenantInDB(
+            id=uuid4(),
+            name="Tenant",
+            display_name="Tenant",
+            quota_limit=1024**3,
+            modules=[],
+            api_credentials={},
+            federation_config={},
+            crawler_settings={},
+            api_key_policy={},
+            flow_settings={
+                "ai_builder": {
+                    "conversation_safety_buffer_tokens": "many",
+                }
+            },
+            state=TenantState.ACTIVE,
+        )
+
+
+def test_tenant_in_db_propagates_unexpected_ai_builder_validator_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fail_validation(_value: object) -> dict[str, object]:
+        raise RuntimeError("ai builder validator failed")
+
+    monkeypatch.setattr(
+        flow_settings_module,
+        "validate_ai_builder_budget_settings_object",
+        fail_validation,
+    )
+
+    with pytest.raises(RuntimeError, match="ai builder validator failed"):
+        _tenant_with_flow_settings(
+            {"ai_builder": {"conversation_safety_buffer_tokens": 1500}}
+        )
+
+
 def test_tenant_in_db_validates_flow_input_limit_settings():
     tenant = TenantInDB(
         id=uuid4(),

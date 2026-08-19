@@ -9,6 +9,7 @@ describe("flow settings load", () => {
       flowInputLimits: { id: "input" },
       flowRuntimePolicy: { id: "runtime" },
       mappedExecutionPolicy: { id: "mapped" },
+      aiBuilderBudgetSettings: { id: "builder" },
       ragEvidencePolicy: { id: "evidence" },
       securityClassifications: { security_enabled: true, security_classifications: [] },
       flowClassificationRetentionPolicies: { policies: [] }
@@ -19,6 +20,7 @@ describe("flow settings load", () => {
         getFlowInputLimits: vi.fn().mockResolvedValue(values.flowInputLimits),
         getFlowRuntimePolicy: vi.fn().mockResolvedValue(values.flowRuntimePolicy),
         getMappedExecutionPolicy: vi.fn().mockResolvedValue(values.mappedExecutionPolicy),
+        getAIBuilderBudgetSettings: vi.fn().mockResolvedValue(values.aiBuilderBudgetSettings),
         getRagEvidencePolicy: vi.fn().mockResolvedValue(values.ragEvidencePolicy),
         listFlowClassificationRetentionPolicies: vi
           .fn()

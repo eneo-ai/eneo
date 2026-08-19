@@ -18,6 +18,13 @@ from eneo.flows.domain.rag_evidence_policy import (
     RAG_EVIDENCE_MAX_SOURCES_KEY,
     RAG_EVIDENCE_MAX_STEP_PASSAGE_BYTES_KEY,
 )
+from eneo.flows.flow_ai_builder_budget_settings import (
+    AI_BUILDER_BUDGET_MAX_TOKENS,
+    AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+    AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+    AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
+    AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
+)
 from eneo.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
 from eneo.flows.flow_input_limits import (
     FLOW_INPUT_MAX_AUDIO_FILES_COUNT,
@@ -570,6 +577,58 @@ class FlowRagEvidencePolicyUpdate(BaseModel):
         ge=1,
         le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_RUN_VIEW_PASSAGE_BYTES_KEY],
         description="Set the per-run-view ceiling, or send null to restore the default.",
+    )
+
+
+class AIBuilderBudgetSettingsPublic(BaseModel):
+    conversation_safety_buffer_tokens: int
+    minimum_conversation_budget_tokens: int
+    max_attachments: int
+    max_message_chars: int
+    max_template_inspection_uncompressed_bytes: int
+    max_template_placeholders: int
+    max_attachments_hard_limit: int
+    max_message_chars_hard_limit: int
+    max_template_inspection_uncompressed_bytes_hard_limit: int
+    max_template_placeholders_hard_limit: int
+    max_template_archive_entries_per_file_hard_limit: int
+    max_template_uncompressed_bytes_per_file_hard_limit: int
+    max_planning_state_payload_bytes_hard_limit: int
+    budget_token_hard_limit: int
+
+
+class AIBuilderBudgetSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_safety_buffer_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_BUDGET_MAX_TOKENS,
+    )
+    minimum_conversation_budget_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_BUDGET_MAX_TOKENS,
+    )
+    max_attachments: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+    )
+    max_message_chars: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+    )
+    max_template_inspection_uncompressed_bytes: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
+    )
+    max_template_placeholders: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
     )
 
 

@@ -5,6 +5,8 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from eneo.flows import flow_runtime_policy
+from eneo.flows.ai_builder import ai_builder_settings
+from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_evidence_policy import (
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
@@ -21,6 +23,7 @@ from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings import (
+    AIBuilderBudgetSettingsUpdate,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyUpdate,
     FlowInputLimitsUpdate,
@@ -151,6 +154,7 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
         (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
         (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
         (FlowEvidencePolicyUpdate, {"allow_sensitive_flow_exports": True}),
+        (AIBuilderBudgetSettingsUpdate, {"max_attachments": 50}),
         (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": 14}),
     )
 
@@ -1051,6 +1055,137 @@ async def test_get_flow_evidence_policy_requires_admin_permission():
 
     with pytest.raises(Exception, match="Need permission admin"):
         await service.get_flow_evidence_policy()
+
+
+async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "ai_builder": {
+                    "conversation_safety_buffer_tokens": 1234,
+                    "minimum_conversation_budget_tokens": 5678,
+                    "max_attachments": 37,
+                    "max_message_chars": 12000,
+                    "max_template_inspection_uncompressed_bytes": 67108864,
+                    "max_template_placeholders": 750,
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        ai_builder_settings,
+        "get_settings",
+        lambda: SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2000,
+            ai_builder_minimum_conversation_budget_tokens=4000,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    settings = await service.get_ai_builder_budget_settings()
+
+    assert settings.conversation_safety_buffer_tokens == 1234
+    assert settings.minimum_conversation_budget_tokens == 5678
+    assert settings.max_attachments == 37
+    assert settings.max_message_chars == 12000
+    assert settings.max_template_inspection_uncompressed_bytes == 67108864
+    assert settings.max_template_placeholders == 750
+    assert settings.max_template_archive_entries_per_file_hard_limit == 2048
+    assert (
+        settings.max_template_uncompressed_bytes_per_file_hard_limit == 50 * 1024 * 1024
+    )
+    assert (
+        settings.max_planning_state_payload_bytes_hard_limit
+        == PLANNING_STATE_PAYLOAD_CAP_BYTES
+    )
+
+
+async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    monkeypatch.setattr(
+        ai_builder_settings,
+        "get_settings",
+        lambda: SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2000,
+            ai_builder_minimum_conversation_budget_tokens=4000,
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(
+            conversation_safety_buffer_tokens=1500,
+            max_attachments=42,
+        )
+    )
+
+    assert updated.conversation_safety_buffer_tokens == 1500
+    assert updated.minimum_conversation_budget_tokens == 4000
+    assert updated.max_attachments == 42
+
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert (
+        tenant.flow_settings["ai_builder"]["conversation_safety_buffer_tokens"] == 1500
+    )
+    assert tenant.flow_settings["ai_builder"]["max_attachments"] == 42
+    assert len(calls) == 1
+    assert calls[0]["metadata"]["setting"] == "ai_builder_budget_settings"
+    assert calls[0]["metadata"]["changes"]["max_attachments"] == {
+        "old": 100,
+        "new": 42,
+    }
+
+
+async def test_update_ai_builder_budget_settings_rejects_empty_patch():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    with pytest.raises(BadRequestException, match="At least one AI Builder setting"):
+        await service.update_ai_builder_budget_settings(AIBuilderBudgetSettingsUpdate())
 
 
 async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):

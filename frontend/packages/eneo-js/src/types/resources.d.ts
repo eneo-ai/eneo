@@ -143,6 +143,8 @@ export type FlowDocumentRenderLimits = {
   max_structured_depth: number;
   max_object_fields: number;
 };
+export type AIBuilderBudgetSettings = components["schemas"]["AIBuilderBudgetSettingsPublic"];
+export type AIBuilderBudgetSettingsUpdate = components["schemas"]["AIBuilderBudgetSettingsUpdate"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];
@@ -243,6 +245,19 @@ export type FlowHttpTestRequest = components["schemas"]["HttpTestRequest"];
 export type FlowHttpTestResponse = components["schemas"]["HttpTestResponse"];
 export type FlowHttpRequestPreview = components["schemas"]["HttpRequestPreview"];
 export type FlowHttpTransportError = components["schemas"]["HttpTransportError"];
+export type AIBuilderAttachmentFile = components["schemas"]["FilePublic"];
+export type AIBuilderConversationMessage = components["schemas"]["AIBuilderConversationMessage"];
+export type AIBuilderSessionResponse = components["schemas"]["SessionResponse"];
+export type AIBuilderDraftSession = components["schemas"]["SessionListItemResponse"];
+export type AIBuilderStepSpec = components["schemas"]["StepSpec"];
+export type AIBuilderFlowDraftSpecCore = components["schemas"]["FlowDraftSpecCore"];
+export type AIBuilderLintWarning = components["schemas"]["LintWarning"];
+export type AIBuilderFlowBuilderProposalContent =
+  components["schemas"]["FlowBuilderProposalContent"];
+export type AIBuilderPlanResponse = components["schemas"]["PlanResponse"];
+export type AIBuilderApplyResult = components["schemas"]["ApplyResultResponse"];
+export type AIBuilderModel = components["schemas"]["SessionModelOption"];
+export type AIBuilderSessionTelemetrySummary = components["schemas"]["SessionTelemetrySummary"];
 export type FlowRunResultFile = components["schemas"]["FlowRunStepResultFile"];
 export type FlowRunResult = NonNullable<components["schemas"]["FlowRunPublic"]["result"]>;
 export type FlowRunTokenUsage = components["schemas"]["FlowRunTokenUsagePublic"];

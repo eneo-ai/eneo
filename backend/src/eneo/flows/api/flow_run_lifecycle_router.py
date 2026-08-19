@@ -149,8 +149,8 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
     matching run row is retained; clients should keep the returned run id as the durable
     polling handle.
 
-    Service-key principals may create published-flow runs in v1. Draft ownership still requires
-    a user principal.
+    Service-key principals may create published-flow runs in v1. Draft ownership and AI Builder
+    flows still require a user principal.
 
     """
     + FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE

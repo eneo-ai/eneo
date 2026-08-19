@@ -5,7 +5,7 @@ Declares the `FlowCapability` shape, seeds one entry per key in
 transcription-wizard rules, and exposes the public API
 (`resolve_capability_for_tuple`, `coverage_report`).
 
-Engine-truth only: no Pattern Registry and no planner prose.
+Engine-truth only: no Pattern Registry, no AI Builder, no planner prose.
 Planner-facing copy and strategy live on the Pattern Registry and
 Question Catalog.
 

@@ -8,11 +8,15 @@ the public API (`resolve_capability_for_tuple`, `coverage_report`).
 
 from __future__ import annotations
 
+import ast
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
+    builder_form_field_type_values,
+)
 from eneo.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
 from eneo.flows.enums import (
     FlowInputSource,
@@ -21,6 +25,7 @@ from eneo.flows.enums import (
     FlowOutputType,
     flow_output_mode_uses_completion_model,
 )
+from eneo.flows.flow_authoring_spec import _VALID_FORM_FIELD_TYPES
 from eneo.flows.flow_capability_manifest import (
     _TEMPORARY_REASON_MARKER,
     CAPABILITY_REGISTRY,
@@ -56,6 +61,10 @@ def _flow_capability_manifest_source() -> Path:
 
 def test_fcm_version_is_eight() -> None:
     assert FCM_VERSION == 8
+
+
+def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
+    assert set(builder_form_field_type_values()) == _VALID_FORM_FIELD_TYPES
 
 
 def test_flow_capability_is_frozen_with_engine_truth_fields() -> None:
@@ -825,6 +834,24 @@ def test_output_mode_and_citation_capabilities_are_non_input() -> None:
         assert capability.runtime_input_mode is None, (
             f"{cap_id} is not an input capability; runtime_input_mode must be None"
         )
+
+
+def test_fcm_module_has_no_ai_builder_imports() -> None:
+    """Redundant with the `importlinter` contract but keeps the invariant
+    obvious in this test module: engine capability truth must not depend
+    on planner strategy."""
+    tree = ast.parse(_flow_capability_manifest_source().read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert "ai_builder" not in module.split("."), (
+                f"forbidden import from ai_builder: {module}"
+            )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                assert "ai_builder" not in alias.name.split("."), (
+                    f"forbidden import from ai_builder: {alias.name}"
+                )
 
 
 # ---------------------------------------------------------------------
