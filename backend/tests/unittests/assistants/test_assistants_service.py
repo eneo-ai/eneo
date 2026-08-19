@@ -308,6 +308,55 @@ async def test_update_assistant_command_preserves_clears_and_sets_completion_mod
     assert assistant.update.call_args.kwargs["completion_model"] == model
 
 
+async def test_update_model_kwargs_without_model_uses_existing_model(setup: Setup):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.origin = AssistantOrigin.FLOW_MANAGED
+    assistant.managing_flow_id = uuid4()
+    assistant.completion_model = MagicMock()
+    assistant.completion_model.get_supported_model_kwargs.return_value = (
+        SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        )
+    )
+    kwargs = ModelKwargs(temperature=0.2)
+
+    await _update_assistant(
+        setup.service,
+        assistant_id=TEST_UUID,
+        update=AssistantUpdateCommand(completion_model_kwargs=kwargs),
+        caller=AssistantUpdateCaller.FLOW_MANAGED,
+    )
+
+    assistant.completion_model.get_supported_model_kwargs.assert_called_once_with()
+    assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
+    assert assistant.update.call_args.kwargs["completion_model_kwargs"] == kwargs
+
+
+async def test_update_rejects_model_kwargs_when_model_is_cleared(setup: Setup):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.completion_model = MagicMock()
+    assistant.completion_model.get_supported_model_kwargs.return_value = (
+        SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        )
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Select a completion model before configuring model settings",
+    ):
+        await _update_assistant(
+            setup.service,
+            assistant_id=TEST_UUID,
+            update=AssistantUpdateCommand(
+                completion_model_id=None,
+                completion_model_kwargs=ModelKwargs(temperature=0.2),
+            ),
+        )
+
+    assistant.update.assert_not_called()
+
+
 async def test_update_assistant_command_translates_clearable_fields_to_domain(
     setup: Setup,
 ):
@@ -756,6 +805,31 @@ async def test_personal_chat_can_change_reasoning_effort_when_policy_allows(
         reasoning_effort="high",
         response_format={"type": "json_object"},
     )
+
+
+async def test_personal_chat_rejects_reasoning_kwargs_when_model_is_cleared(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(setup)
+    assistant.completion_model = reasoning_model("high")
+    setup.service.effective_config_service = AsyncMock()
+    setup.service.effective_config_service.resolve_for.return_value = (
+        governed_reasoning_config(assistant.completion_model)
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Select a completion model before configuring model settings",
+    ):
+        await _update_assistant(
+            setup.service,
+            assistant_id=TEST_UUID,
+            completion_model_id=None,
+            completion_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        )
+
+    assistant.completion_model.get_supported_model_kwargs.assert_not_called()
+    assistant.update.assert_not_called()
 
 
 @pytest.mark.parametrize("can_manage_assistants", [False, True])

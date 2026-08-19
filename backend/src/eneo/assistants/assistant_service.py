@@ -1470,6 +1470,10 @@ class AssistantService:
                 completion_model = None
 
         if completion_model_kwargs is not None:
+            if completion_model is None:
+                raise BadRequestException(
+                    "Select a completion model before configuring model settings"
+                )
             kwargs_model = completion_model
             if (
                 is_personal_default
@@ -1479,13 +1483,9 @@ class AssistantService:
                 kwargs_model = self._context_model(
                     assistant,
                     effective_config=update_effective_config,
-                    current_model=(
-                        completion_model
-                        if completion_model is not None
-                        else assistant.completion_model
-                    ),
+                    current_model=completion_model,
                 )
-            if kwargs_model is None:
+            if isinstance(kwargs_model, NotProvided):
                 kwargs_model = assistant.completion_model
             if kwargs_model is None:
                 raise BadRequestException(
