@@ -35,10 +35,8 @@ class SettingsInDB(SettingsUpsert, InDB):
 class ChunkingPolicyPublic(BaseModel):
     """Platform chunking policy, so clients do not duplicate backend constants.
 
-    The defaults are env-overridable per deployment, and the fraction is the share
-    of an embedding model's ``max_input`` a single chunk may occupy. A client that
-    hardcodes either one will disagree with the server the moment a deployment
-    tunes it.
+    The defaults are env-overridable per deployment; the fractions are shares of
+    an embedding model's ``max_input`` and of the chunk size respectively.
     """
 
     default_chunk_size: int

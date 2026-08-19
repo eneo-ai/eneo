@@ -180,10 +180,8 @@ class Website(Entity):
                 embedding_model,
                 *optional_tail,
             ) = args
-            # The positional overload declares the chunk settings after the auth pair,
-            # so they arrive here too. Reading them from kwargs instead would silently
-            # drop a positional caller's values and build the website on the platform
-            # defaults while the type contract promised otherwise.
+            # The positional overload declares the chunk settings after the auth
+            # pair, so they have to be read from the same positional tail.
             http_auth_username = cast(
                 Optional[str], optional_tail[0] if optional_tail else None
             )

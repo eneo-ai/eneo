@@ -266,9 +266,8 @@
       httpAuthEnabled = false;
       httpAuthUsername = "";
       httpAuthPassword = "";
-      // The dialog is reused for the next website, so the chunk state has to reset
-      // with the rest of the form. The key below remounts ChunkSettings, clearing its
-      // own defaultness flags and numeric state along with these bindings.
+      // The dialog is reused for the next website; the key below remounts
+      // ChunkSettings so its internal state resets with these bindings.
       chunkSize = null;
       chunkOverlap = null;
       chunkSettingsKey += 1;
@@ -482,8 +481,6 @@
       {/if}
 
       {#key chunkSettingsKey}
-        <!-- Editing an existing website: its crawled pages keep their current chunking
-             until the next crawl re-embeds them. -->
         <ChunkSettings
           bind:chunkSize
           bind:chunkOverlap

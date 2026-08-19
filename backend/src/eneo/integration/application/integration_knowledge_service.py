@@ -729,13 +729,7 @@ class IntegrationKnowledgeService:
         chunk_size: int | None | NotProvided = NOT_PROVIDED,
         chunk_overlap: int | None | NotProvided = NOT_PROVIDED,
     ) -> IntegrationKnowledge:
-        """Update an integration knowledge item's name and/or chunk configuration.
-
-        Chunking is editable here for the same reason it is on collections and
-        websites. Without it the drift detection this branch adds for integrations
-        could only ever fire when a deployment retunes its platform defaults, since a
-        source's own pair was fixed at import.
-        """
+        """Update an integration knowledge item's name and/or chunk configuration."""
         space = await self.space_repo.one(id=space_id)
         # Verify the knowledge exists in this space (for permission check)
         space_knowledge = space.get_integration_knowledge(

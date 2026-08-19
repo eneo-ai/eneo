@@ -9,19 +9,10 @@
   export let max: number;
   export let step: number;
   export let onInput: ((value: number) => void) | undefined = undefined;
-  /**
-   * Accessible name for the thumb, which is the element carrying role="slider".
-   * A visible paragraph next to the track is not programmatically associated with
-   * it, so without this the control is announced with no name at all. Optional so
-   * existing consumers are unchanged: Svelte omits an undefined attribute.
-   */
+  /** Accessible name for the thumb (the element carrying role="slider"). */
   export let label: string | undefined = undefined;
-  /**
-   * Spoken value for the thumb. The numeric value a slider carries is often not the
-   * quantity the label names — a percentage thumb under a "(tokens)" label announces
-   * the wrong unit — so a consumer whose displayed value differs from `value` should
-   * pass the same string it shows.
-   */
+  /** Spoken value for the thumb, for consumers whose displayed value differs
+   * from `value` (e.g. a percentage thumb under a token label). */
   export let ariaValueText: string | undefined = undefined;
 
   const {
@@ -34,10 +25,8 @@
     step,
     onValueChange({ next }) {
       value = next[0];
-      // Only report genuine interaction. melt-ui's store calls onChange even when the
-      // value is unchanged, so pushing the prop in below would otherwise notify the
-      // consumer on mount and on every external update — indistinguishable from a
-      // user dragging the thumb.
+      // melt-ui calls onValueChange for programmatic updates too; only report
+      // genuine interaction, not the prop sync below.
       if (!syncingFromProp) onInput?.(value);
       return next;
     }

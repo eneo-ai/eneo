@@ -20,20 +20,12 @@ class ChunkSettings(BaseSettings):
 
 settings = ChunkSettings()
 
-# Safety valve: keep chunks well under the model's token limit, where embedding
-# quality degrades and oversized chunks get silently truncated at embed time.
+# Keep chunks well under the model's token limit, where embedding quality
+# degrades and oversized chunks get silently truncated at embed time.
 MAX_CHUNK_FRACTION = 0.6
 
-# Practical RAG systems land at 10-20% overlap for small chunks and 5-10% for large
-# ones. Every token of overlap is re-embedded and re-stored in the neighbouring chunk,
-# so the chunk count grows as size / (size - overlap): 1.11x at 10%, 1.25x at 20%,
-# 1.33x at 25%, 2x at 50%.
-#
-# This ceiling exists to stop the pathological end of that curve, not to enforce the
-# median — the UI's discrete steps guide towards the usual range. 25% leaves room for
-# the case that justifies it, a very small chunk where a single sentence spans the
-# boundary, and keeps the ceiling above every offered step so no valid choice can be
-# nudged over it by rounding.
+# Caps the pathological end of the overlap curve (each overlapping token is
+# re-embedded and re-stored) while staying above every step the UI offers.
 MAX_OVERLAP_FRACTION = 0.25
 
 
@@ -42,18 +34,12 @@ def max_overlap_for(chunk_size: int) -> int:
     return int(chunk_size * MAX_OVERLAP_FRACTION)
 
 
-# A chunk is split by token count, so a small size multiplies everything downstream:
-# one embedding call, one row and one index entry per chunk. At the 200-token default a
-# 1000-token document yields about 5 chunks; at 50 it yields about 25, and at 1 it
-# yields 1000. This floor keeps the fan-out within roughly 5x of the default while
-# still allowing genuinely fine-grained chunking for short, dense material.
+# A small chunk size multiplies embedding calls, stored rows and index entries
+# per document; this keeps the fan-out within ~5x of the 200-token default.
 MIN_CHUNK_SIZE = 50
 
-# Chunk size is a token count that has to fit an embedding model's input, and the
-# largest context any current model offers is a few hundred thousand tokens. This bound
-# is generous against that and still two orders of magnitude below the range of the
-# PostgreSQL INTEGER column the value is stored in — without it, an accepted request
-# reached the database and failed there with a range error instead of a 400.
+# Generous against any current model's context, but far below the INTEGER
+# column's range so an oversized request fails as a 400 instead of a DB error.
 MAX_CHUNK_SIZE = 100_000
 
 
@@ -80,32 +66,14 @@ def resolve_source_chunk_config(
     """Validate the pair a knowledge source is about to store.
 
     Callers pass the pair *after* merging a partial update with what the source
-    already had, because the two fields only make sense together. Validating one
-    field at a time is what let a size-only update land next to a retained overlap
-    that the splitter then had to reduce, leaving the source reporting a setting its
-    own chunks did not follow.
+    already had — the two fields are only valid together. The model's size
+    ceiling is applied before the overlap is judged, so anything that cannot be
+    honoured raises instead of being adjusted later.
 
-    The model's size ceiling is applied first, so an overlap is judged against the
-    size that will really be used, and anything that cannot be honoured raises instead
-    of being adjusted later.
-
-    Customisation is pair-level: ``(None, None)`` is the only delegating state, and any
-    explicit side stores the whole resolved pair. Keeping the other side ``None`` used
-    to mean "keep following the platform", which made the stored pair depend on values
-    that can change under it. Storing ``(200, None)`` was valid under 200/40 defaults,
-    but moving the deployment to 500/100 then fed 200/100 to ingestion — a 50% overlap
-    the API itself refuses, re-chunking existing material at twice the fan-out nobody
-    asked for, and leaving the source unable to change its size without also naming an
-    overlap. Freezing the pair costs a source the ability to track a future default,
-    which full delegation still provides, and buys a stored configuration that means
-    exactly one thing for as long as it is stored.
-
-    A fully defaulted source stays exempt from the overlap ceiling: it delegates the
-    whole pair to the deployment, and the env-configured defaults were never subject to
-    the per-source ceiling — the splitter has always accepted any overlap up to the
-    size. Judging them here made a deployment with CHUNK_OVERLAP above 25% of
-    CHUNK_SIZE unable to create websites or save a default-configured source at all,
-    while its ingestion kept using that very pair.
+    ``(None, None)`` is the only delegating state; any explicit side stores the
+    whole resolved pair, so a stored configuration keeps meaning the same thing
+    when the platform defaults change. A fully defaulted source is exempt from
+    the overlap ceiling — the env-configured defaults were never subject to it.
     """
     if chunk_size is None and chunk_overlap is None:
         return None, None
@@ -120,31 +88,23 @@ def resolve_source_chunk_config(
             raise BadRequestException(
                 f"chunk_size must not exceed {MAX_CHUNK_SIZE} tokens"
             )
-    # Resolve both sides before validating, because both sides are about to be stored.
-    # The clamp then applies to a defaulted size too: an overlap-only request would
-    # otherwise persist a size this model cannot embed.
+    # Resolve and clamp both sides before validating; both are about to be stored.
     effective_size, effective_overlap = resolve_chunk_config(chunk_size, chunk_overlap)
     effective_size = clamp_chunk_size(effective_size, max_input)
     if effective_size < MIN_CHUNK_SIZE:
-        # The model's input limit forces the size below the public floor. Persisting
-        # the clamped value would store a configuration the API contract itself
-        # refuses on the next save; delegation to platform defaults remains available
-        # for such models.
+        # The model's input limit forces the size below the public floor;
+        # persisting the clamped value would be refused on the next save.
         raise BadRequestException(
             f"this embedding model caps chunks at {effective_size} tokens, below the "
             f"minimum of {MIN_CHUNK_SIZE}; leave the chunk settings on the "
             "platform defaults for this model"
         )
 
-    # A size small enough that the platform's default overlap breaks the ceiling is
-    # refused rather than stored: it would index an overlap that neither the settings
-    # response nor the editor represents.
     try:
         validate_overlap_within_policy(effective_size, effective_overlap)
     except ValueError as error:
-        # The shared rule raises ValueError so pydantic can turn it into a 422 for
-        # request bodies. Reaching it from a domain entity instead, it has to be a
-        # BadRequestException or the caller gets a 500 for their own bad input.
+        # The shared rule raises ValueError so pydantic can turn it into a 422;
+        # from here it must become a BadRequestException or the caller gets a 500.
         if chunk_overlap is None:
             raise BadRequestException(
                 f"a chunk_size of {effective_size} needs an explicit chunk_overlap of "
@@ -154,8 +114,6 @@ def resolve_source_chunk_config(
             ) from error
         raise BadRequestException(str(error)) from error
 
-    # Both sides, resolved and clamped. Storing the pair whole is what makes the
-    # stamp comparison, the settings response and the editor agree on one number.
     return effective_size, effective_overlap
 
 
@@ -166,9 +124,8 @@ def clamp_chunk_size(chunk_size: int, max_input: int | None) -> int:
     """
     if max_input is None or max_input == 0:
         return chunk_size
-    # A known limit always produces a ceiling, even a zero one. Treating that as
-    # unknown let a model declaring a one-token input accept a 100000-token chunk;
-    # returning it instead lets the caller's floor check refuse the configuration.
+    # A known limit always produces a ceiling, even a zero one, so the caller's
+    # floor check can refuse a model whose input is too small to chunk for.
     return min(chunk_size, int(max_input * MAX_CHUNK_FRACTION))
 
 
@@ -178,26 +135,16 @@ def resolve_chunk_config(
 ) -> tuple[int, int]:
     """Resolve the values a splitter will actually use.
 
-    ``None`` means "use the platform default", so the resolved pair is what the
-    text was really split with — not what the caller asked for. Ingestion stamps
-    the result on the info blob, which lets a later crawl tell whether stored
-    material was chunked with the configuration that is in force now. Comparing
-    raw config instead would report a difference between ``None`` and an explicit
-    200 even though both split the text identically.
-
-    A defaulted overlap is the platform's absolute token default — the same number
-    ``ChunkingPolicyPublic`` publishes and the editor shows. Deriving it from the
-    chosen size instead would give ``None`` a size-dependent meaning that neither the
-    settings response nor a numeric input can express, so the same stored source would
-    be described by three different numbers. Sizes too small for that default are
-    refused when they are stored, by ``resolve_source_chunk_config``, rather than
-    quietly given a different overlap here.
+    ``None`` means "use the platform default". Ingestion stamps the resolved
+    pair on the info blob, which lets a later crawl tell whether stored material
+    was chunked with the configuration in force now. A defaulted overlap is the
+    platform's absolute token default — the same number ``ChunkingPolicyPublic``
+    publishes — not a share of the chosen size.
     """
     size = chunk_size if chunk_size is not None else settings.chunk_size
     overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
-    # Last guard for values that never passed the API — an env-configured pair, or a
-    # row written before the ceiling existed. RecursiveCharacterTextSplitter raises
-    # only when overlap > size, so that is where this caps.
+    # Last guard for values that never passed the API (env-configured pairs);
+    # RecursiveCharacterTextSplitter raises when overlap > size.
     return size, min(overlap, size)
 
 
@@ -210,17 +157,10 @@ def chunking_is_unchanged(
 ) -> bool:
     """Whether already-stored chunks match the chunking the source asks for now.
 
-    ``requested_*`` is the source's own configuration, where ``None`` means
-    "platform default". Unrecorded chunking on the stored side is handled by
-    intent rather than by guessing:
-
-    - While the source is still on platform defaults, unrecorded material counts
-      as unchanged. Anything else would re-chunk and re-embed every existing page
-      of every website the first time this ships.
-    - Once the source carries an explicit size or overlap, unrecorded material is
-      stale. That configuration is a deliberate choice, and material that predates
-      it cannot be shown to satisfy it — leaving it alone would let a source report
-      a setting its own knowledge does not follow, indefinitely.
+    Material with unrecorded chunking counts as unchanged while the source
+    delegates to platform defaults (anything else would re-embed every existing
+    page when this ships), but as stale once the source carries an explicit
+    setting it cannot be shown to satisfy.
     """
     source_is_explicit = (
         requested_chunk_size is not None or requested_chunk_overlap is not None
@@ -241,9 +181,8 @@ def build_text_splitter(
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
 ) -> RecursiveCharacterTextSplitter:
-    # Imported lazily to avoid a circular import at module load: this module is
-    # pulled in early via ``website.py`` -> ``clamp_chunk_size``, while
-    # ``context_builder`` depends (transitively) back on ``info_blob``.
+    # Imported lazily to avoid a circular import: this module loads early via
+    # website.py, while context_builder depends transitively back on info_blob.
     from eneo.completion_models.infrastructure.context_builder import count_tokens
 
     size, overlap = resolve_chunk_config(chunk_size, chunk_overlap)

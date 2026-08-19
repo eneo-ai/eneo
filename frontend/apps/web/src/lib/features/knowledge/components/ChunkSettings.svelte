@@ -3,8 +3,7 @@
   import { m } from "$lib/paraglide/messages";
   import { getAppContext } from "$lib/core/AppContext";
 
-  // The platform policy comes from the backend. Hardcoding it here would silently
-  // override a deployment that tunes CHUNK_SIZE, CHUNK_OVERLAP or either ceiling.
+  // From the backend, so a deployment's tuned CHUNK_SIZE/CHUNK_OVERLAP is respected.
   const policy = getAppContext().settings.chunking;
 
   // null = "use platform default". A number = explicit override.
@@ -12,19 +11,14 @@
   export let chunkOverlap: number | null = null;
 
   /** max_input of the embedding model this source will use, when known. Lets the
-   * input stop at the value the backend would clamp to instead of silently lowering
-   * it after the fact. */
+   * input stop at the value the backend would clamp to. */
   export let maxInput: number | null | undefined = undefined;
 
-  /** Whether this source already holds indexed material. Creating a source costs
-   * nothing to configure, but changing an existing one means every document has to be
-   * split and embedded again — real time and real provider spend. The two cases
-   * therefore say different things, and only the second is a warning. */
+  /** Whether this source already holds indexed material — changing the chunking
+   * then costs a full re-index, so the copy becomes a warning. */
   export let hasIndexedContent: boolean = false;
 
-  // Overlap is chosen as a share of the chunk size, which is how the limit is defined
-  // and how the practical guidance is stated, and it survives a change of chunk size:
-  // an absolute overlap would quietly slide from 20% to 4% when the size grows.
+  // Overlap is chosen as a share of the chunk size, so it survives a size change.
   const OVERLAP_STEP_PERCENT = 5;
   const maxOverlapPercent =
     Math.floor((policy.max_overlap_fraction * 100) / OVERLAP_STEP_PERCENT) * OVERLAP_STEP_PERCENT;
@@ -39,24 +33,19 @@
     chunkSize ?? policy.default_chunk_size
   );
 
-  /** An overlap that does not land on one of our steps — a value set through the API,
-   * or a deployment default whose ratio is not a whole step — keeps its exact token
-   * count instead of snapping, so the value shown never disagrees with the value
-   * indexed. Cleared only when the user moves the slider. */
+  /** An overlap that does not land on one of our steps (set via the API) keeps its
+   * exact token count instead of snapping; cleared when the slider is moved. */
   let exactOverlapTokens: number | null = offStepTokens(
     chunkOverlap,
     chunkSize ?? policy.default_chunk_size
   );
 
-  /** Whether the overlap is still "use the platform default". A source may set only a
-   * size, and submitting a number for the other field would change a setting nobody
-   * edited — enough on its own to make the source's material stale. Cleared when the
-   * slider is moved. */
+  /** Whether the overlap is still "use the platform default" — submitting a number
+   * for an untouched field would mark the source's material stale. */
   let overlapIsDefault = chunkOverlap === null;
 
-  /** Same for the size. Toggling the section open is disclosure, not an edit: it must
-   * submit (null, null), or a deployment whose defaults sit outside the per-source
-   * ceiling gets its own configuration rejected the moment the switch is used. */
+  /** Same for the size. Toggling the section open is disclosure, not an edit,
+   * and must still submit (null, null). */
   let sizeIsDefault = chunkSize === null;
 
   function toPercent(tokens: number, size: number): number {
@@ -72,9 +61,8 @@
     return onStep || percent > maxOverlapPercent ? null : tokens;
   }
 
-  // Reset to the platform defaults each time the switch is turned on, so toggling off
-  // then on always starts from the deployment's values. Initialised to the current
-  // state so opening an existing override doesn't reset it.
+  // Reset to the platform defaults each time the switch is turned on; initialised
+  // to the current state so opening an existing override doesn't reset it.
   let wasCustomizing = customize;
   $: onCustomizeChange(customize);
   function onCustomizeChange(on: boolean) {
@@ -82,29 +70,24 @@
       sizeValue = policy.default_chunk_size;
       overlapPercent = toPercent(policy.default_chunk_overlap, policy.default_chunk_size);
       exactOverlapTokens = null;
-      // Turning the switch on is not editing either field: both go back to meaning
-      // "platform default" so nothing is submitted for controls nobody touched.
       overlapIsDefault = true;
       sizeIsDefault = true;
     }
     wasCustomizing = on;
   }
 
-  // The backend caps a chunk at a fraction of the embedding model's input limit. When
-  // that limit is unknown the backend accepts any size, so this must not invent a cap
-  // of its own — doing so would rewrite a stored value the administrator never edited.
+  // The backend caps a chunk at a fraction of the embedding model's input limit;
+  // an unknown limit means no cap, and inventing one here would rewrite a stored value.
   $: ceiling = maxInput ? Math.floor(maxInput * policy.max_chunk_fraction) : null;
-  // Gated on the pair being explicit, not on the size input having been touched: an
-  // overlap-only edit submits the size too, and an unclamped 200 next to a 180-token
-  // model ceiling would be stored as 180 — a source whose real boundaries differ from
-  // the ones the editor showed. The flags are read directly rather than through
-  // isCustomized so this cannot form a reactive cycle with the reset below.
+  // Gated on the pair being explicit: an overlap-only edit submits the size too,
+  // and an unclamped size would be stored lower than the editor showed. The flags
+  // are read directly to avoid a reactive cycle with the reset below.
   $: if ((!sizeIsDefault || !overlapIsDefault) && ceiling !== null && sizeValue > ceiling)
     sizeValue = ceiling;
   $: sizeMax = ceiling !== null ? Math.min(ceiling, policy.max_chunk_size) : policy.max_chunk_size;
 
-  // While the overlap is defaulted, the smallest usable size is the one where that
-  // default still fits the ceiling — offering less would be offering a rejection.
+  // While the overlap is defaulted, the smallest usable size is the one where
+  // that default still fits the overlap ceiling.
   $: sizeMin = overlapIsDefault
     ? Math.max(
         policy.min_chunk_size,
@@ -112,15 +95,9 @@
       )
     : policy.min_chunk_size;
 
-  // A model whose ceiling falls below the absolute floor cannot carry any explicit size,
-  // so the whole customization goes back to delegation — not just the size. Leaving the
-  // overlap explicit kept the pair alive with a size the clamp had lowered below the
-  // floor, and reselecting a roomier model then submitted that hidden value: valid
-  // sequence of model choices, request the API refuses.
-  //
-  // Derived from the ceiling alone, deliberately. Reading sizeMin here would make this
-  // depend on overlapIsDefault while assigning it, which svelte-check reports as a
-  // reactive cycle.
+  // A ceiling below the absolute floor cannot carry any explicit pair, so the whole
+  // customization goes back to delegation. Derived from the ceiling alone: reading
+  // sizeMin here would be a reactive cycle (svelte-check).
   $: ceilingBelowFloor = ceiling !== null && ceiling < policy.min_chunk_size;
   $: if (ceilingBelowFloor && (!sizeIsDefault || !overlapIsDefault)) {
     sizeIsDefault = true;
@@ -130,20 +107,17 @@
     exactOverlapTokens = null;
   }
 
-  // The softer collapse: the range is empty only because a defaulted overlap needs a
-  // larger size than this model allows. The template then hides the size input and
-  // promises platform defaults, so the export has to keep that promise.
+  // The range is empty only when a defaulted overlap needs a larger size than this
+  // model allows; the template then promises platform defaults, so the export keeps it.
   $: rangeCollapsed = sizeMax < sizeMin;
   $: if (!sizeIsDefault && rangeCollapsed) {
     sizeIsDefault = true;
     sizeValue = policy.default_chunk_size;
   }
 
-  // Tokens are what the API and the index actually use. Floor, and never above the
-  // backend's own integer ceiling — rounding up would offer a pair the API refuses.
-  //
-  // A defaulted overlap reports the platform's token default rather than a share of the
-  // size chosen here, so the number shown is the number submitted and indexed.
+  // Tokens are what the API uses: floor, never above the backend's ceiling. A
+  // defaulted overlap reports the platform's token default, so the number shown
+  // is the number submitted.
   $: overlapTokens = overlapIsDefault
     ? policy.default_chunk_overlap
     : Math.min(
@@ -151,38 +125,29 @@
         Math.floor(sizeValue * policy.max_overlap_fraction)
       );
 
-  // The thumb can only sit on a step, so a defaulted overlap gets the nearest one. Any
-  // other value would be snapped by the slider, and that snap fires onInput and would
-  // mark the overlap explicit without anyone touching it.
+  // The thumb can only sit on a step; any other value would snap, fire onInput
+  // and mark the overlap explicit without anyone touching it.
   $: defaultPercentOnStep = Math.min(
     Math.round(((policy.default_chunk_overlap / sizeValue) * 100) / OVERLAP_STEP_PERCENT) *
       OVERLAP_STEP_PERCENT,
     maxOverlapPercent
   );
 
-  // Report the share the tokens really represent, which can differ from the slider
-  // position while an exact value is being preserved.
+  // The share the tokens really represent, which can differ from the slider
+  // position while an exact value is preserved.
   $: displayPercent =
     sizeValue > 0 ? Math.round((overlapTokens / sizeValue) * 100) : overlapPercent;
 
-  // What the overlap really is, in the same words the visible text uses. The slider's
-  // own value is a percentage while the field is labelled in tokens, so without this
-  // a screen reader announces "10" as though it were 10 tokens.
+  // Spoken value for the slider: its own value is a percentage while the field
+  // is labelled in tokens.
   $: overlapValueText = overlapIsDefault
     ? m.chunk_overlap_value_default({ tokens: overlapTokens })
     : m.chunk_overlap_value({ percent: displayPercent, tokens: overlapTokens });
 
-  // Customisation is pair-level, matching the API: (null, null) is the only delegating
-  // state, and touching either field submits both. Sending one side as null would store
-  // a pair whose meaning depends on defaults that can change under it — a size stored
-  // beside a null overlap silently became a 50% overlap when a deployment raised
-  // CHUNK_OVERLAP, re-chunking existing knowledge at twice the fan-out.
-  //
-  // Leaving the disclosure open without touching anything therefore still delegates,
-  // which is how a source keeps following the deployment.
-  // A collapsed range cannot carry an explicit pair at all, and clearing overlapIsDefault
-  // here instead would make sizeMin depend on a value derived from it. Falling back to
-  // full delegation keeps the promise the template makes without that cycle.
+  // Customisation is pair-level, matching the API: (null, null) is the only
+  // delegating state, and touching either field submits both. Leaving the
+  // disclosure open without touching anything still delegates; a collapsed
+  // range falls back to full delegation to avoid a cycle with sizeMin.
   $: isCustomized = customize && !rangeCollapsed && (!sizeIsDefault || !overlapIsDefault);
   $: chunkSize = isCustomized ? sizeValue : null;
   $: chunkOverlap = isCustomized ? overlapTokens : null;

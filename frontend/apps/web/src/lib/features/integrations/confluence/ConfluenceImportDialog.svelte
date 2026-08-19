@@ -98,9 +98,8 @@
       // Make sure we're also polling for further updates (polling will stop once all jobs are finished)
       startUpdatePolling();
       $inputValue = ""; // Reset input in case something else should be added
-      // The dialog is reused for the next import, so the chunk state resets with
-      // the rest of the form — otherwise the next source inherits this override,
-      // and integration knowledge has no update path to correct it.
+      // The dialog is reused for the next import, so the chunk state resets
+      // with the rest of the form.
       chunkSize = null;
       chunkOverlap = null;
       $openController = false;

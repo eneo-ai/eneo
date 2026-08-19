@@ -29,11 +29,9 @@
   let chunkSize: number | null = collection?.chunk_size ?? null;
   let chunkOverlap: number | null = collection?.chunk_overlap ?? null;
 
-  // The backend clamps chunk size against the source's embedding model, so the
-  // inputs need that model's limit to stop at the same value.
-  // The source keeps its own embedding model, and a deprecated model is filtered out
-  // of the space list — so update mode has to read the limit off the source itself or
-  // it loses the ceiling the backend still applies, silently clamping what it shows.
+  // The backend clamps chunk size against the source's embedding model. A
+  // deprecated model is filtered out of the space list, so update mode falls
+  // back to the limit carried by the source's own model.
   $: chunkMaxInput =
     mode === "create"
       ? $currentSpace.embedding_models.find((model) => model.id === embeddingModel?.id)?.max_input
@@ -132,8 +130,6 @@
           required
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
-        <!-- Editing an existing collection: anything already stored has to be split and
-             embedded again before it follows the new setting. -->
         <ChunkSettings
           bind:chunkSize
           bind:chunkOverlap

@@ -546,15 +546,10 @@ class SharePointContentService:
                         )
                         folder_scope_path_unresolved = True
 
-                # A delta result enumerates only what Graph considers changed, so
-                # every other active blob is skipped by construction — whether the
-                # result holds no items or many. The chunk-aware comparison in
-                # _process_info_blob therefore never sees them, and advancing the
-                # token would leave them on obsolete boundaries until Graph happens
-                # to report each document again. For a webhook-driven source that may
-                # be never. So this is judged before the item count, not inside the
-                # no-op branch: a stamp drift discards the delta result entirely and
-                # recovers the same way an expired token does.
+                # A delta result only covers what Graph considers changed, so blobs
+                # on obsolete chunk boundaries would never be revisited. Judged
+                # before the item count: a stamp drift discards the delta result and
+                # falls back to full sync, like an expired token does.
                 effective_size, effective_overlap = resolve_chunk_config(
                     integration_knowledge.chunk_size,
                     integration_knowledge.chunk_overlap,
@@ -586,8 +581,7 @@ class SharePointContentService:
                         or integration_knowledge.resource_type
                         or "site",
                         # Carry the trigger and reason like the sibling recovery
-                        # branches: this full sync is automatic, and a SyncLog saying
-                        # "manual" with no cause would hide why the enumeration ran.
+                        # branches, so the SyncLog shows why the enumeration ran.
                         sync_trigger=sync_trigger,
                         recovery="chunking_changed",
                     )
@@ -1230,11 +1224,8 @@ class SharePointContentService:
         # unchanged. SharePoint emits delta changes for metadata edits, moves and
         # co-author saves that do not alter the extracted text; re-embedding those
         # wastes embedding cost for no retrieval benefit.
-        #
         # The chunking has to agree too: this return sits in front of the generic
-        # publisher, whose own chunk-aware guard is never reached from here. Without
-        # this check a changed chunk configuration never reached unchanged SharePoint
-        # documents, unlike the same configuration on every other knowledge source.
+        # publisher, so its chunk-aware guard is never reached from here.
         if (
             existing_blob is not None
             and existing_blob.content_hash is not None

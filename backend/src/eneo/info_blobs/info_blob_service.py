@@ -183,10 +183,9 @@ class InfoBlobService:
     ) -> _PublicationMatch:
         """Decide whether stored material still satisfies this publication.
 
-        ``chunk_size``/``chunk_overlap`` are the source's own configuration, where
-        ``None`` means "platform default". They are deliberately required rather than
-        defaulted: a caller that forgot them would silently compare against the
-        platform default and report an explicitly configured source as unchanged.
+        ``chunk_size``/``chunk_overlap`` are the source's own configuration
+        (``None`` = platform default), required rather than defaulted so a caller
+        cannot silently compare an explicitly configured source against the default.
         """
         original_sha256 = original.captured.sha256 if original is not None else None
         await self.repo.lock_publication_identity(
@@ -200,9 +199,8 @@ class InfoBlobService:
         active = (
             active_publication.info_blob if active_publication is not None else None
         )
-        # Chunking is part of what makes the stored text searchable: the same bytes
-        # split at different boundaries produce different embeddings, so material
-        # chunked under a superseded configuration is as stale as edited content.
+        # The same bytes split at different boundaries produce different embeddings,
+        # so material chunked under a superseded configuration is stale too.
         same_searchable_content = (
             active is not None
             and active.content_hash == info_blob.content_hash

@@ -80,11 +80,8 @@ class IntegrationKnowledge(Entity):
     ) -> None:
         """Apply a partial update, mirroring Collection.update and Website.update.
 
-        The sentinel matters more here than elsewhere: this is also the rename path,
-        so treating an omitted field as ``None`` would silently return the source to
-        the platform default. For an integration that means the next sync sees drifted
-        stamps and re-syncs the whole corpus — a rename would quietly cost a full
-        re-index.
+        The sentinel matters: this is also the rename path, and treating an omitted
+        field as ``None`` would reset the chunking and re-index the whole corpus.
         """
         if is_provided(name):
             self.name = name

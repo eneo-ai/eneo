@@ -41,16 +41,13 @@ describe("ChunkSettings", () => {
     await page.getByText(m.chunk_settings_customize()).click();
     await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
 
-    // Touching one field commits both. A size stored beside a null overlap changed
-    // meaning whenever an operator retuned CHUNK_OVERLAP, which could hand ingestion
-    // an overlap the API itself refuses.
+    // Touching one field commits both — customisation is pair-level.
     const slider = overlapSlider().element() as HTMLElement;
     slider.focus();
     slider.dispatchEvent(
       new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
     );
     // One 5% step from the default 20% lands on the 25% ceiling: 50 of 200 tokens.
-    // The size comes along even though nobody touched it — that is the contract.
     await expect.element(submitted).toHaveTextContent("size=200, overlap=50");
   });
 
@@ -62,9 +59,7 @@ describe("ChunkSettings", () => {
     await page.getByText(m.chunk_settings_customize()).click();
     await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
 
-    // Touching only the overlap still submits a size, so the ceiling has to apply to
-    // it. Submitting an unclamped 200 would be stored as 180, leaving the source with
-    // boundaries the editor never showed.
+    // Touching only the overlap still submits a size, so the ceiling applies to it.
     const slider = overlapSlider().element() as HTMLElement;
     slider.focus();
     slider.dispatchEvent(
@@ -77,9 +72,7 @@ describe("ChunkSettings", () => {
   });
 
   it("announces the overlap as tokens, not as the slider's percentage", async () => {
-    // 40 of 400 tokens is 10%, and the thumb's numeric value is that 10. Under a
-    // label that says "tokens", announcing a bare 10 would name the wrong quantity
-    // in the wrong unit.
+    // 40 of 400 tokens is 10%; announcing the thumb's bare 10 would name the wrong unit.
     render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });
 
     const expected = m.chunk_overlap_value({ percent: 10, tokens: 40 });
@@ -119,8 +112,7 @@ describe("ChunkSettings", () => {
     await rerender({ maxInput: 64 });
     await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
 
-    // Back to a roomy model. The clamped 38 must not reappear: the API refuses any
-    // explicit size below 50, so this sequence used to end in a rejected save.
+    // Back to a roomy model: the clamped 38 must not reappear (the API refuses it).
     await rerender({ maxInput: 1000 });
     await expect.element(submitted).toHaveTextContent("size=null, overlap=null");
   });
@@ -141,8 +133,6 @@ describe("ChunkSettings", () => {
       hasIndexedContent: true
     });
 
-    // The warning has to say what it costs, not just that it applies later: every
-    // document is split and embedded again, which is time and provider spend.
     await expect
       .element(page.getByText(m.chunk_settings_reindex_warning_title()))
       .toBeInTheDocument();
@@ -153,9 +143,8 @@ describe("ChunkSettings", () => {
     // An explicit override starts the disclosure expanded.
     render(ChunkSettings, { chunkSize: 400, chunkOverlap: 40 });
 
-    // Found by role and name: the visible paragraph beside the track is not
-    // programmatically associated with the thumb, so only a name on the control
-    // itself makes it identifiable to a screen reader.
+    // Found by role and name — the visible text beside the track is not
+    // programmatically associated with the thumb.
     await expect.element(overlapSlider()).toBeInTheDocument();
   });
 
@@ -173,9 +162,7 @@ describe("ChunkSettings", () => {
       new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })
     );
 
-    // One 5% step. Reaching the displayed value proves onInput fired: the mount guard
-    // in Slider suppresses programmatic prop syncs, and would suppress this too if it
-    // could not tell real input apart.
+    // Reaching the displayed value proves onInput fired despite Slider's mount guard.
     await expect
       .element(page.getByText(m.chunk_overlap_value({ percent: 15, tokens: 60 })))
       .toBeInTheDocument();

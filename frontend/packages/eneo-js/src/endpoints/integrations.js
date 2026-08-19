@@ -339,14 +339,10 @@ export function initIntegrations(client) {
       },
 
       /**
-       * Change an integration knowledge item's chunk configuration.
-       *
-       * Sends only the chunk pair, never the name: the endpoint treats an omitted
-       * field as "leave it alone", so a chunking change must not carry a name and a
-       * rename must not carry chunking. Both sides of the pair are always sent —
-       * null on both means "follow the platform default".
-       *
-       * Takes effect at the source's next sync, which re-embeds its documents.
+       * Change an integration knowledge item's chunk configuration. Sends only the
+       * chunk pair — the endpoint treats omitted fields as "leave it alone" — and
+       * null on both means "follow the platform default". Takes effect at the
+       * source's next sync.
        * @param {Object} args
        * @param {{id: string}} args.knowledge IntegrationKnowledge to reconfigure
        * @param {{id: string}} args.space Space where the knowledge belongs

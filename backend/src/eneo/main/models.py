@@ -144,16 +144,9 @@ class ResourcePermissionsMixin(BaseModel):
 class ChunkConfigRequestMixin(BaseModel):
     """Chunk configuration a client may set on a knowledge source.
 
-    Customisation is pair-level. Sending both as ``None`` delegates to the platform
-    default and keeps the source following deployment configuration; giving either
-    one stores the whole resolved pair, so the other side is filled from the current
-    default at that moment rather than left to track future changes. A stored pair
-    that still followed the platform on one side changed meaning whenever an operator
-    retuned CHUNK_SIZE or CHUNK_OVERLAP, which could feed ingestion an overlap this
-    very contract refuses.
-
-    An explicit overlap larger than an explicit size is refused here rather than
-    quietly adjusted at split time.
+    Customisation is pair-level: both ``None`` delegates to the platform default,
+    while giving either one stores the whole resolved pair. An overlap above the
+    policy ceiling is refused here rather than adjusted at split time.
     """
 
     chunk_size: Optional[
