@@ -15116,7 +15116,7 @@ export interface components {
       )[];
       kind: components["schemas"]["EneoPackageKind"];
       /** Omissions */
-      omissions: components["schemas"]["FlowPackageOmission"][];
+      omissions: components["schemas"]["ResourcePackageOmission"][];
       /** Package Id */
       package_id: string;
       package_summary: components["schemas"]["FlowPackageImportPlanSummary"];
@@ -15452,16 +15452,6 @@ export interface components {
       /** Tested With */
       tested_with?: components["schemas"]["FlowPackageModelIdentity"][];
     };
-    /** FlowPackageOmission */
-    FlowPackageOmission: {
-      /** Count */
-      count: number;
-      /**
-       * Kind
-       * @constant
-       */
-      kind: "mcp_attachment";
-    };
     /**
      * FlowPackagePolicyStatus
      * @enum {string}
@@ -15589,7 +15579,7 @@ export interface components {
        * Omissions
        * @description Source-local package dependencies deliberately omitted from the portable archive.
        */
-      omissions: components["schemas"]["FlowPackageOmission"][];
+      omissions: components["schemas"]["ResourcePackageOmission"][];
       /**
        * Package Id
        * @description Portable package identifier from the package manifest.
@@ -25131,6 +25121,16 @@ export interface components {
       configured: boolean;
       /** Default Effort */
       default_effort: string | null;
+    };
+    /** ResourcePackageOmission */
+    ResourcePackageOmission: {
+      /** Count */
+      count: number;
+      /**
+       * Kind
+       * @constant
+       */
+      kind: "mcp_attachment";
     };
     /**
      * ResourcePermission
