@@ -8572,7 +8572,7 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> No
         cases=cases, repetitions=3, timeout_seconds=900
     )
 
-    assert demand["total"] == 11_056
+    assert demand["total"] == 11_566
     assert demand["total"] > 10_000
 
 

@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "description": "A Flow AI Builder benchmark for Swedish municipal work. It combines release and architecture coverage with curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue and a plan-authoring tjänsteskrivelse family. The cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, and applied human-review journeys. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
+  "description": "A Flow AI Builder benchmark for Swedish municipal work. It combines release and architecture coverage with curated cases grounded in municipal services, including Sundsvall's Open ePlatform catalogue, a plan-authoring tjänsteskrivelse family, and ten long-context municipal service prompts. The cases balance deliberately vague first requests, controlled single-gap interviews, scripted question-to-plan continuations, complete everyday requests, technically explicit contracts, applied human-review journeys, and realistic 6–9k-character instructions. Expectations measure structured questioning, topology, input ownership, output fields, delivery format, and review placement without relying on prompt-specific golden prose. Run repeated samples to distinguish model variance from product regressions.",
   "synthetic_user_profiles": {
     "audio_source": {
       "description": "Audio is uploaded as the primary runtime source and no extra metadata fields are entered.",
@@ -10774,6 +10774,302 @@
         "input_field_contract",
         "json"
       ]
+    },
+    {
+      "id": "long_context_livsmedelsverksamhet_json_to_pdf",
+      "complexity": "hard",
+      "domain": "municipality_food_safety",
+      "prompt_file": "01_livsmedelsverksamhet_json_till_pdf.md",
+      "synthetic_user_profile": "structured_json_source",
+      "question_answer_overrides": {
+        "pdf_generation_mode": {"selected_option_id": "generated_pdf"}
+      },
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "json",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["operator", "verksamhetsutovare"],
+          ["site", "verksamhetsplats"],
+          ["activity", "verksamhet", "verksamhetsbeskrivning"],
+          ["conflicts", "avvikelser", "motstridiga_uppgifter"],
+          ["missing_information", "saknade_uppgifter", "oklara_uppgifter"]
+        ]
+      },
+      "cohorts": ["json", "long_context", "pdf"]
+    },
+    {
+      "id": "long_context_bygglov_pdf_to_docx",
+      "complexity": "hard",
+      "domain": "municipality_building_permits",
+      "prompt_file": "02_bygglov_pdf_till_docx.md",
+      "synthetic_user_profile": "document_source",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["documents", "handlingar", "document_inventory"],
+          ["case_facts", "grunduppgifter", "arendeuppgifter"],
+          ["conflicts", "avvikelser", "motstridiga_uppgifter"],
+          ["missing_information", "oklarheter", "saknade_uppgifter"],
+          ["supplement_request", "kompletteringsbegaran", "requested_completions"]
+        ]
+      },
+      "cohorts": ["document", "docx", "long_context"]
+    },
+    {
+      "id": "long_context_grannehornande_text_to_docx",
+      "complexity": "hard",
+      "domain": "municipality_building_permits",
+      "prompt_file": "03_grannehornande_text_json_till_docx.md",
+      "question_answer_overrides": {
+        "primary_runtime_input": {"selected_option_id": "text"},
+        "runtime_metadata_fields": {"selected_option_id": "no_extra_metadata"}
+      },
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "text",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["responses", "yttranden", "respondents"],
+          ["stance", "installning"],
+          ["themes", "teman"],
+          ["conflicts", "motstridiga_uppgifter"],
+          ["uncertainties", "osakerheter"]
+        ]
+      },
+      "cohorts": ["docx", "long_context", "text"]
+    },
+    {
+      "id": "long_context_foreningsbidrag_documents_to_docx",
+      "complexity": "hard",
+      "domain": "municipality_culture_and_leisure",
+      "prompt_file": "04_foreningsbidrag_docx_pdf_till_docx.md",
+      "synthetic_user_profile": "document_source",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["documents", "handlingar"],
+          ["application", "ansokan", "ansokningsoversikt"],
+          ["planned_activities", "planerad_verksamhet"],
+          ["financial_summary", "ekonomisk_sammanstallning"],
+          ["conflicts", "avvikelser", "jamforelse"],
+          ["missing_information", "saknade_uppgifter", "oklarheter"]
+        ]
+      },
+      "cohorts": ["document", "docx", "long_context"]
+    },
+    {
+      "id": "long_context_varmepumpsanmalan_json_pdf_to_pdf",
+      "complexity": "hard",
+      "domain": "municipality_environmental_health",
+      "prompt_file": "05_varmepumpsanmalan_json_pdf_till_pdf.md",
+      "synthetic_user_profile": "document_source",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "file",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["service_data", "e_tjanstuppgifter", "json_data"],
+          ["attachment_data", "bilageuppgifter", "site_plan_data"],
+          ["comparison", "jamforelse", "cross_validation"],
+          ["deviations", "avvikelser"],
+          ["missing_information", "saknade_uppgifter", "oklarheter"]
+        ]
+      },
+      "cohorts": ["document", "long_context", "pdf"]
+    },
+    {
+      "id": "long_context_miljofarlig_verksamhet_documents_to_json",
+      "complexity": "hard",
+      "domain": "municipality_environmental_health",
+      "prompt_file": "06_miljofarlig_verksamhet_dokument_till_json.md",
+      "synthetic_user_profile": "document_source",
+      "expected": {
+        "min_steps": 2,
+        "max_steps": 4,
+        "terminal_output_type": "json",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["case_metadata", "arendemetadata"],
+          ["operator", "verksamhetsutovare"],
+          ["site", "plats"],
+          ["activity", "verksamhet"],
+          ["emissions", "utslapp"],
+          ["conflicts", "motstridiga_uppgifter"],
+          ["missing_information", "saknade_uppgifter"],
+          ["provenance", "kallspårbarhet"]
+        ]
+      },
+      "cohorts": ["document", "json", "long_context"]
+    },
+    {
+      "id": "long_context_serveringstillstand_json_pdf_to_docx",
+      "complexity": "hard",
+      "domain": "municipality_alcohol_permits",
+      "prompt_file": "07_serveringstillstand_json_pdf_till_docx.md",
+      "synthetic_user_profile": "document_source",
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "docx",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "file",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["application", "ansokan", "e_tjanstuppgifter"],
+          ["attachments", "bilagor", "mottaget_underlag"],
+          ["company", "foretag", "foretradare"],
+          ["premises", "lokal", "verksamhetsstalle"],
+          ["checklist", "checklistekontroll"],
+          ["deviations", "avvikelser"],
+          ["missing_information", "saknade_uppgifter", "oklarheter"]
+        ]
+      },
+      "cohorts": ["document", "docx", "long_context"]
+    },
+    {
+      "id": "long_context_synpunkt_text_to_json",
+      "complexity": "hard",
+      "domain": "municipality_service_center",
+      "prompt_file": "08_synpunkt_text_till_json.md",
+      "question_answer_overrides": {
+        "primary_runtime_input": {"selected_option_id": "text"},
+        "runtime_metadata_fields": {"selected_option_id": "no_extra_metadata"}
+      },
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "json",
+        "expected_primary_input_type": "text",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["classification", "klassificering"],
+          ["summary", "sammanfattning"],
+          ["reported_events", "handelser"],
+          ["requested_actions", "onskade_atgarder"],
+          ["claims", "pastaenden"],
+          ["uncertainties", "osakerheter"],
+          ["routing_notes", "routningsanteckningar"]
+        ]
+      },
+      "cohorts": ["json", "long_context", "text"]
+    },
+    {
+      "id": "long_context_allman_handling_text_to_json",
+      "complexity": "hard",
+      "domain": "municipality_records",
+      "prompt_file": "09_allman_handling_text_pdf_till_json.md",
+      "expected": {
+        "min_steps": 1,
+        "max_steps": 3,
+        "terminal_output_type": "json",
+        "expected_primary_input_type": "file",
+        "min_json_steps": 1,
+        "max_all_previous_steps": 0,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["request_summary", "sammanfattning"],
+          ["request_objects", "efterfragade_objekt"],
+          ["document_types", "handlingstyper"],
+          ["date_constraints", "datumavgransningar"],
+          ["ambiguities", "oklarheter"],
+          ["clarification_questions", "klargorandefragor"],
+          ["search_strategy", "sokstrategi"]
+        ]
+      },
+      "cohorts": ["json", "long_context", "text"]
+    },
+    {
+      "id": "long_context_inackorderingstillagg_pdf_to_pdf",
+      "complexity": "hard",
+      "domain": "municipality_education",
+      "prompt_file": "10_inackorderingstillagg_pdf_till_pdf.md",
+      "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "terminal_output": {"selected_option_id": "pdf_document"},
+        "pdf_generation_mode": {"selected_option_id": "generated_pdf"}
+      },
+      "expected": {
+        "min_steps": 3,
+        "max_steps": 5,
+        "terminal_output_type": "pdf",
+        "terminal_document_output_mode": "render_verbatim",
+        "expected_primary_input_type": "document",
+        "min_json_steps": 1,
+        "min_source_ref_steps": 1,
+        "max_all_previous_steps": 0,
+        "max_post_json_text_cleanup_steps": 1,
+        "forbid_input_sources": ["all_previous_steps"],
+        "forbid_primary_material_form_fields": true,
+        "expected_leaf_output_field_groups": [
+          ["documents", "handlingar"],
+          ["application", "ansokan", "ansokningsuppgifter"],
+          ["school_and_education", "skola_och_utbildning"],
+          ["housing", "boende", "boendeuppgifter"],
+          ["comparison", "jamforelse"],
+          ["deviations", "avvikelser"],
+          ["missing_information", "saknade_uppgifter", "oklarheter"]
+        ]
+      },
+      "cohorts": ["document", "long_context", "pdf"]
     }
   ]
 }
