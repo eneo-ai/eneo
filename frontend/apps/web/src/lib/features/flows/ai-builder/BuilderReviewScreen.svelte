@@ -44,6 +44,7 @@
     buildAIBuilderTokenUsageView,
     formatAIBuilderTokenCount
   } from "./flowAIBuilderTokenUsage";
+  import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
 
   interface Props {
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
@@ -251,8 +252,11 @@
 
   function modelLabel(step: StepSpec): string {
     if (step.output_mode === "transcribe_only") return m.ai_builder_step_transcription_model();
+    if (!outputModeUsesCompletionModel(step.output_mode ?? "pass_through")) {
+      return m.ai_builder_node_model_none();
+    }
     const ref = step.assistant_spec.model_ref;
-    if (!ref) return m.ai_builder_node_model_none();
+    if (!ref) return m.ai_builder_node_model_space_default();
     const known = service.availableModels.find((model) => model.id === ref);
     if (known) return known.name;
     // An unresolved plan-local reference still names the model; "model." is

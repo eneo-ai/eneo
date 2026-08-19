@@ -6292,6 +6292,7 @@
   "ai_builder_flow_out_value": "{type} comes out of every run",
   "ai_builder_node_io": "{input} → {output}",
   "ai_builder_node_model_none": "No AI model",
+  "ai_builder_node_model_space_default": "Space default model",
   "ai_builder_node_review_checkpoint": "Review",
   "ai_builder_node_review_checkpoint_hint": "The flow pauses here and waits for your approval before the next step runs.",
   "ai_builder_node_per_file": "per file",
