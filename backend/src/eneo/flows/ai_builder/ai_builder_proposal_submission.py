@@ -434,6 +434,11 @@ class ProposalSubmissionOwner:
                 tool_schema=proposal_tool_schema,
             )
         except ProposalToolArgumentsError as error:
+            logger.info(
+                "ai_builder_proposal_schema_rejected session_id=%s validator=%s",
+                invocation.turn.session_id,
+                error.validator,
+            )
             capture_rejected_proposal_arguments(
                 invocation.arguments,
                 session_id=str(invocation.turn.session_id),

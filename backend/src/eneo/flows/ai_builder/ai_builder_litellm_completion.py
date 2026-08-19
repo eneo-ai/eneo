@@ -33,6 +33,10 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
     CompletionTokenUsage,
     completion_token_usage_from_response,
 )
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolSchema,
+    build_native_strict_tool_schema,
+)
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -159,21 +163,18 @@ async def call_proposal_completion(
 def _outbound_proposal_tool_schemas(
     request: ProposalCompletionRequest,
 ) -> list[dict[str, Any]]:
-    # Only the create schema is built strict-compatible; the edit schema still
-    # carries constructs that native strict tools reject.
+    # Only create has a native-strict transport projection; edit still carries
+    # schema constructs that strict providers reject.
     if (
         request.target_kind != TargetKind.CREATE
         or not request.route.supports_strict_tool_schema
     ):
         return request.tool_schemas
     return [
-        {
-            **tool_schema,
-            "function": {
-                **cast(dict[str, Any], tool_schema["function"]),
-                "strict": True,
-            },
-        }
+        cast(
+            dict[str, Any],
+            build_native_strict_tool_schema(cast(ProposalToolSchema, tool_schema)),
+        )
         for tool_schema in request.tool_schemas
     ]
 

@@ -136,6 +136,7 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
+    build_native_strict_tool_schema,
     build_propose_flow_tool_schema,
     validate_native_strict_schema,
     validate_propose_flow_tool_arguments,
@@ -586,13 +587,15 @@ def test_property_names_are_not_read_as_schema_keywords() -> None:
     )
 
 
-def test_prepared_create_schema_is_native_strict_compatible() -> None:
+def test_prepared_create_schema_has_a_native_strict_transport_projection() -> None:
     prepared = _build_create_proposal_for_architecture(_document_architecture_state())
     tool_schema = prepared.proposal_tool_schema
     parameters = tool_schema["function"]["parameters"]
 
     assert "strict" not in tool_schema["function"]
-    validate_native_strict_schema(parameters)
+    assert set(parameters["required"]) != set(parameters["properties"])
+    strict_tool_schema = build_native_strict_tool_schema(tool_schema)
+    validate_native_strict_schema(strict_tool_schema["function"]["parameters"])
 
     raw_create_payload = {
         "flow_name": "Case assessment",

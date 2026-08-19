@@ -58,6 +58,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ObligatedResultKey,
+    ProposalObligationProjection,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolRetryOutcome,
     build_self_correction_error_event,
@@ -1144,7 +1148,13 @@ async def test_repair_invocation_validates_the_prepared_schema_before_compilatio
     resource_catalog = build_ai_builder_resource_catalog(
         available_models=[], available_kbs=[]
     )
-    schema = build_propose_flow_tool_schema(resource_catalog=resource_catalog)
+    private_result_key = "PRIVATE_USER_CONTENT_MUST_NOT_REACH_LOGS"
+    schema = build_propose_flow_tool_schema(
+        resource_catalog=resource_catalog,
+        obligation_projection=ProposalObligationProjection(
+            keys=(ObligatedResultKey(name=private_result_key),)
+        ),
+    )
     process_create = AsyncMock()
     config = submission._proposal_retry_config(
         target_kind=TargetKind.CREATE,
@@ -1161,24 +1171,42 @@ async def test_repair_invocation_validates_the_prepared_schema_before_compilatio
         "flow_name": "Invalid repair",
         "flow_description": None,
         "plan_rationale": "Repair the proposal.",
-        "steps": ["not an object"],
+        "steps": [{"name": "Draft report", "instructions": "Draft the report."}],
         "assumptions": [],
+        "result_keys": {
+            private_result_key: {
+                "field_type": "unsupported-private-shape",
+                "description": "Private result content.",
+                "required": True,
+            }
+        },
     }
     invocation = _make_retry_invocation(
         resource_catalog=resource_catalog,
         arguments=invalid_arguments,
     )
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_proposal_submission."
-        "process_create_intent_arguments",
-        new=process_create,
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.logger.info"
+        ) as log_info,
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
+            "process_create_intent_arguments",
+            new=process_create,
+        ),
     ):
         result = await config.process_tool_invocation(invocation)
 
     assert result.failure_kind == "parse"
     assert result.failure_codes == frozenset({"proposal_parse_schema"})
-    assert result.feedback is not None and "steps.0" in result.feedback
+    assert result.feedback is not None and private_result_key in result.feedback
+    log_info.assert_called_once_with(
+        "ai_builder_proposal_schema_rejected session_id=%s validator=%s",
+        invocation.turn.session_id,
+        "enum",
+    )
+    assert private_result_key not in repr(log_info.call_args)
     process_create.assert_not_awaited()
     captures = list(tmp_path.glob("rejected-proposal-*.json"))
     assert len(captures) == 1

@@ -76,7 +76,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import classify_slots
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    build_propose_flow_tool_schema,
+    validate_native_strict_schema,
+)
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
@@ -401,10 +404,15 @@ async def test_outbound_proposal_tools_follow_the_route_capability_on_create(
     assert _nested_key_values(call_kwargs["tools"], "strict") == (
         expected_strict_values
     )
-    assert (
-        call_kwargs["tools"][0]["function"]["parameters"]
-        is (tool_schema["function"]["parameters"])
-    )
+    outbound_parameters = call_kwargs["tools"][0]["function"]["parameters"]
+    if target_kind == TargetKind.CREATE and supports_strict_tool_schema:
+        assert outbound_parameters is not tool_schema["function"]["parameters"]
+        validate_native_strict_schema(outbound_parameters)
+        assert set(outbound_parameters["required"]) == set(
+            outbound_parameters["properties"]
+        )
+    else:
+        assert outbound_parameters is tool_schema["function"]["parameters"]
     assert "strict" not in tool_schema["function"]
     assert call_kwargs["tool_choice"] == tool_choice
     assert call_kwargs["parallel_tool_calls"] is False
@@ -1263,6 +1271,12 @@ async def test_final_strict_tool_payload_is_admitted_before_provider_work(
     )
     ctx = _make_context(
         route=_route(supports_strict_tool_schema=True),
+        proposal_tool_schema=build_propose_flow_tool_schema(
+            resource_catalog=build_ai_builder_resource_catalog(
+                available_models=[],
+                available_kbs=[],
+            )
+        ),
         message_groups=(
             ProposalMessageGroup(
                 messages=({"role": "user", "content": "current turn"},),
