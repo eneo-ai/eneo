@@ -222,7 +222,7 @@ class TestBuildToolSchema:
                 tool_schema=schema,
             )
 
-    def test_create_structured_fields_use_closed_shape_branches(self) -> None:
+    def test_create_structured_fields_use_one_closed_semantic_shape(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
         step_schema = schema["function"]["parameters"]["properties"]["steps"]["items"]
         output_fields_schema = step_schema["properties"]["output_fields"]
@@ -231,44 +231,103 @@ class TestBuildToolSchema:
         assert output_fields_schema["minItems"] == 1
 
         field_schema = output_fields_schema["items"]
-        scalar_branch, object_branch, array_branch = field_schema["anyOf"]
-        assert scalar_branch["properties"]["field_type"]["enum"] == [
-            "string",
-            "number",
-            "boolean",
-        ]
-        assert set(scalar_branch["properties"]) == {
+        assert field_schema["type"] == "object"
+        assert field_schema["required"] == ["name", "field_type", "description"]
+        assert set(field_schema["properties"]) == {
             "name",
             "field_type",
             "description",
             "required",
+            "fields",
+            "item_fields",
         }
-        assert "pattern" not in scalar_branch["properties"]["name"]
+        assert field_schema["additionalProperties"] is False
+        assert "pattern" not in field_schema["properties"]["name"]
+        assert field_schema["properties"]["required"]["default"] is True
+        assert field_schema["properties"]["fields"]["type"] == ["array", "null"]
+        assert field_schema["properties"]["item_fields"]["type"] == [
+            "array",
+            "null",
+        ]
 
-        assert object_branch["properties"]["field_type"]["enum"] == ["object"]
-        assert object_branch["properties"]["fields"]["minItems"] == 1
-        assert "item_fields" not in object_branch["properties"]
+        depth_four_schema = field_schema
+        for _ in range(3):
+            depth_four_schema = depth_four_schema["properties"]["fields"]["items"]
+        assert depth_four_schema["properties"]["field_type"]["enum"] == [
+            "string",
+            "number",
+            "boolean",
+            "array",
+        ]
+        assert depth_four_schema["properties"]["fields"] == {"type": "null"}
+        assert depth_four_schema["properties"]["item_fields"] == {"type": "null"}
 
-        assert array_branch["properties"]["field_type"]["enum"] == ["array"]
-        assert "fields" not in array_branch["properties"]
-        null_items, nested_items = array_branch["properties"]["item_fields"]["anyOf"]
-        assert null_items == {"type": "null"}
-        assert nested_items["type"] == "array"
-        assert nested_items["minItems"] == 1
+    def test_create_structured_field_defaults_are_admitted_by_the_wire_schema(
+        self,
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Report",
+            "plan_rationale": "Create the report.",
+            "steps": [
+                {
+                    "name": "Write",
+                    "instructions": "Write the report.",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "A concise summary.",
+                        }
+                    ],
+                }
+            ],
+        }
 
-        for branch in field_schema["anyOf"]:
-            assert branch["additionalProperties"] is False
-            assert set(branch["required"]) == set(branch["properties"])
-            assert "const" not in branch["properties"]["field_type"]
+        validate_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema)
+        intent = parse_create_flow_intent_arguments(arguments)
 
-        depth_four_schema = object_branch["properties"]["fields"]["items"]
-        for _ in range(2):
-            depth_four_schema = depth_four_schema["anyOf"][1]["properties"]["fields"][
-                "items"
-            ]
-        assert len(depth_four_schema["anyOf"]) == 2
-        depth_four_array = depth_four_schema["anyOf"][1]
-        assert depth_four_array["properties"]["item_fields"] == {"type": "null"}
+        field = intent.steps[0].output_fields[0]
+        assert field.required is True
+        assert field.fields is None
+        assert field.item_fields is None
+
+    def test_create_structured_field_relationships_are_owned_by_typed_admission(
+        self,
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Report",
+            "plan_rationale": "Create the report.",
+            "steps": [
+                {
+                    "name": "Write",
+                    "instructions": "Write the report.",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "A concise summary.",
+                            "fields": [
+                                {
+                                    "name": "detail",
+                                    "field_type": "string",
+                                    "description": "A detail.",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        validate_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema)
+        with pytest.raises(ProposalIntentArgumentError) as excinfo:
+            parse_create_flow_intent_arguments(arguments)
+        assert excinfo.value.issues == (
+            "steps.0.output_fields.0: Value error, Only object fields may declare "
+            "nested fields ('summary'). [value_error]",
+        )
 
     def test_create_schema_admits_explicit_empty_lists_and_nullable_scalars(
         self,

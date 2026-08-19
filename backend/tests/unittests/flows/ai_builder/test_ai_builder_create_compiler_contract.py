@@ -42,6 +42,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+    build_ai_builder_resource_catalog,
+)
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     ResultOutputFieldRole,
 )
@@ -54,6 +57,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import SourceCaptureField
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
+)
+from eneo.flows.ai_builder.ai_builder_tools import (
+    build_propose_flow_tool_schema,
+    validate_propose_flow_tool_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.pattern_registry import (
@@ -412,6 +419,63 @@ def test_compiler_applies_distinct_input_and_output_schema_evidence() -> None:
     assert compiled.steps[1].input_contract == compiled.steps[0].output_contract
     assert compiled.steps[1].input_contract != input_schema
     assert compiled.steps[1].output_contract == output_schema
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_create_depth_four_primitive_array_survives_full_compile_contract() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "text",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "structured_json",
+    )
+    _commit_architecture(state)
+    leaf_array: JsonObject = {
+        "name": "values",
+        "field_type": "array",
+        "description": "Primitive values.",
+    }
+    nested_field = leaf_array
+    for depth in range(3, 0, -1):
+        nested_field = {
+            "name": f"level_{depth}",
+            "field_type": "object",
+            "description": f"Level {depth}.",
+            "fields": [nested_field],
+        }
+    arguments = {
+        "flow_name": "Nested report",
+        "plan_rationale": "Return the requested nested report.",
+        "steps": [
+            {
+                "name": "Build report",
+                "instructions": "Build the nested report from the supplied text.",
+                "output_fields": [nested_field],
+            }
+        ],
+    }
+    tool_schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        )
+    )
+
+    validate_propose_flow_tool_arguments(arguments=arguments, tool_schema=tool_schema)
+    intent = parse_create_flow_intent_arguments(arguments)
+    context = create_compile_context_from_planning_state(state)
+    assert context is not None
+    compiled = compile_create_intent_to_spec(intent, context=context)
+
+    leaf_schema = compiled.steps[0].output_contract
+    assert leaf_schema is not None
+    for depth in range(1, 4):
+        leaf_schema = leaf_schema["properties"][f"level_{depth}"]
+    assert leaf_schema["properties"]["values"]["items"] == {"type": "string"}
     validation = validate_spec(compiled)
     assert validation.valid, validation.errors
 

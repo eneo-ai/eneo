@@ -4238,7 +4238,7 @@ async def test_a_confirmation_reuses_state_only_under_the_disclosed_policy(
     ("max_input_tokens", "replays_every_assumption"),
     [
         pytest.param(200_000, True, id="the model can carry the whole disclosure"),
-        pytest.param(9_000, False, id="the model cannot"),
+        pytest.param(7_000, False, id="the model cannot"),
     ],
 )
 async def test_a_confirmed_disclosure_is_replayed_within_the_model_budget(
