@@ -278,14 +278,69 @@ class _CreateSemanticStepArguments(BaseModel):
 
     name: str
     instructions: str
-    output_fields: list[StructuredFieldDraft] | None = None
+    output_fields: list["CreateStructuredFieldIntent"] | None = None
     model_ref: str | None = None
     knowledge_refs: list[str] = Field(default_factory=list)
     citations_requested: bool = False
 
 
+class CreateStructuredFieldIntent(BaseModel):
+    """Compact create-only field tree lowered into the authoring field model.
+
+    The provider only needs one recursive edge. ``field_type`` tells the server
+    whether ``children`` are object members or array-item members; exposing both
+    internal branches made the tool grammar larger without adding information.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    field_type: StructuredFieldType
+    description: str
+    required: bool = True
+    children: list["CreateStructuredFieldIntent"] | None = None
+
+    @model_validator(mode="after")
+    def _validate_children(self) -> "CreateStructuredFieldIntent":
+        if self.field_type == "object" and not self.children:
+            raise ValueError(
+                f"Object field {self.name!r} must declare non-empty children."
+            )
+        if self.field_type not in ("object", "array") and self.children is not None:
+            raise ValueError(
+                f"Only object or array fields may declare children ({self.name!r})."
+            )
+        if self.children == []:
+            raise ValueError(
+                f"Field {self.name!r} must declare non-empty children or null."
+            )
+        return self
+
+    def to_structured_field_draft(self) -> StructuredFieldDraft:
+        children = (
+            [child.to_structured_field_draft() for child in self.children]
+            if self.children
+            else None
+        )
+        return StructuredFieldDraft(
+            name=self.name,
+            field_type=self.field_type,
+            description=self.description,
+            required=self.required,
+            fields=children if self.field_type == "object" else None,
+            item_fields=children if self.field_type == "array" else None,
+        )
+
+
 def _validate_create_semantic_step(value: object) -> dict[str, object]:
-    return _CreateSemanticStepArguments.model_validate(value).model_dump()
+    step = _CreateSemanticStepArguments.model_validate(value)
+    lowered = step.model_dump(exclude={"output_fields"})
+    lowered["output_fields"] = (
+        [field.to_structured_field_draft().model_dump() for field in step.output_fields]
+        if step.output_fields
+        else None
+    )
+    return lowered
 
 
 CreateSemanticStepIntent = Annotated[
@@ -571,6 +626,11 @@ def build_create_flow_tool_schema(
                 "items": build_create_structured_field_schema(),
             }
         )
+        # Keep the only recursive step property last on the wire. Non-strict
+        # providers are less likely to strand later step properties at the
+        # proposal root when closing a nested field tree.
+        output_fields_schema = step_schema["properties"].pop("output_fields")
+        step_schema["properties"]["output_fields"] = output_fields_schema
     if confirmed_runtime_inputs and not is_pure_audio_transcription:
         rendered_runtime_inputs = render_confirmed_runtime_input_requirements(
             confirmed_runtime_inputs
@@ -603,8 +663,8 @@ def build_create_flow_tool_schema(
                 "required": [
                     "flow_name",
                     "plan_rationale",
-                    "steps",
                     *projected_result_keys,
+                    "steps",
                 ],
                 "properties": {
                     "flow_name": {
@@ -623,6 +683,13 @@ def build_create_flow_tool_schema(
                         "minLength": 1,
                         "description": "Short user-visible explanation of the design.",
                     },
+                    "assumptions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    **projected_result_keys,
+                    # The recursive proposal body stays last for the same
+                    # reason as output_fields inside each step.
                     "steps": {
                         "type": "array",
                         "minItems": 1,
@@ -631,11 +698,6 @@ def build_create_flow_tool_schema(
                         ),
                         "items": step_schema,
                     },
-                    "assumptions": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                    **projected_result_keys,
                 },
                 "additionalProperties": False,
             },

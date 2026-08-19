@@ -525,7 +525,7 @@ async def test_finalize_compiler_lowered_report_needs_no_planner_repair(
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",

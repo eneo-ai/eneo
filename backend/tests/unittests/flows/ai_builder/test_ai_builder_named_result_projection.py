@@ -914,7 +914,7 @@ def test_a_model_field_that_buries_an_obligated_name_is_repairable() -> None:
                 "field_type": "object",
                 "description": "Modellens egen behållare.",
                 "required": True,
-                "fields": [
+                "children": [
                     {
                         "name": "case_id",
                         "field_type": "string",
@@ -1010,7 +1010,7 @@ def test_a_discarded_model_root_cannot_suppress_an_envelope_field() -> None:
                     "field_type": "object",
                     "description": "Modellens egen bedömning.",
                     "required": True,
-                    "fields": [
+                    "children": [
                         {
                             "name": "risks",
                             "field_type": "string",
@@ -1046,7 +1046,7 @@ def test_a_surviving_model_field_repeating_an_obligation_is_repairable() -> None
                     "field_type": "object",
                     "description": "Modellens egen behållare.",
                     "required": True,
-                    "fields": [
+                    "children": [
                         {
                             "name": "risks",
                             "field_type": "string",
@@ -1085,7 +1085,7 @@ def test_a_wholly_discarded_model_tree_does_not_demand_a_repair() -> None:
                     "field_type": "object",
                     "description": "Modellens egen bedömning.",
                     "required": True,
-                    "fields": [
+                    "children": [
                         {
                             "name": "assessment",
                             "field_type": "string",
@@ -1135,7 +1135,7 @@ def test_legacy_any_depth_model_satisfaction_of_an_envelope_field_is_unchanged()
                     "field_type": "object",
                     "description": "Modellens egen behållare.",
                     "required": True,
-                    "fields": [
+                    "children": [
                         {
                             "name": "risks",
                             "field_type": "string",
@@ -1175,7 +1175,7 @@ def test_the_postcondition_reports_the_path_it_lost_not_just_the_name() -> None:
                 "field_type": "object",
                 "description": "Modellens egen bedömning.",
                 "required": True,
-                "fields": [
+                "children": [
                     {
                         "name": "risks",
                         "field_type": "string",

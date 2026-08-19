@@ -256,29 +256,26 @@ class TestBuildToolSchema:
             "field_type",
             "description",
             "required",
-            "fields",
-            "item_fields",
+            "children",
         }
         assert field_schema["additionalProperties"] is False
         assert "pattern" not in field_schema["properties"]["name"]
         assert field_schema["properties"]["required"]["default"] is True
-        assert field_schema["properties"]["fields"]["type"] == ["array", "null"]
-        assert field_schema["properties"]["item_fields"]["type"] == [
-            "array",
-            "null",
-        ]
+        assert field_schema["properties"]["children"]["type"] == ["array", "null"]
 
         depth_four_schema = field_schema
         for _ in range(3):
-            depth_four_schema = depth_four_schema["properties"]["fields"]["items"]
+            depth_four_schema = depth_four_schema["properties"]["children"]["items"]
         assert depth_four_schema["properties"]["field_type"]["enum"] == [
             "string",
             "number",
             "boolean",
             "array",
         ]
-        assert depth_four_schema["properties"]["fields"] == {"type": "null"}
-        assert depth_four_schema["properties"]["item_fields"] == {"type": "null"}
+        assert depth_four_schema["properties"]["children"]["type"] == "null"
+
+        assert list(step_schema["properties"])[-1] == "output_fields"
+        assert list(schema["function"]["parameters"]["properties"])[-1] == "steps"
 
     def test_create_structured_field_defaults_are_admitted_by_the_wire_schema(
         self,
@@ -326,7 +323,7 @@ class TestBuildToolSchema:
                             "name": "summary",
                             "field_type": "string",
                             "description": "A concise summary.",
-                            "fields": [
+                            "children": [
                                 {
                                     "name": "detail",
                                     "field_type": "string",
@@ -343,8 +340,8 @@ class TestBuildToolSchema:
         with pytest.raises(ProposalIntentArgumentError) as excinfo:
             parse_create_flow_intent_arguments(arguments)
         assert excinfo.value.issues == (
-            "steps.0.output_fields.0: Value error, Only object fields may declare "
-            "nested fields ('summary'). [value_error]",
+            "steps.0.output_fields.0: Value error, Only object or array fields may "
+            "declare children ('summary'). [value_error]",
         )
 
     def test_create_schema_admits_explicit_empty_lists_and_nullable_scalars(
