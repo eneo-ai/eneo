@@ -3,6 +3,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import TokenUsageBadge from "$lib/features/flows/components/TokenUsageBadge.svelte";
   import { toast } from "$lib/components/toast";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
@@ -669,17 +670,30 @@
           {/if}
 
           <header class="px-[1.375rem] pt-5 pb-4 max-sm:px-3.5">
-            <div class="flex flex-wrap items-center gap-2">
-              <span
-                class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2.5 py-0.5 text-[0.65625rem] font-bold tracking-[0.03em] uppercase"
-              >
-                {isCreateMode ? m.ai_builder_draft_pill() : m.ai_builder_change_pill()}
-              </span>
-              <span class="text-secondary text-xs">
-                {isCreateMode
-                  ? m.ai_builder_plan_meta_steps_nothing_created({ count: stepCount })
-                  : m.ai_builder_plan_meta_steps_not_published({ count: stepCount })}
-              </span>
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <span
+                  class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2.5 py-0.5 text-[0.65625rem] font-bold tracking-[0.03em] uppercase"
+                >
+                  {isCreateMode ? m.ai_builder_draft_pill() : m.ai_builder_change_pill()}
+                </span>
+                <span class="text-secondary text-xs">
+                  {isCreateMode
+                    ? m.ai_builder_plan_meta_steps_nothing_created({ count: stepCount })
+                    : m.ai_builder_plan_meta_steps_not_published({ count: stepCount })}
+                </span>
+              </div>
+              {#if tokenUsage}
+                <TokenUsageBadge
+                  total={formatAIBuilderTokenCount(tokenUsage.total, getLocale())}
+                  input={formatAIBuilderTokenCount(tokenUsage.prompt, getLocale())}
+                  output={formatAIBuilderTokenCount(tokenUsage.completion, getLocale())}
+                  note={tokenUsage.estimated
+                    ? m.ai_builder_token_usage_estimated_note()
+                    : m.ai_builder_token_usage_provider_note()}
+                  estimated={tokenUsage.estimated}
+                />
+              {/if}
             </div>
             <h2
               id="builder-plan-heading"
@@ -772,26 +786,7 @@
                   </dd>
                 </div>
               {/each}
-              {#if tokenUsage}
-                <div class="border-dimmer flex items-baseline gap-4 border-t py-1.5">
-                  <dt class="text-secondary text-[0.8125rem]">
-                    {m.ai_builder_execution_token_usage()}
-                  </dt>
-                  <dd class="text-primary ml-auto text-[0.8125rem] font-semibold tabular-nums">
-                    {tokenUsage.estimated ? "≈ " : ""}{m.ai_builder_token_usage_badge({
-                      count: formatAIBuilderTokenCount(tokenUsage.total, getLocale())
-                    })}
-                  </dd>
-                </div>
-              {/if}
             </dl>
-            {#if tokenUsage}
-              <p class="text-secondary mt-2 text-xs leading-relaxed text-pretty">
-                {tokenUsage.estimated
-                  ? m.ai_builder_token_usage_estimated_note()
-                  : m.ai_builder_token_usage_provider_note()}
-              </p>
-            {/if}
             <h4 class="text-primary mt-4 text-[0.8125rem] font-bold">
               {m.ai_builder_execution_mapped_limits()}
             </h4>

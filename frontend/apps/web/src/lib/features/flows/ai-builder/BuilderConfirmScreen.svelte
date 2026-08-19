@@ -1,5 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
@@ -209,6 +210,14 @@
   let runtimeFieldDetails = $state(false);
   let addingContentField = $state(false);
   let newContentField = $state("");
+  let addContentFieldButton = $state<HTMLButtonElement | null>(null);
+
+  async function cancelAddingContentField() {
+    newContentField = "";
+    addingContentField = false;
+    await tick();
+    addContentFieldButton?.focus();
+  }
   const hasRuntimeFieldDetail = $derived(
     runtimeFields.some((field) => field.purpose || (field.options?.length ?? 0) > 0)
   );
@@ -683,6 +692,11 @@
                         placeholder={m.ai_builder_requirements_field_add_placeholder()}
                         autofocus
                         {disabled}
+                        onkeydown={(event) => {
+                          if (event.key !== "Escape") return;
+                          event.preventDefault();
+                          void cancelAddingContentField();
+                        }}
                       />
                       <Button
                         type="submit"
@@ -691,11 +705,23 @@
                       >
                         {m.ai_builder_requirements_field_add_confirm()}
                       </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={m.cancel()}
+                        title={m.cancel()}
+                        {disabled}
+                        onclick={() => void cancelAddingContentField()}
+                      >
+                        <IconX aria-hidden="true" />
+                      </Button>
                     </form>
                   {:else}
                     <button
                       type="button"
                       class="border-default text-secondary hover:text-primary inline-flex h-[1.625rem] items-center rounded-full border border-dashed px-2.5 text-[0.78125rem]"
+                      bind:this={addContentFieldButton}
                       {disabled}
                       onclick={() => (addingContentField = true)}
                     >

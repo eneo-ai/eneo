@@ -69,6 +69,24 @@ describe("FlowStepAssistantState", () => {
     expect(flowEditor.updateAssistantImmediately).not.toHaveBeenCalled();
   });
 
+  it("does not save model settings for a deterministic step", () => {
+    const activeStep = {
+      current: { ...makeStep("assistant-1"), output_mode: "render_verbatim" as const }
+    };
+    const { state, flowEditor } = makeState(activeStep);
+    state.assistant = {
+      id: "assistant-1",
+      name: "Render PDF",
+      completion_model: null,
+      completion_model_kwargs: {}
+    } as unknown as LoadedAssistant;
+
+    state.updateField("completion_model_kwargs", { reasoning_effort: "high" });
+
+    expect(flowEditor.saveAssistant).not.toHaveBeenCalled();
+    expect(flowEditor.updateAssistantImmediately).not.toHaveBeenCalled();
+  });
+
   it("loads Prompt Guide availability once per selected assistant", async () => {
     const activeStep = { current: makeStep("assistant-1") };
     const { state, availability } = makeState(activeStep);

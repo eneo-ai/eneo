@@ -5,6 +5,7 @@ import { getExplicitAttachmentRules } from "$lib/features/attachments/getAttachm
 import type { Attachment } from "$lib/features/attachments/AttachmentManager";
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { Readable, Writable } from "svelte/store";
+import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
 
 export type LoadedAssistant = NonNullable<Awaited<ReturnType<FlowEditor["loadAssistant"]>>>;
 export type PromptGuideAvailability = Awaited<
@@ -123,14 +124,26 @@ export class FlowStepAssistantState {
         ? (this.assistant as { id: string }).id
         : null;
     if (loadedAssistantId !== null && loadedAssistantId !== activeStep.assistant_id) return;
+    const acceptedChanges = { ...changes };
+    const completionModel =
+      "completion_model" in acceptedChanges
+        ? acceptedChanges.completion_model
+        : this.assistant?.completion_model;
+    if (
+      "completion_model_kwargs" in acceptedChanges &&
+      (!outputModeUsesCompletionModel(activeStep.output_mode) || !completionModel)
+    ) {
+      delete acceptedChanges.completion_model_kwargs;
+    }
+    if (Object.keys(acceptedChanges).length === 0) return;
     if (this.assistant) {
-      this.assistant = { ...this.assistant, ...changes };
+      this.assistant = { ...this.assistant, ...acceptedChanges };
     }
     if (opts?.immediate) {
-      void this.#flowEditor.updateAssistantImmediately(activeStep.assistant_id, changes);
+      void this.#flowEditor.updateAssistantImmediately(activeStep.assistant_id, acceptedChanges);
       return;
     }
-    void this.#flowEditor.saveAssistant(activeStep.assistant_id, changes);
+    void this.#flowEditor.saveAssistant(activeStep.assistant_id, acceptedChanges);
   }
 
   onFileUploaded(newFile: UploadedFile) {

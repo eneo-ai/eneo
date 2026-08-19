@@ -127,6 +127,43 @@ describe("BuilderReviewScreen approval", () => {
 });
 
 describe("BuilderReviewScreen plan document", () => {
+  it("shows cumulative planning token usage in the header with details on demand", async () => {
+    const state = makeCreateState();
+    state.session.telemetry = {
+      planner_request_count: 2,
+      clarification_question_count: 1,
+      prompt_tokens_total: 18_705,
+      completion_tokens_total: 6_395,
+      total_tokens_total: 25_100,
+      tool_call_count_total: 2,
+      auxiliary_llm_call_count: 0,
+      architecture_commit_count: 1,
+      repair_attempts_total: 0,
+      parse_repair_attempts_total: 0,
+      wall_clock_ms_total: 12_000,
+      llm_calls_made_total: 2,
+      token_usage_estimated: false,
+      last_request_id: "request-2",
+      last_model: "openai/gpt-5.6-luna",
+      last_finish_reason: "tool_calls",
+      last_outcome_kind: "dispatched",
+      last_token_usage_source: "provider",
+      last_token_usage_estimated: false
+    };
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state
+    });
+
+    const badge = screen.getByRole("button", { name: /25.100 tokens/ });
+    await fireEvent.click(badge);
+
+    expect(await screen.findByText(m.flow_run_token_usage_title())).toBeTruthy();
+    expect(screen.getByText(/18.705/)).toBeTruthy();
+    expect(screen.getByText(/6.395/)).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_token_usage_provider_note())).toBeTruthy();
+  });
+
   it("marks review checkpoints, per-file steps and artifacts from the plan spec", () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
