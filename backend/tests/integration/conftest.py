@@ -87,14 +87,6 @@ if not os.getenv("REDIS_HOST"):
     os.environ["REDIS_HOST"] = "placeholder"
 if not os.getenv("REDIS_PORT"):
     os.environ["REDIS_PORT"] = "6379"
-if not os.getenv("UPLOAD_FILE_TO_SESSION_MAX_SIZE"):
-    os.environ["UPLOAD_FILE_TO_SESSION_MAX_SIZE"] = "10485760"
-if not os.getenv("UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"):
-    os.environ["UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"] = "10485760"
-if not os.getenv("UPLOAD_MAX_FILE_SIZE"):
-    os.environ["UPLOAD_MAX_FILE_SIZE"] = "10485760"
-if not os.getenv("TRANSCRIPTION_MAX_FILE_SIZE"):
-    os.environ["TRANSCRIPTION_MAX_FILE_SIZE"] = "10485760"
 if not os.getenv("MAX_IN_QUESTION"):
     os.environ["MAX_IN_QUESTION"] = "1"
 if not os.getenv("API_PREFIX"):
