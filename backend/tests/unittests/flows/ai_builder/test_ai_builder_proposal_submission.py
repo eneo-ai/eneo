@@ -1171,7 +1171,7 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
                 "name": "data_quality_notes",
                 "field_type": "array",
                 "description": "Missing or contradictory source details.",
-                "item_fields": [
+                "children": [
                     {
                         "name": "description",
                         "field_type": "string",

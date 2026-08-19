@@ -445,7 +445,7 @@ def test_create_depth_four_primitive_array_survives_full_compile_contract() -> N
             "name": f"level_{depth}",
             "field_type": "object",
             "description": f"Level {depth}.",
-            "fields": [nested_field],
+            "children": [nested_field],
         }
     arguments = {
         "flow_name": "Nested report",
@@ -1512,7 +1512,7 @@ def test_compiler_preserves_result_contract_fields_on_analysis_step() -> None:
                             "name": "comparison_results",
                             "field_type": "array",
                             "description": "Per-requirement comparison results.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "requirement",
                                     "field_type": "string",
@@ -1987,7 +1987,7 @@ def test_provider_authored_runtime_identity_collision_remains_repairable(
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": runtime_name,
                                     "field_type": "string",
@@ -2119,7 +2119,7 @@ def test_runtime_identity_injection_does_not_conflict_with_confirmed_field(
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -3864,7 +3864,7 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
                             "name": "documents",
                             "field_type": "array",
                             "description": "En post per dokument.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "title",
                                     "field_type": "string",
@@ -3972,7 +3972,7 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                             "name": "documents",
                             "field_type": "array",
                             "description": "En post per dokument.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "title",
                                     "field_type": "string",
@@ -3995,7 +3995,7 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
                             "name": "source_sections",
                             "field_type": "array",
                             "description": "Avsnitt per källa.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_title",
                                     "field_type": "string",
@@ -4192,7 +4192,7 @@ def test_per_source_requested_section_label_stays_with_canonical_producer() -> N
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -4210,7 +4210,7 @@ def test_per_source_requested_section_label_stays_with_canonical_producer() -> N
                             "name": "source_sections",
                             "field_type": "array",
                             "description": "Finished source sections.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_title",
                                     "field_type": "string",
@@ -4289,7 +4289,7 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -4307,7 +4307,7 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
                             "name": "source_sections",
                             "field_type": "array",
                             "description": "Finished source sections.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_title",
                                     "field_type": "string",
@@ -4335,7 +4335,7 @@ def test_per_source_report_keeps_first_section_producer_canonical() -> None:
                             "name": "refined_sections",
                             "field_type": "array",
                             "description": "Independent refined sections.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_title",
                                     "field_type": "string",
@@ -4405,7 +4405,7 @@ def test_single_call_custom_section_array_guidance_uses_selected_field(
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -4423,7 +4423,7 @@ def test_single_call_custom_section_array_guidance_uses_selected_field(
                             "name": "chapters",
                             "field_type": "array",
                             "description": "Finished report chapters.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_title",
                                     "field_type": "string",
@@ -4553,7 +4553,7 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -4571,12 +4571,12 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                             "name": "source_sections",
                             "field_type": "array",
                             "description": "Report sections.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_title",
                                     "field_type": "array",
                                     "description": "Invalid title shape.",
-                                    "item_fields": [
+                                    "children": [
                                         {
                                             "name": "value",
                                             "field_type": "string",
@@ -4588,7 +4588,7 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                                     "name": "section_body",
                                     "field_type": "array",
                                     "description": "Invalid body shape.",
-                                    "item_fields": [
+                                    "children": [
                                         {
                                             "name": "value",
                                             "field_type": "string",
@@ -4613,7 +4613,7 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                             "name": "report_title",
                             "field_type": "array",
                             "description": "Invalid report title shape.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "value",
                                     "field_type": "string",
@@ -4630,7 +4630,7 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                             "name": "key_points",
                             "field_type": "array",
                             "description": "Key report points.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "point",
                                     "field_type": "string",
@@ -4642,7 +4642,7 @@ def test_report_lowering_normalizes_canonical_field_shapes_and_overview_alias() 
                             "name": "report_metadata",
                             "field_type": "object",
                             "description": "Report metadata.",
-                            "fields": [
+                            "children": [
                                 {
                                     "name": "owner",
                                     "field_type": "string",
@@ -4719,7 +4719,7 @@ def test_per_source_sections_combines_distinct_models_once_and_uses_terminal_mod
                             "name": "documents",
                             "field_type": "array",
                             "description": "Source evidence.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -4789,7 +4789,7 @@ def test_report_disposition_both_preserves_distinct_producer_model_selections() 
                             "name": "documents",
                             "field_type": "array",
                             "description": "Source evidence.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -5071,7 +5071,7 @@ def test_report_disposition_both_ignores_source_section_name_without_shape() -> 
                             "name": "documents",
                             "field_type": "array",
                             "description": "En post per dokument.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "title",
                                     "field_type": "string",
@@ -5094,7 +5094,7 @@ def test_report_disposition_both_ignores_source_section_name_without_shape() -> 
                             "name": "source_sections",
                             "field_type": "array",
                             "description": "Avsnitt per källa.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_text",
                                     "field_type": "string",
@@ -5165,7 +5165,7 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
                             "name": "documents",
                             "field_type": "array",
                             "description": "En post per dokument.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "title",
                                     "field_type": "string",
@@ -5289,7 +5289,7 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
                             "name": "documents",
                             "field_type": "array",
                             "description": "En post per dokument.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "title",
                                     "field_type": "string",
@@ -5445,7 +5445,7 @@ def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> No
                             "name": "documents",
                             "field_type": "array",
                             "description": "En post per dokument.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "title",
                                     "field_type": "string",
@@ -5468,7 +5468,7 @@ def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> No
                             "name": "source_sections",
                             "field_type": "array",
                             "description": "Färdiga rapportavsnitt per källa.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "section_title",
                                     "field_type": "string",
@@ -5771,7 +5771,7 @@ def test_single_call_report_state_to_lowering_matrix(
                                 "name": "documents",
                                 "field_type": "array",
                                 "description": "One record per source.",
-                                "item_fields": [
+                                "children": [
                                     {
                                         "name": "summary",
                                         "field_type": "string",
@@ -5834,7 +5834,7 @@ def test_requested_section_labels_with_braces_compile_for_every_disposition(
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -5896,7 +5896,7 @@ def test_mapped_reader_canonicalizes_authored_identity_fields_for_runtime() -> N
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "source_label",
                                     "field_type": "number",
@@ -5976,7 +5976,7 @@ def test_single_call_reader_removes_authored_runtime_source_file_id() -> None:
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "source_label",
                                     "field_type": "number",

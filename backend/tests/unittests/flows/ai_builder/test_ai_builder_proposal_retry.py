@@ -562,7 +562,7 @@ async def test_forced_tool_retry_surfaces_typed_feedback_for_invalid_tool_argume
                         "field_type": "array",
                         "description": "Facts found in the transcript.",
                         "required": True,
-                        "item_fields": {
+                        "children": {
                             "name": "fact",
                             "field_type": "string",
                             "description": "A fact found in the transcript.",
@@ -605,7 +605,7 @@ async def test_forced_tool_retry_surfaces_typed_feedback_for_invalid_tool_argume
     assert result.events is None
     assert result.feedback is not None
     assert "steps.1.assumptions" in result.feedback
-    assert "item_fields" in result.feedback
+    assert "children" in result.feedback
     assert result.failure_kind == "parse"
     repair_completion.assert_awaited_once()
 

@@ -611,7 +611,7 @@ def test_prepared_create_schema_has_a_native_strict_transport_projection() -> No
                         "field_type": "object",
                         "description": "The structured case assessment.",
                         "required": True,
-                        "fields": [
+                        "children": [
                             {
                                 "name": "summary",
                                 "field_type": "string",
@@ -623,7 +623,7 @@ def test_prepared_create_schema_has_a_native_strict_transport_projection() -> No
                                 "field_type": "array",
                                 "description": "Recommended follow-up actions.",
                                 "required": True,
-                                "item_fields": [
+                                "children": [
                                     {
                                         "name": "owner",
                                         "field_type": "string",
@@ -879,7 +879,7 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
@@ -1021,7 +1021,7 @@ def test_example_document_headings_stay_guidance_and_never_become_topology() -> 
                             "name": "documents",
                             "field_type": "array",
                             "description": "One record per source.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",

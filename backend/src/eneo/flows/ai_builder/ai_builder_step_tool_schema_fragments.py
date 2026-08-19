@@ -172,7 +172,7 @@ def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
         if is_leaf_depth
         else ["string", "number", "boolean", "object", "array"]
     )
-    nested_fields_schema: dict[str, Any] = (
+    children_schema: dict[str, Any] = (
         {"type": "null"}
         if is_leaf_depth
         else {
@@ -200,8 +200,13 @@ def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
                 ),
             },
             "required": {"type": "boolean", "default": True},
-            "fields": nested_fields_schema,
-            "item_fields": nested_fields_schema,
+            "children": {
+                **children_schema,
+                "description": (
+                    "Nested object members or array-item members. Use null for "
+                    "primitive fields and arrays of primitive values."
+                ),
+            },
         },
         "additionalProperties": False,
     }

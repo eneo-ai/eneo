@@ -658,7 +658,7 @@ async def test_combined_report_models_surface_warning_on_stored_plan() -> None:
                             "name": "documents",
                             "field_type": "array",
                             "description": "Source evidence.",
-                            "item_fields": [
+                            "children": [
                                 {
                                     "name": "summary",
                                     "field_type": "string",
