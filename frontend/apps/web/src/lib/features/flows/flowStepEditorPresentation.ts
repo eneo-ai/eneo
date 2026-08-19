@@ -1,5 +1,6 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
+import { outputModeUsesCompletionModel } from "$lib/features/flows/flowStepTypes";
 
 /**
  * What the middle of a step's flow capsule describes — the "AI work" segment
@@ -19,6 +20,9 @@ export function getStepAiWorkKind(
     return "http";
   }
   if (step.output_mode === "template_fill") return "template";
+  if (!outputModeUsesCompletionModel(step.output_mode)) {
+    return step.output_type === "docx" || step.output_type === "pdf" ? "document" : "process";
+  }
   // Only report a missing instruction when we actually know it is empty —
   // `null` means the assistant is still loading, so stay neutral.
   if (instructionPresent === false) return "missing";

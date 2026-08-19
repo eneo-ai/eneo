@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 import { getDefaultOpenStepChapter, getStepAiWorkKind } from "./flowStepEditorPresentation";
+import { outputModeUsesCompletionModel } from "./flowStepTypes";
 
 function step(partial: Partial<FlowStep>): FlowStep {
   return {
@@ -38,6 +39,18 @@ describe("getStepAiWorkKind", () => {
     expect(
       getStepAiWorkKind(step({ output_mode: "template_fill" }), { instructionPresent: false })
     ).toBe("template");
+  });
+
+  it("keeps deterministic output modes outside the AI instruction contract", () => {
+    expect(outputModeUsesCompletionModel("compose_text")).toBe(false);
+    expect(outputModeUsesCompletionModel("render_verbatim")).toBe(false);
+    expect(outputModeUsesCompletionModel("pass_through")).toBe(true);
+    expect(outputModeUsesCompletionModel("http_post")).toBe(true);
+    expect(
+      getStepAiWorkKind(step({ output_mode: "render_verbatim", output_type: "pdf" }), {
+        instructionPresent: false
+      })
+    ).toBe("document");
   });
 
   it("marks an LLM step with a known-empty instruction as missing", () => {

@@ -29,7 +29,8 @@
     getOutputModeCompatibilityIssue,
     getFlowStepValidationIssues,
     getSelectableInputSourceOptions,
-    getSelectableInputTypeOptions
+    getSelectableInputTypeOptions,
+    outputModeUsesCompletionModel
   } from "$lib/features/flows/flowStepTypes";
   import {
     needsTranscribeOnlyOutputModeReset,
@@ -940,7 +941,7 @@
             </Settings.Row>
           </FlowStepSection>
 
-          {#if !isTemplateFill && !isTranscribeOnly}
+          {#if !isTemplateFill && !isTranscribeOnly && outputModeUsesCompletionModel(activeStep.output_mode)}
             <FlowStepBehaviorSection
               step={activeStep}
               {isPublished}

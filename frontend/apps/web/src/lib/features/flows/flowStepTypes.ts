@@ -6,6 +6,10 @@ type InputSource = FlowStep["input_source"];
 type OutputMode = FlowStep["output_mode"];
 type OutputType = FlowStep["output_type"];
 
+export function outputModeUsesCompletionModel(mode: OutputMode): boolean {
+  return mode === "pass_through" || mode === "http_post";
+}
+
 type OutputOption<TValue extends string> = {
   value: TValue;
   readonly label: string;

@@ -1524,6 +1524,53 @@ describe("FlowAIBuilder confirm, build and review", () => {
     });
   });
 
+  it("lets the user cancel adding report content and restores focus", async () => {
+    const summary = {
+      ...SUMMARY,
+      named_content_fields: [{ id: "beslut", label: "Beslut" }]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_requirements_field_add() })
+    );
+    const input = screen.getByLabelText(m.ai_builder_requirements_field_add());
+    const form = input.closest("form");
+    if (!form) throw new Error("Expected the report-content form");
+
+    await fireEvent.click(within(form).getByRole("button", { name: m.cancel() }));
+
+    expect(screen.queryByLabelText(m.ai_builder_requirements_field_add())).toBeNull();
+    const addButton = screen.getByRole("button", {
+      name: m.ai_builder_requirements_field_add()
+    });
+    await waitFor(() => expect(document.activeElement).toBe(addButton));
+
+    await fireEvent.click(addButton);
+    const reopenedInput = screen.getByLabelText(m.ai_builder_requirements_field_add());
+    await fireEvent.keyDown(reopenedInput, { key: "Escape" });
+
+    expect(screen.queryByLabelText(m.ai_builder_requirements_field_add())).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: m.ai_builder_requirements_field_add() })
+      )
+    );
+    expect(calls).toHaveLength(0);
+  });
+
   it("does not claim answers on a run where nothing was asked", async () => {
     // The common live case: the description settles every slot, so the server
     // asks nothing and every row is derived.
