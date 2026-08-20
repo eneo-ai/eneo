@@ -301,15 +301,19 @@ def admit_propose_flow_tool_arguments(
     copy, then apply the unchanged proposal schema to the full payload.
     """
 
-    admitted = _rehome_misplaced_create_children(
+    admitted = _rehome_steps_from_result_projection(
         arguments=arguments,
+        tool_schema=tool_schema,
+    )
+    admitted = _rehome_misplaced_create_children(
+        arguments=admitted,
         tool_schema=tool_schema,
     )
     admitted = _discard_server_owned_result_key_children(
         arguments=admitted,
         tool_schema=tool_schema,
     )
-    admitted = _discard_primitive_field_boolean_children(
+    admitted = _normalize_structured_field_children(
         arguments=admitted,
         tool_schema=tool_schema,
     )
@@ -318,6 +322,45 @@ def admit_propose_flow_tool_arguments(
         tool_schema=tool_schema,
     )
     return admitted
+
+
+def _rehome_steps_from_result_projection(
+    *,
+    arguments: dict[str, Any],
+    tool_schema: ProposalToolSchema,
+) -> dict[str, Any]:
+    """Move a misplaced step list out of the server-owned result projection."""
+
+    if "steps" in arguments:
+        return arguments
+    raw_result_keys = arguments.get(RESULT_KEYS_ARGUMENT)
+    if not isinstance(raw_result_keys, dict):
+        return arguments
+    result_keys = cast(dict[str, object], raw_result_keys)
+    misplaced_steps = result_keys.get("steps")
+    if not isinstance(misplaced_steps, list):
+        return arguments
+
+    root_properties = tool_schema["function"]["parameters"].get("properties")
+    if not isinstance(root_properties, dict):
+        return arguments
+    result_keys_schema = cast(dict[str, object], root_properties).get(
+        RESULT_KEYS_ARGUMENT
+    )
+    if not isinstance(result_keys_schema, dict):
+        return arguments
+    projected_properties = cast(dict[str, object], result_keys_schema).get("properties")
+    if not isinstance(projected_properties, dict) or "steps" in projected_properties:
+        return arguments
+
+    admitted_result_keys = {
+        key: value for key, value in result_keys.items() if key != "steps"
+    }
+    return {
+        **arguments,
+        RESULT_KEYS_ARGUMENT: admitted_result_keys,
+        "steps": misplaced_steps,
+    }
 
 
 def _discard_server_owned_result_key_children(
@@ -371,16 +414,18 @@ def _discard_server_owned_result_key_children(
     return {**arguments, RESULT_KEYS_ARGUMENT: updated_result_keys}
 
 
-def _discard_primitive_field_boolean_children(
+def _normalize_structured_field_children(
     *,
     arguments: dict[str, Any],
     tool_schema: ProposalToolSchema,
 ) -> dict[str, Any]:
-    """Discard a non-structural boolean copied onto a primitive field.
+    """Normalize only unambiguous structured-field child shapes.
 
     A boolean cannot describe nested fields, and primitive fields cannot own
     them. Nested field records remain untouched so a contradictory primitive
-    type still fails admission instead of silently losing authored content.
+    type still fails admission instead of silently losing authored content. A
+    single child record on an object or array has exactly one lossless list
+    representation, so admit it without spending a model repair call.
     """
 
     parameters = tool_schema["function"]["parameters"]
@@ -403,7 +448,7 @@ def _discard_primitive_field_boolean_children(
         if not isinstance(raw_fields, list):
             admitted_steps.append(step)
             continue
-        admitted_fields, fields_changed = _discard_boolean_primitive_children(
+        admitted_fields, fields_changed = _normalize_field_children(
             cast(list[object], raw_fields)
         )
         if not fields_changed:
@@ -417,7 +462,7 @@ def _discard_primitive_field_boolean_children(
     return {**arguments, "steps": admitted_steps}
 
 
-def _discard_boolean_primitive_children(
+def _normalize_field_children(
     fields: list[object],
 ) -> tuple[list[object], bool]:
     admitted_fields: list[object] = []
@@ -429,15 +474,18 @@ def _discard_boolean_primitive_children(
         field = cast(dict[str, object], raw_field)
         admitted_field = field
         children = field.get("children")
-        if field.get("field_type") in {"string", "number", "boolean"} and isinstance(
-            children, bool
-        ):
+        field_type = field.get("field_type")
+        if field_type in {"string", "number", "boolean"} and isinstance(children, bool):
             admitted_field = {
                 key: value for key, value in field.items() if key != "children"
             }
             changed = True
+        elif field_type in {"object", "array"} and isinstance(children, dict):
+            admitted_children, _ = _normalize_field_children([children])
+            admitted_field = {**field, "children": admitted_children}
+            changed = True
         elif isinstance(children, list):
-            admitted_children, children_changed = _discard_boolean_primitive_children(
+            admitted_children, children_changed = _normalize_field_children(
                 cast(list[object], children)
             )
             if children_changed:

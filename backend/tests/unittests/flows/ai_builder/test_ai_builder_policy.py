@@ -92,9 +92,9 @@ def test_proposal_budget_clamps_capabilities_without_model_specific_rules() -> N
 
     smaller_budget = policy.proposal_request_budget(
         context_window_tokens=131_072,
-        model_output_ceiling_tokens=8_192,
+        model_output_ceiling_tokens=4_096,
     ).resolve(input_tokens=20_000)
 
-    assert resolved_outputs == [32_768, 32_768]
+    assert resolved_outputs == [6_144, 6_144]
     assert smaller_budget is not None
-    assert smaller_budget.resolved_output_tokens == 8_192
+    assert smaller_budget.resolved_output_tokens == 4_096

@@ -18,13 +18,12 @@ from eneo.flows.flow_ai_builder_budget_settings import (
 )
 from eneo.main.config import get_settings
 
-# Interim model-agnostic product defaults. Recalibrate the output targets from
-# successful call-record completion-token distributions, and the deadlines from
-# observed timeout rates and provider-latency logs after those signals have a
-# representative sample. Minimums are fail-fast usefulness floors.
+# Model-agnostic product targets. Capability remains a ceiling; the proposal
+# target retains headroom above observed successful Builder calls without
+# permitting runaway malformed output. Minimums are usefulness floors.
 AI_BUILDER_CLASSIFICATION_OUTPUT_TARGET_TOKENS = 4_096
 AI_BUILDER_CLASSIFICATION_MINIMUM_OUTPUT_TOKENS = 256
-AI_BUILDER_PROPOSAL_OUTPUT_TARGET_TOKENS = 32_768
+AI_BUILDER_PROPOSAL_OUTPUT_TARGET_TOKENS = 6_144
 AI_BUILDER_PROPOSAL_MINIMUM_OUTPUT_TOKENS = 1_024
 AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS = 60.0
 AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 180.0

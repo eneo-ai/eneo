@@ -473,6 +473,49 @@ class TestBuildToolSchema:
         assert intent.steps[0].output_fields[0].item_fields is not None
         assert intent.steps[0].output_fields[0].item_fields[0].name == "impact"
 
+    def test_create_admission_wraps_one_structured_child_record(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Board decision news",
+            "plan_rationale": "Structure the decision before writing the news item.",
+            "steps": [
+                {
+                    "name": "Structure the decision",
+                    "instructions": "Extract the referenced decision material.",
+                    "output_fields": [
+                        {
+                            "name": "source_material",
+                            "field_type": "array",
+                            "description": "Referenced decision material.",
+                            "children": {
+                                "name": "source",
+                                "field_type": "string",
+                                "description": "One referenced source.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+
+        admitted = admit_propose_flow_tool_arguments(
+            arguments=arguments,
+            tool_schema=schema,
+        )
+        intent = parse_create_flow_intent_arguments(admitted)
+
+        admitted_children = admitted["steps"][0]["output_fields"][0]["children"]
+        assert admitted_children == [
+            {
+                "name": "source",
+                "field_type": "string",
+                "description": "One referenced source.",
+            }
+        ]
+        assert intent.steps[0].output_fields is not None
+        assert intent.steps[0].output_fields[0].item_fields is not None
+        assert intent.steps[0].output_fields[0].item_fields[0].name == "source"
+
     def test_create_schema_admits_explicit_empty_lists_and_nullable_scalars(
         self,
     ) -> None:

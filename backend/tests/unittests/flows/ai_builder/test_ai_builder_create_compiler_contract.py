@@ -988,40 +988,108 @@ def test_compiler_uses_assembly_path_for_single_step_linear_flow() -> None:
     assert validate_spec(compiled).valid
 
 
-def test_assembly_plan_value_error_becomes_typed_architecture_failure() -> None:
+def test_single_text_report_translates_source_capture_into_writer_instructions() -> (
+    None
+):
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Text report",
-            "plan_rationale": "A plain text step cannot satisfy reader fields.",
+            "plan_rationale": "Read the submitted text and write a report.",
             "steps": [
                 {
                     "name": "Write report",
                     "instructions": "Write the report.",
+                    "output_fields": [
+                        {
+                            "name": "heading",
+                            "field_type": "string",
+                            "description": "A short report heading.",
+                        },
+                        {
+                            "name": "web_copy",
+                            "field_type": "string",
+                            "description": "Concise publication-ready copy.",
+                        },
+                    ],
                 }
             ],
         }
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        compile_create_intent_to_spec(
-            intent,
-            context=CreateCompileContext(
-                source_reader_required_fields=(
-                    SourceCaptureField(
-                        name="document_title",
-                        description="Document title.",
-                    ),
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.TEXT,
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="document_title",
+                    description="Document title.",
                 ),
             ),
-        )
+            ui_language="en",
+        ),
+    )
 
-    assert exc_info.value.public_code == "architecture_materialization_failed"
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_plan_invariant_failed"
+    assert [(step.input_type, step.output_type) for step in compiled.steps] == [
+        (InputType.TEXT, OutputType.TEXT),
+    ]
+    assert compiled.steps[0].output_contract is None
+    assert "Document title" in compiled.steps[0].assistant_spec.instructions
+    assert "A short report heading" in compiled.steps[0].assistant_spec.instructions
+    assert "Concise publication-ready copy" in (
+        compiled.steps[0].assistant_spec.instructions
     )
-    assert "source_reader_required_fields require a source-reader planned step" in (
-        exc_info.value.detail
+    assert validate_spec(compiled).valid
+
+
+def test_multi_step_text_report_keeps_required_field_on_structured_reader() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Text report",
+            "plan_rationale": "Structure the source before writing a report.",
+            "steps": [
+                {
+                    "name": "Structure source",
+                    "instructions": "Extract the source facts.",
+                    "output_fields": [
+                        {
+                            "name": "key_fact",
+                            "field_type": "string",
+                            "description": "One source-grounded fact.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the report from the structured facts.",
+                },
+            ],
+        }
     )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.TEXT,
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="summary",
+                    description="Source-grounded summary.",
+                ),
+            ),
+            ui_language="en",
+        ),
+    )
+
+    assert len(compiled.steps) == 2
+    assert compiled.steps[0].output_contract is not None
+    assert set(compiled.steps[0].output_contract["properties"]) == {
+        "key_fact",
+        "summary",
+    }
+    assert validate_spec(compiled).valid
 
 
 def test_audio_input_translates_source_reader_obligation_instead_of_dead_ending() -> (
