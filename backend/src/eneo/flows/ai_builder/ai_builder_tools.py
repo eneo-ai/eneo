@@ -293,16 +293,20 @@ def admit_propose_flow_tool_arguments(
     """Admit one proposal payload after deterministic schema-guided normalization.
 
     Some non-strict tool implementations occasionally close the adjacent
-    ``steps`` and ``output_fields`` arrays at the wrong boundary. The prepared
-    create schema makes those cases unambiguous: each complete object matches
-    exactly one of the two shapes. Models can also copy ``output_fields``
-    children into the flat, server-owned ``result_keys`` projection. Rehome the
-    unambiguous array entries and discard only that non-authoritative nested
-    copy, then apply the unchanged proposal schema to the full payload.
+    ``steps`` and ``output_fields`` arrays at the wrong boundary or emit a
+    punctuation-only property while closing them. The prepared create schema
+    makes those cases unambiguous. Models can also copy ``output_fields``
+    children into the flat, server-owned ``result_keys`` projection. Normalize
+    only those lossless shapes, then apply the unchanged proposal schema to the
+    full payload.
     """
 
-    admitted = _rehome_steps_from_result_projection(
+    admitted = _discard_punctuation_serialization_artifacts(
         arguments=arguments,
+        tool_schema=tool_schema,
+    )
+    admitted = _rehome_steps_from_result_projection(
+        arguments=admitted,
         tool_schema=tool_schema,
     )
     admitted = _rehome_misplaced_create_children(
@@ -322,6 +326,78 @@ def admit_propose_flow_tool_arguments(
         tool_schema=tool_schema,
     )
     return admitted
+
+
+def _discard_punctuation_serialization_artifacts(
+    *,
+    arguments: dict[str, Any],
+    tool_schema: ProposalToolSchema,
+) -> dict[str, Any]:
+    """Discard unknown punctuation-only properties at create object boundaries."""
+
+    parameters = tool_schema["function"]["parameters"]
+    raw_root_properties = parameters.get("properties")
+    if not isinstance(raw_root_properties, dict):
+        return arguments
+    root_properties = cast(dict[str, object], raw_root_properties)
+    admitted_root, root_changed = _without_punctuation_only_unknown_properties(
+        record=arguments,
+        allowed_keys=frozenset(root_properties),
+    )
+
+    raw_steps_schema = root_properties.get("steps")
+    if not isinstance(raw_steps_schema, dict):
+        return admitted_root
+    raw_step_schema = cast(dict[str, object], raw_steps_schema).get("items")
+    if not isinstance(raw_step_schema, dict):
+        return admitted_root
+    raw_step_properties = cast(dict[str, object], raw_step_schema).get("properties")
+    if not isinstance(raw_step_properties, dict):
+        return admitted_root
+
+    raw_steps = admitted_root.get("steps")
+    if not isinstance(raw_steps, list):
+        return admitted_root
+    allowed_step_keys = frozenset(cast(dict[str, object], raw_step_properties))
+    admitted_steps: list[object] = []
+    steps_changed = False
+    for raw_step in cast(list[object], raw_steps):
+        if not isinstance(raw_step, dict):
+            admitted_steps.append(raw_step)
+            continue
+        admitted_step, step_changed = _without_punctuation_only_unknown_properties(
+            record=cast(dict[str, object], raw_step),
+            allowed_keys=allowed_step_keys,
+        )
+        admitted_steps.append(admitted_step)
+        steps_changed = steps_changed or step_changed
+
+    if not root_changed and not steps_changed:
+        return arguments
+    if not steps_changed:
+        return admitted_root
+    return {**admitted_root, "steps": admitted_steps}
+
+
+def _without_punctuation_only_unknown_properties(
+    *,
+    record: dict[str, object],
+    allowed_keys: frozenset[str],
+) -> tuple[dict[str, object], bool]:
+    debris_keys = {
+        key
+        for key, value in record.items()
+        if key not in allowed_keys
+        and isinstance(value, str)
+        and not any(character.isalnum() for character in key)
+        and not any(character.isalnum() for character in value)
+    }
+    if not debris_keys:
+        return record, False
+    return (
+        {key: value for key, value in record.items() if key not in debris_keys},
+        True,
+    )
 
 
 def _rehome_steps_from_result_projection(
@@ -557,22 +633,6 @@ def _rehome_misplaced_create_children(
         candidate_map = (
             cast(dict[str, object], candidate) if isinstance(candidate, dict) else None
         )
-        if candidate_map is not None:
-            debris_keys = {
-                key
-                for key, value in candidate_map.items()
-                if key not in allowed_step_keys
-                and isinstance(value, str)
-                and not any(character.isalnum() for character in key)
-                and not any(character.isalnum() for character in value)
-            }
-            if debris_keys:
-                candidate_map = {
-                    key: value
-                    for key, value in candidate_map.items()
-                    if key not in debris_keys
-                }
-                changed = True
         previous_map = (
             cast(dict[str, object], previous) if isinstance(previous, dict) else None
         )
