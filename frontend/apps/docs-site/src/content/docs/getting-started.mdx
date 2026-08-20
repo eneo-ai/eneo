@@ -95,14 +95,14 @@ cd backend && uv run start
 # Terminal 2: Frontend
 cd frontend && bun run dev
 
-# Terminal 3: ARQ worker
+# Terminal 3: General ARQ worker
 cd backend && uv run worker
 
-# Terminal 4: Flow worker
-cd backend && uv run flow-worker
+# Terminal 4: Platform execution worker
+cd backend && uv run task-execution-worker
 
-# Terminal 5: Flow scheduler
-cd backend && uv run flow-beat
+# Terminal 5: Platform maintenance worker and scheduler
+cd backend && uv run task-maintenance-worker
 ```
 
 #### Access Your Development Environment
@@ -151,11 +151,14 @@ File uploads require the worker service to be running:
 cd backend && uv run worker
 ```
 
-Flow runs require the Flow worker and scheduler:
+Flow runs require both platform worker processes:
 ```bash
-cd backend && uv run flow-worker
-cd backend && uv run flow-beat
+cd backend && uv run task-execution-worker
+cd backend && uv run task-maintenance-worker
 ```
+
+Keep the general `uv run worker` process running as well. It consumes a
+different ARQ queue for uploads, crawling, integrations, and audit jobs.
 
 ## Get Help
 

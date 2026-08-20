@@ -603,7 +603,8 @@ database-only or object-only backup complete in that state.
 
 For the bundled reference service:
 
-1. Put Eneo in maintenance and stop `backend` and `worker` so there are no new
+1. Put Eneo in maintenance and stop `backend`, `worker`,
+   `task-execution-worker`, and `task-maintenance-worker` so there are no new
    writes or lifecycle transitions.
 2. Record the Eneo version, exact SeaweedFS manifest digest, stable deployment
    ID, PostgreSQL timestamp, and an operator backup ID. Do not record secrets.
@@ -611,7 +612,7 @@ For the bundled reference service:
    volume while writers remain stopped.
 4. Checksum both artifacts and the manifest; copy them to independent durable
    storage with the same retention policy.
-5. Restart the original pair only after both halves complete.
+5. Restart the stopped application roles only after both halves complete.
 
 Example commands (the utility image is digest-pinned):
 
@@ -619,7 +620,7 @@ Example commands (the utility image is digest-pinned):
 backup_id="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -m 0700 "backup-$backup_id"
 
-docker compose stop backend worker
+docker compose stop backend worker task-execution-worker task-maintenance-worker
 docker compose exec -T db pg_dump -U postgres -Fc eneo \
   >"backup-$backup_id/postgresql.dump"
 docker compose stop object-content

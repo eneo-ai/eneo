@@ -259,7 +259,9 @@ Flow execution and maintenance use the platform ARQ runtime. Platform worker pro
 
 Flow runs and steps create custom root spans named `flow.run.execute` and `flow.step.execute`. These spans use low-cardinality attributes such as `flow.run.id`, `flow.id`, `flow.tenant.id`, `flow.task.id`, and `flow.run.result.status`. After the run row is loaded, the persisted Flow run `trace_id` is emitted as `flow.run.trace_id` on spans and worker log attributes. This value is the Flow API/evidence/export correlation token; it is not the OpenTelemetry protocol `trace_id`.
 
-ARQ job arguments do not carry `traceparent`, so Flow worker spans are independent worker-root traces. Correlate Flow worker logs and spans by `flow.run.id` and `flow.run.trace_id`.
+ARQ job arguments do not carry `traceparent`, so Flow execution-worker spans
+are independent worker-root traces. Correlate execution-worker logs and spans
+by `flow.run.id` and `flow.run.trace_id`.
 
 ---
 

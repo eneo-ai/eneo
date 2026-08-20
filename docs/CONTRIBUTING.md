@@ -38,11 +38,17 @@ cp frontend/apps/web/.env.example frontend/apps/web/.env
 # Initialize database
 cd backend && uv run python init_db.py
 
-# Start development servers (3 terminals)
-cd backend && uv run start              # Terminal 1
-cd frontend && bun run dev                 # Terminal 2
-cd backend && uv run worker             # Terminal 3
+# Start development services (5 terminals)
+cd backend && uv run start                    # Terminal 1: API
+cd frontend && bun run dev                    # Terminal 2: web app
+cd backend && uv run worker                   # Terminal 3: general jobs
+cd backend && uv run task-execution-worker    # Terminal 4: Flow execution
+cd backend && uv run task-maintenance-worker  # Terminal 5: Flow maintenance
 ```
+
+All three worker processes are required for a complete development environment.
+The general worker handles uploads, crawling, integrations, and audit jobs;
+Flow execution and Flow maintenance use separate ARQ queues and capacity.
 
 For a Git worktree checkout, expose only its Git common directory to the
 container with a narrow local mount, or use a plain clone; never mount the

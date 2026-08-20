@@ -6,7 +6,7 @@ Quick deployment reference for Eneo using Docker Compose.
 
 ## Files in This Directory
 
-- `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
+- `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, three ARQ worker roles, PostgreSQL, Redis)
 - `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
 - `.env.template` - Required image digests and optional object-store inputs
 - `docker-compose.modules.yml` - Optional module overlay (inert unless a `--profile` is passed; see [MODULES.md](MODULES.md))
@@ -84,9 +84,9 @@ The stack uses four Docker networks:
 
 | Network | Services | Purpose |
 |---|---|---|
-| `proxy_tier` (external, created in step 7) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
-| `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
-| `object_content_net` (`internal: true`) | optional object-content, backend, worker | Private S3-compatible byte plane when enabled; no public route |
+| `proxy_tier` (external, created in step 7) | Traefik, frontend, backend, general worker, execution worker, maintenance worker | Ingress and outbound access (LLM APIs, OIDC, crawling, webhooks) |
+| `data_net` (`internal: true`) | db, redis, backend, all three workers, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
+| `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker | Private S3-compatible byte plane when enabled; no public route |
 | `module_net` | Traefik, backend, optional modules | Module traffic — modules reach the backend only (see [MODULES.md](MODULES.md)) |
 
 The backend is the only service on all four networks. PostgreSQL, Redis, and
@@ -151,8 +151,8 @@ curl -fsS https://your-domain.com/api/readyz \
 An HTTP 200 alone is not sufficient for an object-store deployment: it can
 also describe the intentionally degraded state in which inline content remains
 available. A bundled deployment must additionally show `object-content` in
-`docker compose ps`; backend, worker, and the store must share
-`object_content_net`.
+`docker compose ps`; backend, the general and execution workers, and the store
+must share `object_content_net`.
 
 ## Troubleshooting
 

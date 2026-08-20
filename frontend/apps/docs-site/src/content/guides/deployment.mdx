@@ -39,7 +39,7 @@ enabled when needed.
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
-![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers](/diagrams/eneo-architecture.svg)
+![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, ARQ workers, and AI Providers](/diagrams/eneo-architecture.svg)
 
 </div>
 
@@ -47,11 +47,11 @@ enabled when needed.
 | ------------------ | ------------------------ | ------------ | -------------------------------------------------- |
 | **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                                 |
 | **Backend**        | FastAPI (Python)         | 8000         | API server, authentication                         |
-| **Worker**         | ARQ                      | -            | Background processing, document indexing           |
-| **Flow worker**    | Celery                   | -            | Flow runtime execution                             |
-| **Flow scheduler** | Celery beat              | -            | Flow stale-run recovery and outbox delivery        |
+| **General worker** | ARQ                      | -            | Uploads, crawling, integrations, and audit jobs     |
+| **Execution worker** | ARQ                    | -            | Flow runtime execution on its own capacity queue    |
+| **Maintenance worker** | ARQ                  | -            | Flow recovery, expiry, and outbox scheduling        |
 | **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                        |
-| **Redis**          | Redis 7                  | 6379         | Cache, ARQ queue, and Celery broker                |
+| **Redis**          | Redis 7                  | 6379         | Cache and independent ARQ task queues               |
 | **Object content** | S3-compatible endpoint   | 8333 private | Optional durable original and derived byte storage |
 | **db-init**        | Python                   | -            | One-time database initialization                   |
 
@@ -218,10 +218,10 @@ The Docker Compose stack uses four networks:
 
 | Network                                 | Services                                 | Purpose                                                                |
 | --------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| `proxy_tier` (external)                 | Traefik, frontend, backend, worker       | Ingress and outbound access for APIs, OIDC, and crawls                 |
-| `data_net` (`internal: true`)           | db, redis, backend, worker, db-init      | Data layer without internet egress, isolated from Traefik and frontend |
+| `proxy_tier` (external)                 | Traefik, frontend, backend, general worker, execution worker, maintenance worker | Ingress and outbound access for APIs, OIDC, crawls, model calls, and webhooks |
+| `data_net` (`internal: true`)           | db, redis, backend, all three workers, db-init | Data layer without internet egress, isolated from Traefik and frontend |
 | `module_net`                            | Traefik, backend                         | Reserved for optional module containers                                |
-| `object_content_net` (`internal: true`) | optional object-content, backend, worker | Private S3-compatible byte plane when enabled; never routed publicly   |
+| `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker | Private S3-compatible byte plane when enabled; never routed publicly   |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend or Traefik containers, and they have no outbound internet access.
 
@@ -699,6 +699,8 @@ ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 | OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND IdP config                                     |
 | Crawls not processing                | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
 | Crawls/uploads not working           | Worker not running or no embedding model             | Check worker is running, enable embedding model in Admin → Models                   |
+| Flow remains queued                  | Execution worker not running                          | Check `task-execution-worker`; its queue is separate from the general worker        |
+| Flow recovery or outboxes are delayed | Maintenance worker not running                       | Check `task-maintenance-worker` and `/api/healthz/flows`                            |
 | Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription tab, enable Whisper                                  |
 | JWT token invalid                    | `JWT_SECRET` mismatch                                | Must be identical in backend AND frontend                                           |
 | Worker jobs stuck or slow            | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
@@ -750,8 +752,9 @@ docker compose logs -f
 # Specific service
 docker compose logs -f backend
 
-# Last 100 lines
-docker compose logs --tail=100 backend worker
+# Last 100 lines for the API and all worker roles
+docker compose logs --tail=100 backend worker \
+  task-execution-worker task-maintenance-worker
 ```
 
 ---
@@ -767,8 +770,9 @@ docker compose logs --tail=100 backend worker
 </Callout>
 
 Set the five digest suffixes in `.env`. Compose builds each image identity as
-`repository@sha256:<digest-suffix>`. One backend digest supplies the API, ARQ
-worker, both Celery workers, Celery beat, and database initialization roles.
+`repository@sha256:<digest-suffix>`. One backend digest supplies the API,
+general ARQ worker, platform execution worker, platform maintenance worker, and
+database initialization roles.
 
 **Find Eneo image digests:**
 
@@ -813,8 +817,8 @@ docker run --rm -v eneo_eneo_redis_data:/data -v $(pwd):/backup ubuntu \
 ```
 
 If object-store rows exist, also archive `eneo_eneo_object_content_data` while
-backend, worker, and the object-content service are stopped, or take the
-matching versioned snapshot in your external provider. Follow the
+the backend, all three workers, and the object-content service are stopped, or
+take the matching versioned snapshot in your external provider. Follow the
 [object-content backup and restore
 procedure](/guides/object-content-storage#back-up-and-restore), including
 checksum and skew-recovery checks.
@@ -918,7 +922,7 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  stop backend worker object-content
+  stop backend worker task-execution-worker task-maintenance-worker object-content
 # Restore the matching PostgreSQL dump and object-store snapshot as described
 # in the linked procedure, then start the previous digest set:
 docker compose \

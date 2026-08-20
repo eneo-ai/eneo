@@ -53,7 +53,9 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 - **`traefik`**: A reverse proxy that handles incoming traffic, routes it to the correct service, and automatically manages SSL certificates
 - **`frontend`**: The web interface for Eneo
 - **`backend`**: The main API and application logic
-- **`worker`**: A background service for processing heavy tasks like document ingestion, crawling, and audit log exports
+- **`worker`**: The general ARQ worker for document ingestion, crawling, integrations, and audit jobs
+- **`task-execution-worker`**: The ARQ worker that executes Flow runs on the dedicated execution-capacity queue
+- **`task-maintenance-worker`**: The ARQ worker and scheduler for Flow recovery, review expiry, and audit/webhook outboxes
 - **`db`**: A PostgreSQL database with the pgvector extension for storing all application data
 - **`redis`**: An in-memory data store used for caching and managing background jobs
 
@@ -62,6 +64,8 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 > This `docker-compose.yml` file with Traefik is a convenient, all-in-one solution, but it is **not mandatory**.
 >
 > The Eneo frontend and backend images are self-contained and can be run in any container environment. You can integrate them into your own custom `docker-compose.yml` file or deploy them using other tools like Nginx, Caddy, or cloud-based load balancers if you prefer.
+> Custom deployments must run all three worker roles. The general worker does
+> not consume jobs from the platform execution or maintenance queues.
 
 ## 🚀 Deployment in 4 Steps
 

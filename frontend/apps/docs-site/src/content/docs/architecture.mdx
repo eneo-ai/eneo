@@ -82,7 +82,8 @@ for protocol and implementation detail.
 ## Reference deployment
 
 The tracked Compose deployment includes Traefik, the frontend, backend,
-PostgreSQL, Redis, a general worker, and the dedicated Flow worker processes.
+PostgreSQL, Redis, a general ARQ worker, a platform execution worker, and a
+platform maintenance worker.
 Traefik terminates TLS and routes product, API, SCIM, and API-documentation
 traffic to the correct service.
 

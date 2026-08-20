@@ -13,6 +13,12 @@ services:
     networks:
       - object_content_net
 
+  # Flow execution reads runtime inputs and writes generated artifacts through
+  # the same private byte plane as the API and general worker.
+  task-execution-worker:
+    networks:
+      - object_content_net
+
   object-content:
     profiles:
       - object-content
