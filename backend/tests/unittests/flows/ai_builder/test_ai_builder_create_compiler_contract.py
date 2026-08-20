@@ -3559,9 +3559,9 @@ def test_docx_template_placeholders_become_server_owned_form_fields() -> None:
 
     assert compiled.form_fields is not None
     assert [field.name for field in compiled.form_fields] == ["kundnamn", "case_id"]
-    content_step = compiled.steps[1]
-    assert content_step.input_bindings is None
-    template_question = _question(compiled.steps[-1].input_bindings)
+    assert len(compiled.steps) == 2
+    template_step = compiled.steps[-1]
+    template_question = _question(template_step.input_bindings)
     assert "kundnamn: {{ flow_input.kundnamn }}" in template_question
     assert "case_id: {{ flow_input.case_id }}" in template_question
     assert validate_spec(compiled).valid
@@ -5835,6 +5835,62 @@ def test_single_source_text_report_materializes_missing_reader() -> None:
     assert "Titel från dokumentet" in writer_step.assistant_spec.instructions
     assert "aldrig som JSON" in writer_step.assistant_spec.instructions
     assert "Kort sammanfattning" in writer_step.assistant_spec.instructions
+    assert validate_spec(compiled).valid
+
+
+def test_single_json_to_pdf_report_preserves_structured_extraction() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Registreringsunderlag",
+            "plan_rationale": "Validera JSON och skriv ett PDF-underlag.",
+            "steps": [
+                {
+                    "name": "Validera och sammanställ underlaget",
+                    "instructions": "Kontrollera underlaget och skriv rapporten.",
+                    "output_fields": [
+                        {
+                            "name": "deviations",
+                            "field_type": "array",
+                            "description": "Avvikelser som finns i underlaget.",
+                        },
+                        {
+                            "name": "key_facts",
+                            "field_type": "array",
+                            "description": "Källstödda sakuppgifter.",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.JSON,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            ui_language="sv",
+        ),
+    )
+
+    assert [step.output_type for step in compiled.steps] == [
+        OutputType.JSON,
+        OutputType.TEXT,
+        OutputType.PDF,
+    ]
+    reader_step, writer_step, renderer_step = compiled.steps
+    assert reader_step.output_contract is not None
+    assert set(reader_step.output_contract["properties"]) == {
+        "deviations",
+        "key_facts",
+    }
+    assert writer_step.input_source == InputSource.PREVIOUS_STEP
+    assert (
+        "Avvikelser som finns i underlaget" in writer_step.assistant_spec.instructions
+    )
+    assert "Källstödda sakuppgifter" in writer_step.assistant_spec.instructions
+    assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
 
 

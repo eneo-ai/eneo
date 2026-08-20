@@ -77,7 +77,12 @@ def admit_document_report_semantic_shape(
         raise ValueError("Semantic origin eligibility must align with semantic steps.")
     if (
         not semantic_steps
-        or runtime_input_type not in {InputType.DOCUMENT, InputType.FILE}
+        or runtime_input_type
+        not in {
+            InputType.DOCUMENT,
+            InputType.FILE,
+            InputType.JSON,
+        }
         or final_semantic_output_type != OutputType.TEXT
     ):
         return semantic_steps, eligibility
