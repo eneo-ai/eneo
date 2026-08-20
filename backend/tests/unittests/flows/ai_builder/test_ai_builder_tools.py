@@ -433,6 +433,46 @@ class TestBuildToolSchema:
             "declare children ('summary'). [value_error]",
         )
 
+    def test_create_admission_discards_children_from_primitive_fields(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Work order list",
+            "plan_rationale": "Structure reported issues for prioritization.",
+            "steps": [
+                {
+                    "name": "Structure issues",
+                    "instructions": "Extract only the reported issue details.",
+                    "output_fields": [
+                        {
+                            "name": "issues",
+                            "field_type": "array",
+                            "description": "Reported issues.",
+                            "children": [
+                                {
+                                    "name": "impact",
+                                    "field_type": "string",
+                                    "description": "Reported impact.",
+                                    "children": True,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        admitted = admit_propose_flow_tool_arguments(
+            arguments=arguments,
+            tool_schema=schema,
+        )
+        intent = parse_create_flow_intent_arguments(admitted)
+
+        admitted_impact = admitted["steps"][0]["output_fields"][0]["children"][0]
+        assert "children" not in admitted_impact
+        assert intent.steps[0].output_fields is not None
+        assert intent.steps[0].output_fields[0].item_fields is not None
+        assert intent.steps[0].output_fields[0].item_fields[0].name == "impact"
+
     def test_create_schema_admits_explicit_empty_lists_and_nullable_scalars(
         self,
     ) -> None:
