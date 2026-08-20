@@ -586,7 +586,7 @@ async def _wait_for_turn_state(
 def _child_environment(*, test_settings: Settings) -> dict[str, str]:
     environment = _flow_worker_environment(
         settings=test_settings,
-        queue_name=test_settings.flow_celery_queue,
+        queue_name=test_settings.task_execution_queue,
     )
     environment["TESTING"] = "true" if test_settings.testing else "false"
     environment["AI_BUILDER_SEND_LOCK_LEASE_SECONDS"] = str(_LEASE_SECONDS)

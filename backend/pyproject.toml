@@ -196,6 +196,7 @@ pytest_add_cli_args_test_selection = [
     "tests/unittests/flows/ai_builder/test_ai_builder_architecture_commit.py",
     "tests/unittests/flows/ai_builder/test_ai_builder_commit_invariance.py",
     "tests/unittests/flows/ai_builder/test_ai_builder_send_lease.py",
+    "tests/unit/flows/test_flow_ai_builder_budget_settings.py",
     "tests/unittests/tenants/test_tenant_flow_settings.py",
 ]
 

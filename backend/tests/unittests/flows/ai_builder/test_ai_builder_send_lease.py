@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -289,6 +290,209 @@ async def test_claim_ai_builder_send_turn_refreshes_with_independent_session_bef
         "release",
     ]
     assert request_repo.released_lease == request_repo.claimed_lease
+
+
+@pytest.mark.parametrize(
+    ("configured_seconds", "expected_lease", "expected_refresh"),
+    [(1, 30, 10), (15, 30, 10), (31, 31, 10), (90, 90, 30)],
+)
+def test_send_lock_timing_applies_the_minimum_and_one_third_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_seconds: int,
+    expected_lease: int,
+    expected_refresh: int,
+) -> None:
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "get_settings",
+        lambda: SimpleNamespace(ai_builder_send_lock_lease_seconds=configured_seconds),
+    )
+
+    assert ai_builder_send_lease._send_lock_lease_seconds() == expected_lease
+    assert (
+        ai_builder_send_lease._send_lock_refresh_interval_seconds() == expected_refresh
+    )
+
+
+async def test_lease_maintenance_stops_without_refresh_when_already_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop_event = asyncio.Event()
+    stop_event.set()
+    lease_lost_event = asyncio.Event()
+
+    async def unexpected_refresh(**kwargs: object) -> bool:
+        raise AssertionError(f"unexpected refresh: {kwargs}")
+
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_refresh_session_send_lease",
+        unexpected_refresh,
+    )
+
+    await ai_builder_send_lease._maintain_send_lock_lease(
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        stop_event=stop_event,
+        lease_lost_event=lease_lost_event,
+    )
+
+    assert lease_lost_event.is_set() is False
+
+
+@pytest.mark.parametrize("refresh_outcome", [False, RuntimeError("redis unavailable")])
+async def test_lease_maintenance_marks_loss_after_failed_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    refresh_outcome: bool | Exception,
+) -> None:
+    session_id = uuid4()
+    tenant_id = uuid4()
+    lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+    stop_event = asyncio.Event()
+    lease_lost_event = asyncio.Event()
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_send_lock_refresh_interval_seconds",
+        lambda: 0,
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_send_lock_lease_seconds",
+        lambda: 73,
+    )
+
+    async def refresh(**kwargs: object) -> bool:
+        calls.append(kwargs)
+        if isinstance(refresh_outcome, Exception):
+            raise refresh_outcome
+        return refresh_outcome
+
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_refresh_session_send_lease",
+        refresh,
+    )
+
+    import logging as std_logging
+
+    log_name = "test.ai_builder_send_lease.maintenance"
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "logger",
+        std_logging.getLogger(log_name),
+    )
+
+    with caplog.at_level("WARNING", logger=log_name):
+        await ai_builder_send_lease._maintain_send_lock_lease(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=lease,
+            stop_event=stop_event,
+            lease_lost_event=lease_lost_event,
+        )
+
+    assert calls == [
+        {
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "lease": lease,
+            "lock_lease_seconds": 73,
+        }
+    ]
+    assert lease_lost_event.is_set() is True
+    if isinstance(refresh_outcome, Exception):
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert record.getMessage() == "AI Builder send lease refresh failed."
+        assert record.exc_info is not None
+        assert record.exc_info[1] is refresh_outcome
+        assert record.session_id == str(session_id)
+        assert record.request_id == str(lease.request_id)
+
+
+async def test_lease_maintenance_continues_after_refresh_until_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop_event = asyncio.Event()
+    lease_lost_event = asyncio.Event()
+    refresh_count = 0
+
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_send_lock_refresh_interval_seconds",
+        lambda: 0,
+    )
+
+    async def refresh(**kwargs: object) -> bool:
+        nonlocal refresh_count
+        assert kwargs["lock_lease_seconds"] >= 30
+        refresh_count += 1
+        stop_event.set()
+        return True
+
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_refresh_session_send_lease",
+        refresh,
+    )
+
+    await ai_builder_send_lease._maintain_send_lock_lease(
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        lease=SessionSendLease(request_id=uuid4(), lock_token=uuid4()),
+        stop_event=stop_event,
+        lease_lost_event=lease_lost_event,
+    )
+
+    assert refresh_count == 1
+    assert lease_lost_event.is_set() is False
+
+
+async def test_refresh_lease_opens_a_session_and_forwards_the_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_id = uuid4()
+    tenant_id = uuid4()
+    lease = SessionSendLease(request_id=uuid4(), lock_token=uuid4())
+    database_session = cast(AsyncSession, object())
+    calls: list[dict[str, object]] = []
+
+    @contextlib.asynccontextmanager
+    async def session_scope() -> AsyncGenerator[AsyncSession, None]:
+        yield database_session
+
+    class RecordingRepo:
+        def __init__(self, session: AsyncSession) -> None:
+            assert session is database_session
+
+        async def refresh_session_send_lease(self, **kwargs: object) -> bool:
+            calls.append(kwargs)
+            return True
+
+    monkeypatch.setattr(ai_builder_send_lease.sessionmanager, "session", session_scope)
+    monkeypatch.setattr(ai_builder_send_lease, "AIBuilderRepository", RecordingRepo)
+
+    assert (
+        await ai_builder_send_lease._refresh_session_send_lease(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=lease,
+            lock_lease_seconds=47,
+        )
+        is True
+    )
+    assert calls == [
+        {
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "lease": lease,
+            "lock_lease_seconds": 47,
+        }
+    ]
 
 
 def _accepted_turn(client_turn_id: UUID) -> SessionTurnAcceptance:

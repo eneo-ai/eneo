@@ -38,6 +38,7 @@ export const FLOWS_BUNDLE_ROUTES = [
   "docs/flows-for-developers/when-things-fail",
   "docs/flows-for-developers/key-decisions",
   "docs/flows-for-developers/reviewing-flows-code",
+  "docs/ai-builder",
 ];
 
 const SECTION_TITLES = {

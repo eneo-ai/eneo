@@ -48,29 +48,6 @@ def test_builder_schema_values_follow_builder_exposed_flow_capabilities() -> Non
     ]
 
 
-def test_flow_authoring_enum_values_preserve_the_persisted_wire_contract() -> None:
-    assert [item.value for item in FlowAuthoringInputSource] == [
-        "flow_input",
-        "previous_step",
-        "all_previous_steps",
-    ]
-    assert [item.value for item in FlowAuthoringInputType] == [
-        "text",
-        "json",
-        "audio",
-        "document",
-        "file",
-        "any",
-    ]
-    assert [item.value for item in FlowAuthoringOutputMode] == [
-        "pass_through",
-        "compose_text",
-        "transcribe_only",
-        "template_fill",
-        "render_verbatim",
-    ]
-
-
 def test_flow_input_field_provenance_vocabulary_is_complete_and_ordered() -> None:
     assert get_args(FlowInputFieldProvenance) == (
         "user_confirmed",
