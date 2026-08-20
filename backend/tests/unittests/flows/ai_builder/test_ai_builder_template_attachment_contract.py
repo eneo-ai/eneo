@@ -136,7 +136,7 @@ def test_contract_preserves_exact_placeholder_whitespace() -> None:
 
     assert contracted.steps[-1].output_config == {
         "bindings": {
-            "customer   name": "{{ flow_input.customer name }}",
+            "customer   name": "{{ step_b.output.structured.customer.name }}",
         }
     }
 
@@ -296,6 +296,123 @@ def test_contract_binds_human_named_placeholders_to_prepared_fields() -> None:
     field_names = {field.name for field in contracted.form_fields or ()}
     assert "Ärendet" not in field_names
     assert "diarienummer" not in field_names
+
+
+def test_contract_binds_nested_placeholder_to_declared_string_leaf() -> None:
+    spec = _template_spec()
+    extract = spec.steps[1].model_copy(
+        update={
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "sections": {
+                        "type": "object",
+                        "properties": {
+                            "ärendet": {
+                                "type": "object",
+                                "properties": {"text": {"type": "string"}},
+                                "required": ["text"],
+                                "additionalProperties": False,
+                            }
+                        },
+                        "required": ["ärendet"],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["sections"],
+                "additionalProperties": False,
+            }
+        }
+    )
+    spec = spec.model_copy(update={"steps": [spec.steps[0], extract, spec.steps[2]]})
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=("sections.ärendet.text",),
+    )
+
+    assert contracted.steps[-1].output_config == {
+        "bindings": {
+            "sections.ärendet.text": (
+                "{{ step_b.output.structured.sections.ärendet.text }}"
+            )
+        }
+    }
+
+
+def test_contract_drops_unused_text_step_before_template_fill() -> None:
+    spec = _template_spec()
+    unused_text_step = StepSpec(
+        plan_step_ref="step_unused",
+        name="Fill the template",
+        assistant_spec=AssistantSpec(instructions="Write a final letter."),
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        output_type=OutputType.TEXT,
+    )
+    spec = spec.model_copy(
+        update={
+            "steps": [
+                spec.steps[0],
+                spec.steps[1],
+                unused_text_step,
+                spec.steps[2].model_copy(
+                    update={
+                        "input_bindings": {
+                            "source_refs": [
+                                {
+                                    "step_ref": "step_unused",
+                                    "output": "text",
+                                }
+                            ]
+                        }
+                    }
+                ),
+            ]
+        }
+    )
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=("customer.name",),
+    )
+
+    assert [step.plan_step_ref for step in contracted.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert contracted.steps[-1].output_config == {
+        "bindings": {"customer.name": "{{ step_b.output.structured.customer.name }}"}
+    }
+    assert contracted.steps[-1].input_bindings is None
+
+
+def test_contract_keeps_text_step_referenced_by_template() -> None:
+    spec = _template_spec()
+    referenced_text_step = spec.steps[0].model_copy(
+        update={"plan_step_ref": "step_letter", "name": "Write the letter"}
+    )
+    spec = spec.model_copy(
+        update={"steps": [spec.steps[1], referenced_text_step, spec.steps[2]]}
+    )
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=("föregående_steg",),
+    )
+
+    assert [step.plan_step_ref for step in contracted.steps] == [
+        "step_b",
+        "step_letter",
+        "step_c",
+    ]
+    assert contracted.steps[-1].output_config == {
+        "bindings": {"föregående_steg": "{{ föregående_steg }}"}
+    }
 
 
 def test_contract_prefers_declared_form_field_over_prepared_field() -> None:

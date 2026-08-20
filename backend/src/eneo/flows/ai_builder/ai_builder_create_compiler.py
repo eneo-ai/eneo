@@ -212,6 +212,51 @@ def compile_create_intent_to_spec(
             runtime_input_type=runtime_input_type,
         )
         compiled_spec = assembly_spec
+        if context is not None and context.checkpoint_intents is not None:
+            compiled_spec = project_checkpoint_intents(
+                compiled_spec,
+                context.checkpoint_intents,
+            )
+            mismatches = checkpoint_intent_mismatches(
+                compiled_spec,
+                context.checkpoint_intents,
+            )
+            if mismatches:
+                # The transcription step is backend-inserted; the proposal model
+                # cannot add one, so a transcript checkpoint without its producer
+                # is a planning/architecture contradiction, not a repairable plan.
+                transcript_producer_missing = any(
+                    mismatch.kind == "producer_missing"
+                    and mismatch.producer_kind == "transcript"
+                    for mismatch in mismatches
+                )
+                if transcript_producer_missing:
+                    raise AIBuilderArchitectureError(
+                        public_code="architecture_materialization_failed",
+                        detail=(
+                            "A transcript review checkpoint was requested, but the "
+                            "committed architecture compiles no transcription step "
+                            "to attach it to."
+                        ),
+                        log_context={
+                            "failure_code": "checkpoint_transcript_producer_missing",
+                            "reason": "checkpoint_transcript_producer_missing",
+                            "mismatch_count": len(mismatches),
+                        },
+                    )
+                raise AIBuilderArchitectureError(
+                    public_code="architecture_materialization_failed",
+                    detail=(
+                        "The compiled Flow cannot place every requested review checkpoint "
+                        "on its typed output producer. Add the missing semantic result "
+                        "producer and try again."
+                    ),
+                    log_context={
+                        "failure_code": "checkpoint_intent_mismatch",
+                        "reason": "checkpoint_intent_mismatch",
+                        "mismatch_count": len(mismatches),
+                    },
+                )
         if context is not None and context.selected_template_count is not None:
             compiled_spec = apply_template_attachment_contract(
                 compiled_spec,
@@ -230,52 +275,6 @@ def compile_create_intent_to_spec(
                 log_context={
                     "failure_code": "template_preparation_stage_limit_exceeded",
                     "reason": "template_preparation_stage_limit_exceeded",
-                },
-            )
-        if context is None or context.checkpoint_intents is None:
-            return _spec_preserving_obligations(compiled_spec, obligated_output_fields)
-        compiled_spec = project_checkpoint_intents(
-            compiled_spec,
-            context.checkpoint_intents,
-        )
-        mismatches = checkpoint_intent_mismatches(
-            compiled_spec,
-            context.checkpoint_intents,
-        )
-        if mismatches:
-            # The transcription step is backend-inserted; the proposal model
-            # cannot add one, so a transcript checkpoint without its producer
-            # is a planning/architecture contradiction, not a repairable plan.
-            transcript_producer_missing = any(
-                mismatch.kind == "producer_missing"
-                and mismatch.producer_kind == "transcript"
-                for mismatch in mismatches
-            )
-            if transcript_producer_missing:
-                raise AIBuilderArchitectureError(
-                    public_code="architecture_materialization_failed",
-                    detail=(
-                        "A transcript review checkpoint was requested, but the "
-                        "committed architecture compiles no transcription step "
-                        "to attach it to."
-                    ),
-                    log_context={
-                        "failure_code": "checkpoint_transcript_producer_missing",
-                        "reason": "checkpoint_transcript_producer_missing",
-                        "mismatch_count": len(mismatches),
-                    },
-                )
-            raise AIBuilderArchitectureError(
-                public_code="architecture_materialization_failed",
-                detail=(
-                    "The compiled Flow cannot place every requested review checkpoint "
-                    "on its typed output producer. Add the missing semantic result "
-                    "producer and try again."
-                ),
-                log_context={
-                    "failure_code": "checkpoint_intent_mismatch",
-                    "reason": "checkpoint_intent_mismatch",
-                    "mismatch_count": len(mismatches),
                 },
             )
         return _spec_preserving_obligations(compiled_spec, obligated_output_fields)

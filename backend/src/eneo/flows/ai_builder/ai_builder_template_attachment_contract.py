@@ -13,7 +13,7 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
 )
-from eneo.flows.domain.flow import clone_json_object
+from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
@@ -176,9 +176,21 @@ def apply_template_attachment_contract(
         if key not in _LOCAL_TEMPLATE_CONFIG_KEYS and key != "bindings"
     }
     portable_output_config["bindings"] = bindings
+    preparation_steps = _drop_unused_template_text_predecessor(
+        steps=spec.steps[:-1],
+        bindings=bindings,
+    )
+    dropped_text_predecessor = len(preparation_steps) != len(spec.steps) - 1
+    terminal_update: dict[str, object] = {"output_config": portable_output_config}
+    if dropped_text_predecessor:
+        dropped_step = spec.steps[-2]
+        terminal_update["input_bindings"] = _without_step_source_refs(
+            terminal_step.input_bindings,
+            step_refs={dropped_step.plan_step_ref, f"step_{len(spec.steps) - 1}"},
+        )
     steps = [
-        *spec.steps[:-1],
-        terminal_step.model_copy(update={"output_config": portable_output_config}),
+        *preparation_steps,
+        terminal_step.model_copy(update=terminal_update),
     ]
     return spec.model_copy(update={"steps": steps, "form_fields": form_fields})
 
@@ -269,33 +281,106 @@ def _folded_step_output_binding(
         contract = step.output_contract
         if not isinstance(contract, Mapping) or not step.plan_step_ref:
             continue
-        properties = cast(object, contract.get("properties"))
-        if not isinstance(properties, Mapping):
-            continue
-        for property_name, property_schema in cast(
-            Mapping[object, object], properties
-        ).items():
-            if not isinstance(property_name, str):
+        string_paths = _declared_string_output_paths(contract)
+        if placeholder in string_paths:
+            matched_path = placeholder
+        else:
+            folded_matches = [
+                path
+                for path in string_paths
+                if fold_result_field_name(path) == folded_placeholder
+            ]
+            if len(folded_matches) > 1:
+                return None
+            if not folded_matches:
                 continue
-            if not isinstance(property_schema, Mapping):
-                continue
-            if cast(Mapping[object, object], property_schema).get("type") != "string":
-                continue
-            if fold_result_field_name(property_name) != folded_placeholder:
-                continue
-            if (
-                missing_structured_output_path(dict(contract), property_name)
-                is not None
-            ):
-                continue
-            return (
-                "{{ "
-                + step.plan_step_ref
-                + ".output.structured."
-                + property_name
-                + " }}"
-            )
+            matched_path = folded_matches[0]
+        return "{{ " + step.plan_step_ref + ".output.structured." + matched_path + " }}"
     return None
+
+
+def _declared_string_output_paths(
+    schema: Mapping[str, object],
+    *,
+    prefix: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Return provable string leaf paths without implicit array traversal."""
+
+    if schema.get("type") == "array":
+        return ()
+    if schema.get("type") == "string":
+        return (".".join(prefix),) if prefix else ()
+
+    properties = cast(object, schema.get("properties"))
+    if not isinstance(properties, Mapping):
+        return ()
+
+    paths: list[str] = []
+    for raw_name, raw_schema in cast(Mapping[object, object], properties).items():
+        if not isinstance(raw_name, str) or not isinstance(raw_schema, Mapping):
+            continue
+        paths.extend(
+            _declared_string_output_paths(
+                cast(Mapping[str, object], raw_schema),
+                prefix=(*prefix, raw_name),
+            )
+        )
+    return tuple(paths)
+
+
+def _drop_unused_template_text_predecessor(
+    *,
+    steps: Sequence[StepSpec],
+    bindings: Mapping[str, str],
+) -> Sequence[StepSpec]:
+    """Remove a model-authored text step that cannot affect template output."""
+
+    if len(steps) < 2:
+        return steps
+    candidate = steps[-1]
+    if (
+        candidate.output_mode is not OutputMode.PASS_THROUGH
+        or candidate.output_type is not OutputType.TEXT
+        or candidate.review_policy is not None
+    ):
+        return steps
+
+    candidate_order = len(steps)
+    used_expressions = {
+        "{{ " + PREVIOUS_STEP_TEXT_ALIAS + " }}",
+        "{{ " + candidate.plan_step_ref + ".output.text }}",
+        "{{ step_" + str(candidate_order) + ".output.text }}",
+    }
+    if used_expressions.intersection(bindings.values()):
+        return steps
+    return steps[:-1]
+
+
+def _without_step_source_refs(
+    input_bindings: FlowPersistedJsonObject | None,
+    *,
+    step_refs: set[str],
+) -> FlowPersistedJsonObject | None:
+    if input_bindings is None:
+        return None
+    raw_source_refs = input_bindings.get("source_refs")
+    if not isinstance(raw_source_refs, list):
+        return input_bindings
+
+    retained_source_refs: list[object] = []
+    for source_ref in cast(list[object], raw_source_refs):
+        if (
+            isinstance(source_ref, Mapping)
+            and cast(Mapping[object, object], source_ref).get("step_ref") in step_refs
+        ):
+            continue
+        retained_source_refs.append(cast(object, source_ref))
+    updated = dict(input_bindings)
+    if retained_source_refs:
+        updated["source_refs"] = retained_source_refs
+    else:
+        updated.pop("source_refs", None)
+    return updated or None
 
 
 def _require_template_form_field(
