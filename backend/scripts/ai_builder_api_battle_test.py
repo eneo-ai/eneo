@@ -4451,7 +4451,13 @@ def _runtime_lineage_sha256s(
     if not isinstance(edges, list):
         return [None] * expected_count, "current_lineage_invalid"
 
-    checksum_by_ordinal: dict[int, str] = {}
+    uploaded_ids = [file_id for file_id in uploaded_file_ids if file_id is not None]
+    uploaded_sizes_by_id = dict(zip(uploaded_ids, uploaded_runtime_content_sizes))
+    uploaded_positions_by_id = {
+        file_id: position for position, file_id in enumerate(uploaded_ids)
+    }
+    checksum_by_file_id: dict[str, str] = {}
+    runtime_edge_positions: list[tuple[int, int, object]] = []
     for edge in edges:
         if not isinstance(edge, Mapping):
             return [None] * expected_count, "current_lineage_invalid"
@@ -4459,24 +4465,38 @@ def _runtime_lineage_sha256s(
         if not isinstance(source, Mapping) or source.get("kind") != "runtime_file":
             continue
         ordinal = source.get("input_file_ordinal")
+        file_id = source.get("file_id")
         checksum = source.get("checksum")
         byte_size = source.get("byte_size")
         if (
             not isinstance(ordinal, int)
             or isinstance(ordinal, bool)
             or ordinal not in range(expected_count)
-            or source.get("file_id") != uploaded_file_ids[ordinal]
+            or not isinstance(file_id, str)
+            or file_id not in uploaded_sizes_by_id
             or not _is_sha256(checksum)
-            or byte_size != uploaded_runtime_content_sizes[ordinal]
-            or ordinal in checksum_by_ordinal
+            or byte_size != uploaded_sizes_by_id[file_id]
+            or file_id in checksum_by_file_id
         ):
             return [None] * expected_count, "current_lineage_invalid"
-        checksum_by_ordinal[ordinal] = checksum
+        checksum_by_file_id[file_id] = checksum
+        runtime_edge_positions.append(
+            (uploaded_positions_by_id[file_id], ordinal, edge.get("binding_ref"))
+        )
 
-    expected_ordinals = set(range(expected_count))
-    if set(checksum_by_ordinal) != expected_ordinals:
+    if set(checksum_by_file_id) != set(uploaded_ids):
         return [None] * expected_count, "incomplete"
-    return [checksum_by_ordinal[index] for index in range(expected_count)], "complete"
+    global_ordinals = all(
+        expected_ordinal == observed_ordinal
+        for expected_ordinal, observed_ordinal, _ in runtime_edge_positions
+    )
+    per_source_local_ordinals = all(
+        observed_ordinal == 0 and binding_ref == "runtime_files[0]"
+        for _, observed_ordinal, binding_ref in runtime_edge_positions
+    )
+    if not global_ordinals and not per_source_local_ordinals:
+        return [None] * expected_count, "current_lineage_invalid"
+    return [checksum_by_file_id[file_id] for file_id in uploaded_ids], "complete"
 
 
 def _write_bundle(output_dir: Path, bundle: JsonObject, *, suffix: str) -> Path:
