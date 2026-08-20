@@ -53,7 +53,7 @@ export interface paths {
     };
     /**
      * Flow Runtime Health
-     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, and Celery worker and scheduler state.
+     * @description Return super-key-protected Flow runtime readiness signals derived from persisted run, review, data-integrity, audit-outbox, webhook-outbox, and platform task worker readiness.
      */
     get: operations["flow_runtime_health_api_healthz_flows_get"];
     put?: never;
@@ -19496,9 +19496,8 @@ export interface components {
      * @enum {string}
      */
     FlowRuntimeHealthFlag:
-      | "EXECUTION_QUEUE_CONSUMER_UNAVAILABLE"
-      | "MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE"
-      | "BEAT_SCHEDULER_STALE"
+      | "EXECUTION_WORKER_UNAVAILABLE"
+      | "MAINTENANCE_WORKER_UNAVAILABLE"
       | "STALE_QUEUED_RUNS"
       | "ACCEPTED_DISPATCH_EXHAUSTED"
       | "STALE_RUNNING_RUNS"
@@ -19701,37 +19700,32 @@ export interface components {
     };
     /** FlowRuntimeProbe */
     FlowRuntimeProbe: {
-      /**
-       * Beat Freshness Ttl Seconds
-       * @description Remaining lifetime of the latest successful scheduled Flow task publish. Null means the receipt is missing, expired, non-expiring, or unreadable.
-       */
-      beat_freshness_ttl_seconds: number | null;
-      /**
-       * Celery Inspection Timeout Seconds
-       * @description Bounded Celery and Beat inspection timeout used by the adapter.
-       * @default 1
-       */
-      celery_inspection_timeout_seconds?: number;
       /** Db Query Duration Ms */
       db_query_duration_ms?: number | null;
       db_query_failure?: components["schemas"]["FlowRuntimeProbeFailure"] | null;
       /** Db Query Ok */
       db_query_ok: boolean;
       /**
-       * Execution Queue Consumer Ok
-       * @description Whether a responding Celery worker reports consuming the configured Flow execution queue. False includes unavailable broker/control replies.
+       * Execution Worker Ready
+       * @description Whether the platform execution worker health key is fresh.
        */
-      execution_queue_consumer_ok: boolean;
+      execution_worker_ready: boolean;
       /**
-       * Maintenance Queue Consumer Ok
-       * @description Whether a responding Celery worker reports consuming the configured Flow maintenance queue. False includes unavailable broker/control replies.
+       * Maintenance Worker Ready
+       * @description Whether the platform maintenance worker health key is fresh.
        */
-      maintenance_queue_consumer_ok: boolean;
+      maintenance_worker_ready: boolean;
       /**
        * Scope
-       * @default db_and_celery_runtime
+       * @default db_and_platform_task_runtime
        */
       scope?: string;
+      /**
+       * Task Readiness Timeout Seconds
+       * @description Bounded platform worker readiness timeout.
+       * @default 1
+       */
+      task_readiness_timeout_seconds?: number;
     };
     /**
      * FlowRuntimeProbeFailure
