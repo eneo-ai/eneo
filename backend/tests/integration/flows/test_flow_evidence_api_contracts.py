@@ -438,7 +438,7 @@ async def _seed_flow_run_contract_data(
             step_id=step.id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="celery-1",
+            dispatch_task_id="celery-1",
             status="completed",
             error_code=None,
             error_message="Bearer super-secret",

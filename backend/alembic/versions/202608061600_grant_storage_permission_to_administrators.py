@@ -34,5 +34,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        sa.text("UPDATE roles SET permissions = array_remove(permissions, 'storage')")
+        sa.text(
+            "UPDATE roles SET permissions = array_remove(permissions, 'storage')"
+        )
     )

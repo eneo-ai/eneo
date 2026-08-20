@@ -20001,7 +20001,7 @@ export interface components {
       /** Attempt No */
       attempt_no: number;
       /** Celery Task Id */
-      celery_task_id?: string | null;
+      dispatch_task_id?: string | null;
       /**
        * Created At
        * Format: date-time

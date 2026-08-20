@@ -243,7 +243,7 @@ async def _create_running_webhook_run(
             step_id=published_step.id,
             step_order=published_step.step_order,
             attempt_no=1,
-            celery_task_id=f"webhook-outbox-fixture-{published_step.step_order}",
+            dispatch_task_id=f"webhook-outbox-fixture-{published_step.step_order}",
         )
         pending_result = await run_repo.get_step_result(
             run_id=run.id,

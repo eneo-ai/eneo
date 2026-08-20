@@ -2494,7 +2494,7 @@ async def test_create_or_get_attempt_started_is_idempotent(
             step_id=step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="task-1",
+            dispatch_task_id="task-1",
         )
         second = await run_repo.create_or_get_attempt_started(
             run_id=run.id,
@@ -2503,7 +2503,7 @@ async def test_create_or_get_attempt_started_is_idempotent(
             step_id=step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="task-1-duplicate",
+            dispatch_task_id="task-1-duplicate",
         )
 
         assert first.id == second.id
@@ -2533,7 +2533,7 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="tracked-attempt-provenance",
+            dispatch_task_id="tracked-attempt-provenance",
         )
         await session.execute(
             sa.update(FlowStepAttempts)
@@ -2597,7 +2597,7 @@ async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="resolved-input-write-once",
+            dispatch_task_id="resolved-input-write-once",
         )
 
         legacy = await repo.get_resolved_input_edges(
@@ -2691,7 +2691,7 @@ async def test_attempt_input_writes_reject_corrupt_persisted_envelope(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="corrupt-attempt-input",
+            dispatch_task_id="corrupt-attempt-input",
         )
         corrupt_input = {
             "schema_version": "flow-step-attempt-input.v1",
@@ -2736,7 +2736,7 @@ async def test_resolved_input_edges_reader_marks_corruption_without_repair(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="resolved-input-corruption",
+            dispatch_task_id="resolved-input-corruption",
         )
         await session.execute(
             sa.insert(FlowStepAttemptResolvedInputs).values(
@@ -2786,7 +2786,7 @@ async def test_resolved_input_edges_batch_reader_projects_every_admitted_attempt
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="resolved-input-batch-tracked",
+            dispatch_task_id="resolved-input-batch-tracked",
         )
         untracked_attempt = await repo.create_or_get_attempt_started(
             run_id=context.run_id,
@@ -2795,7 +2795,7 @@ async def test_resolved_input_edges_batch_reader_projects_every_admitted_attempt
             step_id=context.step_id,
             step_order=1,
             attempt_no=2,
-            celery_task_id="resolved-input-batch-untracked",
+            dispatch_task_id="resolved-input-batch-untracked",
         )
         await session.execute(
             sa.insert(FlowStepAttemptResolvedInputs).values(
@@ -2832,7 +2832,7 @@ async def test_resolved_input_lineage_participates_in_attempt_evidence_budget(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="resolved-input-budget",
+            dispatch_task_id="resolved-input-budget",
         )
         payload = aggregate.model_dump(mode="json")
         await session.execute(
@@ -2887,7 +2887,7 @@ async def test_resolved_input_edges_reject_initial_write_after_attempt_terminal(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="resolved-input-terminal-absent",
+            dispatch_task_id="resolved-input-terminal-absent",
         )
         await session.execute(
             sa.update(FlowStepAttempts)
@@ -2937,7 +2937,7 @@ async def test_resolved_input_edges_serialize_concurrent_writers(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="resolved-input-concurrent",
+            dispatch_task_id="resolved-input-concurrent",
         )
 
     second_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
@@ -3027,7 +3027,7 @@ async def test_normal_attempt_hydration_does_not_load_resolved_input_edges(
             step_id=context.step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="resolved-input-deferred",
+            dispatch_task_id="resolved-input-deferred",
         )
         await _activate_test_attempt(
             repo=repo,
@@ -3131,7 +3131,7 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
                 step_id=step_id,
                 step_order=1,
                 attempt_no=1,
-                celery_task_id=worker_name,
+                dispatch_task_id=worker_name,
             )
             return attempt.id
 
@@ -3234,7 +3234,7 @@ async def test_attempt_start_serializes_against_terminalization(
                     step_id=step_id,
                     step_order=1,
                     attempt_no=1,
-                    celery_task_id="terminal-race-task",
+                    dispatch_task_id="terminal-race-task",
                 )
             except FlowRunPersistenceInvariantError as exc:
                 return exc
@@ -3478,7 +3478,7 @@ async def test_finish_attempt_is_idempotent(
             step_id=step_id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="task-finish-1",
+            dispatch_task_id="task-finish-1",
         )
         attempt_start = FlowStepAttemptStart(
             requested_model="openai/gpt-4o-mini",
@@ -4111,7 +4111,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
                 step_id=step_one,
                 step_order=1,
                 attempt_no=attempt_no,
-                celery_task_id=f"measure-{attempt_no}",
+                dispatch_task_id=f"measure-{attempt_no}",
                 predecessor_attempt_id=predecessor.id if predecessor else None,
             )
             predecessor = attempt
@@ -4122,7 +4122,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             step_id=step_two,
             step_order=2,
             attempt_no=1,
-            celery_task_id="measure-s2",
+            dispatch_task_id="measure-s2",
         )
         for step_id, step_order, current in ((step_one, 1, 3), (step_two, 2, 1)):
             saved = await run_repo.save_step_result(
@@ -4200,7 +4200,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         assert narrowed.count_truncated is True
 
         # Currents consume the byte budget first. A one-byte budget excludes
-        # every row because emitted attempt text, including celery_task_id, is
+        # every row because emitted attempt text, including dispatch_task_id, is
         # measured as serialized JSON even when the payload JSON is absent.
         tiny_budget = await run_repo.list_step_attempts(
             run_id=run.id,
@@ -4354,7 +4354,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
             (FlowStepAttempts.provenance_json, {"value": "x"}),
             (FlowStepAttempts.input_payload_json, {"value": "x"}),
             (FlowStepAttempts.output_payload_json, {"value": "x"}),
-            (FlowStepAttempts.celery_task_id, "x"),
+            (FlowStepAttempts.dispatch_task_id, "x"),
             (FlowStepAttempts.error_code, "x"),
             (FlowStepAttempts.error_message, "x"),
             (FlowStepAttempts.requested_model, "x"),

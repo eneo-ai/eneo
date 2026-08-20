@@ -138,7 +138,7 @@ async def test_hard_exited_worker_stale_recovery_converges(
     assert after_crash["step_results"][0]["status"] == "running"
     assert len(after_crash["step_attempts"]) == 1
     assert after_crash["step_attempts"][0]["status"] == "started"
-    assert after_crash["step_attempts"][0]["celery_task_id"] == task_id
+    assert after_crash["step_attempts"][0]["dispatch_task_id"] == task_id
 
     async with db_container() as container:
         pre_recovery_audit_count = await container.session().scalar(
@@ -199,7 +199,7 @@ async def test_hard_exited_worker_stale_recovery_converges(
     assert len(final_evidence["step_attempts"]) == 1
     final_attempt = final_evidence["step_attempts"][0]
     assert final_attempt["status"] == "failed"
-    assert final_attempt["celery_task_id"] == task_id
+    assert final_attempt["dispatch_task_id"] == task_id
     assert final_attempt["finished_at"] is not None
     assert final_attempt["error_code"] == "flow_worker_stalled"
 
@@ -256,7 +256,7 @@ async def _wait_for_durable_attempt_checkpoint(
             and len(attempts) == 1
             and attempts[0]["status"] == "started"
         ):
-            task_id = attempts[0]["celery_task_id"]
+            task_id = attempts[0]["dispatch_task_id"]
             assert isinstance(task_id, str)
             return evidence, task_id
         await asyncio.sleep(0.1)

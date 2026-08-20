@@ -184,7 +184,7 @@ def _attempt_evidence_logical_bytes() -> Any:
         FlowStepAttempts.output_payload_json,
         FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
     ) + _scalar_evidence_logical_bytes(
-        FlowStepAttempts.celery_task_id,
+        FlowStepAttempts.dispatch_task_id,
         FlowStepAttempts.error_code,
         FlowStepAttempts.error_message,
         FlowStepAttempts.requested_model,
@@ -2226,7 +2226,7 @@ class FlowRunRepository:
         step_id: UUID,
         step_order: int,
         attempt_no: int,
-        celery_task_id: str | None,
+        dispatch_task_id: str | None,
     ) -> FlowStepAttempt:
         run_status = await self.session.scalar(
             sa.select(FlowRuns.status)
@@ -2253,7 +2253,7 @@ class FlowRunRepository:
                 step_id=step_id,
                 step_order=step_order,
                 attempt_no=attempt_no,
-                celery_task_id=celery_task_id,
+                dispatch_task_id=dispatch_task_id,
                 status=FlowStepAttemptStatus.STARTED.value,
                 started_at=started_at,
             )

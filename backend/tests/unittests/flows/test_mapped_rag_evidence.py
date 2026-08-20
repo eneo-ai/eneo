@@ -281,7 +281,7 @@ def _attempt_with_passage(
         step_id=uuid4(),
         step_order=step_order,
         attempt_no=attempt_no,
-        celery_task_id=None,
+        dispatch_task_id=None,
         status=FlowStepAttemptStatus.COMPLETED,
         error_code=None,
         provenance_json={"rag": rag},

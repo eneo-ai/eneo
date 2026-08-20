@@ -494,7 +494,7 @@ class FlowStepAttempt(BaseModel):
     step_id: UUID
     step_order: int
     attempt_no: int
-    celery_task_id: Optional[str] = None
+    dispatch_task_id: Optional[str] = None
     status: FlowStepAttemptStatus
     error_code: Optional[str] = None
     error_message: Optional[str] = None

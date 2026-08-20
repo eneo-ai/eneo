@@ -238,7 +238,7 @@ async def _create_started_attempt(
         step_id=step.id,
         step_order=step.step_order,
         attempt_no=1,
-        celery_task_id="provider-call-lifecycle-test",
+        dispatch_task_id="provider-call-lifecycle-test",
     )
     context = _StartedAttempt(
         attempt_id=attempt.id,

@@ -1,55 +1,49 @@
 from __future__ import annotations
 
-from pathlib import Path
-from runpy import run_path
+from sqlalchemy import CheckConstraint
 
+from eneo.database.tables.flow_tables import FlowRunReviewCheckpoints
 from eneo.flows.enums import (
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     FlowOutputType,
-    FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
-def test_review_checkpoint_snapshot_migration_constraint_values_match_flow_enums() -> (
-    None
-):
-    migration_path = (
-        Path(__file__).parents[3]
-        / "alembic"
-        / "versions"
-        / "20260508_review_checkpoint_contract_snapshot.py"
+def _constraint_sql(name: str) -> str:
+    constraint = next(
+        constraint
+        for constraint in FlowRunReviewCheckpoints.__table__.constraints
+        if isinstance(constraint, CheckConstraint) and constraint.name == name
     )
-    migration = run_path(str(migration_path))
-
-    assert tuple(migration["REVIEW_CHECKPOINT_REVIEW_MODE_VALUES"]) == tuple(
-        mode.value for mode in FlowStepReviewMode
-    )
-    assert tuple(migration["REVIEW_CHECKPOINT_OUTPUT_TYPE_VALUES"]) == tuple(
-        output_type.value for output_type in FlowOutputType
-    )
+    return str(constraint.sqltext)
 
 
-def test_review_checkpoint_expiry_migration_constraint_values_match_flow_enums() -> (
-    None
-):
-    migration_path = (
-        Path(__file__).parents[3] / "alembic" / "versions" / "20260514_review_expiry.py"
-    )
-    migration = run_path(str(migration_path))
+def test_review_checkpoint_constraint_values_match_flow_enums() -> None:
+    review_mode_sql = _constraint_sql("ck_flow_run_review_checkpoints_review_mode")
+    output_type_sql = _constraint_sql("ck_flow_run_review_checkpoints_output_type")
 
-    assert len(migration["revision"]) <= 32
-    assert tuple(migration["REVIEW_CHECKPOINT_STATES"]) == tuple(
-        state.value for state in FlowRunReviewCheckpointState
+    assert all(f"'{mode.value}'" in review_mode_sql for mode in FlowStepReviewMode)
+    assert all(
+        f"'{output_type.value}'" in output_type_sql for output_type in FlowOutputType
     )
-    assert set(migration["REVIEW_CHECKPOINT_RECONCILABLE_STATES"]) == {
-        state.value for state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
-    }
-    assert tuple(migration["FLOW_RUN_LIFECYCLE_SOURCES"]) == tuple(
-        source.value for source in FlowRunLifecycleSource
+
+
+def test_review_checkpoint_state_and_expiry_index_match_flow_enums() -> None:
+    state_sql = _constraint_sql("ck_flow_run_review_checkpoints_state")
+    expiry_index = next(
+        index
+        for index in FlowRunReviewCheckpoints.__table__.indexes
+        if index.name == "ix_flow_run_review_checkpoints_tenant_expires_at_reconcilable"
     )
-    assert (
-        migration["REVIEW_CHECKPOINT_EXPIRY_INDEX_PREDICATE"]
-        == "state IN ('awaiting_review', 'edited')"
+    predicate = str(expiry_index.dialect_options["postgresql"]["where"])
+
+    assert all(
+        f"'{state.value}'" in state_sql for state in FlowRunReviewCheckpointState
     )
+    assert {
+        state.value
+        for state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
+        if f"'{state.value}'" in predicate
+    } == {state.value for state in RECONCILABLE_REVIEW_CHECKPOINT_STATES}

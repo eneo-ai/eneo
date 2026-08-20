@@ -47,7 +47,7 @@ class Assistants(BasePublic):
         default="user", nullable=False, server_default="user"
     )
     managing_flow_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("flows.id", ondelete="SET NULL"),
+        ForeignKey("flows.id", ondelete="RESTRICT"),
         nullable=True,
     )
     # TODO: refactor since this is a somewhat weird solution having a

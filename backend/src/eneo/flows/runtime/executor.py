@@ -540,7 +540,7 @@ class FlowRunExecutor:
         flow_id: UUID,
         tenant_id: UUID,
         run_revision: int,
-        celery_task_id: str | None,
+        dispatch_task_id: str | None,
         retry_count: int,
     ) -> dict[str, object]:
         can_run = await self.flow_run_repo.mark_running_if_claimable(
@@ -559,7 +559,7 @@ class FlowRunExecutor:
             run_id=run_id,
             flow_id=flow_id,
             tenant_id=tenant_id,
-            celery_task_id=celery_task_id,
+            dispatch_task_id=dispatch_task_id,
             retry_count=retry_count,
         )
 
@@ -569,7 +569,7 @@ class FlowRunExecutor:
         run_id: UUID,
         flow_id: UUID,
         tenant_id: UUID,
-        celery_task_id: str | None,
+        dispatch_task_id: str | None,
         retry_count: int,
     ) -> dict[str, Any]:
         logger.info(
@@ -841,7 +841,7 @@ class FlowRunExecutor:
                     flow_id=flow_id,
                     tenant_id=tenant_id,
                     step=step,
-                    celery_task_id=celery_task_id,
+                    dispatch_task_id=dispatch_task_id,
                 )
                 await self._commit()
                 # A zero-model step can cross this commit before an external test
@@ -1042,7 +1042,7 @@ class FlowRunExecutor:
         flow_id: UUID,
         tenant_id: UUID,
         step: RuntimeStep,
-        celery_task_id: str | None,
+        dispatch_task_id: str | None,
     ) -> FlowStepAttempt:
         attempt_no = await self.flow_run_repo.allocate_next_attempt_no(
             tenant_id=tenant_id,
@@ -1056,7 +1056,7 @@ class FlowRunExecutor:
             step_id=step.step_id,
             step_order=step.step_order,
             attempt_no=attempt_no,
-            celery_task_id=celery_task_id,
+            dispatch_task_id=dispatch_task_id,
         )
 
     async def _execute_step(

@@ -514,7 +514,7 @@ async def test_review_checkpoint_open_after_terminalization_returns_terminal_out
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-open-terminalized-{target_status.value}",
+            dispatch_task_id=f"review-open-terminalized-{target_status.value}",
             retry_count=0,
         )
 
@@ -628,7 +628,7 @@ async def test_review_checkpoint_open_invariant_terminalizes_failed_run(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id="review-open-invariant",
+            dispatch_task_id="review-open-invariant",
             retry_count=0,
         )
 
@@ -707,7 +707,7 @@ async def test_executor_pauses_after_review_policy_step_and_duplicate_delivery_s
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-pause-{uuid4()}",
+            dispatch_task_id=f"review-pause-{uuid4()}",
             retry_count=0,
         )
         duplicate_result = await context.executor.execute(
@@ -715,7 +715,7 @@ async def test_executor_pauses_after_review_policy_step_and_duplicate_delivery_s
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-pause-duplicate-{uuid4()}",
+            dispatch_task_id=f"review-pause-duplicate-{uuid4()}",
             retry_count=1,
         )
 
@@ -861,7 +861,7 @@ async def test_review_checkpoint_snapshot_is_enough_to_render_consumer_review_ui
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-pause-json-{uuid4()}",
+            dispatch_task_id=f"review-pause-json-{uuid4()}",
             retry_count=0,
         )
         review_service = context.container.flow_run_review_checkpoint_service()
@@ -953,7 +953,7 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-contract-pause-{uuid4()}",
+            dispatch_task_id=f"review-contract-pause-{uuid4()}",
             retry_count=0,
         )
         review_service = context.container.flow_run_review_checkpoint_service()
@@ -1154,7 +1154,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-pause-{uuid4()}",
+            dispatch_task_id=f"review-pause-{uuid4()}",
             retry_count=0,
         )
         review_service = context.container.flow_run_review_checkpoint_service()
@@ -1188,7 +1188,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-stale-epoch-{uuid4()}",
+            dispatch_task_id=f"review-stale-epoch-{uuid4()}",
             retry_count=0,
         )
         completed_result = await context.executor.execute(
@@ -1196,7 +1196,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=resumed.run.revision,
-            celery_task_id=f"review-resume-{uuid4()}",
+            dispatch_task_id=f"review-resume-{uuid4()}",
             retry_count=0,
         )
 
@@ -1330,7 +1330,7 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.initial_run_revision,
-            celery_task_id=f"review-last-step-pause-{uuid4()}",
+            dispatch_task_id=f"review-last-step-pause-{uuid4()}",
             retry_count=0,
         )
         review_service = context.container.flow_run_review_checkpoint_service()
@@ -1364,7 +1364,7 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=resumed.run.revision,
-            celery_task_id=f"review-last-step-resume-{uuid4()}",
+            dispatch_task_id=f"review-last-step-resume-{uuid4()}",
             retry_count=0,
         )
 

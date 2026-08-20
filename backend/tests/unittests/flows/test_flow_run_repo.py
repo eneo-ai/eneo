@@ -189,7 +189,7 @@ async def test_create_or_get_attempt_started_raises_persistence_invariant_when_i
             step_id=uuid4(),
             step_order=1,
             attempt_no=1,
-            celery_task_id=None,
+            dispatch_task_id=None,
         )
 
     assert exc_info.value.operation == "create_flow_step_attempt"

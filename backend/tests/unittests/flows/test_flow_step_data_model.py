@@ -71,7 +71,7 @@ def _flow_step_attempt_payload() -> dict[str, object]:
         "rerun_operation_id": None,
         "predecessor_attempt_id": None,
         "superseded_by_attempt_id": None,
-        "celery_task_id": "celery-1",
+        "dispatch_task_id": "celery-1",
         "status": FlowStepAttemptStatus.COMPLETED,
         "error_code": None,
         "error_message": None,

@@ -106,19 +106,15 @@ def _backfill_token_costs(
     are left untouched so admins can disambiguate via "Lookup defaults" in the
     UI rather than receive a silently-wrong price.
     """
-    rows = (
-        connection.execute(
-            sa.text(
-                f"SELECT t.id, t.name, t.litellm_model_name, mp.provider_type "
-                f"FROM {table} t "
-                "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
-                "WHERE t.input_cost_per_token IS NULL "
-                "   OR t.output_cost_per_token IS NULL"
-            )
+    rows = connection.execute(
+        sa.text(
+            f"SELECT t.id, t.name, t.litellm_model_name, mp.provider_type "
+            f"FROM {table} t "
+            "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
+            "WHERE t.input_cost_per_token IS NULL "
+            "   OR t.output_cost_per_token IS NULL"
         )
-        .mappings()
-        .all()
-    )
+    ).mappings().all()
 
     updates = 0
     ambiguous = 0
@@ -156,18 +152,14 @@ def _backfill_per_minute(
 
     Same return shape as ``_backfill_token_costs`` — see that docstring.
     """
-    rows = (
-        connection.execute(
-            sa.text(
-                "SELECT t.id, t.name, t.model_name, mp.provider_type "
-                "FROM transcription_models t "
-                "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
-                "WHERE t.cost_per_minute IS NULL"
-            )
+    rows = connection.execute(
+        sa.text(
+            "SELECT t.id, t.name, t.model_name, mp.provider_type "
+            "FROM transcription_models t "
+            "LEFT JOIN model_providers mp ON mp.id = t.provider_id "
+            "WHERE t.cost_per_minute IS NULL"
         )
-        .mappings()
-        .all()
-    )
+    ).mappings().all()
 
     updates = 0
     ambiguous = 0
@@ -204,12 +196,8 @@ def upgrade() -> None:
         return
 
     bind = op.get_bind()
-    completion_n, completion_amb = _backfill_token_costs(
-        bind, "completion_models", model_cost
-    )
-    embedding_n, embedding_amb = _backfill_token_costs(
-        bind, "embedding_models", model_cost
-    )
+    completion_n, completion_amb = _backfill_token_costs(bind, "completion_models", model_cost)
+    embedding_n, embedding_amb = _backfill_token_costs(bind, "embedding_models", model_cost)
     transcription_n, transcription_amb = _backfill_per_minute(bind, model_cost)
 
     ambiguous_total = completion_amb + embedding_amb + transcription_amb

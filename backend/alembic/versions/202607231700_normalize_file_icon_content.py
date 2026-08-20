@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from hashlib import sha256
-from typing import Literal
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
@@ -34,7 +33,6 @@ _DEFAULT_BATCH_SIZE = 100
 _DEFAULT_BATCH_BYTES = 32 * 1024 * 1024
 
 _PENDING_KEYS_TABLE = "file_icon_normalization_pending"
-_FileUserOwnerColumn = Literal["user_id", "owner_user_id"]
 
 _CANDIDATE_KEY_FACTS = """
     SELECT
@@ -159,75 +157,72 @@ _POPULATE_PENDING_KEYS = sa.text(f"""
     ORDER BY owner_order, owner_id, variant, ordinal
 """)
 
-
-def _candidate_page(file_user_owner_column: _FileUserOwnerColumn):
-    return sa.text(f"""
-        WITH page AS (
-            SELECT pending.*
-            FROM {_PENDING_KEYS_TABLE} AS pending
-            WHERE pending.sequence > :after_sequence
-            ORDER BY pending.sequence
-            LIMIT :batch_size
-        ),
-        bounded AS (
-            SELECT
-                page.*,
-                sum(page.payload_size) OVER (
-                    ORDER BY page.sequence
-                    ROWS UNBOUNDED PRECEDING
-                ) AS running_size
-            FROM page
-        ),
-        selected AS (
-            SELECT bounded.*
-            FROM bounded
-            WHERE bounded.sequence = (SELECT min(sequence) FROM bounded)
-               OR bounded.running_size <= :batch_bytes
-        )
+_CANDIDATE_PAGE = sa.text(f"""
+    WITH page AS (
+        SELECT pending.*
+        FROM {_PENDING_KEYS_TABLE} AS pending
+        WHERE pending.sequence > :after_sequence
+        ORDER BY pending.sequence
+        LIMIT :batch_size
+    ),
+    bounded AS (
         SELECT
-            selected.sequence,
-            selected.owner_kind,
-            selected.owner_id,
-            CASE
-                WHEN selected.owner_kind = 'icon' THEN icon.tenant_id
-                ELSE file.tenant_id
-            END AS tenant_id,
-            CASE
-                WHEN selected.owner_kind = 'icon' THEN NULL::uuid
-                ELSE file.{file_user_owner_column}
-            END AS created_by_user_id,
-            selected.variant,
-            selected.ordinal,
-            CASE
-                WHEN selected.owner_kind = 'icon' THEN icon.mimetype
-                WHEN selected.variant = 'transcription' THEN 'text/plain'
-                WHEN selected.variant = 'original' THEN COALESCE(
-                    NULLIF(file.mimetype, ''),
-                    'application/octet-stream'
-                )
-                WHEN file.file_type = 'text' THEN 'text/plain'
-                ELSE COALESCE(
-                    NULLIF(file.mimetype, ''),
-                    'application/octet-stream'
-                )
-            END AS media_type,
-            selected.payload_size,
-            CASE
-                WHEN selected.owner_kind = 'icon' THEN icon.blob
-                WHEN selected.variant = 'transcription'
-                    THEN convert_to(file.transcription, 'UTF8')
-                WHEN selected.variant = 'original' THEN file.blob
-                WHEN file.file_type = 'text' THEN convert_to(file.text, 'UTF8')
-                ELSE file.blob
-            END AS payload
-        FROM selected
-        LEFT JOIN files AS file
-          ON selected.owner_kind = 'file' AND file.id = selected.owner_id
-        LEFT JOIN icons AS icon
-          ON selected.owner_kind = 'icon' AND icon.id = selected.owner_id
-        ORDER BY selected.sequence
-    """)
-
+            page.*,
+            sum(page.payload_size) OVER (
+                ORDER BY page.sequence
+                ROWS UNBOUNDED PRECEDING
+            ) AS running_size
+        FROM page
+    ),
+    selected AS (
+        SELECT bounded.*
+        FROM bounded
+        WHERE bounded.sequence = (SELECT min(sequence) FROM bounded)
+           OR bounded.running_size <= :batch_bytes
+    )
+    SELECT
+        selected.sequence,
+        selected.owner_kind,
+        selected.owner_id,
+        CASE
+            WHEN selected.owner_kind = 'icon' THEN icon.tenant_id
+            ELSE file.tenant_id
+        END AS tenant_id,
+        CASE
+            WHEN selected.owner_kind = 'icon' THEN NULL::uuid
+            ELSE file.user_id
+        END AS created_by_user_id,
+        selected.variant,
+        selected.ordinal,
+        CASE
+            WHEN selected.owner_kind = 'icon' THEN icon.mimetype
+            WHEN selected.variant = 'transcription' THEN 'text/plain'
+            WHEN selected.variant = 'original' THEN COALESCE(
+                NULLIF(file.mimetype, ''),
+                'application/octet-stream'
+            )
+            WHEN file.file_type = 'text' THEN 'text/plain'
+            ELSE COALESCE(
+                NULLIF(file.mimetype, ''),
+                'application/octet-stream'
+            )
+        END AS media_type,
+        selected.payload_size,
+        CASE
+            WHEN selected.owner_kind = 'icon' THEN icon.blob
+            WHEN selected.variant = 'transcription'
+                THEN convert_to(file.transcription, 'UTF8')
+            WHEN selected.variant = 'original' THEN file.blob
+            WHEN file.file_type = 'text' THEN convert_to(file.text, 'UTF8')
+            ELSE file.blob
+        END AS payload
+    FROM selected
+    LEFT JOIN files AS file
+      ON selected.owner_kind = 'file' AND file.id = selected.owner_id
+    LEFT JOIN icons AS icon
+      ON selected.owner_kind = 'icon' AND icon.id = selected.owner_id
+    ORDER BY selected.sequence
+""")
 
 _FIRST_CANDIDATE = sa.text(f"""
     SELECT owner_kind, owner_id
@@ -236,12 +231,9 @@ _FIRST_CANDIDATE = sa.text(f"""
     LIMIT 1
 """)
 
-
-def _insert_batch(file_user_owner_column: _FileUserOwnerColumn):
-    candidate_page = _candidate_page(file_user_owner_column)
-    return sa.text(f"""
-        WITH selected AS (
-            {candidate_page.text}
+_INSERT_BATCH = sa.text(f"""
+    WITH selected AS (
+        {_CANDIDATE_PAGE.text}
     ),
     normalized AS (
         SELECT
@@ -341,12 +333,12 @@ def _insert_batch(file_user_owner_column: _FileUserOwnerColumn):
         WHERE batch.owner_kind = 'icon'
         RETURNING content_id
     )
-        SELECT
-            (SELECT count(*) FROM file_references)
-            + (SELECT count(*) FROM icon_references) AS inserted_count,
-            (SELECT count(*) FROM batch) AS expected_count,
-            (SELECT max(sequence) FROM batch) AS last_sequence
-    """)
+    SELECT
+        (SELECT count(*) FROM file_references)
+        + (SELECT count(*) FROM icon_references) AS inserted_count,
+        (SELECT count(*) FROM batch) AS expected_count,
+        (SELECT max(sequence) FROM batch) AS last_sequence
+""")
 
 
 def _positive_setting(name: str, default: int) -> int:
@@ -485,27 +477,6 @@ def _stage_pending_keys(connection: Connection) -> None:
     connection.execute(_POPULATE_PENDING_KEYS)
 
 
-def _file_user_owner_column(connection: Connection) -> _FileUserOwnerColumn:
-    columns = set(
-        connection.execute(
-            sa.text("""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                  AND table_name = 'files'
-                  AND column_name IN ('user_id', 'owner_user_id')
-            """)
-        ).scalars()
-    )
-    if "owner_user_id" in columns:
-        return "owner_user_id"
-    if "user_id" in columns:
-        return "user_id"
-    raise RuntimeError(
-        "File/Icon normalization requires files.user_id or files.owner_user_id"
-    )
-
-
 def _copy_in_bounded_batches(
     connection: Connection,
     *,
@@ -513,11 +484,10 @@ def _copy_in_bounded_batches(
     batch_bytes: int,
 ) -> None:
     _stage_pending_keys(connection)
-    insert_batch = _insert_batch(_file_user_owner_column(connection))
     after_sequence = 0
     while True:
         result = connection.execute(
-            insert_batch,
+            _INSERT_BATCH,
             {
                 "after_sequence": after_sequence,
                 "batch_size": batch_size,

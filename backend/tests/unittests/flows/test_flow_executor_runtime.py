@@ -262,7 +262,7 @@ def _started_step_attempt(
         attempt_no=attempt_no,
         predecessor_attempt_id=None,
         superseded_by_attempt_id=None,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         status=FlowStepAttemptStatus.STARTED,
         error_code=None,
         requested_model=None,
@@ -706,7 +706,7 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -828,7 +828,7 @@ async def test_webhook_step_enqueues_delivery_and_leaves_run_running(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -967,7 +967,7 @@ async def test_execute_persists_distinct_model_parameters_for_each_step(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1034,7 +1034,7 @@ async def test_duplicate_worker_exits_when_step_already_claimed(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1056,7 +1056,7 @@ async def test_execute_skips_when_run_claim_fails(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1078,7 +1078,7 @@ async def test_execute_terminal_task_loses_worker_cas_without_lifecycle_writes(u
         flow_id=completed_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=completed_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1107,7 +1107,7 @@ async def test_execute_cancels_when_flow_deleted_before_step_execution(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1294,7 +1294,7 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1702,7 +1702,7 @@ async def test_terminal_run_attempt_start_rejection_uses_failure_path_without_pr
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1788,7 +1788,7 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -1863,7 +1863,7 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -2174,7 +2174,7 @@ async def test_typed_validation_failure_without_attached_context_uses_fallback_p
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -2322,7 +2322,7 @@ async def test_execute_marks_run_completed_with_last_completed_output_payload(us
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -2391,7 +2391,7 @@ async def test_execute_returns_cancelled_when_any_step_result_cancelled(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -2460,7 +2460,7 @@ async def test_execute_returns_run_in_progress_when_pending_results_exist(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -2542,7 +2542,7 @@ async def test_execute_uses_persisted_next_attempt_no_for_attempt_lifecycle(user
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=2,
     )
 
@@ -2629,7 +2629,7 @@ async def test_execute_stops_before_claiming_later_steps_when_run_becomes_cancel
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -2707,7 +2707,7 @@ async def test_execute_does_not_persist_step_after_run_cancelled_during_executio
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -2812,7 +2812,7 @@ async def test_execute_returns_terminal_outcome_when_review_open_loses_run_race(
             flow_id=queued_run.flow_id,
             tenant_id=user.tenant_id,
             run_revision=queued_run.revision,
-            celery_task_id="task-1",
+            dispatch_task_id="task-1",
             retry_count=0,
         )
 
@@ -2942,7 +2942,7 @@ async def test_execute_terminalizes_review_open_invariant_errors(
             flow_id=queued_run.flow_id,
             tenant_id=user.tenant_id,
             run_revision=queued_run.revision,
-            celery_task_id="task-1",
+            dispatch_task_id="task-1",
             retry_count=0,
         )
 
@@ -3064,7 +3064,7 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -3156,7 +3156,7 @@ async def test_execute_cancels_when_flow_deleted_after_first_step_and_keeps_comp
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -3418,7 +3418,7 @@ async def test_execute_fails_run_when_claimed_step_result_missing(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -3478,7 +3478,7 @@ async def test_execute_fails_run_when_definition_snapshot_is_invalid(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -3533,7 +3533,7 @@ async def test_execute_terminalizes_malformed_definition_envelope(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -3584,7 +3584,7 @@ async def test_execute_terminalizes_definition_without_executable_steps(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -3665,7 +3665,7 @@ async def test_execute_rejects_question_binding_input_contract_before_step_execu
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -3979,7 +3979,7 @@ async def test_execute_rejects_later_mcp_assistant_before_any_step_effect(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -4346,7 +4346,7 @@ async def test_execute_rejects_stale_snapshot_before_step_claim_or_assistant_loa
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -5356,7 +5356,7 @@ async def test_prior_results_bootstrap_once(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -5422,7 +5422,7 @@ async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -5482,7 +5482,7 @@ async def test_execute_terminalizes_checksum_drift_before_step_claim(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -5536,7 +5536,7 @@ async def test_execute_terminalizes_wrong_flow_snapshot_before_step_claim(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -5597,7 +5597,7 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -5757,7 +5757,7 @@ async def test_execute_audits_completed_run_terminal_state(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 
@@ -5818,7 +5818,7 @@ async def test_execute_audits_failed_run_terminal_state(user):
         flow_id=queued_run.flow_id,
         tenant_id=user.tenant_id,
         run_revision=queued_run.revision,
-        celery_task_id="task-1",
+        dispatch_task_id="task-1",
         retry_count=0,
     )
 

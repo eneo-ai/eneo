@@ -344,7 +344,7 @@ async def _ensure_completed_step_attempt(
         step_id=step_id,
         step_order=step_order,
         attempt_no=attempt_no,
-        celery_task_id=None,
+        dispatch_task_id=None,
     )
     if attempt.status == FlowStepAttemptStatus.COMPLETED:
         return

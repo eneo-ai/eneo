@@ -691,7 +691,12 @@ class FlowRuns(BasePublic):
         nullable=False,
         index=True,
     )
-    trace_id: Mapped[UUID] = mapped_column(default=uuid4, nullable=False, index=True)
+    trace_id: Mapped[UUID] = mapped_column(
+        default=uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+        nullable=False,
+        index=True,
+    )
     idempotency_key: Mapped[Optional[str]] = mapped_column(
         sa.String(255),
         nullable=True,
@@ -907,7 +912,7 @@ class FlowStepResults(BasePublic):
         nullable=False,
         server_default="pending",
     )
-    error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
     flow_step_execution_hash: Mapped[Optional[str]] = mapped_column(nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(
@@ -978,7 +983,7 @@ class FlowStepAttempts(BasePublic):
     step_id: Mapped[UUID] = mapped_column(nullable=False)
     step_order: Mapped[int] = mapped_column(nullable=False)
     attempt_no: Mapped[int] = mapped_column(nullable=False)
-    celery_task_id: Mapped[Optional[str]] = mapped_column(nullable=True)
+    dispatch_task_id: Mapped[Optional[str]] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(nullable=True)

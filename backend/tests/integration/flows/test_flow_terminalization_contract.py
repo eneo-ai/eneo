@@ -226,7 +226,7 @@ async def _create_running_run(
         step_id=flow.steps[0].id,
         step_order=1,
         attempt_no=1,
-        celery_task_id="terminalization-contract",
+        dispatch_task_id="terminalization-contract",
     )
     return run, flow, run_repo
 
@@ -283,7 +283,7 @@ async def test_terminalization_fails_run_once_and_writes_one_outbox_event(
             step_id=flow.steps[0].id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="terminalization-contract-other-run",
+            dispatch_task_id="terminalization-contract-other-run",
         )
         terminalizer = _flow_run_terminalizer(run_repo)
 

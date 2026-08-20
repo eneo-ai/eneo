@@ -32,6 +32,7 @@ _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"
     "sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3"
 )
+_PREVIOUS_REVISION = "202607071200"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -87,7 +88,17 @@ def _current_revision(database_url: str) -> str | None:
         connection.close()
 
 
-def test_fresh_upgrade_and_orm_parity(
+def _table_exists(database_url: str, table_name: str) -> bool:
+    connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass(%s)", (table_name,))
+            return cursor.fetchone()[0] is not None
+    finally:
+        connection.close()
+
+
+def test_fresh_upgrade_downgrade_reupgrade_and_orm_parity(
     migration_database: tuple[str, Config],
 ) -> None:
     database_url, config = migration_database
@@ -148,3 +159,12 @@ def test_fresh_upgrade_and_orm_parity(
         } <= binding_checks
     finally:
         engine.dispose()
+
+    command.downgrade(config, _PREVIOUS_REVISION)
+    assert _current_revision(database_url) == _PREVIOUS_REVISION
+    assert not _table_exists(database_url, "object_contents")
+    assert not _table_exists(database_url, "object_content_reconciliation_state")
+
+    command.upgrade(config, "head")
+    assert _current_revision(database_url) == head_revision
+    assert _table_exists(database_url, "object_contents")

@@ -266,7 +266,7 @@ async def _create_running_step_file_flow(
         step_id=step.id,
         step_order=step.step_order,
         attempt_no=1,
-        celery_task_id="terminal-guard-files",
+        dispatch_task_id="terminal-guard-files",
     )
     return flow, step, run, run_repo
 
@@ -985,7 +985,7 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
             step_id=step.id,
             step_order=step.step_order,
             attempt_no=3,
-            celery_task_id="result-files-attempt-3",
+            dispatch_task_id="result-files-attempt-3",
         )
         await run_repo.save_step_result(
             run.id,
@@ -1017,7 +1017,7 @@ async def test_step_result_files_keep_history_but_bulk_run_view_uses_current_att
             step_id=step.id,
             step_order=step.step_order,
             attempt_no=4,
-            celery_task_id="result-files-attempt-4",
+            dispatch_task_id="result-files-attempt-4",
         )
         await run_repo.save_step_result(
             run.id,

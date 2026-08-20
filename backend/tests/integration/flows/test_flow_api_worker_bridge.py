@@ -134,7 +134,7 @@ async def test_public_flow_run_crosses_real_broker_and_worker(
     attempt = evidence["step_attempts"][0]
     assert attempt["status"] == "completed"
     assert attempt["attempt_no"] == 1
-    assert isinstance(attempt["celery_task_id"], str)
+    assert isinstance(attempt["dispatch_task_id"], str)
     assert attempt["finished_at"] is not None
     assert attempt["requested_model"]
     assert attempt["provider"]

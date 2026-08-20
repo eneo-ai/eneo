@@ -448,7 +448,7 @@ async def test_late_output_after_terminalization_does_not_complete_attempt_or_we
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.run_revision,
-            celery_task_id=f"late-output-{target_status.value}",
+            dispatch_task_id=f"late-output-{target_status.value}",
             retry_count=0,
         )
 
@@ -739,7 +739,7 @@ async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
             flow_id=flow.id,
             tenant_id=admin_user.tenant_id,
             run_revision=run.revision,
-            celery_task_id=run_correlation_id,
+            dispatch_task_id=run_correlation_id,
             retry_count=0,
         )
 
@@ -856,7 +856,7 @@ async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.run_revision,
-            celery_task_id=f"runtime-generic-failure-{uuid4()}",
+            dispatch_task_id=f"runtime-generic-failure-{uuid4()}",
             retry_count=0,
         )
 
@@ -936,7 +936,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.run_revision,
-            celery_task_id=f"runtime-typed-failure-{uuid4()}",
+            dispatch_task_id=f"runtime-typed-failure-{uuid4()}",
             retry_count=0,
         )
 
@@ -1006,7 +1006,7 @@ async def test_question_binding_variable_miss_persists_precise_typed_failure_wit
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.run_revision,
-            celery_task_id=f"runtime-variable-resolution-failure-{uuid4()}",
+            dispatch_task_id=f"runtime-variable-resolution-failure-{uuid4()}",
             retry_count=0,
         )
 
@@ -1084,7 +1084,7 @@ async def test_attempt_start_failure_persists_failed_state_for_fresh_sessions(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.run_revision,
-            celery_task_id=f"runtime-attempt-start-failure-{uuid4()}",
+            dispatch_task_id=f"runtime-attempt-start-failure-{uuid4()}",
             retry_count=0,
         )
 
@@ -1153,7 +1153,7 @@ async def test_webhook_output_enqueues_delivery_for_fresh_sessions(
             flow_id=context.flow_id,
             tenant_id=context.tenant_id,
             run_revision=context.run_revision,
-            celery_task_id=f"runtime-webhook-success-{uuid4()}",
+            dispatch_task_id=f"runtime-webhook-success-{uuid4()}",
             retry_count=0,
         )
         delivery_rows = (

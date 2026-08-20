@@ -704,7 +704,7 @@ def _attempt_with_passage_bytes(run, *, byte_count: int, attempt_no: int = 1):
         step_id=uuid4(),
         step_order=1,
         attempt_no=attempt_no,
-        celery_task_id=None,
+        dispatch_task_id=None,
         status=FlowStepAttemptStatus.COMPLETED,
         error_code=None,
         # Built through the production provenance envelope: a bare dict would be
@@ -1322,7 +1322,7 @@ def _mapped_attempt_with_passage_bytes(run, *, byte_count: int, attempt_no: int 
         step_id=uuid4(),
         step_order=1,
         attempt_no=attempt_no,
-        celery_task_id=None,
+        dispatch_task_id=None,
         status=FlowStepAttemptStatus.COMPLETED,
         error_code=None,
         provenance_json=FlowAttemptProvenance(

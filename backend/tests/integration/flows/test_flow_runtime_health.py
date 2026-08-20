@@ -192,7 +192,7 @@ async def _create_webhook_delivery_attempt(
         step_id=flow.steps[0].id,
         step_order=1,
         attempt_no=1,
-        celery_task_id=f"runtime-health-webhook-{case}",
+        dispatch_task_id=f"runtime-health-webhook-{case}",
     )
     return run
 
@@ -421,7 +421,7 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             step_id=flow.steps[0].id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="runtime-health",
+            dispatch_task_id="runtime-health",
         )
 
         await session.execute(
@@ -452,7 +452,7 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             step_id=flow.steps[0].id,
             step_order=1,
             attempt_no=1,
-            celery_task_id="runtime-health-review",
+            dispatch_task_id="runtime-health-review",
         )
         await session.execute(
             sa.update(FlowRuns)

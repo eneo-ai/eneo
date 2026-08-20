@@ -15,6 +15,7 @@ from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from eneo.database.database import DatabaseSessionManager
 from eneo.object_content.content import (
     CapturedContent,
@@ -34,6 +35,7 @@ _POSTGRES_13_IMAGE = (
 )
 _PREVIOUS_REVISION = "202607221700"
 _SPLIT_REVISION = "202607231200"
+_CURRENT_HEAD = "202607261700"
 _LEGACY_PAYLOAD = b"legacy remote content"
 _LEGACY_PRODUCER_RECEIPT = "file:legacy-owner:original:0"
 
@@ -292,6 +294,8 @@ def test_populated_object_store_round_trip_and_inline_downgrade_fence(
     migration_database: tuple[str, Config],
 ) -> None:
     database_url, config = migration_database
+    script = ScriptDirectory.from_config(config)
+    assert script.get_heads() == [_CURRENT_HEAD]
     tenant_id, content_id, tombstoned_content_id = _insert_legacy_content(database_url)
 
     command.upgrade(config, _SPLIT_REVISION)

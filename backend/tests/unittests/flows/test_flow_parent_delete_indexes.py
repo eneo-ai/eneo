@@ -12,8 +12,8 @@ from eneo.database.tables.flow_tables import FlowRuns
 INDEX_NAME = "ix_flow_runs_job_id"
 TABLE_NAME = "flow_runs"
 INDEX_COLUMNS = ("job_id",)
-MIGRATION_REVISION = "202607232300_flow_run_job_index"
-PRIOR_REVISION = "202607230130_review_actor_delete"
+MIGRATION_REVISION = "202608201000"
+PRIOR_REVISION = "202608181000"
 
 
 def _index_by_name(index_name: str) -> Index:
@@ -43,16 +43,13 @@ def test_flow_run_job_index_migration_matches_metadata_contract() -> None:
         Path(__file__).parents[3]
         / "alembic"
         / "versions"
-        / "202607232300_flow_run_job_index.py"
+        / "202608201000_create_final_flow_schema.py"
     )
     migration = run_path(str(migration_path))
     source = migration_path.read_text()
 
     assert migration["revision"] == MIGRATION_REVISION
     assert migration["down_revision"] == PRIOR_REVISION
-    assert migration["_INDEX_NAME"] == INDEX_NAME
-    assert migration["_TABLE_NAME"] == TABLE_NAME
-    assert migration["_INDEX_COLUMNS"] == INDEX_COLUMNS
-    assert source.count("CREATE INDEX CONCURRENTLY IF NOT EXISTS") == 1
-    assert source.count("DROP INDEX CONCURRENTLY IF EXISTS") == 1
-    assert source.count("autocommit_block()") == 2
+    assert f'"{INDEX_NAME}"' in source
+    assert f'"{TABLE_NAME}"' in source
+    assert '["job_id"]' in source

@@ -477,7 +477,7 @@ erDiagram
 | `rerun_operation_id`       | uuid      | yes      | FK → `flow_run_rerun_operations.id` SET NULL |
 | `predecessor_attempt_id`   | uuid      | yes      | FK → `flow_step_attempts.id` SET NULL        |
 | `superseded_by_attempt_id` | uuid      | yes      | FK → `flow_step_attempts.id` SET NULL        |
-| `celery_task_id`           | varchar   | yes      |                                              |
+| `dispatch_task_id`           | varchar   | yes      |                                              |
 | `status`                   | varchar   |          |                                              |
 | `error_code`               | varchar   | yes      |                                              |
 | `error_message`            | varchar   | yes      |                                              |

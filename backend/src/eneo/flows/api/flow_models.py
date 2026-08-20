@@ -1933,7 +1933,7 @@ class FlowStepAttemptPublic(BaseModel):
     step_id: UUID
     step_order: int
     attempt_no: int
-    celery_task_id: str | None = None
+    dispatch_task_id: str | None = None
     status: FlowStepAttemptStatus
     error_code: NullablePublicTerminalErrorCode = Field(
         default=None,

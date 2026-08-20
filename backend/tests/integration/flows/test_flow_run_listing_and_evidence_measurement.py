@@ -319,7 +319,7 @@ async def _write_representative_evidence(
                 step_id=step_id,
                 step_order=step_order,
                 attempt_no=attempt_no,
-                celery_task_id=f"flow-evidence-{step_order}-{attempt_no}",
+                dispatch_task_id=f"flow-evidence-{step_order}-{attempt_no}",
                 predecessor_attempt_id=predecessor_attempt_id,
             )
             if attempt_no > 1:

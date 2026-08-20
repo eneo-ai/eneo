@@ -399,7 +399,7 @@ async def _mark_run_completed_with_artifact(
             step_id=UUID(step["id"]),
             step_order=int(step["step_order"]),
             attempt_no=1,
-            celery_task_id=f"consumer-artifact-{run['id']}",
+            dispatch_task_id=f"consumer-artifact-{run['id']}",
         )
         result = FlowStepResult(
             id=uuid4(),
@@ -508,7 +508,7 @@ async def _mark_run_completed_with_file_backed_text(
             step_id=step_id,
             step_order=int(step["step_order"]),
             attempt_no=1,
-            celery_task_id=f"consumer-text-history-{run['id']}",
+            dispatch_task_id=f"consumer-text-history-{run['id']}",
         )
         historical_result = step_result({"text": "historical complete text"})
         assert (
@@ -534,7 +534,7 @@ async def _mark_run_completed_with_file_backed_text(
             step_id=step_id,
             step_order=int(step["step_order"]),
             attempt_no=2,
-            celery_task_id=f"consumer-text-current-{run['id']}",
+            dispatch_task_id=f"consumer-text-current-{run['id']}",
         )
         terminal_payload = {
             "text": "current",

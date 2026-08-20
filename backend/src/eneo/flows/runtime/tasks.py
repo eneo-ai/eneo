@@ -354,7 +354,7 @@ async def _execute_flow_run_async_traced(
                 run_id=run_id,
                 flow_id=flow_id,
                 tenant_id=tenant_id,
-                celery_task_id=task_id,
+                dispatch_task_id=task_id,
                 retry_count=retry_count,
             )
             flow_span.set_result_from_mapping(result)

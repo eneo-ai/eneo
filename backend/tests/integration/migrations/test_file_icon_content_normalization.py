@@ -12,12 +12,14 @@ from uuid import uuid4
 import psycopg2
 import pytest
 import sqlalchemy as sa
-from psycopg2 import sql
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.icons_table import Icons
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -27,9 +29,6 @@ _POSTGRES_13_IMAGE = (
 )
 _PREVIOUS_REVISION = "202607240310"
 _NORMALIZATION_REVISION = "202607231700"
-_DEVELOP_PARENT_REVISION = "202607301200"
-_FLOW_PARENT_REVISION = "202607291800_attempt_admit_idx"
-_MERGE_REVISION = "202607311200"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -80,24 +79,6 @@ def _connect(database_url: str):
     return psycopg2.connect(database_url.replace("+psycopg2", ""))
 
 
-def _file_user_owner_column(cursor) -> str:
-    cursor.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'files'
-          AND column_name IN ('user_id', 'owner_user_id')
-        """
-    )
-    columns = {row[0] for row in cursor.fetchall()}
-    if "owner_user_id" in columns:
-        return "owner_user_id"
-    if "user_id" in columns:
-        return "user_id"
-    raise AssertionError("files has no supported user-owner column")
-
-
 def _seed_legacy_owners(database_url: str) -> dict[str, bytes | str]:
     ids = {
         "tenant": str(uuid4()),
@@ -142,11 +123,10 @@ def _seed_legacy_owners(database_url: str) -> dict[str, bytes | str]:
             ),
         )
         cursor.execute(
-            sql.SQL(
-                """
+            """
             INSERT INTO files (
                 id, name, text, blob, checksum, size, mimetype, file_type,
-                transcription, {user_owner_column}, tenant_id, parent_file_id
+                transcription, user_id, tenant_id, parent_file_id
             )
             VALUES
                 (%s, 'legacy.pdf', %s, %s, 'legacy-text', %s,
@@ -159,8 +139,7 @@ def _seed_legacy_owners(database_url: str) -> dict[str, bytes | str]:
                  'image/png', 'image', NULL, %s, %s, %s),
                 (%s, 'legacy.mp3', NULL, %s, 'legacy-audio', %s,
                  'audio/mpeg', 'audio', %s, %s, %s, NULL)
-            """
-            ).format(user_owner_column=sql.Identifier(_file_user_owner_column(cursor))),
+            """,
             (
                 ids["text"],
                 payloads["text"].decode(),
@@ -245,11 +224,10 @@ def _assert_byte_bounded_page_plan(
             isolation_level="AUTOCOMMIT"
         ) as connection:
             migration._stage_pending_keys(connection)
-            candidate_page = migration._candidate_page(
-                migration._file_user_owner_column(connection)
-            )
             explained = connection.execute(
-                sa.text("EXPLAIN (ANALYZE, FORMAT JSON) " + candidate_page.text),
+                sa.text(
+                    "EXPLAIN (ANALYZE, FORMAT JSON) " + migration._CANDIDATE_PAGE.text
+                ),
                 {
                     "after_sequence": 0,
                     "batch_size": batch_size,
@@ -274,6 +252,8 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database_url, config = migration_database
+    script = ScriptDirectory.from_config(config)
+    assert script.get_heads() == [_NORMALIZATION_REVISION]
     seeded = _seed_legacy_owners(database_url)
     _assert_byte_bounded_page_plan(
         database_url,
@@ -370,20 +350,16 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
     try:
         with writer.cursor() as cursor:
             cursor.execute(
-                sql.SQL(
-                    """
+                """
                 INSERT INTO files (
                     id, name, text, blob, checksum, size, mimetype, file_type,
-                    transcription, {user_owner_column}, tenant_id, parent_file_id
+                    transcription, user_id, tenant_id, parent_file_id
                 )
                 VALUES (
                     %s, 'racing.mp3', NULL, %s, 'racing-checksum', %s,
                     'audio/mpeg', 'audio', NULL, %s, %s, NULL
                 )
-                """
-                ).format(
-                    user_owner_column=sql.Identifier(_file_user_owner_column(cursor))
-                ),
+                """,
                 (
                     racing_file_id,
                     racing_payload,
@@ -538,56 +514,22 @@ def test_copy_verify_flip_preserves_legacy_bytes_and_typed_variants(
             """
         )
         assert cursor.fetchall() == []
+        cursor.execute(
+            """
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name IN ('files', 'icons')
+            """
+        )
+        columns: dict[str, set[str]] = {"files": set(), "icons": set()}
+        for table_name, column_name in cursor.fetchall():
+            columns[table_name].add(column_name)
+        assert columns["files"] == set(Files.__table__.columns.keys())
+        assert columns["icons"] == set(Icons.__table__.columns.keys())
+
     with pytest.raises(
         RuntimeError,
         match="restore the pre-flip backup or recover forward",
     ):
         command.downgrade(config, _PREVIOUS_REVISION)
-
-
-def test_merge_head_upgrades_from_both_parent_histories() -> None:
-    postgres = PostgresContainer(
-        image=_POSTGRES_13_IMAGE,
-        username="develop_flow_merge",
-        password="develop_flow_merge_password",
-        dbname="develop_flow_merge",
-    )
-    with postgres:
-        database_url = postgres.get_connection_url()
-        config = _alembic_config(database_url)
-
-        for parent_revision in (
-            _DEVELOP_PARENT_REVISION,
-            _FLOW_PARENT_REVISION,
-        ):
-            connection = _connect(database_url)
-            connection.autocommit = True
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute("DROP SCHEMA IF EXISTS public CASCADE")
-                    cursor.execute("CREATE SCHEMA public")
-                    cursor.execute("GRANT ALL ON SCHEMA public TO PUBLIC")
-            finally:
-                connection.close()
-
-            command.upgrade(config, parent_revision)
-            seeded = (
-                _seed_legacy_owners(database_url)
-                if parent_revision == _FLOW_PARENT_REVISION
-                else None
-            )
-
-            command.upgrade(config, _MERGE_REVISION)
-
-            with _connect(database_url) as connection, connection.cursor() as cursor:
-                cursor.execute("SELECT version_num FROM alembic_version")
-                assert cursor.fetchall() == [(_MERGE_REVISION,)]
-                if seeded is not None:
-                    cursor.execute(
-                        """
-                        SELECT DISTINCT created_by_user_id::text
-                        FROM object_contents
-                        WHERE idempotency_key LIKE 'normalize:file:%'
-                        """
-                    )
-                    assert cursor.fetchall() == [(seeded["user"],)]
