@@ -206,7 +206,6 @@ VLLM_API_KEY=
 
 # Super API keys (system administration)
 ENEO_SUPER_API_KEY=
-ENEO_SUPER_DUPER_API_KEY=
 
 # ----------------------------------------------------------------------------
 # Upload Limits (startup requirement on released images, migration seed later)

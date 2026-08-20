@@ -126,6 +126,7 @@ def make_broker(module=None, config=None, user=None, redis=None):
     user_service = AsyncMock()
     api_key_repo = AsyncMock()
     api_key_repo.get.return_value = make_api_key()
+    api_key_repo.get_for_update.return_value = make_api_key()
     auth_service = AuthService()
 
     broker = ModuleAuthBroker(
@@ -713,13 +714,13 @@ class TestModuleServiceKeyRegistration:
             tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
         )
 
-        broker.api_key_repo.get.assert_awaited_once_with(
+        broker.api_key_repo.get_for_update.assert_awaited_once_with(
             key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID
         )
 
     async def test_rejects_unknown_or_wrong_tenant_key(self):
         broker = make_broker()
-        broker.api_key_repo.get.return_value = None
+        broker.api_key_repo.get_for_update.return_value = None
 
         with pytest.raises(BadRequestException, match="target tenant"):
             await broker.validate_client_config_service_key(
@@ -736,7 +737,7 @@ class TestModuleServiceKeyRegistration:
     )
     async def test_rejects_key_that_can_never_exchange(self, key_overrides, message):
         broker = make_broker()
-        broker.api_key_repo.get.return_value = make_api_key(**key_overrides)
+        broker.api_key_repo.get_for_update.return_value = make_api_key(**key_overrides)
 
         with pytest.raises(BadRequestException, match=message):
             await broker.validate_client_config_service_key(
@@ -760,7 +761,7 @@ class TestModuleServiceKeyRegistration:
         """Binding a dead key would persist a config under which every ticket
         exchange fails at API-key authentication."""
         broker = make_broker()
-        broker.api_key_repo.get.return_value = make_api_key(**key_overrides)
+        broker.api_key_repo.get_for_update.return_value = make_api_key(**key_overrides)
 
         with pytest.raises(BadRequestException, match=message):
             await broker.validate_client_config_service_key(
@@ -769,7 +770,7 @@ class TestModuleServiceKeyRegistration:
 
     async def test_accepts_key_expiring_in_the_future(self):
         broker = make_broker()
-        broker.api_key_repo.get.return_value = make_api_key(
+        broker.api_key_repo.get_for_update.return_value = make_api_key(
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
 

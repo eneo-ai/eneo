@@ -271,7 +271,7 @@ flowchart TD
 - `module_key` (the module's unique `name`) is the public machine identity
   used in every API call. It is intentionally immutable — a new key is a new
   module identity.
-- The **client config** lives on the tenant-module assignment. Only the bound
+- The **client config** lives on the internal organization-module assignment. Only the bound
   `service_key_id` (or its direct rotation successor) may exchange that
   tenant's tickets. Binding validation rejects keys that could never work:
   the key must be service-owned, of type `sk_`, and hold write or admin
@@ -279,7 +279,7 @@ flowchart TD
   least privilege comes from scoping the key narrowly (typically to a
   dedicated space), while the right to exchange tickets comes from the exact
   binding.
-- **Disabling a module for a tenant deletes its client config.** Re-enabling
+- **Uninstalling a module deletes its client config.** Reinstalling
   later requires re-binding the redirect URIs and service key.
 - Key rotation is downtime-free at depth one: the rotated successor is
   accepted until the operator updates the binding. Rotating twice without
@@ -290,23 +290,25 @@ flowchart TD
 The short version of the [operator
 guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MODULES.md):
 
-1. **Register the module key** (once, global): `POST /api/v1/modules/` with the
-   stable `module_key` as `name`. The key must be a URL-safe slug (letters
-   and digits plus `.`, `_` or `-`) — it becomes a URL path segment in the
-   session and refresh routes.
-2. **Enable it for the tenant**: `PUT /api/v1/modules/{tenant_id}/{module_id}/`
-   (idempotent, preserves other modules).
-3. **Mint a dedicated `sk_` service key** as a tenant admin: service-owned,
+1. **Mint a dedicated `sk_` service key** in Administration → API keys:
+   service-owned,
    `write` permission, narrowest workable scope, an expiry date and a rate
    limit. The secret goes into the module's server environment only.
-4. **Bind callback and key**:
-   `PATCH /api/v1/modules/{tenant_id}/{module_id}/client-config/` with the
-   exact `redirect_uris` and the key's `service_key_id`.
-5. **Deploy the module** with `MODULE_KEY`, the Eneo URL, the service key and
+2. **Install it in Administration → Modules** with the stable module key, the
+   exact callback URLs and the service key. The key must be a URL-safe slug
+   (letters and digits plus `.`, `_` or `-`). One atomic, idempotent save
+   registers, enables and completely configures the module for the signed-in
+   administrator's organization; no tenant ID or environment key is used.
+3. **Deploy the module** with `MODULE_KEY`, the Eneo URL, the service key and
    its own session secret; then run the login smoke test end to end.
 
+Automation uses the equivalent session-authenticated contract:
+`GET /api/v1/admin/modules/`,
+`PUT /api/v1/admin/modules/{module_key}/` and
+`DELETE /api/v1/admin/modules/{module_key}/`.
+
 Every step of the lifecycle is audited: ticket issuance, ticket exchange,
-client-config changes and tenant assignment changes all produce audit events
+configuration changes and organization assignment changes all produce audit events
 (see [Audit Logging](/docs/audit-logging)).
 
 ## Known limitations

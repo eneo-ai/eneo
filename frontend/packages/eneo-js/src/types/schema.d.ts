@@ -2245,7 +2245,7 @@ export interface paths {
     };
     /**
      * Get super API key status
-     * @description Return whether super and super-duper API keys are configured in environment settings.
+     * @description Return whether the sysadmin API key is configured in environment settings.
      */
     get: operations["get_super_api_key_status_api_v1_admin_super_api_key_status_get"];
     put?: never;
@@ -7597,7 +7597,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/": {
+  "/api/v1/admin/modules/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7605,63 +7605,19 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get Modules
-     * @description List all globally registered modules.
+     * List Module Installations
+     * @description List modules installed for the authenticated user's organization. The tenant identity is derived from the session and is never accepted from the client.
      */
-    get: operations["get_modules_api_v1_modules__get"];
+    get: operations["list_module_installations_api_v1_admin_modules__get"];
     put?: never;
-    /**
-     * Add Module
-     * @description Register a new global module. The module key is immutable, case-sensitive and restricted to a URL-safe slug: letters and digits plus '.', '_' or '-', starting with a letter or digit.
-     */
-    post: operations["add_module_api_v1_modules__post"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/{tenant_id}/{module_id}/client-config/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    /**
-     * Update Module Client Config
-     * @description Set a tenant module's auth-broker client config: the exact-match redirect URI allowlist and the sk_ service key allowed to exchange that tenant's login tickets.
-     */
-    patch: operations["update_module_client_config_api_v1_modules__tenant_id___module_id__client_config__patch"];
-    trace?: never;
-  };
-  "/api/v1/modules/{tenant_id}/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Add Module To Tenant
-     * @description Replace the tenant's complete module set. Prefer the targeted PUT and DELETE routes when enabling or disabling one module.
-     */
-    post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/modules/{tenant_id}/{module_id}/": {
+  "/api/v1/admin/modules/{module_key}/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7670,16 +7626,16 @@ export interface paths {
     };
     get?: never;
     /**
-     * Enable Module For Tenant
-     * @description Enable one module without changing the tenant's other modules.
+     * Install Module
+     * @description Idempotently register, enable and fully configure one module for the authenticated user's organization. The service key must already exist in that organization and be an active, service-owned sk_ key with write or admin permission.
      */
-    put: operations["enable_module_for_tenant_api_v1_modules__tenant_id___module_id___put"];
+    put: operations["install_module_api_v1_admin_modules__module_key___put"];
     post?: never;
     /**
-     * Disable Module For Tenant
-     * @description Disable one module and delete its tenant-specific callback and service-key binding.
+     * Uninstall Module
+     * @description Idempotently uninstall one module from the authenticated user's organization. Removing the assignment also deletes its callback and service-key binding.
      */
-    delete: operations["disable_module_for_tenant_api_v1_modules__tenant_id___module_id___delete"];
+    delete: operations["uninstall_module_api_v1_admin_modules__module_key___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -14441,25 +14397,6 @@ export interface components {
       /** Provider Ids */
       provider_ids: string[];
     };
-    /**
-     * ModuleClientConfig
-     * @description Auth-broker client config for a module: which callback URLs are allowed
-     *     and which sk_ key alone may exchange the module's login tickets.
-     */
-    ModuleClientConfig: {
-      /** Redirect Uris */
-      redirect_uris?: string[] | null;
-      /** Service Key Id */
-      service_key_id?: string | null;
-    };
-    /**
-     * ModuleCreate
-     * @description Registration contract for a new stable module key.
-     */
-    ModuleCreate: {
-      /** Name */
-      name: components["schemas"]["Modules"] | string;
-    };
     /** ModuleInDB */
     ModuleInDB: {
       /** Name */
@@ -14475,29 +14412,34 @@ export interface components {
       id: string;
     };
     /**
-     * ModuleResourceSessionResponse
-     * @description Public identity returned after both module credentials pass.
+     * ModuleInstallation
+     * @description One module installed for the authenticated user's organization.
+     *
+     *     The tenant id is intentionally absent. It is derived from the session and
+     *     remains an internal data-partition key rather than an admin-UI concept.
+     *     Older assignments may be incomplete, so reads retain nullable config while
+     *     the new installation command only accepts a complete configuration.
      */
-    ModuleResourceSessionResponse: {
+    ModuleInstallation: {
+      /**
+       * Module Id
+       * Format: uuid
+       */
+      module_id: string;
       /** Module Key */
       module_key: string;
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
-      user: components["schemas"]["ModuleTokenUser"];
+      /** Redirect Uris */
+      redirect_uris?: string[];
+      /** Service Key Id */
+      service_key_id?: string | null;
+      /** Configured */
+      readonly configured: boolean;
     };
     /**
-     * ModuleTenantAssignment
-     * @description Narrow result for enabling or disabling one tenant module.
+     * ModuleInstallationChange
+     * @description Tenant-free result for an idempotent installation state change.
      */
-    ModuleTenantAssignment: {
-      /**
-       * Tenant Id
-       * Format: uuid
-       */
-      tenant_id: string;
+    ModuleInstallationChange: {
       /**
        * Module Id
        * Format: uuid
@@ -14510,22 +14452,32 @@ export interface components {
       /** Changed */
       changed: boolean;
     };
-    /** ModuleTenantClientConfig */
-    ModuleTenantClientConfig: {
+    /**
+     * ModuleInstallationConfig
+     * @description Complete, tenant-implicit configuration accepted by the admin UI.
+     */
+    ModuleInstallationConfig: {
       /** Redirect Uris */
-      redirect_uris?: string[] | null;
-      /** Service Key Id */
-      service_key_id?: string | null;
+      redirect_uris: string[];
+      /**
+       * Service Key Id
+       * Format: uuid
+       */
+      service_key_id: string;
+    };
+    /**
+     * ModuleResourceSessionResponse
+     * @description Public identity returned after both module credentials pass.
+     */
+    ModuleResourceSessionResponse: {
+      /** Module Key */
+      module_key: string;
       /**
        * Tenant Id
        * Format: uuid
        */
       tenant_id: string;
-      /**
-       * Module Id
-       * Format: uuid
-       */
-      module_id: string;
+      user: components["schemas"]["ModuleTokenUser"];
     };
     /** ModuleTicketRequest */
     ModuleTicketRequest: {
@@ -15330,13 +15282,13 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[ModuleInDB] */
-    PaginatedResponse_ModuleInDB_: {
+    /** PaginatedResponse[ModuleInstallation] */
+    PaginatedResponse_ModuleInstallation_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["ModuleInDB"][];
+      items: components["schemas"]["ModuleInstallation"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -16001,6 +15953,7 @@ export interface components {
       | "shared_spaces"
       | "api_keys"
       | "storage"
+      | "modules"
       | "assistant_debug";
     /** PermissionPublic */
     PermissionPublic: {
@@ -18375,8 +18328,6 @@ export interface components {
     SuperApiKeyStatus: {
       /** Super Api Key Configured */
       super_api_key_configured: boolean;
-      /** Super Duper Api Key Configured */
-      super_duper_api_key_configured: boolean;
     };
     /** SupportedModelKwargs */
     SupportedModelKwargs: {
@@ -30036,8 +29987,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "super_api_key_configured": true,
-           *       "super_duper_api_key_configured": false
+           *       "super_api_key_configured": true
            *     }
            */
           "application/json": components["schemas"]["SuperApiKeyStatus"];
@@ -47086,7 +47036,7 @@ export interface operations {
       };
     };
   };
-  get_modules_api_v1_modules__get: {
+  list_module_installations_api_v1_admin_modules__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -47101,7 +47051,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_ModuleInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_ModuleInstallation_"];
         };
       };
       /** @description Unauthorized */
@@ -47113,32 +47063,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-    };
-  };
-  add_module_api_v1_modules__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ModuleCreate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ModuleInDB"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -47146,39 +47072,20 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Conflict */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
     };
   };
-  update_module_client_config_api_v1_modules__tenant_id___module_id__client_config__patch: {
+  install_module_api_v1_admin_modules__module_key___put: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        tenant_id: string;
-        module_id: string;
+        module_key: string;
       };
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ModuleClientConfig"];
+        "application/json": components["schemas"]["ModuleInstallationConfig"];
       };
     };
     responses: {
@@ -47188,7 +47095,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ModuleTenantClientConfig"];
+          "application/json": components["schemas"]["ModuleInstallation"];
         };
       };
       /** @description Bad Request */
@@ -47209,8 +47116,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -47229,66 +47136,12 @@ export interface operations {
       };
     };
   };
-  add_module_to_tenant_api_v1_modules__tenant_id___post: {
+  uninstall_module_api_v1_admin_modules__module_key___delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        tenant_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ModelId"][];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["TenantInDB"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  enable_module_for_tenant_api_v1_modules__tenant_id___module_id___put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenant_id: string;
-        module_id: string;
+        module_key: string;
       };
       cookie?: never;
     };
@@ -47300,7 +47153,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ModuleTenantAssignment"];
+          "application/json": components["schemas"]["ModuleInstallationChange"];
         };
       };
       /** @description Unauthorized */
@@ -47312,49 +47165,8 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  disable_module_for_tenant_api_v1_modules__tenant_id___module_id___delete: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        tenant_id: string;
-        module_id: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ModuleTenantAssignment"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

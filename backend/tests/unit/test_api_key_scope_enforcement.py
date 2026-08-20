@@ -743,6 +743,11 @@ class TestScopeRouteGuardCoverage:
         for route in runtime_router_routes():
             prefix = getattr(route, "path", "")
             if prefix.startswith("/admin"):
+                if prefix.startswith("/admin/modules"):
+                    assert route_has_dependency_named(route, "require_session_auth"), (
+                        f"Session-only admin route {prefix} missing require_session_auth"
+                    )
+                    continue
                 has_scope_dep = route_has_dependency_named(route, "_scope_check_dep")
                 admin_routes_found.append((prefix, has_scope_dep))
                 assert has_scope_dep, (
