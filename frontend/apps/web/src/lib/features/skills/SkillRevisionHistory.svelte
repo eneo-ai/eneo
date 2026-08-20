@@ -383,7 +383,7 @@
         <Dialog.Description>{m.skills_library_compare_revision_description()}</Dialog.Description>
       {/if}
     </Dialog.Header>
-    <div class="min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
+    <div class="min-h-0 [scrollbar-gutter:stable] overflow-y-auto">
       {#if restoreError}
         <div class="flex flex-col gap-3 px-6 pt-6">
           <Alert.Root variant="destructive">

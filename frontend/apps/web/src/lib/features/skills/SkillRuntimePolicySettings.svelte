@@ -264,7 +264,7 @@
       </p>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (bounded table must be keyboard-scrollable) -->
       <div
-        class="border-border focus-visible:ring-ring mt-4 max-h-72 overflow-auto border-y outline-none focus-visible:ring-2 [scrollbar-gutter:stable]"
+        class="border-border focus-visible:ring-ring mt-4 max-h-72 [scrollbar-gutter:stable] overflow-auto border-y outline-none focus-visible:ring-2"
         role="region"
         aria-label={m.skills_runtime_models_region({
           count: String(modelProjections.models.length)
