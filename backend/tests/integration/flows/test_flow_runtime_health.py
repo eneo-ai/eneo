@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -25,7 +26,6 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from eneo.flows.runtime.celery_app import FlowCeleryConsumerPresence
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthFlag,
     FlowRuntimeHealthPolicy,
@@ -34,6 +34,7 @@ from eneo.flows.runtime.flow_runtime_health import (
     classify_flow_runtime_health,
     load_flow_runtime_health_snapshot,
 )
+from eneo.tasks.contracts import TaskWorkerReadiness
 
 
 def _policy() -> FlowRuntimeHealthPolicy:
@@ -52,9 +53,8 @@ def _live_probe(*, duration_ms: int) -> FlowRuntimeProbe:
     return FlowRuntimeProbe(
         db_query_ok=True,
         db_query_duration_ms=duration_ms,
-        execution_queue_consumer_ok=True,
-        maintenance_queue_consumer_ok=True,
-        beat_freshness_ttl_seconds=60,
+        execution_worker_ready=True,
+        maintenance_worker_ready=True,
     )
 
 
@@ -205,15 +205,13 @@ async def test_flow_runtime_health_endpoint_requires_super_key_and_returns_probe
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "eneo.server.main.inspect_flow_celery_consumers",
-        lambda **_kwargs: FlowCeleryConsumerPresence(
-            execution=True,
-            maintenance=True,
+        "eneo.server.main.load_task_worker_readiness",
+        AsyncMock(
+            return_value=TaskWorkerReadiness(
+                execution_ready=True,
+                maintenance_ready=True,
+            )
         ),
-    )
-    monkeypatch.setattr(
-        "eneo.server.main.read_flow_beat_freshness_ttl_seconds",
-        lambda **_kwargs: 60,
     )
 
     unauthorized = await client.get("/api/healthz/flows")
@@ -225,10 +223,9 @@ async def test_flow_runtime_health_endpoint_requires_super_key_and_returns_probe
     assert unauthorized.status_code == 401
     assert response.status_code == 200
     payload = response.json()
-    assert payload["probe"]["scope"] == "db_and_celery_runtime"
-    assert payload["probe"]["execution_queue_consumer_ok"] is True
-    assert payload["probe"]["maintenance_queue_consumer_ok"] is True
-    assert payload["probe"]["beat_freshness_ttl_seconds"] == 60
+    assert payload["probe"]["scope"] == "db_and_platform_task_runtime"
+    assert payload["probe"]["execution_worker_ready"] is True
+    assert payload["probe"]["maintenance_worker_ready"] is True
     assert "tenant_id" not in payload
     assert "flow_id" not in payload
     assert "run_id" not in payload

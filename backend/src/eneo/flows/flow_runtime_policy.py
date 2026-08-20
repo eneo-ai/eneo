@@ -46,7 +46,7 @@ def flow_runtime_step_timeout_hard_ceiling_seconds(
     settings = defaults or get_settings()
     configured_ceiling = int(settings.flow_runtime_step_timeout_hard_ceiling_seconds)
     task_ceiling = (
-        int(settings.flow_task_timeout_seconds) - STEP_TIMEOUT_TASK_BUFFER_SECONDS
+        int(settings.task_execution_timeout_seconds) - STEP_TIMEOUT_TASK_BUFFER_SECONDS
     )
     return max(1, min(configured_ceiling, task_ceiling))
 

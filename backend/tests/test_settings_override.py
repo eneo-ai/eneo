@@ -249,28 +249,27 @@ def test_flow_mapped_step_default_env_parses_platform_opt_out(
     assert settings.flow_mapped_step_max_provider_calls_default == expected
 
 
-def test_flow_celery_visibility_timeout_must_exceed_task_hard_timeout(
+def test_platform_task_timeout_must_be_positive(
     monkeypatch: pytest.MonkeyPatch,
 ):
     _set_minimal_settings_env(monkeypatch)
-    monkeypatch.setenv("FLOW_TASK_TIMEOUT_SECONDS", "3600")
-    monkeypatch.setenv("CELERY_VISIBILITY_TIMEOUT_SECONDS", "3660")
+    monkeypatch.setenv("TASK_EXECUTION_TIMEOUT_SECONDS", "0")
 
     with pytest.raises(SystemExit):
         Settings(_env_file=None)
 
 
-def test_flow_celery_visibility_timeout_accepts_default_margin(
+def test_platform_task_runtime_settings_are_environment_configurable(
     monkeypatch: pytest.MonkeyPatch,
 ):
     _set_minimal_settings_env(monkeypatch)
-    monkeypatch.setenv("FLOW_TASK_TIMEOUT_SECONDS", "3600")
-    monkeypatch.setenv("CELERY_VISIBILITY_TIMEOUT_SECONDS", "7200")
+    monkeypatch.setenv("TASK_EXECUTION_TIMEOUT_SECONDS", "3600")
+    monkeypatch.setenv("TASK_MAINTENANCE_TIMEOUT_SECONDS", "120")
 
     settings = Settings(_env_file=None)
 
-    assert settings.flow_task_timeout_seconds == 3600
-    assert settings.celery_visibility_timeout_seconds == 7200
+    assert settings.task_execution_timeout_seconds == 3600
+    assert settings.task_maintenance_timeout_seconds == 120
 
 
 @pytest.fixture(autouse=True)

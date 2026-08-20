@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 from pydantic import Field, computed_field, field_validator, model_validator
@@ -245,8 +245,6 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
     redis_db: int = 0
-    redis_db_celery_broker: int = 2
-    redis_db_celery_result: int = 3
     # Redis connection resilience defaults
     # Safe defaults avoid aggressive timeouts during transient network blips
     redis_conn_timeout: int = 5
@@ -303,17 +301,14 @@ class Settings(BaseSettings):
     crawl_feeder_interval_seconds: int = 10  # How often feeder checks for work
     crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
     flow_max_concurrent_runs_per_tenant: int = 4
-    flow_celery_queue: str = "flows.execute"
-    flow_celery_maintenance_queue: str = "flows.maintenance"
-    # Deployment declares the ROLE; the two queue-name settings above are the
-    # single owner of the names, so renaming a queue cannot leave a worker
-    # subscribed to the old one. There is deliberately NO queue-name override:
-    # this file is shared by every role, so an override would apply to all of
-    # them and could strand the maintenance queue with no consumer.
-    flow_celery_worker_role: Literal["execute", "maintenance"] = "execute"
-    flow_celery_worker_concurrency: int = 4
-    flow_task_timeout_seconds: int = 3600
-    celery_visibility_timeout_seconds: int = 7200
+    # Platform task runtime capacity classes. Each queue is consumed by its own
+    # ARQ worker process with an independent max_jobs budget.
+    task_execution_queue: str = "tasks:execution"
+    task_maintenance_queue: str = "tasks:maintenance"
+    task_execution_max_jobs: int = 4
+    task_maintenance_max_jobs: int = 2
+    task_execution_timeout_seconds: int = 3600
+    task_maintenance_timeout_seconds: int = 120
     flow_max_inline_text_bytes: int = 1_048_576
     flow_llm_request_timeout_seconds: int = 600
     flow_runtime_step_timeout_hard_ceiling_seconds: int = 3600
@@ -714,32 +709,25 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        if self.flow_task_timeout_seconds <= 0:
+        if self.task_execution_timeout_seconds <= 0:
             logging.error(
-                "FLOW_TASK_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
-                self.flow_task_timeout_seconds,
+                "TASK_EXECUTION_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.task_execution_timeout_seconds,
             )
             sys.exit(1)
 
-        if self.celery_visibility_timeout_seconds <= 0:
+        if self.task_maintenance_timeout_seconds <= 0:
             logging.error(
-                "CELERY_VISIBILITY_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
-                self.celery_visibility_timeout_seconds,
+                "TASK_MAINTENANCE_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.task_maintenance_timeout_seconds,
             )
             sys.exit(1)
 
-        from eneo.flows.domain.flow_run_recovery_policy import (
-            flow_task_hard_timeout_seconds,
-        )
-
-        flow_task_hard_timeout = flow_task_hard_timeout_seconds(
-            task_timeout_seconds=self.flow_task_timeout_seconds
-        )
-        if self.celery_visibility_timeout_seconds <= flow_task_hard_timeout:
+        if self.task_execution_max_jobs <= 0 or self.task_maintenance_max_jobs <= 0:
             logging.error(
-                "CELERY_VISIBILITY_TIMEOUT_SECONDS (%s) must be greater than the Flow Celery hard time limit (%s).",
-                self.celery_visibility_timeout_seconds,
-                flow_task_hard_timeout,
+                "Task worker concurrency must be greater than zero. Execution=%s maintenance=%s",
+                self.task_execution_max_jobs,
+                self.task_maintenance_max_jobs,
             )
             sys.exit(1)
 

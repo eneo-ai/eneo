@@ -17,20 +17,6 @@ if [[ "${RUN_AS_WORKER,,}" == "true" ]]; then
     exec arq src.eneo.worker.arq.WorkerSettings
 fi
 
-# Check if running as Celery worker (flows runtime)
-if [[ "${RUN_AS_CELERY_WORKER,,}" == "true" ]]; then
-    echo "Starting Celery flow worker"
-    echo "Launching..."
-    exec flow-worker
-fi
-
-# Check if running as Celery beat (flows reconciliation scheduler)
-if [[ "${RUN_AS_CELERY_BEAT,,}" == "true" ]]; then
-    echo "Starting Celery beat for flow reconciliation scheduling"
-    echo "Launching..."
-    exec flow-beat
-fi
-
 # Skip Alembic migrations in OpenAPI-only mode
 if [[ "${OPENAPI_ONLY_MODE,,}" != "true" ]]; then
     alembic upgrade head

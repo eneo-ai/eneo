@@ -30,7 +30,7 @@
 #   proxy_tier (external) - Traefik, frontend, backend, worker. Internet-facing
 #                           traffic and outbound access (LLM APIs, OIDC, crawls).
 #   data_net   (internal) - PostgreSQL and Redis. No internet egress, and only
-#                           backend, worker, db-init, and the Flow Celery
+#                           backend, workers, and db-init
 #                           services (execution worker, maintenance worker,
 #                           beat scheduler) can reach them. Frontend,
 #                           Traefik and future module containers cannot.
@@ -186,31 +186,23 @@ services:
     depends_on:
       - backend
 
-  celery-worker-flows:
-    # Flow execution worker (Celery). Runs alongside ARQ worker during migration.
+  task-execution-worker:
+    # Platform execution-capacity worker.
     image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
-    container_name: eneo_celery_worker_flows
+    container_name: eneo_task_execution_worker
     restart: unless-stopped
-    environment:
-      - RUN_AS_CELERY_WORKER=true
-      # Both worker services declare their role HERE, per service. A
-      # per-service value always overrides env_file, so a role set in the
-      # shared env_backend.env can never flip a worker onto the wrong
-      # queue and strand the other one.
-      - FLOW_CELERY_WORKER_ROLE=execute
+    command: ["task-execution-worker"]
     env_file:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp
     networks:
-      # data_net carries Redis (broker) and PostgreSQL; proxy_tier carries
-      # outbound model calls. Without data_net this worker cannot consume
-      # its queue at all.
+      # data_net carries Redis and PostgreSQL; proxy_tier carries outbound calls.
       - proxy_tier
       - data_net
     healthcheck:
-      test: ["CMD", "flow-worker-health"]
+      test: ["CMD", "task-execution-worker", "--check"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -218,74 +210,40 @@ services:
     depends_on:
       - backend
 
-  celery-worker-flows-maintenance:
-    # Flow maintenance worker for reconciliation and outbox delivery.
+  task-maintenance-worker:
+    # Platform maintenance-capacity worker and scheduler.
     image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
-    container_name: eneo_celery_worker_flows_maintenance
+    container_name: eneo_task_maintenance_worker
     restart: unless-stopped
-    environment:
-      - RUN_AS_CELERY_WORKER=true
-      # Declare the ROLE, never the queue name: FLOW_CELERY_MAINTENANCE_QUEUE
-      # in env_backend.env is the single owner of that name, so renaming the
-      # queue cannot leave this worker subscribed to the old one while beat
-      # schedules onto the new one.
-      - FLOW_CELERY_WORKER_ROLE=maintenance
+    command: ["task-maintenance-worker"]
     env_file:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp
     networks:
-      # data_net for broker/DB; proxy_tier for outbound webhook delivery.
+      # data_net for Redis/DB; proxy_tier for outbound webhook delivery.
       - proxy_tier
       - data_net
     healthcheck:
-      test: ["CMD", "flow-worker-health"]
+      test: ["CMD", "task-maintenance-worker", "--check"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
     depends_on:
       - backend
-
-  celery-beat-flows:
-    # Flow reconciliation scheduler (Celery beat). Required for stale-run reconciliation.
-    image: ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}
-    container_name: eneo_celery_beat_flows
-    restart: unless-stopped
-    environment:
-      - RUN_AS_CELERY_BEAT=true
-    env_file:
-      - env_backend.env
-    volumes:
-      - eneo_backend_data:/app/data
-      - eneo_temp_files:/tmp
-    networks:
-      # Beat only enqueues due schedules over the broker; it opens no
-      # database pool of its own (see the ceiling note on the db
-      # service) and makes no outbound model calls, so data_net alone
-      # is correct.
-      - data_net
-    healthcheck:
-      test: ["CMD", "flow-beat-health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 90s
-    depends_on:
-      - backend
-      - redis
 
   db:
     image: pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}
     container_name: eneo_db
     restart: unless-stopped
     # CONNECTION CEILING. PostgreSQL defaults to 100, which this stack
-    # exceeds before any tuning. Each backend, ARQ and Celery WORKER
+    # exceeds before any tuning. Each backend and ARQ worker
     # process owns an independent pool (beat opens none; db-init uses
     # one transient connection), so the deployment's maximum demand is
     # the SUM across roles — and every role reads env_backend.env, so a
-    # tuning profile raises the celery pools too.
+    # tuning profile raises worker pools too.
     #
     # THE AGGREGATE BUDGET TABLE LIVES IN env_backend.template and is
     # the single owner of this arithmetic. In short: the shipped

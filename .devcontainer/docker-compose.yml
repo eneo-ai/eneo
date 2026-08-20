@@ -92,15 +92,14 @@ services:
     volumes:
       - redis_data:/data
 
-  celery-worker-flows:
+  task-execution-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    command: sleep infinity
+    command: bash -lc "cd /workspace/backend && .venv/bin/task-execution-worker"
     networks:
       - eneo
     environment:
-      - RUN_AS_CELERY_WORKER=true
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
     volumes:
@@ -108,15 +107,14 @@ services:
       - backend_venv:/workspace/backend/.venv
       - /var/run/docker.sock:/var/run/docker.sock
 
-  celery-beat-flows:
+  task-maintenance-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    command: bash -lc "cd /workspace/backend && ./run.sh"
+    command: bash -lc "cd /workspace/backend && .venv/bin/task-maintenance-worker"
     networks:
       - eneo
     environment:
-      - RUN_AS_CELERY_BEAT=true
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
     volumes:

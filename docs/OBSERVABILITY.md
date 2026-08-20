@@ -10,7 +10,7 @@ Eneo emits OpenTelemetry-shaped structured logs and distributed traces. The appl
 ## 1. What You Get
 
 - **Structured logs** as NDJSON on STDOUT, one JSON object per line, with stable top-level fields (`timestamp`, `severity_text`, `severity_number`, `body`, `trace_id`, `span_id`, `trace_flags`, `resource`, `attributes`).
-- **Distributed traces** with a real `TracerProvider`. A root span is created for every HTTP request (FastAPI auto-instrumentation), and child spans for SQLAlchemy queries, Redis operations, and outbound HTTP via `httpx` and `aiohttp`. ARQ background jobs and Flow Celery runs create their own root traces.
+- **Distributed traces** with a real `TracerProvider`. A root span is created for every HTTP request (FastAPI auto-instrumentation), and child spans for SQLAlchemy queries, Redis operations, and outbound HTTP via `httpx` and `aiohttp`. Platform ARQ jobs and Flow runs create their own root traces.
 - **W3C TraceContext propagation**. The `traceparent` header is honored on inbound requests and propagated on outbound backend-to-backend calls.
 - **Support header to the frontend**: `X-Trace-Id` is set on every HTTP response, including 4xx and 5xx, and exposed via CORS. `X-Correlation-ID` is emitted in parallel as a legacy alias during the migration period.
 - **Built-in redaction** of authorization headers, cookies, and sensitive query parameters (tokens, secrets, OAuth `code`/`state`) from both stdout logs and span attributes.
@@ -46,7 +46,7 @@ Worker (ARQ)                                                                  �
   are patched. Each job creates its own root trace (v1 decision).             │
                   │                                                           │
                   ▼                                                           │
-Flow Worker (Celery)                                                          │
+Platform Task Worker (ARQ)                                                    │
   init_observability() runs before worker child DB/aiohttp resources          │
   start. Flow run and step spans carry low-cardinality Flow attributes.        │
                   │                                                           │
@@ -253,13 +253,13 @@ Every log call inside an active span receives the span's `trace_id` and `span_id
 
 ARQ has no built-in metadata envelope separate from job kwargs, so injecting `traceparent` into job arguments would mix trace context with domain parameters. v1 decision: each ARQ job creates its own root trace. Consequence: there is no end-to-end waterfall from an HTTP request to the ARQ job it enqueues. All log entries within a job correlate via the job's own `trace_id`. Request-to-job propagation is planned for a future version once a clean metadata mechanism is available.
 
-### Flow Celery runs (v1)
+### Flow platform task runs (v1)
 
-Flow execution uses Celery while the rest of the system still uses ARQ. Flow Celery worker child processes initialize observability before DB and aiohttp resources start, so SQLAlchemy, Redis, `httpx`, and `aiohttp` instrumentation is active inside the worker.
+Flow execution and maintenance use the platform ARQ runtime. Platform worker processes initialize observability before DB and aiohttp resources start, so SQLAlchemy, Redis, `httpx`, and `aiohttp` instrumentation is active inside the worker.
 
-Flow runs and steps create custom root spans named `flow.run.execute` and `flow.step.execute`. These spans use low-cardinality attributes such as `flow.run.id`, `flow.id`, `flow.tenant.id`, `flow.celery.task_id`, and `flow.run.result.status`. After the run row is loaded, the persisted Flow run `trace_id` is emitted as `flow.run.trace_id` on spans and worker log attributes. This value is the Flow API/evidence/export correlation token; it is not the OpenTelemetry protocol `trace_id`.
+Flow runs and steps create custom root spans named `flow.run.execute` and `flow.step.execute`. These spans use low-cardinality attributes such as `flow.run.id`, `flow.id`, `flow.tenant.id`, `flow.task.id`, and `flow.run.result.status`. After the run row is loaded, the persisted Flow run `trace_id` is emitted as `flow.run.trace_id` on spans and worker log attributes. This value is the Flow API/evidence/export correlation token; it is not the OpenTelemetry protocol `trace_id`.
 
-Flow Celery does not use OpenTelemetry Celery auto-instrumentation in v1. Celery message headers do not carry `traceparent`, so Flow worker spans are independent worker-root traces. Correlate Flow worker logs and spans by `flow.run.id` and `flow.run.trace_id`.
+ARQ job arguments do not carry `traceparent`, so Flow worker spans are independent worker-root traces. Correlate Flow worker logs and spans by `flow.run.id` and `flow.run.trace_id`.
 
 ---
 
@@ -415,7 +415,7 @@ The following are explicitly **not** part of v1:
 - **No frontend OTel SDK.** The browser does not generate, export, or propagate spans.
 - **No WebSocket or SSE tracing.** SSE requests can produce extremely long-lived spans without special handling and need a dedicated solution.
 - **No request-to-ARQ-job trace propagation.** See §6.
-- **No request-to-Flow-Celery trace propagation.** See §6.
+- **No request-to-Flow-task trace propagation.** See §6.
 - **No metrics export** (Prometheus, OTLP metrics).
 - **No Sentry initialization.** The Sentry SDK remains a declared dependency but is not initialized.
 - **No custom spans outside the Flow runtime.** Flow run and step execution use custom spans with low-cardinality Flow attributes.

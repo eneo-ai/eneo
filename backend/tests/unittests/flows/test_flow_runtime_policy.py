@@ -20,7 +20,7 @@ def _settings(
 ) -> SimpleNamespace:
     return SimpleNamespace(
         flow_llm_request_timeout_seconds=llm_timeout,
-        flow_task_timeout_seconds=task_timeout,
+        task_execution_timeout_seconds=task_timeout,
         flow_runtime_step_timeout_hard_ceiling_seconds=hard_ceiling,
     )
 

@@ -3,18 +3,9 @@ from __future__ import annotations
 from importlib import import_module
 
 _EXPORTS = {
-    "CeleryFlowExecutionBackend": (
-        "eneo.flows.runtime.celery_execution_backend",
-        "CeleryFlowExecutionBackend",
-    ),
-    "FLOW_EXECUTE_TASK_NAME": (
-        "eneo.flows.runtime.celery_execution_backend",
-        "FLOW_EXECUTE_TASK_NAME",
-    ),
-    "celery_app": ("eneo.flows.runtime.celery_app", "celery_app"),
-    "create_flow_celery_app": (
-        "eneo.flows.runtime.celery_app",
-        "create_flow_celery_app",
+    "PlatformFlowExecutionBackend": (
+        "eneo.flows.runtime.platform_execution_backend",
+        "PlatformFlowExecutionBackend",
     ),
     "rag_retrieval": ("eneo.flows.runtime.rag_retrieval", None),
     "step_execution_runtime": ("eneo.flows.runtime.step_execution_runtime", None),

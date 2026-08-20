@@ -117,7 +117,7 @@ services:
       retries: 40
       start_period: 60s
 
-  celery-worker-flows:
+  task-execution-worker:
     image: eneo_devcontainer-eneo
     working_dir: /workspace/backend
     depends_on:
@@ -127,31 +127,23 @@ services:
       - ./backend/.env
     environment:
       <<: *e2e-backend-environment
-      RUN_AS_CELERY_WORKER: "true"
     command:
       - bash
       - -lc
       - |
         set -e
         export PATH="/workspace/backend/.venv/bin:$$PATH"
-        exec ./run.sh
+        exec task-execution-worker
     volumes: *e2e-backend-volumes
     networks: [e2e]
     healthcheck:
-      # `FLOW_CELERY_QUEUE` defaults to `flows.execute`; this checks queue
-      # consumption, not just that a worker process exists.
-      test:
-        - CMD-SHELL
-        - >-
-          PATH=/workspace/backend/.venv/bin:$$PATH celery -A
-          eneo.flows.runtime.celery_app:celery_app inspect active_queues
-          --timeout=5 | grep -Fq "$${FLOW_CELERY_QUEUE:-flows.execute}"
+      test: ["CMD", "task-execution-worker", "--check"]
       interval: 5s
       timeout: 10s
       retries: 30
       start_period: 120s
 
-  celery-beat-flows:
+  task-maintenance-worker:
     image: eneo_devcontainer-eneo
     working_dir: /workspace/backend
     depends_on:
@@ -161,14 +153,13 @@ services:
       - ./backend/.env
     environment:
       <<: *e2e-backend-environment
-      RUN_AS_CELERY_BEAT: "true"
     command:
       - bash
       - -lc
       - |
         set -e
         export PATH="/workspace/backend/.venv/bin:$$PATH"
-        exec ./run.sh
+        exec task-maintenance-worker
     volumes: *e2e-backend-volumes
     networks: [e2e]
 

@@ -74,15 +74,15 @@ assert "eneo.flows.api.flow_router" not in sys.modules
     assert result.returncode == 0, result.stderr
 
 
-def test_eneo_flows_runtime_package_does_not_import_celery_as_side_effect() -> None:
+def test_eneo_flows_runtime_package_does_not_import_task_transport_as_side_effect() -> (
+    None
+):
     sys.modules.pop("eneo.flows.runtime", None)
-    sys.modules.pop("eneo.flows.runtime.celery_app", None)
-    sys.modules.pop("eneo.flows.runtime.celery_execution_backend", None)
+    sys.modules.pop("arq", None)
 
     importlib.import_module("eneo.flows.runtime")
 
-    assert "eneo.flows.runtime.celery_app" not in sys.modules
-    assert "eneo.flows.runtime.celery_execution_backend" not in sys.modules
+    assert "arq" not in sys.modules
 
 
 def test_flow_api_router_modules_export_only_router() -> None:

@@ -366,7 +366,7 @@ WI-MKT-02.
   decisions. Concise output never implies that fewer sources may be read.
 - **Retained surface:** Deterministic sequential mapping, definition-owned file
   and item ceilings, exact source references, and whole-step retry semantics.
-  The Celery soft/hard task timeout remains the one aggregate mapped-step
+  The platform execution task timeout remains the one aggregate mapped-step
   deadline; no per-source or per-item deadline owner is added.
 - **Removed or unavailable surface:** Implicit `contained_records`, selective
   retrieval inferred from words such as “overview,” resumable fan-out, silent

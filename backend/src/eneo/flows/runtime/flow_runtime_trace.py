@@ -27,8 +27,8 @@ FLOW_RUN_SPAN_ATTRIBUTE_KEYS: Final[frozenset[str]] = frozenset(
         "flow.run.trace_id",
         "flow.id",
         "flow.tenant.id",
-        "flow.celery.task_id",
-        "flow.celery.retry_count",
+        "flow.task.id",
+        "flow.task.retry_count",
         "flow.run.result.status",
         "flow.run.result.reason",
     }
@@ -153,14 +153,14 @@ def trace_flow_run(
     run_id: UUID,
     flow_id: UUID,
     tenant_id: UUID,
-    celery_task_id: str | None,
+    task_id: str | None,
     retry_count: int,
 ) -> Generator[FlowRunSpanContext, None, None]:
     attributes = _flow_run_span_attributes(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
-        celery_task_id=celery_task_id,
+        task_id=task_id,
         retry_count=retry_count,
     )
     with _tracer.start_as_current_span(
@@ -224,17 +224,17 @@ def _flow_run_span_attributes(
     run_id: UUID,
     flow_id: UUID,
     tenant_id: UUID,
-    celery_task_id: str | None,
+    task_id: str | None,
     retry_count: int,
 ) -> dict[str, AttributeValue]:
     attributes: dict[str, AttributeValue] = {
         "flow.run.id": str(run_id),
         "flow.id": str(flow_id),
         "flow.tenant.id": str(tenant_id),
-        "flow.celery.retry_count": retry_count,
+        "flow.task.retry_count": retry_count,
     }
-    if celery_task_id is not None:
-        attributes["flow.celery.task_id"] = celery_task_id
+    if task_id is not None:
+        attributes["flow.task.id"] = task_id
     _warn_for_unexpected_keys(attributes, FLOW_RUN_SPAN_ATTRIBUTE_KEYS)
     return attributes
 

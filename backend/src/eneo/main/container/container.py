@@ -130,10 +130,9 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
-from eneo.flows.runtime.celery_app import celery_app as flow_celery_app
-from eneo.flows.runtime.celery_execution_backend import CeleryFlowExecutionBackend
 from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
@@ -289,6 +288,7 @@ from eneo.integration.presentation.assemblers.tenant_integration_assembler impor
 from eneo.integration.presentation.assemblers.user_integration_assembler import (
     UserIntegrationAssembler,
 )
+from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
 from eneo.jobs.task_service import TaskService
@@ -375,6 +375,8 @@ from eneo.storage.application.storage_services import StorageInfoService
 from eneo.storage.domain.storage_factory import StorageInfoFactory
 from eneo.storage.domain.storage_repo import StorageInfoRepository
 from eneo.storage.presentation.storage_assembler import StorageInfoAssembler
+from eneo.tasks.arq_adapter import ArqTaskEnqueuer
+from eneo.tasks.routing import task_queue_routing
 from eneo.templates.api.templates_assembler import TemplateAssembler
 from eneo.templates.app_template.api.app_template_assembler import (
     AppTemplateAssembler,
@@ -474,10 +476,6 @@ def _build_encryption_service() -> EncryptionService:
         },
     )
     return EncryptionService(key)
-
-
-def _flow_celery_queue_name() -> str:
-    return get_settings().flow_celery_queue
 
 
 def _flow_http_request_timeout_seconds() -> float:
@@ -885,11 +883,14 @@ class Container(containers.DeclarativeContainer):
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         flow_run_terminalizer=flow_run_terminalizer,
     )
-    flow_celery_app = providers.Object(flow_celery_app)
+    platform_task_enqueuer = providers.Singleton(
+        ArqTaskEnqueuer,
+        job_manager=providers.Object(job_manager),
+        routing=providers.Callable(task_queue_routing),
+    )
     flow_execution_backend = providers.Factory(
-        CeleryFlowExecutionBackend,
-        celery_app=flow_celery_app,
-        queue_name=providers.Callable(_flow_celery_queue_name),
+        PlatformFlowExecutionBackend,
+        task_enqueuer=platform_task_enqueuer,
     )
 
     storage_repo = providers.Factory(

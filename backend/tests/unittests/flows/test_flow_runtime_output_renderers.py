@@ -11,9 +11,7 @@ FLOW_RUNTIME_ROOT = (
 DOCUMENT_RENDERING_DEPENDENCIES = frozenset(
     {"docx", "docxtpl", "weasyprint", "markdown_it"}
 )
-ALLOWED_DOCUMENT_RENDERING_DEPENDENCY_PATHS = frozenset(
-    {"celery_preflight.py", "docx_template_runtime.py"}
-)
+ALLOWED_DOCUMENT_RENDERING_DEPENDENCY_PATHS = frozenset({"docx_template_runtime.py"})
 ALLOWED_DOCUMENT_RENDERING_DEPENDENCY_PREFIXES = ("document_rendering/",)
 
 
@@ -127,8 +125,7 @@ def test_document_rendering_dependencies_stay_in_rendering_leaves():
     assert unexpected == set(), (
         "Low-level DOCX/PDF/Markdown rendering dependencies belong in "
         "runtime/document_rendering or runtime/docx_template_runtime. "
-        "Worker preflight may stay in celery_preflight.py. If this is a "
-        "legitimate exception, add it to "
+        "If this is a legitimate exception, add it to "
         "ALLOWED_DOCUMENT_RENDERING_DEPENDENCY_PATHS or "
         "ALLOWED_DOCUMENT_RENDERING_DEPENDENCY_PREFIXES with a narrow reason.\n"
         + _format_uses(unexpected)

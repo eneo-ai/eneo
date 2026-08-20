@@ -573,7 +573,7 @@ class FlowRunExecutor:
         retry_count: int,
     ) -> dict[str, Any]:
         logger.info(
-            "flow_executor.start run_id=%s flow_id=%s tenant_id=%s celery_retry_count=%d",
+            "flow_executor.start run_id=%s flow_id=%s tenant_id=%s task_retry_count=%d",
             run_id,
             flow_id,
             tenant_id,

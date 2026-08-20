@@ -1062,11 +1062,11 @@ def test_flow_transcribe_cache_guard_reports_missing_kwargs_and_true_values():
     assert "Files.transcription cache" in message
 
 
-def test_flow_celery_task_provider_wiring_is_not_erased_to_any():
+def test_flow_task_provider_wiring_is_not_erased_to_any():
     offenders = _container_provider_any_erasure_offenders(FLOW_TASKS_PATH)
 
     assert offenders == [], (
-        "Flow Celery task wiring must preserve typed Container provider "
+        "Flow task wiring must preserve typed Container provider "
         "contracts instead of erasing them to Any: " + ", ".join(offenders)
     )
 

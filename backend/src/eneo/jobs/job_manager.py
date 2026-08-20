@@ -49,6 +49,23 @@ class JobManager:
         assert self._redis is not None
         await self._redis.enqueue_job(task)
 
+    async def enqueue_named(
+        self,
+        *,
+        task_name: str,
+        payload: object,
+        job_id: str,
+        queue_name: str,
+    ) -> Job | None:
+        if self._redis is None:
+            raise NotReadyException("Job manager is not initialized!")
+        return await self._redis.enqueue_job(
+            task_name,
+            payload,
+            _job_id=job_id,
+            _queue_name=queue_name,
+        )
+
     async def get_job_status(self, job_id: UUID):
         if self._redis is None:
             raise NotReadyException("Job manager is not initialized!")

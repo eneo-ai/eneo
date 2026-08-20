@@ -53,9 +53,8 @@ class FlowRuntimeHealthStatus(str, Enum):
 
 
 class FlowRuntimeHealthFlag(str, Enum):
-    EXECUTION_QUEUE_CONSUMER_UNAVAILABLE = "EXECUTION_QUEUE_CONSUMER_UNAVAILABLE"
-    MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE = "MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE"
-    BEAT_SCHEDULER_STALE = "BEAT_SCHEDULER_STALE"
+    EXECUTION_WORKER_UNAVAILABLE = "EXECUTION_WORKER_UNAVAILABLE"
+    MAINTENANCE_WORKER_UNAVAILABLE = "MAINTENANCE_WORKER_UNAVAILABLE"
     STALE_QUEUED_RUNS = "STALE_QUEUED_RUNS"
     ACCEPTED_DISPATCH_EXHAUSTED = "ACCEPTED_DISPATCH_EXHAUSTED"
     STALE_RUNNING_RUNS = "STALE_RUNNING_RUNS"
@@ -119,33 +118,20 @@ class FlowRuntimeHealthSnapshot:
 
 
 class FlowRuntimeProbe(BaseModel):
-    scope: str = "db_and_celery_runtime"
+    scope: str = "db_and_platform_task_runtime"
     db_query_ok: bool
     db_query_duration_ms: int | None = None
     db_query_failure: FlowRuntimeProbeFailure | None = None
-    celery_inspection_timeout_seconds: float = Field(
+    task_readiness_timeout_seconds: float = Field(
         default=1.0,
         gt=0,
-        description="Bounded Celery and Beat inspection timeout used by the adapter.",
+        description="Bounded platform worker readiness timeout.",
     )
-    execution_queue_consumer_ok: bool = Field(
-        description=(
-            "Whether a responding Celery worker reports consuming the configured "
-            "Flow execution queue. False includes unavailable broker/control replies."
-        )
+    execution_worker_ready: bool = Field(
+        description="Whether the platform execution worker health key is fresh."
     )
-    maintenance_queue_consumer_ok: bool = Field(
-        description=(
-            "Whether a responding Celery worker reports consuming the configured "
-            "Flow maintenance queue. False includes unavailable broker/control replies."
-        )
-    )
-    beat_freshness_ttl_seconds: int | None = Field(
-        gt=0,
-        description=(
-            "Remaining lifetime of the latest successful scheduled Flow task publish. "
-            "Null means the receipt is missing, expired, non-expiring, or unreadable."
-        ),
+    maintenance_worker_ready: bool = Field(
+        description="Whether the platform maintenance worker health key is fresh."
     )
 
 
@@ -493,9 +479,8 @@ def flow_runtime_health_probe_failure_response(
     policy: FlowRuntimeHealthPolicy,
     query_duration_ms: int | None,
     failure: FlowRuntimeProbeFailure,
-    execution_queue_consumer_ok: bool,
-    maintenance_queue_consumer_ok: bool,
-    beat_freshness_ttl_seconds: int | None,
+    execution_worker_ready: bool,
+    maintenance_worker_ready: bool,
 ) -> FlowRuntimeHealthResponse:
     return classify_flow_runtime_health(
         snapshot=FlowRuntimeHealthSnapshot(),
@@ -505,9 +490,8 @@ def flow_runtime_health_probe_failure_response(
             db_query_ok=False,
             db_query_duration_ms=query_duration_ms,
             db_query_failure=failure,
-            execution_queue_consumer_ok=execution_queue_consumer_ok,
-            maintenance_queue_consumer_ok=maintenance_queue_consumer_ok,
-            beat_freshness_ttl_seconds=beat_freshness_ttl_seconds,
+            execution_worker_ready=execution_worker_ready,
+            maintenance_worker_ready=maintenance_worker_ready,
         ),
     )
 
@@ -838,12 +822,10 @@ def _flow_runtime_health_flags(
     policy: FlowRuntimeHealthPolicy,
 ) -> list[FlowRuntimeHealthFlag]:
     flags: list[FlowRuntimeHealthFlag] = []
-    if not probe.execution_queue_consumer_ok:
-        flags.append(FlowRuntimeHealthFlag.EXECUTION_QUEUE_CONSUMER_UNAVAILABLE)
-    if not probe.maintenance_queue_consumer_ok:
-        flags.append(FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE)
-    if probe.beat_freshness_ttl_seconds is None:
-        flags.append(FlowRuntimeHealthFlag.BEAT_SCHEDULER_STALE)
+    if not probe.execution_worker_ready:
+        flags.append(FlowRuntimeHealthFlag.EXECUTION_WORKER_UNAVAILABLE)
+    if not probe.maintenance_worker_ready:
+        flags.append(FlowRuntimeHealthFlag.MAINTENANCE_WORKER_UNAVAILABLE)
     if snapshot.stale_queued_count > 0:
         flags.append(FlowRuntimeHealthFlag.STALE_QUEUED_RUNS)
     if snapshot.accepted_dispatch_exhausted_count > 0:
@@ -888,9 +870,8 @@ def _flow_runtime_health_status(
     status_flags: list[FlowRuntimeHealthFlag],
 ) -> FlowRuntimeHealthStatus:
     unhealthy_flags = {
-        FlowRuntimeHealthFlag.EXECUTION_QUEUE_CONSUMER_UNAVAILABLE,
-        FlowRuntimeHealthFlag.MAINTENANCE_QUEUE_CONSUMER_UNAVAILABLE,
-        FlowRuntimeHealthFlag.BEAT_SCHEDULER_STALE,
+        FlowRuntimeHealthFlag.EXECUTION_WORKER_UNAVAILABLE,
+        FlowRuntimeHealthFlag.MAINTENANCE_WORKER_UNAVAILABLE,
         FlowRuntimeHealthFlag.ACCEPTED_DISPATCH_EXHAUSTED,
         FlowRuntimeHealthFlag.STALE_RUNNING_RECONCILER_LAG,
         FlowRuntimeHealthFlag.REVIEW_EXPIRY_RECONCILER_LAG,
@@ -910,9 +891,9 @@ def _flow_runtime_health_status(
 
 def _flow_runtime_status_reason(*, status: FlowRuntimeHealthStatus) -> str:
     return {
-        FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB, worker-consumer, and scheduler signals are healthy.",
+        FlowRuntimeHealthStatus.HEALTHY: "Flow runtime DB and platform worker signals are healthy.",
         FlowRuntimeHealthStatus.DEGRADED: "Flow runtime has recoverable stale run, review checkpoint, or outbox signals.",
-        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has a missing queue consumer, stale scheduler, accepted dispatch exhaustion, reconciliation lag, terminal-run integrity issue, or outbox dead letter.",
+        FlowRuntimeHealthStatus.UNHEALTHY: "Flow runtime has a missing platform worker, accepted dispatch exhaustion, reconciliation lag, terminal-run integrity issue, or outbox dead letter.",
         FlowRuntimeHealthStatus.UNKNOWN: "Flow runtime DB signals could not be read.",
     }[status]
 

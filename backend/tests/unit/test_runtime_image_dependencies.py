@@ -38,17 +38,15 @@ BASE_STACK_SERVICE_IMAGES = {
     "frontend": "ghcr.io/eneo-ai/eneo-frontend@sha256:${ENEO_FRONTEND_IMAGE_DIGEST:?Set ENEO_FRONTEND_IMAGE_DIGEST in .env}",
     "backend": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
     "worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
-    "celery-worker-flows": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
-    "celery-worker-flows-maintenance": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
-    "celery-beat-flows": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "task-execution-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
+    "task-maintenance-worker": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
     "db": "pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}",
     "redis": "redis@sha256:${REDIS_IMAGE_DIGEST:?Set REDIS_IMAGE_DIGEST in .env}",
     "db-init": "ghcr.io/eneo-ai/eneo-backend@sha256:${ENEO_BACKEND_IMAGE_DIGEST:?Set ENEO_BACKEND_IMAGE_DIGEST in .env}",
 }
-FLOW_CELERY_HEALTH_COMMANDS = {
-    "celery-worker-flows": "flow-worker-health",
-    "celery-worker-flows-maintenance": "flow-worker-health",
-    "celery-beat-flows": "flow-beat-health",
+TASK_WORKER_HEALTH_COMMANDS = {
+    "task-execution-worker": "task-execution-worker",
+    "task-maintenance-worker": "task-maintenance-worker",
 }
 
 
@@ -122,11 +120,11 @@ def test_deployment_env_template_owns_base_stack_image_digest_inputs() -> None:
     assert digest_inputs == list(REQUIRED_IMAGE_DIGESTS)
 
 
-def test_flow_celery_roles_have_native_healthchecks() -> None:
+def test_platform_task_roles_have_native_healthchecks() -> None:
     compose = DEPLOYMENT_COMPOSE.read_text()
     project_scripts = tomllib.loads(BACKEND_PROJECT.read_text())["project"]["scripts"]
 
-    for service, command in FLOW_CELERY_HEALTH_COMMANDS.items():
+    for service, command in TASK_WORKER_HEALTH_COMMANDS.items():
         service_body = _compose_service_body(compose, service)
-        assert f'test: ["CMD", "{command}"]' in service_body
+        assert f'test: ["CMD", "{command}", "--check"]' in service_body
         assert command in project_scripts

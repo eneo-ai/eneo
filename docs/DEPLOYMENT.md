@@ -257,8 +257,8 @@ Eneo uses several Docker volumes for persistent data storage:
 ### Production Requirement: Immutable Image Digests
 
 The provided Compose file requires immutable digests for Traefik, frontend,
-backend, pgvector, and Redis. One backend digest supplies the API, ARQ worker,
-both Celery workers, Celery beat, and database initialization roles.
+backend, pgvector, and Redis. One backend digest supplies the API, general ARQ
+worker, platform execution and maintenance workers, and database initialization roles.
 
 **Why pin digests?**
 - **Predictable deployments** - Know exactly which artifacts are running

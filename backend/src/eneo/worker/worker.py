@@ -175,11 +175,12 @@ class Worker:
             Includes functions and cron jobs from a sub-worker.
     """
 
-    def __init__(self):
+    def __init__(self, *, enable_feeder: bool = True):
         super().__init__()
         settings = get_settings()
         self.functions: list[Callable[..., Any] | Function] = []
         self.cron_jobs: list[Any] = []
+        self._enable_feeder = enable_feeder
         self.redis_settings = build_arq_redis_settings(settings)
         self.on_startup = self.startup
         self.on_shutdown = self.shutdown
@@ -283,7 +284,7 @@ class Worker:
         # Start crawl feeder as background task if enabled
         # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
         # Uses leader election to ensure only ONE feeder runs across all workers
-        if settings.crawl_feeder_enabled:
+        if self._enable_feeder and settings.crawl_feeder_enabled:
             from eneo.worker.crawl_feeder import CrawlFeeder
 
             try:
@@ -330,7 +331,13 @@ class Worker:
 
         await lifespan.shutdown()
 
-    def function(self, with_user: bool = True, *, keep_result: int | None = None):
+    def function(
+        self,
+        with_user: bool = True,
+        *,
+        keep_result: int | None = None,
+        name: str | None = None,
+    ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: object) -> Any:
@@ -351,8 +358,8 @@ class Worker:
 
             traced = _traced_job("job", wrapper)
             self.functions.append(
-                arq_func(traced, keep_result=keep_result)
-                if keep_result is not None
+                arq_func(traced, name=name, keep_result=keep_result)
+                if keep_result is not None or name is not None
                 else traced
             )
             return wrapper
@@ -360,7 +367,11 @@ class Worker:
         return decorator
 
     def long_running_function(
-        self, with_user: bool = True, *, keep_result: int | None = None
+        self,
+        with_user: bool = True,
+        *,
+        keep_result: int | None = None,
+        name: str | None = None,
     ):
         """Decorator for long-running tasks (crawls, batch jobs).
 
@@ -457,8 +468,8 @@ class Worker:
 
             traced = _traced_job("job", wrapper)
             self.functions.append(
-                arq_func(traced, keep_result=keep_result)
-                if keep_result is not None
+                arq_func(traced, name=name, keep_result=keep_result)
+                if keep_result is not None or name is not None
                 else traced
             )
             return wrapper

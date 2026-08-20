@@ -1,6 +1,6 @@
 """Stale-run timing is shared by redispatch, reconciliation, and health checks.
 
-The running thresholds are coupled to the Celery beat schedule for
+The running thresholds are coupled to the platform maintenance schedule for
 `flows.reconcile_running`; changing the schedule must change the health policy
 at the same time.
 """

@@ -33,7 +33,6 @@ dependencies = [
     "wrapt>=1.16.0,<2",
     "python-multipart>=0.0.27,<1",
     "arq>=0.26,<1",  # v0.26+ required for allow_abort_jobs, lifecycle hooks
-    "celery[redis]>=5.4,<6",
     "soundfile>=0.12.1,<0.13",
     "audioread>=3.0.1,<4",
     "bcrypt>=4.1.2,<5",
@@ -75,10 +74,8 @@ dependencies = [
 [project.scripts]
 start = "eneo.server.main:start"
 worker = "eneo.worker.cli:start"
-flow-worker = "eneo.flows.runtime.cli:worker"
-flow-beat = "eneo.flows.runtime.cli:beat"
-flow-worker-health = "eneo.flows.runtime.cli:worker_health"
-flow-beat-health = "eneo.flows.runtime.cli:beat_health"
+task-execution-worker = "eneo.worker.platform_tasks_cli:execution_worker"
+task-maintenance-worker = "eneo.worker.platform_tasks_cli:maintenance_worker"
 
 [dependency-groups]
 dev = [

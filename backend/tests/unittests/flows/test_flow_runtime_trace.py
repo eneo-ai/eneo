@@ -40,7 +40,7 @@ def test_flow_run_span_records_allowed_attributes_and_result(captured_flow_spans
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
-        celery_task_id="task-1",
+        task_id="task-1",
         retry_count=2,
     ) as span_context:
         span_context.set_run_trace_id(run_trace_id)
@@ -56,8 +56,8 @@ def test_flow_run_span_records_allowed_attributes_and_result(captured_flow_spans
     assert attributes["flow.id"] == str(flow_id)
     assert attributes["flow.tenant.id"] == str(tenant_id)
     assert attributes["flow.run.trace_id"] == str(run_trace_id)
-    assert attributes["flow.celery.task_id"] == "task-1"
-    assert attributes["flow.celery.retry_count"] == 2
+    assert attributes["flow.task.id"] == "task-1"
+    assert attributes["flow.task.retry_count"] == 2
     assert attributes["flow.run.result.status"] == "skipped"
     assert attributes["flow.run.result.reason"] == "run_terminal"
     assert not any(
@@ -72,13 +72,13 @@ def test_flow_run_span_omits_unset_optional_attributes(captured_flow_spans):
         run_id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
-        celery_task_id=None,
+        task_id=None,
         retry_count=0,
     ) as span_context:
         span_context.set_result_from_mapping({"status": "running"})
 
     attributes = captured_flow_spans.get_finished_spans()[0].attributes
-    assert "flow.celery.task_id" not in attributes
+    assert "flow.task.id" not in attributes
     assert "flow.run.trace_id" not in attributes
     assert attributes["flow.run.result.status"] == "running"
 
@@ -88,7 +88,7 @@ def test_flow_run_span_records_actor_resolution_failure_token(captured_flow_span
         run_id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
-        celery_task_id="task-actor",
+        task_id="task-actor",
         retry_count=0,
     ) as span_context:
         span_context.set_result_from_mapping(
@@ -112,7 +112,7 @@ def test_flow_run_span_records_typed_provider_failure_reason(
         run_id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
-        celery_task_id="task-provider",
+        task_id="task-provider",
         retry_count=0,
     ) as span_context:
         span_context.set_result_from_mapping({"status": "failed", "error": reason})
@@ -130,7 +130,7 @@ def test_flow_run_span_preserves_explicit_reason_when_exception_raises(
             run_id=uuid4(),
             flow_id=uuid4(),
             tenant_id=uuid4(),
-            celery_task_id="task-tenant",
+            task_id="task-tenant",
             retry_count=0,
         ) as span_context:
             span_context.set_result(status="failed", reason="tenant_not_found")
@@ -146,7 +146,7 @@ def test_flow_run_span_records_step_claim_skip_token(captured_flow_spans):
         run_id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
-        celery_task_id="task-step",
+        task_id="task-step",
         retry_count=0,
     ) as span_context:
         span_context.set_result_from_mapping(
@@ -165,7 +165,7 @@ def test_flow_run_span_falls_back_for_freeform_error(captured_flow_spans, caplog
         run_id=uuid4(),
         flow_id=uuid4(),
         tenant_id=uuid4(),
-        celery_task_id="task-2",
+        task_id="task-2",
         retry_count=0,
     ) as span_context:
         span_context.set_result_from_mapping({"status": "failed", "error": raw_error})
@@ -182,7 +182,7 @@ def test_flow_run_span_marks_unhandled_exception(captured_flow_spans):
             run_id=uuid4(),
             flow_id=uuid4(),
             tenant_id=uuid4(),
-            celery_task_id="task-3",
+            task_id="task-3",
             retry_count=0,
         ):
             raise RuntimeError("boom")

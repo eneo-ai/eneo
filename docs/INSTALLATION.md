@@ -92,21 +92,20 @@ cd backend
 uv run worker
 ```
 
-**Terminal 4 - Flow worker (Celery):**
+**Terminal 4 - Platform execution worker:**
 ```bash
 cd backend
-uv run flow-worker
+uv run task-execution-worker
 ```
 
-**Terminal 5 - Flow scheduler (Celery beat):**
+**Terminal 5 - Platform maintenance worker and scheduler:**
 ```bash
 cd backend
-uv run flow-beat
+uv run task-maintenance-worker
 ```
 
-Use the `flow-worker` and `flow-beat` entry points instead of raw `uv run celery`
-commands. They point Celery at the registered Flow app and queue used by the
-runtime.
+The platform workers use separate execution and maintenance capacity queues so
+long Flow runs cannot starve recovery, expiry, audit, or webhook work.
 
 ## Verify Installation
 

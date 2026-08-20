@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
-import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, TypeVar, assert_never
+from typing import assert_never
 from uuid import UUID
 
-from celery.exceptions import (  # pyright: ignore[reportMissingTypeStubs]
-    SoftTimeLimitExceeded,
-)
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,7 +48,6 @@ from eneo.flows.flow_runtime_policy import resolve_flow_runtime_policy
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
-from eneo.flows.runtime.celery_app import celery_app
 from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from eneo.flows.runtime.flow_run_actor import (
     FlowRunActor,
@@ -72,37 +66,6 @@ from eneo.users.user_repo import UsersRepository
 
 logger = get_logger(__name__)
 
-_SECONDARY_TERMINALIZATION_TIMEOUT_SECONDS = 10
-_FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS = 10
-_FLOW_TASK_LOOP: asyncio.AbstractEventLoop | None = None
-_FLOW_TASK_LOOP_THREAD: threading.Thread | None = None
-_FLOW_TASK_LOOP_LOCK = threading.Lock()
-_FlowTaskResult = TypeVar("_FlowTaskResult")
-
-
-def _start_event_loop(loop: asyncio.AbstractEventLoop) -> None:
-    asyncio.set_event_loop(loop)
-    loop.run_forever()
-
-
-def get_flow_task_loop() -> asyncio.AbstractEventLoop:
-    global _FLOW_TASK_LOOP  # pyright: ignore[reportConstantRedefinition]
-    global _FLOW_TASK_LOOP_THREAD  # pyright: ignore[reportConstantRedefinition]
-
-    with _FLOW_TASK_LOOP_LOCK:
-        if _FLOW_TASK_LOOP is None or _FLOW_TASK_LOOP.is_closed():
-            loop = asyncio.new_event_loop()
-            thread = threading.Thread(
-                target=_start_event_loop,
-                args=(loop,),
-                daemon=True,
-                name="flow-celery-async-loop",
-            )
-            thread.start()
-            _FLOW_TASK_LOOP = loop  # pyright: ignore[reportConstantRedefinition]
-            _FLOW_TASK_LOOP_THREAD = thread  # pyright: ignore[reportConstantRedefinition]
-        return _FLOW_TASK_LOOP
-
 
 def enable_autobegin_for_flow_task_session(session: AsyncSession) -> None:
     """Flow runtime uses commit-heavy repos; enable autobegin for this task session."""
@@ -116,14 +79,14 @@ def _flow_run_logging_context(
     flow_id: UUID,
     tenant_id: UUID,
     run_trace_id: UUID,
-    celery_task_id: str | None,
+    task_id: str | None,
 ) -> Generator[None]:
     context_values = {
         "flow.run.id": str(run_id),
         "flow.run.trace_id": str(run_trace_id),
         "flow.id": str(flow_id),
         "flow.tenant.id": str(tenant_id),
-        "flow.celery.task_id": celery_task_id,
+        "flow.task.id": task_id,
     }
     set_request_context(**context_values)
     try:
@@ -214,14 +177,14 @@ async def _execute_flow_run_async(
     principal_type: PrincipalType,
     principal_user_id: UUID | None,
     principal_service_id: UUID | None,
-    celery_task_id: str | None,
+    task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
     with trace_flow_run(
         run_id=run_id,
         flow_id=flow_id,
         tenant_id=tenant_id,
-        celery_task_id=celery_task_id,
+        task_id=task_id,
         retry_count=retry_count,
     ) as flow_span:
         return await _execute_flow_run_async_traced(
@@ -232,7 +195,7 @@ async def _execute_flow_run_async(
             principal_type=principal_type,
             principal_user_id=principal_user_id,
             principal_service_id=principal_service_id,
-            celery_task_id=celery_task_id,
+            task_id=task_id,
             retry_count=retry_count,
             flow_span=flow_span,
         )
@@ -247,7 +210,7 @@ async def _execute_flow_run_async_traced(
     principal_type: PrincipalType,
     principal_user_id: UUID | None,
     principal_service_id: UUID | None,
-    celery_task_id: str | None,
+    task_id: str | None,
     retry_count: int,
     flow_span: FlowRunSpanContext,
 ) -> dict[str, str]:
@@ -276,7 +239,7 @@ async def _execute_flow_run_async_traced(
             flow_id=flow_id,
             tenant_id=tenant_id,
             run_trace_id=run.trace_id,
-            celery_task_id=celery_task_id,
+            task_id=task_id,
         ):
             can_run = await flow_run_repo.mark_running_if_claimable(
                 run_id=run_id,
@@ -391,7 +354,7 @@ async def _execute_flow_run_async_traced(
                 run_id=run_id,
                 flow_id=flow_id,
                 tenant_id=tenant_id,
-                celery_task_id=celery_task_id,
+                celery_task_id=task_id,
                 retry_count=retry_count,
             )
             flow_span.set_result_from_mapping(result)
@@ -418,87 +381,8 @@ async def terminalize_flow_run_failure(
             )
 
 
-async def _cancel_and_join_flow_execution_task(task: asyncio.Task[object]) -> None:
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        return
-
-
-def _cancel_flow_execution_task_from_worker(
+async def _terminalize_flow_run_failure_from_task(
     *,
-    loop: asyncio.AbstractEventLoop,
-    execution_future: concurrent.futures.Future[dict[str, str]] | None,
-    execution_task: asyncio.Task[object] | None,
-    run_id: UUID,
-    tenant_id: UUID,
-    task_id: str | None,
-) -> None:
-    if execution_task is None:
-        # The loop task has not started; cancel the submission so it cannot
-        # become orphaned work after timeout terminalization.
-        if execution_future is not None:
-            execution_future.cancel()
-        return
-
-    try:
-        asyncio.run_coroutine_threadsafe(
-            _cancel_and_join_flow_execution_task(execution_task),
-            loop,
-        ).result(timeout=_FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS)
-    except concurrent.futures.TimeoutError:
-        logger.exception(
-            "Flow execution task cancellation timed out",
-            extra={
-                "run_id": str(run_id),
-                "tenant_id": str(tenant_id),
-                "task_id": task_id,
-                "source": FlowRunLifecycleSource.TASK_TIMEOUT.value,
-            },
-        )
-    except Exception:
-        logger.exception(
-            "Flow execution task cancellation failed",
-            extra={
-                "run_id": str(run_id),
-                "tenant_id": str(tenant_id),
-                "task_id": task_id,
-                "source": FlowRunLifecycleSource.TASK_TIMEOUT.value,
-            },
-        )
-
-
-def _flow_task_future_result_or_cancel(
-    *,
-    future: concurrent.futures.Future[_FlowTaskResult],
-    timeout_seconds: int,
-    task_name: str,
-) -> _FlowTaskResult:
-    try:
-        return future.result(timeout=timeout_seconds)
-    except (concurrent.futures.TimeoutError, SoftTimeLimitExceeded):
-        future.cancel()
-        try:
-            future.result(timeout=_FLOW_TASK_CANCEL_DRAIN_TIMEOUT_SECONDS)
-        except concurrent.futures.CancelledError:
-            pass
-        except concurrent.futures.TimeoutError:
-            logger.exception(
-                "Flow runtime task cancellation timed out",
-                extra={"task_name": task_name},
-            )
-        except Exception:
-            logger.exception(
-                "Flow runtime task cancellation failed",
-                extra={"task_name": task_name},
-            )
-        raise
-
-
-def _terminalize_flow_run_failure_from_task(
-    *,
-    loop: asyncio.AbstractEventLoop,
     run_id: UUID,
     tenant_id: UUID,
     task_id: str | None,
@@ -506,25 +390,13 @@ def _terminalize_flow_run_failure_from_task(
     error: FlowRunError,
 ) -> None:
     try:
-        asyncio.run_coroutine_threadsafe(
-            terminalize_flow_run_failure(
+        async with asyncio.timeout(10):
+            await terminalize_flow_run_failure(
                 run_id=run_id,
                 tenant_id=tenant_id,
                 source=source,
                 error=error,
-            ),
-            loop,
-        ).result(timeout=_SECONDARY_TERMINALIZATION_TIMEOUT_SECONDS)
-    except concurrent.futures.TimeoutError:
-        logger.exception(
-            "Flow run task terminalization timed out",
-            extra={
-                "run_id": str(run_id),
-                "tenant_id": str(tenant_id),
-                "task_id": task_id,
-                "source": source.value,
-            },
-        )
+            )
     except Exception:
         logger.exception(
             "Flow run task terminalization failed",
@@ -537,35 +409,7 @@ def _terminalize_flow_run_failure_from_task(
         )
 
 
-@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
-    name="flows.execute",
-    bind=True,
-)
-def execute_flow_run(
-    self: Any,
-    *,
-    run_id: str,
-    flow_id: str,
-    tenant_id: str,
-    run_revision: int,
-    principal_type: str | None = None,
-    principal_user_id: str | None = None,
-    principal_service_id: str | None = None,
-) -> dict[str, str]:
-    return _execute_flow_run_task(
-        run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        run_revision=run_revision,
-        principal_type=principal_type,
-        principal_user_id=principal_user_id,
-        principal_service_id=principal_service_id,
-        task_id=self.request.id,
-        retry_count=self.request.retries,
-    )
-
-
-def _execute_flow_run_task(
+async def execute_flow_run_task(
     *,
     run_id: str,
     flow_id: str,
@@ -636,40 +480,20 @@ def _execute_flow_run_task(
         case _:
             assert_never(dispatch_request)
 
-    loop = get_flow_task_loop()
-    future: concurrent.futures.Future[dict[str, str]] | None = None
-    flow_execution_task: asyncio.Task[object] | None = None
-
-    async def _execute_flow_run_async_with_task_capture() -> dict[str, str]:
-        nonlocal flow_execution_task
-        flow_execution_task = asyncio.current_task()
-        return await _execute_flow_run_async(
-            run_id=run_id_uuid,
-            flow_id=flow_id_uuid,
-            tenant_id=tenant_id_uuid,
-            run_revision=expected_run_revision,
-            principal_type=resolved_principal_type,
-            principal_user_id=resolved_principal_user_id,
-            principal_service_id=resolved_principal_service_id,
-            celery_task_id=task_id,
-            retry_count=retry_count,
-        )
-
     try:
-        future = asyncio.run_coroutine_threadsafe(
-            _execute_flow_run_async_with_task_capture(),
-            loop,
-        )
-        return future.result(timeout=get_settings().flow_task_timeout_seconds)
-    except (concurrent.futures.TimeoutError, SoftTimeLimitExceeded):
-        _cancel_flow_execution_task_from_worker(
-            loop=loop,
-            execution_future=future,
-            execution_task=flow_execution_task,
-            run_id=run_id_uuid,
-            tenant_id=tenant_id_uuid,
-            task_id=task_id,
-        )
+        async with asyncio.timeout(get_settings().task_execution_timeout_seconds):
+            return await _execute_flow_run_async(
+                run_id=run_id_uuid,
+                flow_id=flow_id_uuid,
+                tenant_id=tenant_id_uuid,
+                run_revision=expected_run_revision,
+                principal_type=resolved_principal_type,
+                principal_user_id=resolved_principal_user_id,
+                principal_service_id=resolved_principal_service_id,
+                task_id=task_id,
+                retry_count=retry_count,
+            )
+    except TimeoutError:
         error_message = (
             "flow_task_timeout: Flow execution timed out before task completion."
         )
@@ -677,8 +501,7 @@ def _execute_flow_run_task(
             "Flow execution task timed out",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        _terminalize_flow_run_failure_from_task(
-            loop=loop,
+        await _terminalize_flow_run_failure_from_task(
             run_id=run_id_uuid,
             tenant_id=tenant_id_uuid,
             task_id=task_id,
@@ -698,8 +521,7 @@ def _execute_flow_run_task(
             "Flow execution task failed",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        _terminalize_flow_run_failure_from_task(
-            loop=loop,
+        await _terminalize_flow_run_failure_from_task(
             run_id=run_id_uuid,
             tenant_id=tenant_id_uuid,
             task_id=task_id,
@@ -748,7 +570,7 @@ async def _reconcile_stale_running_runs_all_tenants(
 ) -> dict[str, int | str]:
     stale_before = datetime.now(timezone.utc) - timedelta(
         seconds=flow_stale_running_reconcile_after_seconds(
-            task_timeout_seconds=get_settings().flow_task_timeout_seconds
+            task_timeout_seconds=get_settings().task_execution_timeout_seconds
         )
     )
     reconciled = 0
@@ -949,81 +771,22 @@ async def _deliver_flow_webhook_outbox(
     return result.to_task_payload()
 
 
-@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
-    name="flows.reconcile_running",
-)
-def reconcile_stale_running_runs() -> dict[str, int | str]:
-    loop = get_flow_task_loop()
-    future = asyncio.run_coroutine_threadsafe(
-        _reconcile_stale_running_runs_all_tenants(),
-        loop,
-    )
-    return _flow_task_future_result_or_cancel(
-        future=future,
-        timeout_seconds=30,
-        task_name="flows.reconcile_running",
-    )
+async def reconcile_stale_running_runs() -> dict[str, int | str]:
+    return await _reconcile_stale_running_runs_all_tenants()
 
 
-@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
-    name="flows.reconcile_review_expiry",
-)
-def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
-    loop = get_flow_task_loop()
-    future = asyncio.run_coroutine_threadsafe(
-        _reconcile_expired_review_checkpoints_all_tenants(),
-        loop,
-    )
-    return _flow_task_future_result_or_cancel(
-        future=future,
-        timeout_seconds=30,
-        task_name="flows.reconcile_review_expiry",
-    )
+async def reconcile_expired_review_checkpoints() -> dict[str, int | str]:
+    return await _reconcile_expired_review_checkpoints_all_tenants()
 
 
-@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
-    name="flows.redispatch_stale_queued",
-)
-def redispatch_stale_queued_runs() -> dict[str, int | str]:
-    loop = get_flow_task_loop()
-    future = asyncio.run_coroutine_threadsafe(
-        _redispatch_stale_queued_runs_all_tenants(),
-        loop,
-    )
-    return _flow_task_future_result_or_cancel(
-        future=future,
-        timeout_seconds=60,
-        task_name="flows.redispatch_stale_queued",
-    )
+async def redispatch_stale_queued_runs() -> dict[str, int | str]:
+    return await _redispatch_stale_queued_runs_all_tenants()
 
 
-@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
-    name="flows.deliver_audit_outbox",
-)
-def deliver_flow_audit_outbox() -> dict[str, int | str]:
-    loop = get_flow_task_loop()
-    future = asyncio.run_coroutine_threadsafe(
-        _deliver_flow_audit_outbox(),
-        loop,
-    )
-    return _flow_task_future_result_or_cancel(
-        future=future,
-        timeout_seconds=30,
-        task_name="flows.deliver_audit_outbox",
-    )
+async def deliver_flow_audit_outbox() -> dict[str, int | str]:
+    return await _deliver_flow_audit_outbox()
 
 
-@celery_app.task(  # pyright: ignore[reportUnknownMemberType,reportUntypedFunctionDecorator]
-    name="flows.deliver_webhook_outbox",
-)
-def deliver_flow_webhook_outbox() -> dict[str, int | str]:
-    loop = get_flow_task_loop()
-    future = asyncio.run_coroutine_threadsafe(
-        _deliver_flow_webhook_outbox(),
-        loop,
-    )
-    return _flow_task_future_result_or_cancel(
-        future=future,
-        timeout_seconds=FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30,
-        task_name="flows.deliver_webhook_outbox",
-    )
+async def deliver_flow_webhook_outbox() -> dict[str, int | str]:
+    async with asyncio.timeout(FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30):
+        return await _deliver_flow_webhook_outbox()

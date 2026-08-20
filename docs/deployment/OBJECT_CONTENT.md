@@ -324,11 +324,11 @@ at startup — editing the file alone has no effect.
 ```bash
 # 1. See what the running processes actually read.
 docker compose exec backend printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
-docker compose exec celery-worker-flows printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
+docker compose exec task-execution-worker printenv OBJECT_CONTENT_INLINE_MAXIMUM_BYTES
 
 # 2. Edit env_backend.env, then recreate every process that reads it.
 docker compose up -d --force-recreate backend worker \
-  celery-worker-flows celery-worker-flows-maintenance celery-beat-flows
+  task-execution-worker task-maintenance-worker
 ```
 
 Then confirm the new ceiling reached the product: **Admin > Storage** must show

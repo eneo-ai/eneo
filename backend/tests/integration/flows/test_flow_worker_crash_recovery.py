@@ -60,7 +60,7 @@ def test_updated_at_staleness_clock_has_bounded_transcription_reset_ceiling() ->
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
+async def test_hard_exited_worker_stale_recovery_converges(
     client,
     db_container,
     flow_process_auth_headers,
@@ -125,28 +125,20 @@ async def test_hard_exited_worker_redelivers_then_stale_recovery_converges(
     assert evidence["run"]["result"] is None
 
     await flow_broker_worker_seam.wait_for_worker_child_exit(timeout_seconds=30)
-    redelivery_result = await flow_broker_worker_seam.wait_for_task_result(
-        task_id=task_id,
-        timeout_seconds=30,
-    )
-    assert redelivery_result == {
-        "status": "skipped",
-        "reason": "run_running_or_revision_changed",
-    }
 
-    after_redelivery_response = await client.get(
+    after_crash_response = await client.get(
         f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/evidence/",
         headers=flow_process_auth_headers,
     )
-    assert after_redelivery_response.status_code == 200, after_redelivery_response.text
-    after_redelivery = after_redelivery_response.json()
-    assert after_redelivery["run"]["status"] == "running"
-    assert after_redelivery["run"]["result"] is None
-    assert len(after_redelivery["step_results"]) == 1
-    assert after_redelivery["step_results"][0]["status"] == "running"
-    assert len(after_redelivery["step_attempts"]) == 1
-    assert after_redelivery["step_attempts"][0]["status"] == "started"
-    assert after_redelivery["step_attempts"][0]["celery_task_id"] == task_id
+    assert after_crash_response.status_code == 200, after_crash_response.text
+    after_crash = after_crash_response.json()
+    assert after_crash["run"]["status"] == "running"
+    assert after_crash["run"]["result"] is None
+    assert len(after_crash["step_results"]) == 1
+    assert after_crash["step_results"][0]["status"] == "running"
+    assert len(after_crash["step_attempts"]) == 1
+    assert after_crash["step_attempts"][0]["status"] == "started"
+    assert after_crash["step_attempts"][0]["celery_task_id"] == task_id
 
     async with db_container() as container:
         pre_recovery_audit_count = await container.session().scalar(
@@ -249,7 +241,6 @@ async def _wait_for_durable_attempt_checkpoint(
 ) -> tuple[dict[str, object], str]:
     deadline = monotonic() + timeout_seconds
     while monotonic() < deadline:
-        worker.assert_worker_alive()
         response = await client.get(
             f"/api/v1/flows/{flow_id}/runs/{run_id}/evidence/",
             headers=headers,
@@ -297,7 +288,6 @@ async def _wait_for_real_stale_threshold(
     )
     deadline = monotonic() + timeout_seconds
     while monotonic() < deadline:
-        worker.assert_worker_alive()
         response = await client.get(
             f"/api/v1/flows/{flow_id}/runs/{run_id}/",
             headers=headers,

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
-import threading
 from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -494,7 +492,6 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
 ):
     tasks_module = flow_runtime_tasks
     completion_service = SimpleNamespace(get_response=AsyncMock())
-    running_loop = asyncio.get_running_loop()
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
         context = await _create_runtime_worker_context(
@@ -508,9 +505,8 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
         )
         await session.commit()
 
-    started = threading.Event()
-    cancelled = threading.Event()
-    real_run_coroutine_threadsafe = asyncio.run_coroutine_threadsafe
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
 
     async def _attempt_late_completed_step_write() -> FlowStepResult | None:
         async with sessionmanager.session() as write_session:
@@ -552,55 +548,29 @@ async def test_task_timeout_terminalization_rejects_late_completed_step_write(
             cancelled.set()
             raise
 
-    class _TimeoutAfterStartedFuture(concurrent.futures.Future[dict[str, str]]):
-        def __init__(self, future: concurrent.futures.Future[dict[str, str]]) -> None:
-            super().__init__()
-            self._future = future
-
-        def cancel(self) -> bool:
-            return self._future.cancel()
-
-        def result(self, timeout: float | None = None) -> dict[str, str]:
-            # Force timeout after task capture so cancellation drains the coroutine unwind.
-            assert started.wait(timeout=1)
-            raise concurrent.futures.TimeoutError()
-
-    first_execution_call = True
-
-    def _run_coroutine_threadsafe(coroutine, target_loop):
-        nonlocal first_execution_call
-        future = real_run_coroutine_threadsafe(coroutine, target_loop)
-        if first_execution_call:
-            first_execution_call = False
-            return _TimeoutAfterStartedFuture(future)
-        return future
-
-    monkeypatch.setattr(tasks_module, "get_flow_task_loop", lambda: running_loop)
     monkeypatch.setattr(
-        tasks_module.asyncio,
-        "run_coroutine_threadsafe",
-        _run_coroutine_threadsafe,
+        tasks_module,
+        "get_settings",
+        lambda: SimpleNamespace(task_execution_timeout_seconds=0.01),
     )
     monkeypatch.setattr(
         tasks_module, "_execute_flow_run_async", _execute_until_cancelled
     )
 
-    task_result = await asyncio.to_thread(
-        lambda: tasks_module._execute_flow_run_task(
-            run_id=str(context.run_id),
-            flow_id=str(context.flow_id),
-            tenant_id=str(context.tenant_id),
-            run_revision=context.run_revision,
-            principal_type="user",
-            principal_user_id=str(admin_user.id),
-            task_id="runtime-timeout-terminalization",
-            retry_count=0,
-        )
+    task_result = await tasks_module.execute_flow_run_task(
+        run_id=str(context.run_id),
+        flow_id=str(context.flow_id),
+        tenant_id=str(context.tenant_id),
+        run_revision=context.run_revision,
+        principal_type="user",
+        principal_user_id=str(admin_user.id),
+        task_id="runtime-timeout-terminalization",
+        retry_count=0,
     )
 
     assert task_result == {"status": "failed", "reason": "timeout"}
-    assert started.wait(timeout=1)
-    assert cancelled.wait(timeout=1)
+    assert started.is_set()
+    assert cancelled.is_set()
     assert await _attempt_late_completed_step_write() is None
 
     (

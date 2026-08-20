@@ -38,7 +38,7 @@ def test_runbook_covers_auth_staleness_liveness_and_raw_export_controls() -> Non
     assert "x-api-key" in runbook and "/api/healthz/flows" in runbook
     assert "same staleness predicate" in runbook
     assert "pending or claimed webhook delivery" in runbook
-    assert "maintenance queue" in runbook and "consumer" in runbook
+    assert "maintenance worker" in runbook and "readiness" in runbook
     assert "raw evidence export" in runbook
     assert "explicit non-default reason" in runbook
     assert "audit" in runbook and "fail" in runbook and "closed" in runbook

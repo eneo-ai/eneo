@@ -8,7 +8,6 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from time import monotonic
 from typing import TextIO
@@ -16,23 +15,28 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from celery import Celery
+from arq import create_pool
+from arq.connections import ArqRedis
+from arq.jobs import Job
 from dependency_injector import providers
 from httpx import AsyncClient
-from redis.asyncio import Redis as AsyncRedis
 from testcontainers.redis import RedisContainer
 
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
-from eneo.flows.runtime.celery_app import create_flow_celery_app
-from eneo.flows.runtime.celery_execution_backend import CeleryFlowExecutionBackend
 from eneo.flows.runtime.executor import (
     _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV,
     _PROCESS_TEST_CRASH_EXIT_CODE,
 )
+from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
+from eneo.jobs.job_manager import JobManager
+from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.main.config import Settings, get_settings, set_settings
 from eneo.main.container.container import Container
+from eneo.redis.connection import build_arq_redis_settings
 from eneo.roles.permissions import Permission
+from eneo.tasks.arq_adapter import ArqTaskEnqueuer
+from eneo.tasks.routing import task_queue_routing
 from tests.integration.conftest import (
     _IN_DEVCONTAINER,
     _TEST_NETWORK,
@@ -41,7 +45,6 @@ from tests.integration.conftest import (
 )
 
 _FLOW_TASK_TIMEOUT_SECONDS = 5
-_FLOW_VISIBILITY_TIMEOUT_SECONDS = 90
 _WORKER_PARENT_ENV_ALLOWLIST = (
     "HOME",
     "LANG",
@@ -84,9 +87,9 @@ class FlowProcessAuthHeaders(Mapping[str, str]):
 
 @dataclass(slots=True, repr=False)
 class FlowBrokerWorkerSeam:
-    celery_app: Celery
-    broker_client: AsyncRedis
+    broker_client: ArqRedis
     queue_name: str
+    maintenance_queue_name: str
     worker_hostname: str
     worker_environment: dict[str, str]
     worker_log_path: Path
@@ -95,7 +98,7 @@ class FlowBrokerWorkerSeam:
     worker_log: TextIO | None = None
 
     async def discard_single_queued_delivery(self) -> None:
-        pending_count = await self.broker_client.llen(self.queue_name)
+        pending_count = await self.broker_client.zcard(self.queue_name)
         if pending_count != 1:
             raise AssertionError(
                 "Expected exactly one delivery on the disposable Flow queue, "
@@ -108,6 +111,21 @@ class FlowBrokerWorkerSeam:
     async def start_worker(
         self, *, crash_after_attempt_start_run_id: str | None = None
     ) -> None:
+        await self._start_worker_process(
+            settings_path=(
+                "eneo.worker.platform_tasks.PlatformExecutionWorkerSettings"
+            ),
+            readiness_queue=self.queue_name,
+            crash_after_attempt_start_run_id=crash_after_attempt_start_run_id,
+        )
+
+    async def _start_worker_process(
+        self,
+        *,
+        settings_path: str,
+        readiness_queue: str,
+        crash_after_attempt_start_run_id: str | None = None,
+    ) -> None:
         if self.worker_process is not None:
             raise RuntimeError("Flow process-test worker is already running.")
 
@@ -119,24 +137,14 @@ class FlowBrokerWorkerSeam:
         else:
             environment.pop(_PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV, None)
 
+        await self.broker_client.delete(f"{readiness_queue}:health-check")
         self.worker_log = self.worker_log_path.open("w", encoding="utf-8")
         self.worker_process = subprocess.Popen(
             [
                 sys.executable,
                 "-m",
-                "celery",
-                "-A",
-                "eneo.flows.runtime.celery_app:celery_app",
-                "worker",
-                "--loglevel=INFO",
-                "--pool=prefork",
-                "--concurrency=1",
-                "--queues",
-                self.queue_name,
-                "--hostname",
-                self.worker_hostname,
-                "--without-gossip",
-                "--without-mingle",
+                "arq",
+                settings_path,
             ],
             cwd=Path(__file__).resolve().parents[3],
             env=environment,
@@ -145,51 +153,69 @@ class FlowBrokerWorkerSeam:
             text=True,
             start_new_session=True,
         )
-        await self._wait_until_worker_ready(timeout_seconds=30)
+        await self._wait_until_worker_ready(
+            queue_name=readiness_queue,
+            timeout_seconds=30,
+        )
 
     async def wait_for_task_result(
-        self, *, task_id: str, timeout_seconds: float = 30
+        self,
+        *,
+        task_id: str,
+        timeout_seconds: float = 30,
+        queue_name: str | None = None,
     ) -> dict[str, object]:
-        result = self.celery_app.AsyncResult(task_id)
-        deadline = monotonic() + timeout_seconds
-        while monotonic() < deadline:
-            self.assert_worker_alive()
-            if await asyncio.to_thread(result.ready):
-                value = await asyncio.to_thread(
-                    result.get,
-                    timeout=1,
-                    propagate=True,
-                )
-                if not isinstance(value, dict) or not all(
-                    isinstance(key, str) for key in value
-                ):
-                    raise AssertionError(
-                        f"Celery task {task_id} returned a non-object result."
-                    )
-                return dict(value)
-            await asyncio.sleep(0.1)
-        raise AssertionError(
-            f"Celery task {task_id} did not finish within {timeout_seconds}s. "
-            f"Worker log tail:\n{self.worker_log_tail()}"
+        result = Job(
+            task_id,
+            redis=self.broker_client,
+            _queue_name=queue_name or self.queue_name,
         )
+        try:
+            value = await result.result(timeout=timeout_seconds, poll_delay=0.1)
+        except Exception as exc:
+            raise AssertionError(
+                f"Platform task {task_id} did not complete successfully. "
+                f"Worker log tail:\n{self.worker_log_tail()}"
+            ) from exc
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) for key in value
+        ):
+            raise AssertionError(
+                f"Platform task {task_id} returned a non-object result."
+            )
+        return dict(value)
 
     async def send_task_and_wait(
         self, *, task_name: str, timeout_seconds: float = 30
     ) -> dict[str, object]:
-        result = await asyncio.to_thread(
-            partial(
-                self.celery_app.send_task,
-                task_name,
-                queue=self.queue_name,
+        queue_name = self.queue_name
+        using_maintenance_worker = task_name != "flows.execute"
+        if using_maintenance_worker:
+            await self.close()
+            queue_name = self.maintenance_queue_name
+            await self._start_worker_process(
+                settings_path=(
+                    "eneo.worker.platform_tasks.PlatformMaintenanceWorkerSettings"
+                ),
+                readiness_queue=queue_name,
             )
+        task_id = str(uuid4())
+        result = await self.broker_client.enqueue_job(
+            task_name,
+            _job_id=task_id,
+            _queue_name=queue_name,
         )
-        task_id = getattr(result, "id", None)
-        if not isinstance(task_id, str):
-            raise AssertionError(f"Celery did not assign an id to {task_name}.")
-        return await self.wait_for_task_result(
+        if result is None:
+            raise AssertionError(f"Platform runtime refused duplicate {task_name}.")
+        task_result = await self.wait_for_task_result(
             task_id=task_id,
             timeout_seconds=timeout_seconds,
+            queue_name=queue_name,
         )
+        if using_maintenance_worker:
+            await self.close()
+            await self.start_worker()
+        return task_result
 
     async def wait_for_public_run_status(
         self,
@@ -237,22 +263,26 @@ class FlowBrokerWorkerSeam:
 
     async def wait_for_worker_child_exit(self, *, timeout_seconds: float = 30) -> None:
         deadline = monotonic() + timeout_seconds
-        exit_markers = (
-            f"exitcode {_PROCESS_TEST_CRASH_EXIT_CODE}",
-            f"exitcode={_PROCESS_TEST_CRASH_EXIT_CODE}",
-            f"exit code {_PROCESS_TEST_CRASH_EXIT_CODE}",
-        )
         while monotonic() < deadline:
-            self.assert_worker_alive()
-            log_text = self.worker_log_path.read_text(
-                encoding="utf-8", errors="replace"
-            )
-            if any(marker in log_text for marker in exit_markers):
+            process = self.worker_process
+            if process is None:
+                raise AssertionError("Flow process-test worker has not been started.")
+            exit_code = process.poll()
+            if exit_code == _PROCESS_TEST_CRASH_EXIT_CODE:
+                await asyncio.to_thread(process.wait)
+                if self.worker_log is not None:
+                    self.worker_log.close()
+                self.worker_process = None
+                self.worker_log = None
                 return
+            if exit_code is not None:
+                raise AssertionError(
+                    f"Disposable Flow worker exited with unexpected code {exit_code}."
+                )
             await asyncio.sleep(0.1)
         raise AssertionError(
-            "The disposable worker did not report the expected hard-exited pool "
-            f"child. Worker log tail:\n{self.worker_log_tail()}"
+            "The disposable platform worker did not hard-exit as expected. "
+            f"Worker log tail:\n{self.worker_log_tail()}"
         )
 
     def assert_worker_alive(self) -> None:
@@ -298,16 +328,13 @@ class FlowBrokerWorkerSeam:
             self.worker_process = None
             self.worker_log = None
 
-    async def _wait_until_worker_ready(self, *, timeout_seconds: float) -> None:
+    async def _wait_until_worker_ready(
+        self, *, queue_name: str, timeout_seconds: float
+    ) -> None:
         deadline = monotonic() + timeout_seconds
         while monotonic() < deadline:
             self.assert_worker_alive()
-            active_queues = await asyncio.to_thread(
-                self.celery_app.control.inspect(timeout=0.5).active_queues
-            )
-            if active_queues and {
-                queue["name"] for queues in active_queues.values() for queue in queues
-            } == {self.queue_name}:
+            if await self.broker_client.exists(f"{queue_name}:health-check"):
                 return
             await asyncio.sleep(0.1)
         raise AssertionError(
@@ -451,48 +478,39 @@ async def flow_broker_worker_seam(
                 "redis_host": redis_host,
                 "redis_port": redis_port,
                 "redis_db": 0,
-                "redis_db_celery_broker": 1,
-                "redis_db_celery_result": 2,
-                "flow_celery_queue": queue_name,
-                "flow_celery_maintenance_queue": queue_name,
-                "flow_task_timeout_seconds": _FLOW_TASK_TIMEOUT_SECONDS,
-                "celery_visibility_timeout_seconds": (_FLOW_VISIBILITY_TIMEOUT_SECONDS),
+                "task_execution_queue": queue_name,
+                "task_maintenance_queue": f"{queue_name}:maintenance",
+                "task_execution_max_jobs": 1,
+                "task_execution_timeout_seconds": _FLOW_TASK_TIMEOUT_SECONDS,
             }
         )
         original_settings = get_settings()
         set_settings(runtime_settings)
         try:
-            celery_app = create_flow_celery_app()
+            job_manager = JobManager()
+            await job_manager.init()
         finally:
             set_settings(original_settings)
-        cleanup.callback(celery_app.close)
+        cleanup.push_async_callback(job_manager.close)
 
-        assert celery_app.conf.task_acks_late is True
-        assert celery_app.conf.task_reject_on_worker_lost is True
-        assert celery_app.conf.worker_prefetch_multiplier == 1
-        assert (
-            celery_app.conf.broker_transport_options["visibility_timeout"]
-            == _FLOW_VISIBILITY_TIMEOUT_SECONDS
-        )
-
-        execution_backend = CeleryFlowExecutionBackend(
-            celery_app=celery_app,
-            queue_name=queue_name,
+        execution_backend = PlatformFlowExecutionBackend(
+            task_enqueuer=ArqTaskEnqueuer(
+                job_manager=job_manager,
+                routing=task_queue_routing(runtime_settings),
+            )
         )
         Container.flow_execution_backend.override(providers.Object(execution_backend))
         cleanup.callback(Container.flow_execution_backend.reset_last_overriding)
-        broker_client = AsyncRedis(
-            host=redis_host,
-            port=redis_port,
-            db=runtime_settings.redis_db_celery_broker,
-            socket_timeout=runtime_settings.redis_conn_timeout,
-            socket_connect_timeout=runtime_settings.redis_conn_timeout,
+        broker_client = await create_pool(
+            build_arq_redis_settings(runtime_settings),
+            job_serializer=serialize_job,
+            job_deserializer=deserialize_job,
         )
         cleanup.push_async_callback(broker_client.aclose)
         seam = FlowBrokerWorkerSeam(
-            celery_app=celery_app,
             broker_client=broker_client,
             queue_name=queue_name,
+            maintenance_queue_name=f"{queue_name}:maintenance",
             worker_hostname=f"flow-wi04b-{identity}@%h",
             worker_environment=_flow_worker_environment(
                 settings=runtime_settings,
@@ -535,12 +553,10 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             "REDIS_HOST": settings.redis_host,
             "REDIS_PORT": str(settings.redis_port),
             "REDIS_DB": str(settings.redis_db),
-            "REDIS_DB_CELERY_BROKER": str(settings.redis_db_celery_broker),
-            "REDIS_DB_CELERY_RESULT": str(settings.redis_db_celery_result),
-            "FLOW_CELERY_QUEUE": queue_name,
-            "FLOW_CELERY_MAINTENANCE_QUEUE": queue_name,
-            "FLOW_TASK_TIMEOUT_SECONDS": str(_FLOW_TASK_TIMEOUT_SECONDS),
-            "CELERY_VISIBILITY_TIMEOUT_SECONDS": str(_FLOW_VISIBILITY_TIMEOUT_SECONDS),
+            "TASK_EXECUTION_QUEUE": queue_name,
+            "TASK_MAINTENANCE_QUEUE": f"{queue_name}:maintenance",
+            "TASK_EXECUTION_MAX_JOBS": "1",
+            "TASK_EXECUTION_TIMEOUT_SECONDS": str(_FLOW_TASK_TIMEOUT_SECONDS),
             "FLOW_MAX_INLINE_TEXT_BYTES": str(settings.flow_max_inline_text_bytes),
             "FLOW_LLM_REQUEST_TIMEOUT_SECONDS": str(
                 settings.flow_llm_request_timeout_seconds
