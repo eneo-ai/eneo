@@ -154,6 +154,7 @@ class TestBuildToolSchema:
         arguments = {
             "flow_name": "Case assessment",
             "plan_rationale": "Assess the submitted case.",
+            "},{": ":",
             "steps": [
                 {
                     "name": "Assess case",
@@ -172,17 +173,22 @@ class TestBuildToolSchema:
             "name": "Assess case",
             "instructions": "Assess the submitted case material.",
         }
+        assert "},{" not in admitted
+        assert "},{" in arguments
         assert "},{" in arguments["steps"][0]
 
-        semantic_unknown = {
-            **arguments,
-            "steps": [{**arguments["steps"][0], "unexpected": "meaningful"}],
-        }
-        with pytest.raises(ProposalToolArgumentsError, match="unexpected"):
-            admit_propose_flow_tool_arguments(
-                arguments=semantic_unknown,
-                tool_schema=schema,
-            )
+        for semantic_unknown in (
+            {**arguments, "unexpected": "meaningful"},
+            {
+                **arguments,
+                "steps": [{**arguments["steps"][0], "unexpected": "meaningful"}],
+            },
+        ):
+            with pytest.raises(ProposalToolArgumentsError, match="unexpected"):
+                admit_propose_flow_tool_arguments(
+                    arguments=semantic_unknown,
+                    tool_schema=schema,
+                )
 
     def test_create_admission_rehomes_unambiguous_step_tail_properties(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
