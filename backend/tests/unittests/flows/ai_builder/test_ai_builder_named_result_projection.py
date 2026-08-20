@@ -813,6 +813,28 @@ def test_a_nested_result_key_copy_is_discarded_before_schema_admission() -> None
     assert intent.obligated_output_fields[0].field_type == "array"
 
 
+def test_misplaced_steps_are_rehomed_from_the_result_projection() -> None:
+    state = _state((("documents", "array"),))
+    projection = named_result_projection(state)
+    assert projection is not None
+    arguments = _arguments(result_keys=_staged_result_keys(projection))
+    steps = arguments.pop("steps")
+    arguments["result_keys"]["steps"] = steps
+
+    admitted = admit_propose_flow_tool_arguments(
+        arguments=arguments,
+        tool_schema=_prepared_schema(projection),
+    )
+
+    assert admitted["steps"] == steps
+    assert "steps" not in admitted["result_keys"]
+    assert "steps" in arguments["result_keys"]
+    parse_create_flow_intent_arguments(
+        admitted,
+        obligation_projection=projection,
+    )
+
+
 def test_the_wire_record_asks_the_model_only_what_the_user_left_open() -> None:
     # A declared shape is the user's, so its enum has exactly one member and
     # the server materializes it either way. An unshaped name may be any

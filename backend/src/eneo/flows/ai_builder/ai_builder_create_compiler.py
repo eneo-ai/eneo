@@ -12,7 +12,6 @@ from eneo.flows.ai_builder.ai_builder_assembly import (
     CreateAssemblyRejection,
     try_compile_create_intent_with_assembly,
 )
-from eneo.flows.ai_builder.ai_builder_assembly.plan import SOURCE_READER_INPUT_TYPES
 from eneo.flows.ai_builder.ai_builder_checkpoint_contract import (
     checkpoint_intent_mismatches,
     project_checkpoint_intents,
@@ -118,6 +117,13 @@ def compile_create_intent_to_spec(
         _admitted_source_reader_required_fields(
             context=context,
             runtime_input_type=runtime_input_type,
+            text_source_reader_planned=(
+                runtime_input_type is InputType.TEXT
+                and (
+                    final_output_type is OutputType.JSON
+                    or (len(intent.steps) > 1 and bool(intent.steps[0].output_fields))
+                )
+            ),
         )
     )
     terminal_obligation_instructions = _translated_capture_obligation_sentence(
@@ -602,20 +608,20 @@ def _admitted_source_reader_required_fields(
     *,
     context: CreateCompileContext | None,
     runtime_input_type: InputType,
+    text_source_reader_planned: bool = False,
 ) -> tuple[tuple[SourceCaptureField, ...], tuple[SourceCaptureField, ...]]:
-    """Split capture fields into (admitted, translated) for this input type.
+    """Split capture fields into structured-reader and terminal obligations.
 
-    A source-reader step only exists for document/file/text runtime input.
-    Passing capture fields through for e.g. audio makes the FlowAssemblyPlan
-    invariant fail deterministically — the planner cannot repair a constraint
-    it does not control, so the whole proposal turn dies after exhausting
-    repairs. Fields that cannot be captured by a reader are returned in the
-    second tuple so the caller can translate the obligation into server-owned
-    terminal-step instructions instead of silently losing it.
+    Document and file inputs always materialize a source reader. Text inputs
+    retain the capture contract only when the semantic topology already plans
+    a structured reader; a direct prose writer receives the same obligation in
+    its server-owned instructions. Other inputs cannot host a source reader.
     """
     if context is None or not context.source_reader_required_fields:
         return (), ()
-    if runtime_input_type in SOURCE_READER_INPUT_TYPES:
+    if runtime_input_type in {InputType.DOCUMENT, InputType.FILE} or (
+        runtime_input_type is InputType.TEXT and text_source_reader_planned
+    ):
         return context.source_reader_required_fields, ()
     logger.info(
         "ai_builder_source_reader_fields_translated_for_input_type",
