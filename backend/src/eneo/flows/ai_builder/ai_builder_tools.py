@@ -557,6 +557,22 @@ def _rehome_misplaced_create_children(
         candidate_map = (
             cast(dict[str, object], candidate) if isinstance(candidate, dict) else None
         )
+        if candidate_map is not None:
+            debris_keys = {
+                key
+                for key, value in candidate_map.items()
+                if key not in allowed_step_keys
+                and isinstance(value, str)
+                and not any(character.isalnum() for character in key)
+                and not any(character.isalnum() for character in value)
+            }
+            if debris_keys:
+                candidate_map = {
+                    key: value
+                    for key, value in candidate_map.items()
+                    if key not in debris_keys
+                }
+                changed = True
         previous_map = (
             cast(dict[str, object], previous) if isinstance(previous, dict) else None
         )
