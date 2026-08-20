@@ -147,6 +147,43 @@ class TestBuildToolSchema:
                 tool_schema=schema,
             )
 
+    def test_create_admission_discards_only_punctuation_serialization_artifacts(
+        self,
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Case assessment",
+            "plan_rationale": "Assess the submitted case.",
+            "steps": [
+                {
+                    "name": "Assess case",
+                    "instructions": "Assess the submitted case material.",
+                    "},{": ":",
+                }
+            ],
+        }
+
+        admitted = admit_propose_flow_tool_arguments(
+            arguments=arguments,
+            tool_schema=schema,
+        )
+
+        assert admitted["steps"][0] == {
+            "name": "Assess case",
+            "instructions": "Assess the submitted case material.",
+        }
+        assert "},{" in arguments["steps"][0]
+
+        semantic_unknown = {
+            **arguments,
+            "steps": [{**arguments["steps"][0], "unexpected": "meaningful"}],
+        }
+        with pytest.raises(ProposalToolArgumentsError, match="unexpected"):
+            admit_propose_flow_tool_arguments(
+                arguments=semantic_unknown,
+                tool_schema=schema,
+            )
+
     def test_create_admission_rehomes_unambiguous_step_tail_properties(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
         arguments = {
