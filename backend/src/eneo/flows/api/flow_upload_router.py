@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import (
@@ -17,6 +17,7 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.database.database import AsyncSession
 from eneo.files.file_models import FilePublic
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import audit_actor_kwargs, error_response
@@ -30,7 +31,10 @@ from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 
 router = APIRouter()
 
@@ -265,47 +269,27 @@ async def upload_flow_runtime_file(
     request: Request,
     upload_file: UploadFile = File(...),
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_upload_admission=True,
+        )
     ),
 ):
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.RUN,
-        allow_service_key_principals=True,
-        require_published_for_service_key=True,
-    )
-    file = await container.flow_runtime_file_service().upload_runtime_file_for_step(
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await flow_access_context.enforce_flow_scope(
+            request,
+            container,
+            flow_id=id,
+            required_access=FlowApiAction.RUN,
+            allow_service_key_principals=True,
+            require_published_for_service_key=True,
+        )
+    return await container.flow_runtime_file_service().upload_runtime_file_for_step(
         flow_id=id,
         step_id=step_id,
         upload_file=upload_file,
     )
-    user = container.user()
-    actor_kwargs = audit_actor_kwargs(user)
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=actor_kwargs["actor_id"],
-        actor_type=actor_kwargs["actor_type"],
-        actor_api_key_id=actor_kwargs["actor_api_key_id"],
-        action=ActionType.FILE_UPLOADED,
-        entity_type=EntityType.FILE,
-        entity_id=file.id,
-        description=f"Uploaded runtime input file '{file.name}' for flow step {step_id}",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=file,
-            extra={
-                "flow_id": str(id),
-                "step_id": str(step_id),
-                "size_bytes": file.size,
-                "mimetype": getattr(file, "mimetype", None),
-                "upload_purpose": "flow_runtime_step_input",
-            },
-        ),
-    )
-
-    return file
 
 
 @router.delete(

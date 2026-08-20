@@ -182,6 +182,7 @@ def _service(
     user=None,
     session: _Session | None = None,
     runtime_upload_repo: AsyncMock | None = None,
+    audit_service: AsyncMock | None = None,
 ) -> FlowRuntimeFileService:
     session = session or _Session()
     file_service.repo = SimpleNamespace(session=session)
@@ -195,6 +196,7 @@ def _service(
         runtime_upload_repo=runtime_upload_repo,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
+        audit_service=audit_service or AsyncMock(),
     )
 
 
@@ -319,7 +321,7 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
 
     async def save_file(*args, **kwargs):
         session.events.append("save_file")
-        assert session.in_transaction()
+        assert not session.in_transaction()
         return SimpleNamespace(
             id=file_id,
             name="source.pdf",
@@ -330,6 +332,14 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
     async def create_runtime_upload(**kwargs):
         session.events.append("create_runtime_upload")
         assert session.in_transaction()
+
+    audit_service = AsyncMock()
+
+    async def log_async(**kwargs):
+        session.events.append("audit")
+        assert session.in_transaction()
+
+    audit_service.log_async.side_effect = log_async
 
     file_service.save_file.side_effect = save_file
     runtime_upload_repo.create.side_effect = create_runtime_upload
@@ -345,6 +355,7 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
         runtime_upload_repo=runtime_upload_repo,
         settings_service=settings_service,
         flow_version_repo=_version_repo(flow),
+        audit_service=audit_service,
     )
     upload = UploadFile(
         filename="source.pdf",
@@ -363,14 +374,29 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
     )
 
     runtime_upload_repo.create.assert_awaited_once()
-    assert session.begin_calls == 1
-    assert session.events == ["begin", "save_file", "create_runtime_upload", "exit"]
+    assert session.begin_calls == 2
+    assert session.events == [
+        "begin",
+        "exit",
+        "save_file",
+        "begin",
+        "create_runtime_upload",
+        "audit",
+        "exit",
+    ]
     create_kwargs = runtime_upload_repo.create.await_args.kwargs
     assert create_kwargs["file_id"] == file_id
     assert create_kwargs["flow_id"] == flow.id
     assert create_kwargs["tenant_id"] == flow.tenant_id
     assert create_kwargs["uploaded_for_step_id"] == runtime_step.id
     assert create_kwargs["principal"].principal_user_id == user.id
+    audit_service.log_async.assert_awaited_once()
+    audit_kwargs = audit_service.log_async.await_args.kwargs
+    assert audit_kwargs["tenant_id"] == flow.tenant_id
+    assert audit_kwargs["user"] is user
+    assert audit_kwargs["entity_id"] == file_id
+    assert audit_kwargs["metadata"]["extra"]["flow_id"] == str(flow.id)
+    assert audit_kwargs["metadata"]["extra"]["step_id"] == str(runtime_step.id)
 
 
 @pytest.mark.asyncio
@@ -394,7 +420,7 @@ async def test_upload_runtime_file_rolls_back_when_binding_insert_fails(
 
     async def save_file(*args, **kwargs):
         session.events.append("save_file")
-        assert session.in_transaction()
+        assert not session.in_transaction()
         return SimpleNamespace(
             id=file_id,
             name="source.pdf",
@@ -439,8 +465,15 @@ async def test_upload_runtime_file_rolls_back_when_binding_insert_fails(
             upload_file=upload,
         )
 
-    assert session.begin_calls == 1
-    assert session.events == ["begin", "save_file", "create_runtime_upload", "exit"]
+    assert session.begin_calls == 2
+    assert session.events == [
+        "begin",
+        "exit",
+        "save_file",
+        "begin",
+        "create_runtime_upload",
+        "exit",
+    ]
     assert session.exit_exc_type is BindingInsertFailure
 
 
@@ -458,6 +491,7 @@ def test_service_rejects_split_upload_write_sessions() -> None:
             runtime_upload_repo=runtime_upload_repo,
             settings_service=AsyncMock(),
             flow_version_repo=AsyncMock(),
+            audit_service=AsyncMock(),
         )
 
 
@@ -1222,6 +1256,7 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
         runtime_upload_repo=runtime_upload_repo,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
+        audit_service=AsyncMock(),
     )
 
     unknown_step_id = uuid4()

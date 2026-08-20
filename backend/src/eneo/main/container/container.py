@@ -1520,6 +1520,7 @@ class Container(containers.DeclarativeContainer):
         runtime_upload_repo=flow_runtime_upload_repo,
         settings_service=settings_service,
         flow_version_repo=flow_version_repo,
+        audit_service=audit_service,
     )
     flow_run_contract_service = providers.Factory(
         FlowRunContractService,

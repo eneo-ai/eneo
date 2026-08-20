@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -11,6 +9,10 @@ import magic
 from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError
 
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.database.database import AsyncSession
 from eneo.files.file_models import FileInfo
 from eneo.files.file_service import FileService
@@ -173,6 +175,7 @@ class FlowRuntimeFileService:
         runtime_upload_repo: FlowRuntimeUploadRepository,
         settings_service: FlowRuntimeSettingsSource,
         flow_version_repo: FlowRuntimeVersionSource,
+        audit_service: AuditService,
     ):
         _ensure_shared_write_session(
             session=session,
@@ -186,16 +189,7 @@ class FlowRuntimeFileService:
         self.runtime_upload_repo = runtime_upload_repo
         self.settings_service = settings_service
         self.flow_version_repo = flow_version_repo
-
-    @asynccontextmanager
-    async def _write_transaction(self) -> AsyncGenerator[None, None]:
-        if self.session.in_transaction():
-            # Outer callers own commit; upload writes only join the active unit.
-            yield
-            return
-
-        async with self.session.begin():
-            yield
+        self.audit_service = audit_service
 
     def _principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
@@ -207,33 +201,37 @@ class FlowRuntimeFileService:
         step_id: UUID,
         upload_file: UploadFile,
     ) -> FileInfo:
-        runtime_inputs = await load_published_runtime_inputs(
-            flow_service=self.flow_service,
-            flow_version_repo=self.flow_version_repo,
-            settings_source=self.settings_service,
-            flow_id=flow_id,
-            intent=FlowRuntimePublicationIntent.RUNTIME_UPLOAD,
-        )
-        runtime_step = next(
-            (step for step in runtime_inputs.steps if step.step_id == step_id), None
-        )
-        if runtime_step is None:
-            raise FlowBadRequestException(
-                "Unknown runtime step id.",
-                code=FlowApiErrorCode.RUN_UNKNOWN_STEP_INPUT,
-                context={"step_id": str(step_id)},
+        # Close the read transaction before FileService performs object-store
+        # admission. Object-store publication deliberately rejects ambient DB
+        # transactions because the external write cannot be rolled back with SQL.
+        async with self.session.begin():
+            runtime_inputs = await load_published_runtime_inputs(
+                flow_service=self.flow_service,
+                flow_version_repo=self.flow_version_repo,
+                settings_source=self.settings_service,
+                flow_id=flow_id,
+                intent=FlowRuntimePublicationIntent.RUNTIME_UPLOAD,
             )
-
-        spec = runtime_inputs.input_specs.get(step_id)
-        if spec is None:
-            raise FlowBadRequestException(
-                "Runtime input is not enabled for this step.",
-                code=FlowApiErrorCode.RUN_RUNTIME_INPUT_DISABLED,
+            runtime_step = next(
+                (step for step in runtime_inputs.steps if step.step_id == step_id), None
             )
+            if runtime_step is None:
+                raise FlowBadRequestException(
+                    "Unknown runtime step id.",
+                    code=FlowApiErrorCode.RUN_UNKNOWN_STEP_INPUT,
+                    context={"step_id": str(step_id)},
+                )
 
-        policy = _policy_from_runtime_spec(
-            flow_id=runtime_inputs.published.flow_id, spec=spec
-        )
+            spec = runtime_inputs.input_specs.get(step_id)
+            if spec is None:
+                raise FlowBadRequestException(
+                    "Runtime input is not enabled for this step.",
+                    code=FlowApiErrorCode.RUN_RUNTIME_INPUT_DISABLED,
+                )
+
+            policy = _policy_from_runtime_spec(
+                flow_id=runtime_inputs.published.flow_id, spec=spec
+            )
         return await self._upload_with_policy(
             flow_id=runtime_inputs.published.flow_id,
             step_id=step_id,
@@ -287,8 +285,8 @@ class FlowRuntimeFileService:
         )
 
         try:
-            async with self._write_transaction():
-                file = await self.file_service.save_file(upload_file, max_size=max_size)
+            file = await self.file_service.save_file(upload_file, max_size=max_size)
+            async with self.session.begin():
                 await self.runtime_upload_repo.create(
                     file_id=file.id,
                     flow_id=flow_id,
@@ -296,7 +294,29 @@ class FlowRuntimeFileService:
                     uploaded_for_step_id=step_id,
                     principal=self._principal(),
                 )
-                return file
+                await self.audit_service.log_async(
+                    tenant_id=self.user.tenant_id,
+                    user=self.user,
+                    action=ActionType.FILE_UPLOADED,
+                    entity_type=EntityType.FILE,
+                    entity_id=file.id,
+                    description=(
+                        f"Uploaded runtime input file '{file.name}' "
+                        f"for flow step {step_id}"
+                    ),
+                    metadata=AuditMetadata.standard(
+                        actor=self.user,
+                        target=file,
+                        extra={
+                            "flow_id": str(flow_id),
+                            "step_id": str(step_id),
+                            "size_bytes": file.size,
+                            "mimetype": getattr(file, "mimetype", None),
+                            "upload_purpose": "flow_runtime_step_input",
+                        },
+                    ),
+                )
+            return file
         except FileTooLargeException as exc:
             raise FileTooLargeException(
                 f"Uploaded file exceeds effective flow limit of {max_size} bytes.",

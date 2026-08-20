@@ -70,11 +70,9 @@ async def test_upload_flow_runtime_file_calls_step_upload_service(monkeypatch):
     file_id = uuid4()
     container = MagicMock()
     upload_service = AsyncMock()
-    audit_service = AsyncMock()
-    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
-    container.audit_service.return_value = audit_service
-    container.user.return_value = user
     container.flow_runtime_file_service.return_value = upload_service
+    session = MagicMock()
+    container.session.return_value = session
 
     async def fake_enforce(
         request,
@@ -106,7 +104,7 @@ async def test_upload_flow_runtime_file_calls_step_upload_service(monkeypatch):
     )
 
     upload_service.upload_runtime_file_for_step.assert_awaited_once()
-    audit_service.log_async.assert_awaited_once()
+    session.begin.assert_called_once_with()
     assert result.id == file_id
 
 
