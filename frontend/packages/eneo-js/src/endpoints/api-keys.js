@@ -326,7 +326,7 @@ export function initApiKeys(client) {
     admin: {
       /**
        * List all API keys in the tenant (admin only).
-       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, owner_user_id?: string, created_by_user_id?: string, user_relation?: "owner"|"creator", search?: string, expires_within_days?: number, ownership?: "user"|"service", min_permission?: "read"|"write"|"admin"}} [params]
+       * @param {{limit?: number, cursor?: string, previous?: boolean, scope_type?: ApiKeyScopeType | null, scope_id?: string, state?: ApiKeyState | null, key_type?: ApiKeyType | null, owner_user_id?: string, created_by_user_id?: string, user_relation?: "owner"|"creator", search?: string, expires_within_days?: number, ownership?: "user"|"service", min_permission?: "read"|"write"|"admin", eligible_for_module_binding?: boolean}} [params]
        * @returns {Promise<AdminApiKeyPage>}
        * @throws {EneoError}
        * */

@@ -22137,7 +22137,7 @@ export interface operations {
       query?: {
         /** @description Keys per page */
         limit?: number | null;
-        /** @description Current cursor */
+        /** @description Opaque current cursor */
         cursor?: string | null;
         /** @description Show previous page */
         previous?: boolean;
@@ -22188,11 +22188,20 @@ export interface operations {
            *         }
            *       ],
            *       "limit": 50,
-           *       "next_cursor": "2026-02-05T12:00:00Z",
+           *       "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
            *       "total_count": 1
            *     }
            */
           "application/json": components["schemas"]["ApiKeyListResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
@@ -30041,6 +30050,7 @@ export interface operations {
         expires_within_days?: number | null;
         ownership?: components["schemas"]["ApiKeyOwnership"] | null;
         min_permission?: components["schemas"]["ApiKeyPermission"] | null;
+        eligible_for_module_binding?: boolean;
       };
       header?: never;
       path?: never;
@@ -30079,11 +30089,20 @@ export interface operations {
            *         }
            *       ],
            *       "limit": 50,
-           *       "next_cursor": "2026-02-05T12:00:00Z",
+           *       "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
            *       "total_count": 1
            *     }
            */
           "application/json": components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */

@@ -95,10 +95,7 @@ describe("module administration page", () => {
     expect(listApiKeys).toHaveBeenCalledTimes(1);
     expect(listApiKeys).toHaveBeenNthCalledWith(1, {
       limit: 200,
-      state: "active",
-      key_type: "sk_",
-      ownership: "service",
-      min_permission: "write"
+      eligible_for_module_binding: true
     });
     expect(installModule.mock.calls[0][0]).not.toHaveProperty("tenantId");
   });
@@ -115,17 +112,11 @@ describe("module administration page", () => {
     await vi.waitFor(() => expect(listApiKeys).toHaveBeenCalledTimes(2));
     expect(listApiKeys).toHaveBeenNthCalledWith(1, {
       limit: 200,
-      state: "active",
-      key_type: "sk_",
-      ownership: "service",
-      min_permission: "write"
+      eligible_for_module_binding: true
     });
     expect(listApiKeys).toHaveBeenNthCalledWith(2, {
       limit: 200,
-      state: "active",
-      key_type: "sk_",
-      ownership: "service",
-      min_permission: "write",
+      eligible_for_module_binding: true,
       cursor: "page-2"
     });
 

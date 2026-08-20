@@ -57,9 +57,8 @@
   }
 
   async function listCompatibleServiceKeys(): Promise<ApiKeyV2[]> {
-    // Eligibility (active, service-owned sk_ with write-or-better) is decided
-    // by the backend filters, so the picker cannot drift from the broker's
-    // binding rules.
+    // The backend owns the complete module-binding eligibility rule, including
+    // effective expiry and rotation-grace state.
     const keys: ApiKeyV2[] = [];
     const visitedCursors: string[] = [];
     let cursor: string | null = null;
@@ -67,10 +66,7 @@
     do {
       const page = await eneo.apiKeys.admin.list({
         limit: 200,
-        state: "active",
-        key_type: "sk_",
-        ownership: "service",
-        min_permission: "write",
+        eligible_for_module_binding: true,
         ...(cursor && { cursor })
       });
       for (const key of page.items) {

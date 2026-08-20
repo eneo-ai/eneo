@@ -10,8 +10,12 @@ from sqlalchemy.sql import Select
 
 from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
+    ApiKeyListCursor,
+    ApiKeyOwnership,
+    ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
+    ApiKeyType,
     ApiKeyV2InDB,
 )
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
@@ -94,7 +98,7 @@ class ApiKeysV2Repository:
         *,
         tenant_id: UUID,
         limit: int | None = None,
-        cursor: datetime | None = None,
+        cursor: ApiKeyListCursor | None = None,
         previous: bool = False,
         scope_type: ApiKeyScopeType | None = None,
         scope_id: UUID | None = None,
@@ -106,6 +110,7 @@ class ApiKeysV2Repository:
         expires_within_days: int | None = None,
         ownership: str | None = None,
         min_permission: str | None = None,
+        eligible_for_module_binding: bool = False,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -123,20 +128,30 @@ class ApiKeysV2Repository:
             expires_within_days=expires_within_days,
             ownership=ownership,
             min_permission=min_permission,
+            eligible_for_module_binding=eligible_for_module_binding,
         )
         if cursor is not None:
-            if previous:
-                # Inclusive: the previous_cursor token is the oldest row of
-                # the page being returned to (see paginate_keys), so a strict
-                # comparison would drop that row from every backward step.
-                query = query.where(self.table.created_at >= cursor)
+            if cursor.key_id is None:
+                # Rollout compatibility for timestamp-only cursors emitted by
+                # older servers. New cursors always take the total-order path.
+                comparison = (
+                    self.table.created_at >= cursor.created_at
+                    if previous
+                    else self.table.created_at < cursor.created_at
+                )
             else:
-                query = query.where(self.table.created_at < cursor)
+                position = sa.tuple_(self.table.created_at, self.table.id)
+                boundary = sa.tuple_(
+                    sa.literal(cursor.created_at),
+                    sa.literal(cursor.key_id),
+                )
+                comparison = position >= boundary if previous else position < boundary
+            query = query.where(comparison)
 
         if previous:
-            query = query.order_by(self.table.created_at.asc())
+            query = query.order_by(self.table.created_at.asc(), self.table.id.asc())
         else:
-            query = query.order_by(self.table.created_at.desc())
+            query = query.order_by(self.table.created_at.desc(), self.table.id.desc())
 
         if limit is not None:
             query = query.limit(limit + 1)
@@ -192,6 +207,7 @@ class ApiKeysV2Repository:
         expires_within_days: int | None = None,
         ownership: str | None = None,
         min_permission: str | None = None,
+        eligible_for_module_binding: bool = False,
     ) -> int:
         query = cast(
             Select[Any],
@@ -211,6 +227,7 @@ class ApiKeysV2Repository:
             expires_within_days=expires_within_days,
             ownership=ownership,
             min_permission=min_permission,
+            eligible_for_module_binding=eligible_for_module_binding,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -229,7 +246,33 @@ class ApiKeysV2Repository:
         expires_within_days: int | None,
         ownership: str | None = None,
         min_permission: str | None = None,
+        eligible_for_module_binding: bool = False,
     ) -> Select[Any]:
+        effectively_active = sa.and_(
+            self.table.revoked_at.is_(None),
+            self.table.suspended_at.is_(None),
+            sa.or_(
+                self.table.expires_at.is_(None),
+                self.table.expires_at >= sa.func.now(),
+            ),
+            sa.or_(
+                self.table.rotation_grace_until.is_(None),
+                self.table.rotation_grace_until > sa.func.now(),
+            ),
+        )
+        if eligible_for_module_binding:
+            required = PERMISSION_LEVEL_ORDER[ApiKeyPermission.WRITE.value]
+            allowed = [
+                permission
+                for permission, level in PERMISSION_LEVEL_ORDER.items()
+                if level >= required
+            ]
+            query = query.where(
+                self.table.ownership == ApiKeyOwnership.SERVICE.value,
+                self.table.key_type == ApiKeyType.SK.value,
+                self.table.permission.in_(allowed),
+                effectively_active,
+            )
         if ownership is not None:
             query = query.where(self.table.ownership == ownership)
         if min_permission is not None:

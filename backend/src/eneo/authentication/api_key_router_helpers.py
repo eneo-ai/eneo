@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.auth_models import (
+    ApiKeyListCursor,
     ApiKeyUsageEvent,
     ApiKeyUsageSummary,
     ApiKeyV2,
@@ -50,6 +51,12 @@ _GUARDRAIL_CODES: frozenset[str] = frozenset(
         "api_key_inactive",
     }
 )
+
+
+def api_key_cursor_for(key: ApiKeyV2InDB) -> ApiKeyListCursor:
+    if key.created_at is None:
+        raise ValueError("Persisted API key is missing created_at.")
+    return ApiKeyListCursor(created_at=key.created_at, key_id=key.id)
 
 
 def _resolve_request_id(request: Request | None = None) -> str | None:
@@ -151,7 +158,7 @@ def paginate_keys(
     *,
     total_count: int | None,
     limit: int | None,
-    cursor: datetime | None,
+    cursor: ApiKeyListCursor | None,
     previous: bool,
 ) -> dict[str, object]:
     if limit is None:
@@ -164,12 +171,9 @@ def paginate_keys(
     if not previous:
         if len(keys) > limit:
             page = keys[:limit]
-            # Anchor on the last emitted row: the repo filters strictly
-            # created_at < cursor, so anchoring on the first row BEYOND the
-            # page would skip that row on the next request. Rows tied on the
-            # last emitted timestamp can still be skipped — a limitation of
-            # the single-column cursor.
-            next_cursor = page[-1].created_at
+            # Anchor on the last emitted row. The cursor includes the UUID
+            # tie-breaker, so rows sharing created_at remain reachable.
+            next_cursor = api_key_cursor_for(page[-1]).serialize()
         else:
             next_cursor = None
             page = keys
@@ -178,7 +182,7 @@ def paginate_keys(
             "total_count": total_count,
             "limit": limit,
             "next_cursor": next_cursor,
-            "previous_cursor": cursor,
+            "previous_cursor": cursor.serialize() if cursor is not None else None,
         }
 
     if len(keys) > limit:
@@ -186,17 +190,17 @@ def paginate_keys(
         # cursor row itself, so the target page is the first `limit` rows;
         # the extra row proves an earlier page exists and is its oldest row —
         # the next backward token.
-        page = keys[:limit]
-        previous_cursor = keys[limit].created_at
+        page = list(reversed(keys[:limit]))
+        previous_cursor = api_key_cursor_for(keys[limit]).serialize()
     else:
-        page = keys
+        page = list(reversed(keys))
         previous_cursor = None
 
     return {
         "items": [ApiKeyV2.model_validate(key) for key in page],
         "total_count": total_count,
         "limit": limit,
-        "next_cursor": cursor,
+        "next_cursor": cursor.serialize() if cursor is not None else None,
         "previous_cursor": previous_cursor,
     }
 

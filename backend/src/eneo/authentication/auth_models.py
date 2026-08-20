@@ -1,3 +1,5 @@
+import base64
+import binascii
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, Optional
@@ -554,13 +556,61 @@ class ApiKeyListResponse(BaseModel):
 
     items: list[ApiKeyV2]
     limit: Optional[int] = None
-    next_cursor: Optional[datetime] = None
-    previous_cursor: Optional[datetime] = None
+    next_cursor: Optional[str] = None
+    previous_cursor: Optional[str] = None
     total_count: Optional[int] = None
 
     @property
     def count(self) -> int:
         return len(self.items)
+
+
+class ApiKeyListCursor(BaseModel):
+    """Opaque, total-order position in the API-key list.
+
+    ``created_at`` alone is not unique. Pairing it with the primary key makes
+    forward and backward keyset pagination deterministic even when several
+    keys were created in the same transaction. Legacy timestamp cursors remain
+    readable during rollout, while every newly emitted cursor uses this v1
+    representation.
+    """
+
+    created_at: datetime
+    key_id: UUID | None = None
+
+    model_config = ConfigDict(frozen=True)
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_created_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    def serialize(self) -> str:
+        encoded = base64.urlsafe_b64encode(self.model_dump_json().encode()).decode()
+        return f"v1.{encoded.rstrip('=')}"
+
+    @classmethod
+    def deserialize(cls, value: str) -> "ApiKeyListCursor":
+        if not value.startswith("v1."):
+            try:
+                legacy_timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Invalid API key cursor.") from exc
+            return cls(created_at=legacy_timestamp)
+
+        encoded = value.removeprefix("v1.")
+        padding = "=" * (-len(encoded) % 4)
+        try:
+            payload = base64.b64decode(
+                encoded + padding,
+                altchars=b"-_",
+                validate=True,
+            )
+            return cls.model_validate_json(payload)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("Invalid API key cursor.") from exc
 
 
 class ApiKeyCreationConstraints(BaseModel):
