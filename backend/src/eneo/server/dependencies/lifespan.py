@@ -16,7 +16,6 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionError,
 )
 from eneo.object_content.runtime import object_content_runtime
-from eneo.server.dependencies.modules import init_modules
 from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
 from eneo.settings.encryption_service import EncryptionService
@@ -72,9 +71,6 @@ async def startup():
 
     # init predefined roles
     await init_predefined_roles()
-
-    # init modules
-    await init_modules()
 
 
 async def shutdown():

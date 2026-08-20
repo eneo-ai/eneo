@@ -7,7 +7,6 @@ from uuid import UUID
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.main.models import ResourcePermission
-from eneo.modules.module import Modules
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -731,12 +730,6 @@ class SpaceActor:
             and self.space.is_personal()
             and not self._is_service_api_key()
             and Permission.PERSONAL_CHAT not in self.user.permissions
-        ):
-            return False
-
-        if (
-            resource_type == SpaceResourceType.SERVICE
-            and Modules.ENEO_APPLICATIONS not in self.user.modules
         ):
             return False
 

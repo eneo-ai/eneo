@@ -37,7 +37,6 @@ async def test_connection_table_outage_does_not_stop_startup(
     monkeypatch.setattr(lifespan_module.aiohttp_client, "stop", AsyncMock())
     monkeypatch.setattr(lifespan_module.job_manager, "init", AsyncMock())
     monkeypatch.setattr(lifespan_module, "init_predefined_roles", AsyncMock())
-    monkeypatch.setattr(lifespan_module, "init_modules", AsyncMock())
 
     await lifespan_module.startup()
 
