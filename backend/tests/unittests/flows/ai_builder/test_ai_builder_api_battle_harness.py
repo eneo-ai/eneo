@@ -5400,6 +5400,68 @@ def test_observation_input_identity_distinguishes_fixture_bytes_from_runtime_con
     assert untracked["mismatches"] == ["runtime_evidence"]
 
 
+def test_runtime_lineage_accepts_per_source_edges_with_local_ordinals() -> None:
+    harness = _battle_harness()
+    runtime_evidence = {
+        "run_contract": {
+            "steps_requiring_input": [{"step_id": "reader-step"}],
+        },
+        "uploaded_files": [
+            {"id": "runtime-file-a", "size": 11},
+            {"id": "runtime-file-b", "size": 22},
+        ],
+        "step_results": [
+            {
+                "step_id": "reader-step",
+                "status": "completed",
+                "current_attempt_no": 1,
+                "runtime_input_file_ids": ["runtime-file-a", "runtime-file-b"],
+            }
+        ],
+        "step_attempts": [
+            {
+                "step_id": "reader-step",
+                "attempt_no": 1,
+                "status": "completed",
+                "superseded_by_attempt_id": None,
+                "resolved_input_lineage": {
+                    "status": "tracked",
+                    "edges": [
+                        {
+                            "binding_ref": "runtime_files[0]",
+                            "source": {
+                                "kind": "runtime_file",
+                                "input_file_ordinal": 0,
+                                "file_id": "runtime-file-a",
+                                "checksum": "a" * 64,
+                                "byte_size": 11,
+                            },
+                        },
+                        {
+                            "binding_ref": "runtime_files[0]",
+                            "source": {
+                                "kind": "runtime_file",
+                                "input_file_ordinal": 0,
+                                "file_id": "runtime-file-b",
+                                "checksum": "b" * 64,
+                                "byte_size": 22,
+                            },
+                        },
+                    ],
+                },
+            }
+        ],
+    }
+
+    sha256s, status = harness._runtime_lineage_sha256s(
+        runtime_evidence,
+        expected_count=2,
+    )
+
+    assert status == "complete"
+    assert sha256s == ["a" * 64, "b" * 64]
+
+
 def test_complex_first_pass_provenance_rejects_each_missing_or_amplified_fact(
     monkeypatch: MonkeyPatch,
 ) -> None:
