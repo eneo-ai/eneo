@@ -70,6 +70,7 @@ from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolArgumentsError,
+    admit_propose_flow_tool_arguments,
     build_native_strict_tool_schema,
     build_propose_flow_tool_schema,
     validate_native_strict_schema,
@@ -770,11 +771,46 @@ def test_a_model_authored_placement_is_rejected_as_an_extra_property() -> None:
             arguments=_arguments(result_keys=result_keys),
             tool_schema=_prepared_schema(projection),
         )
+    with pytest.raises(ProposalToolArgumentsError):
+        admit_propose_flow_tool_arguments(
+            arguments=_arguments(result_keys=result_keys),
+            tool_schema=_prepared_schema(projection),
+        )
     with pytest.raises(ProposalIntentArgumentError):
         parse_create_flow_intent_arguments(
             _arguments(result_keys=result_keys),
             obligation_projection=projection,
         )
+
+
+def test_a_nested_result_key_copy_is_discarded_before_schema_admission() -> None:
+    state = _state((("documents", "array"),))
+    projection = named_result_projection(state)
+    assert projection is not None
+    result_keys = _staged_result_keys(projection)
+    result_keys["documents"]["children"] = [
+        {
+            "name": "document",
+            "type": "object",
+            "description": "One submitted document.",
+            "required": True,
+        }
+    ]
+    arguments = _arguments(result_keys=result_keys)
+
+    admitted = admit_propose_flow_tool_arguments(
+        arguments=arguments,
+        tool_schema=_prepared_schema(projection),
+    )
+
+    assert "children" not in admitted["result_keys"]["documents"]
+    assert "children" in arguments["result_keys"]["documents"]
+    intent = parse_create_flow_intent_arguments(
+        admitted,
+        obligation_projection=projection,
+    )
+    assert intent.obligated_output_fields[0].name == "documents"
+    assert intent.obligated_output_fields[0].field_type == "array"
 
 
 def test_the_wire_record_asks_the_model_only_what_the_user_left_open() -> None:

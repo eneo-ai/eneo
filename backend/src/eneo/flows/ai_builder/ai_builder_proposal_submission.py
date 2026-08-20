@@ -452,7 +452,7 @@ class ProposalSubmissionOwner:
         if admitted_arguments is not invocation.arguments:
             logger.info(
                 "ai_builder_proposal_arguments_normalized "
-                "session_id=%s reason=misplaced_create_child "
+                "session_id=%s reason=schema_guided_create_normalization "
                 "step_count_before=%s step_count_after=%s",
                 invocation.turn.session_id,
                 len(invocation.arguments.get("steps", ())),
