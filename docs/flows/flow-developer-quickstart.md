@@ -1,8 +1,11 @@
 # Flow Developer Quickstart
 
-Status: draft.
+This page is a developer quickstart for Eneo Flows. Core includes manual
+authoring and the complete runtime. Flow AI Builder is a stacked branch that
+compiles approved planning evidence into the same core draft model. It does not
+add a separate runtime contract.
 
-This page is a developer quickstart for Eneo Flows and Flow AI Builder. It
+It
 explains the core data model, the published runtime contract, how step inputs
 and outputs move through a run, and where to look before changing the system.
 For the deeper maintainer view, read [architecture.md](./architecture.md) and
@@ -36,7 +39,7 @@ prepared against.
 | Run Contract | `FlowRunContractPublic` | API-facing contract that tells clients which form fields, uploads, review points, and final output to expect. |
 | Flow Run | `flow_runs` | One execution of one published Flow version. Stores status, principal identity, input payload, output payload, and errors. |
 | Step Result | `flow_step_results` | Current result for one runtime step attempt. Stores resolved input, output, prompt, token usage, and status. |
-| Step Attempt | `flow_step_attempts` | Attempt history for retries and reruns. |
+| Step Attempt | `flow_step_attempts` | Attempt history for retries, recovery, and diagnostic evidence. |
 | Runtime Upload | `flow_runtime_uploaded_files` | Pre-run uploaded file accepted for a specific published runtime step. |
 | Step Input File | `flow_run_step_input_files` | Run-time binding from uploaded file to the step that consumes it. |
 | Step Result File | `flow_run_step_result_files` | Generated or declared artifact emitted by a step. |

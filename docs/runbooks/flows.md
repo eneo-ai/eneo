@@ -1,226 +1,95 @@
-# Flows Operations Runbook
+# Flows operations runbook
 
-## Runtime health endpoint
+## Runtime health
 
-`GET /api/healthz/flows` is an operator diagnostic endpoint, not a public
-liveness probe. It requires the configured Eneo super API key and does not
-accept ordinary user, tenant API, service, or super-duper credentials. Keep the
-key in the deployment secret manager and invoke the endpoint without printing
-the value:
+`GET /api/healthz/flows` is an operator diagnostic endpoint. It requires the
+configured Eneo super API key; ordinary user, tenant API, service, and
+super-duper credentials are rejected. Keep the key in the deployment secret
+manager and never print it in logs or tickets.
 
-```bash
-curl --fail-with-body --silent --show-error \
-  --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
-  "${ENEO_BASE_URL}/api/healthz/flows" | jq .
-```
+The response combines bounded database diagnostics with platform worker
+readiness for execution and maintenance. `UNKNOWN` means a diagnostic query
+failed or timed out. Missing or expired ARQ health keys and Redis probe failures
+fail closed.
 
-The response combines bounded database diagnostics with bounded platform worker
-readiness checks for execution and maintenance capacity. `UNKNOWN` means the
-database query timed out or failed. Missing or expired ARQ health keys and Redis
-probe failures fail closed as unavailable workers.
+Production has two Flow-related platform processes:
 
-Recovery and health use the same staleness predicate for running runs. A stale
-run with a pending or claimed webhook delivery is excluded from both surfaces:
-the webhook worker still owns an external effect whose outcome may be in
-progress. Do not terminalize it manually. Resolve or let the bounded webhook
-claim/retry lifecycle converge, then repeat the health check.
+- `task-execution-worker` executes queued runs;
+- `task-maintenance-worker` reconciles stale work, expires review checkpoints,
+  redispatches queued work, and delivers audit/webhook outboxes.
 
-### Health flags, effective thresholds, and recovery
+There is no Flow-private worker, beat process, or scheduler.
 
-Timing values are returned in `thresholds`; code-owned defaults are shown below.
-Any positive count triggers a flag unless an age condition is stated.
+## Health flags and recovery
 
-| Flag | Effective threshold | Recovery action |
-| --- | --- | --- |
-| `EXECUTION_WORKER_UNAVAILABLE` | The platform execution worker health key is missing or the 1-second Redis readiness probe failed. | Restore Redis connectivity and `task-execution-worker`, then repeat the endpoint check. |
-| `MAINTENANCE_WORKER_UNAVAILABLE` | The platform maintenance worker health key is missing or the 1-second Redis readiness probe failed. | Restore Redis connectivity and `task-maintenance-worker`, then repeat the endpoint check. |
-| `STALE_QUEUED_RUNS` | A queued run remains dispatch-pending for at least `stale_queued_after_seconds` (30 seconds). | Verify broker and execution-worker health; allow bounded redispatch to converge and inspect dispatch diagnosis if it does not. |
-| `ACCEPTED_DISPATCH_EXHAUSTED` | At least one queued run has exhausted dispatch after broker acceptance or an outcome-unknown send. | Check for delayed claims, then use the generation-fenced redispatch operation described below; never clear fields with SQL. |
-| `STALE_RUNNING_RUNS` | A recovery-eligible running run is at least `stale_running_after_seconds` old (task timeout plus 60 seconds) but has not exceeded the unhealthy threshold. | Verify the execution worker and wait for the maintenance reconciler; investigate if the age keeps increasing. |
-| `STALE_RUNNING_RECONCILER_LAG` | The oldest recovery-eligible running run exceeds `stale_running_unhealthy_after_seconds` (task timeout plus 180 seconds). | Restore the maintenance consumer and broker, inspect reconciler errors, and confirm the run terminalizes through normal recovery. |
-| `EXPIRED_REVIEW_CHECKPOINTS` | A reconcilable checkpoint is expired, but its age has not exceeded `review_expiry_unhealthy_after_seconds` (120 seconds). | Verify the maintenance consumer and allow review-expiry reconciliation to terminalize the checkpoint. |
-| `REVIEW_EXPIRY_RECONCILER_LAG` | The oldest reconcilable expired checkpoint is more than 120 seconds past expiry. | Restore the maintenance consumer, inspect review-expiry task failures, and verify the checkpoint reaches its normal terminal state. |
-| `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | Any terminal run updated in the 24-hour integrity lookback still has an open attempt. | Stop further mutation, preserve evidence, and investigate terminalization transaction ownership before repairing through the canonical lifecycle owner. |
-| `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | Any terminal run updated in the 24-hour integrity lookback still has an active step result. | Stop further mutation, preserve evidence, and investigate terminalization transaction ownership before repairing through the canonical lifecycle owner. |
-| `AUDIT_OUTBOX_DELIVERY_BACKLOG` | A pending audit row is still eligible after the 300-second backlog grace. | Restore audit storage and the maintenance consumer; let bounded delivery retry and verify the backlog clears. |
-| `AUDIT_OUTBOX_DEAD_LETTERS` | Any lifecycle-audit delivery exhausted its bounded attempts. | Follow the generation-fenced audit dead-letter redrive procedure below after restoring audit storage. |
-| `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | An unclaimed or sufficiently expired pending webhook delivery remains eligible beyond the 300-second grace. | Restore destination connectivity and the maintenance consumer; inspect sanitized delivery diagnosis and let bounded retry converge. |
-| `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Any pending webhook claim has reached `claim_expires_at`. | Verify the former worker is gone or no longer owns the effect, then let the maintenance delivery loop reclaim it. |
-| `WEBHOOK_OUTBOX_DEAD_LETTERS` | Any webhook delivery exhausted its five-attempt budget. | Inspect the sanitized failure and destination contract; preserve the dead letter for operator diagnosis rather than editing it with SQL. |
+| Flag | Operator response |
+| --- | --- |
+| `EXECUTION_WORKER_UNAVAILABLE` | Restore Redis and the execution worker, then repeat the health check. |
+| `MAINTENANCE_WORKER_UNAVAILABLE` | Restore Redis and the maintenance worker, then repeat the health check. |
+| `STALE_QUEUED_RUNS` | Verify broker and execution health; allow bounded redispatch to converge. |
+| `ACCEPTED_DISPATCH_EXHAUSTED` | Check for a delayed claim before using the authorized generation-fenced redispatch endpoint. Never clear fields with SQL. |
+| `STALE_RUNNING_RUNS` | Restore worker capacity and allow the stale-running reconciler to terminalize through normal ownership. |
+| `STALE_RUNNING_RECONCILER_LAG` | Restore maintenance capacity and inspect sanitized reconciler errors. |
+| `EXPIRED_REVIEW_CHECKPOINTS` | Allow review-expiry reconciliation to terminalize the checkpoint. |
+| `REVIEW_EXPIRY_RECONCILER_LAG` | Restore maintenance capacity and inspect expiry-task failures. |
+| `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | Stop mutation, preserve evidence, and investigate terminalization ownership. |
+| `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | Stop mutation, preserve evidence, and investigate terminalization ownership. |
+| `AUDIT_OUTBOX_DELIVERY_BACKLOG` | Restore audit storage and maintenance capacity; let bounded delivery retry. |
+| `AUDIT_OUTBOX_DEAD_LETTERS` | Preserve the row, restore dependencies, and follow the dead-letter guidance below. |
+| `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | Restore destination connectivity and maintenance capacity; inspect sanitized diagnosis. |
+| `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Verify the former worker no longer owns the effect, then allow bounded reclaim. |
+| `WEBHOOK_OUTBOX_DEAD_LETTERS` | Preserve the row and inspect its sanitized failure and destination contract. |
 
-The production Compose file gives both platform workers native ARQ healthchecks.
-Each check is tied to its configured capacity queue, so one worker cannot mask
-the absence of the other. Scheduled maintenance runs inside the maintenance
-worker; there is no separate scheduler process.
+A stale running run with a pending or claimed webhook delivery may still have an
+external effect in progress. Do not terminalize it manually. Let the bounded
+claim/retry lifecycle converge first.
 
-## Evidence export controls (D5)
+## Accepted dispatch exhaustion
 
-Raw evidence export remains exceptional. It keeps the existing explicit
-non-default reason gate and the audit-before-response contract: if the audit
-write or commit fails, export fails closed before protected response bytes are
-returned. Raw evidence export also requires active encryption. Enforcement of
-that encryption precondition is owned by M2.9; this runbook does not create a
-second policy owner. Until M2.9 enforcement is active and verified in the
-deployment, do not enable or perform raw export. Redacted export remains the
-default. Never place encryption keys, super API keys, or exported evidence in
-incident tickets or command history.
+A queued run whose `dispatch_exhausted_at` is set can still have a delayed
+broker-accepted delivery. First verify broker and worker health and wait for a
+possible claim. If delivery was lost, an authorized run owner may call the run
+redispatch endpoint with the observed `dispatch_exhausted_at` generation token.
+The audited compare-and-swap re-arms only that generation; concurrent requests
+cannot re-arm a later epoch. Poll the returned run after either a successful or
+no-op response. Automatic maintenance never resets an exhausted budget.
 
-## Stored HTTP credential review (M2.9)
+## Lifecycle audit outbox dead letters
 
-Authored HTTP credentials are encrypted before they are stored, and both saving
-a step and publishing a version refuse a credential that cannot be protected.
-Rows written before that enforcement can still hold an unprotected value, and a
-published version keeps whatever the draft held when it was published.
+Terminal and review transitions write durable lifecycle-audit outbox rows.
+Both `pending` and `dead_lettered` rows are required audit state and block
+run-history purge.
 
-Review legacy draft steps and published versions through an approved,
-tenant-scoped database support procedure. The application no longer ships a
-cross-tenant inventory command. The review must never rewrite, re-encrypt, or
-delete a row automatically: remediation remains an operator decision.
+The final core release exposes no public or sysadmin manual-redrive API. When a
+dead letter appears:
 
-Two findings are possible. `UNPROTECTED` names the credential fields; the value
-is never printed. It covers a plaintext value, a stored sentinel, and a value
-that carries the encryption prefix but does not decrypt — a typed literal, a
-corrupted token, or a token from a different key are all equally unprovable.
-`UNREADABLE` means the stored config or published definition no longer has the
-shape it guarantees, so nothing can be said about the credentials in it.
+1. restore the audit store, database, and platform maintenance worker;
+2. preserve the row and its bounded failure diagnosis;
+3. confirm the health endpoint and normal delivery loop after recovery;
+4. do not delete, resolve, reset attempts, or alter lifecycle fields with SQL;
+5. escalate for an audited application change if the row cannot converge.
 
-Confirm `ENCRYPTION_KEY` is configured first — without an active key nothing can
-be proved protected, so every stored credential is reported. Then re-enter the
-credentials on the reported draft steps and publish
-a new version. Published versions are immutable: an affected version has to be
-retired rather than edited, and the credential it carried must be rotated at the
-destination, because it was readable in the snapshot.
+This fail-closed policy avoids creating an unreviewed cross-tenant operator
+surface. A pending or dead-lettered row remains a retention blocker until the
+canonical delivery owner records success.
 
-## Accepted Flow Dispatch Exhaustion
+## Evidence export
 
-A queued run with `dispatch_exhausted_at` set remains queued when at least one
-delivery was broker-accepted or the process stopped before it could persist the
-broker receipt. A delayed delivery may still claim it. `GET /api/healthz/flows` reports
-`ACCEPTED_DISPATCH_EXHAUSTED`, an `UNHEALTHY` status, the affected count, and
-the oldest age. This is distinct from never-accepted exhaustion, which remains
-a terminal `failed` run with the sanitized `flow_dispatch_failed` error.
+Raw evidence export is exceptional. It requires the explicit non-default reason
+gate, active encryption, and an audit-before-response transaction. If audit or
+commit fails, protected bytes are not returned. Redacted export remains the
+default. Never put encryption keys, API keys, or exported evidence in tickets or
+command history.
 
-First verify worker and broker health and check whether a delayed worker claims
-the run. If every accepted delivery was lost, an authorized run owner may call
-`POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/` with the observed
-`dispatch_exhausted_at` in `expected_dispatch_exhausted_at`. For an accepted
-exhausted run, that audited action atomically rearms exactly that epoch and
-attempts its first dispatch. Concurrent or retried requests cannot rearm a later
-exhausted epoch; automatic maintenance never resets the budget. Confirm
-`redispatched_count: 1`, then poll the run. A zero count means either another
-actor or worker already converged the run or broker acceptance was
-outcome-unknown; poll the returned run because bounded server recovery remains
-authoritative. The existing
-`flow_run_redispatched` audit action records every authorized request and
-whether that request rearmed an exhausted epoch. Never clear exhaustion fields
-with SQL.
+## Stored HTTP credentials
 
-## Lifecycle Audit Outbox Dead Letters
+Authored HTTP credentials are encrypted before storage, and save/publish refuses
+values that cannot be protected. Legacy rows must be reviewed through an
+approved tenant-scoped support procedure. Do not automatically rewrite,
+re-encrypt, or delete them. Re-enter affected draft credentials, publish a new
+immutable version, retire the affected old version, and rotate the destination
+credential.
 
-Flow terminal and review transitions write a durable lifecycle-audit outbox.
-Undelivered rows are required audit state: both `pending` and `dead_lettered`
-rows block run-history purge. Do not delete, resolve, or update these rows with
-SQL.
-
-### Diagnose
-
-1. Check `GET /api/healthz/flows`. The
-   `audit_outbox_dead_letters` flag and `audit_outbox.dead_lettered_count`
-   indicate exhausted delivery. `audit_outbox_delivery_backlog` identifies old
-   pending rows that have not exhausted retries.
-2. Confirm the audit store and database are healthy before redrive. Redrive
-   makes the row immediately eligible and restores its full five-attempt budget.
-3. List dead letters through the operator API. It is available only with the
-   configured Eneo super API key; ordinary user, tenant API, service, and super
-   duper keys are not accepted.
-
-Set the deployment URL and configured super-key header value:
-
-```bash
-export ENEO_BASE_URL="https://eneo.example.com"
-export ENEO_SUPER_API_KEY="<super-api-key>"
-
-curl --fail-with-body --silent --show-error \
-  --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
-  "${ENEO_BASE_URL}/api/v1/sysadmin/flows/audit-outbox/dead-letters/?limit=50&offset=0" \
-  | jq .
-```
-
-The response is bounded to 200 rows per request. Advance `offset` while
-`has_more` is true. Record the selected row's `outbox_id`, tenant and run ids,
-failure text, and exact `dead_lettered_at` value. That timestamp is the
-generation token, not merely diagnostic time.
-
-### Redrive one generation
-
-Use the exact token returned by the latest list response and a trimmed,
-nonblank reason of at most 500 characters:
-
-```bash
-export OUTBOX_ID="<outbox-id>"
-export DEAD_LETTERED_AT="<dead_lettered_at-from-list>"
-
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
-  --header "Content-Type: application/json" \
-  --data "$(jq -n \
-    --arg token "${DEAD_LETTERED_AT}" \
-    --arg reason "Audit storage recovered and delivery was verified." \
-    '{expected_dead_lettered_at: $token, reason: $reason}')" \
-  "${ENEO_BASE_URL}/api/v1/sysadmin/flows/audit-outbox/${OUTBOX_ID}/redrive/" \
-  | jq .
-```
-
-Successful redrive is one atomic transaction:
-
-```text
-dead_lettered(attempts exhausted, generation T)
-  -> pending(attempts 0, eligible now, errors and terminal timestamps cleared)
-  -> delivered(at most one lifecycle audit)
-```
-
-The transaction also commits one tenant-scoped SYSTEM audit action,
-`flow_run_audit_delivery_redriven`, containing the reason and prior bounded
-delivery diagnosis. There is no separate resolve operation.
-
-### Conflicts and safe retry
-
-- `404`: the outbox id does not exist. Recheck the environment and id; no state
-  or audit changed.
-- `409` with a non-dead-lettered state: another operator or the delivery worker
-  already transitioned it. Verify current health rather than repeating blindly.
-- `409` for a changed generation: the row dead-lettered again after it was
-  listed. List again, investigate the new failure, and use the new
-  `dead_lettered_at` token. An old token can never redrive a later generation.
-- `422`: the reason/token contract is invalid. Supply an offset-aware timestamp
-  and a trimmed reason of 1-500 characters.
-- `5xx`: transition and operator audit roll back together. List again before
-  retrying; do not repair with SQL.
-
-Concurrent or repeated requests with the same token allow one transition and
-one operator audit. Treat 409 from the losing request as expected convergence.
-
-### Verify recovery
-
-1. Repeat the dead-letter list. The row should no longer appear while pending
-   or after delivery.
-2. Check `/api/healthz/flows` until the dead-letter count and flag clear. A
-   remaining backlog flag means delivery is still pending or failing.
-3. Query the tenant audit surface and confirm both the original lifecycle audit
-   and `flow_run_audit_delivery_redriven` operator audit exist. Idempotent
-   delivery must not duplicate the lifecycle audit.
-4. If the run is past its configured retention horizon, the next existing
-   retention pass may purge it only after delivery reaches `delivered`. Pending
-   and newly dead-lettered rows remain purge blockers.
-
-### Rollback and recovery
-
-To roll back the release, stop issuing redrives and revert the application
-version. Do not reverse rows already changed to `pending`: the normal worker can
-safely finish their idempotent delivery, and reverting them with SQL would lose
-the generation and operator-audit contract. If the delivery dependency remains
-unhealthy, pause the audit delivery worker to preserve attempt budget, restore
-the dependency, resume the worker, then list and redrive only rows that reached
-`dead_lettered`. A failed redrive request is transactionally safe to retry after
-re-listing.
+An `UNPROTECTED` finding identifies fields, never values. `UNREADABLE` means the
+stored configuration no longer proves its expected shape. Confirm the active
+encryption key before interpreting either result.

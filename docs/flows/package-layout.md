@@ -33,8 +33,7 @@ module at `eneo.flows.application.flow_run_recovery_policy`.
 
 ## The layers
 
-Every root entry belongs in one of these. The list is parsed by the docs-site
-generator, which matches the line below verbatim.
+Every root entry belongs in one of these. This is a hand-maintained review map.
 
 Allowed target homes:
 
@@ -90,7 +89,6 @@ Update it whenever a root entry moves or is removed.
 | flow_metadata | module | domain | Flow metadata is a domain contract. |
 | flow_resource_bindings | module | domain | Resource bindings are Flow domain relationships. |
 | flow_retention_policy | module | domain | Retention policy is a data/domain policy. |
-| flow_retention_tombstone | module | domain | Retention tombstones are domain audit records. |
 | flow_review_expiry_policy | module | domain | Review expiry rules are Flow domain policy. |
 | flow_review_policy | module | domain | Review requirements are Flow domain policy. |
 | flow_run_contract_service | module | application | Run-contract assembly is an application use case. |
@@ -101,10 +99,8 @@ Update it whenever a root entry moves or is removed.
 | flow_run_payload_validation | module | domain | Payload validation enforces Flow contract invariants. |
 | flow_run_provenance | module | domain | Provenance is Flow run domain metadata. |
 | flow_run_redaction | module | domain | Redaction policy belongs with privacy/domain rules. |
-| flow_run_rerun_graph | module | domain | Rerun graph rules are domain lifecycle rules. |
-| flow_run_rerun_request | module | application | Rerun request normalization belongs with the rerun use case. |
 | flow_run_step_input_file | module | domain | Step input file references are domain contracts. |
-| flow_run_step_inputs | module | application | Step-input resolution is run-creation/rerun orchestration. |
+| flow_run_step_inputs | module | application | Step-input resolution is run-creation and runtime-input orchestration. |
 | flow_run_step_result_file | module | domain | Step result file references are domain contracts. |
 | flow_runtime_file_integrity | module | runtime | Runtime file integrity is execution/runtime safety. |
 | flow_runtime_file_service | module | application | Runtime-file operations are application use cases. |

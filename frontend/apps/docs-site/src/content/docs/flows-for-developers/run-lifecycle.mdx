@@ -1,383 +1,120 @@
-import { Cards } from "nextra/components";
-
 # The run lifecycle
 
-Use this page when a run pauses, reruns, fails, or needs a new status. It shows which module owns each transition before you edit code.
+Use this page when changing dispatch, execution, review, recovery, or
+terminalization. A run always executes one immutable published version.
 
-## Run statuses
-
-One run row moves through these statuses. Review pauses and reruns return the run to `queued`; the checkpoint and rerun operation keep their own state, below.
-
-<div className="flow-docs-mermaid-figure">
+## Run states
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
 stateDiagram-v2
-  direction LR
-  [*] --> queued
-  queued --> running: worker starts
-  running --> awaiting_review: checkpoint opens
-  awaiting_review --> queued: approved checkpoint resumes
-  running --> completed: all steps complete
-  running --> failed: step or runtime failure
-  queued --> cancelled: user cancel or deleted flow
-  running --> cancelled: user cancel or deleted flow
-  awaiting_review --> cancelled: rejected, expired, or cancelled
-  completed --> queued: rerun accepted
-  failed --> queued: rerun accepted
-  completed --> [*]
-  failed --> [*]
-  cancelled --> [*]
+  [*] --> queued: run committed
+  queued --> running: worker claim CAS
+  queued --> failed: dispatch budget exhausted
+  queued --> cancelled: owner cancels
+  running --> awaiting_review: checkpoint opened
+  running --> completed: terminalization
+  running --> failed: terminalization
+  running --> cancelled: cancellation or recovery
+  awaiting_review --> queued: approved checkpoint resumed
+  awaiting_review --> failed: rejected or expired
+  awaiting_review --> cancelled: owner cancels
 ```
 
-</div>
+| Status | Meaning |
+| --- | --- |
+| `queued` | Committed and waiting for a platform execution worker. Dispatch may be pending, accepted, outcome-unknown, or exhausted. |
+| `running` | Claimed by the worker for the current revision. Duplicate deliveries lose the compare-and-swap claim. |
+| `awaiting_review` | Execution is paused at one active review checkpoint. |
+| `completed` | Every required step and review completed successfully. |
+| `failed` | A typed terminal failure was recorded. |
+| `cancelled` | The run was cancelled through the lifecycle owner. |
 
-| Status            | Active | Poll | Terminal | Cancellable | Awaiting review | Redispatch | Rerun eligible |
-| ----------------- | ------ | ---- | -------- | ----------- | --------------- | ---------- | -------------- |
-| `queued`          | yes    | yes  | no       | yes         | no              | yes        | no             |
-| `running`         | yes    | yes  | no       | yes         | no              | no         | no             |
-| `awaiting_review` | no     | yes  | no       | yes         | yes             | no         | no             |
-| `completed`       | no     | no   | yes      | no          | no              | no         | yes            |
-| `failed`          | no     | no   | yes      | no          | no              | no         | yes            |
-| `cancelled`       | no     | no   | yes      | no          | no              | no         | no             |
+`completed`, `failed`, and `cancelled` are terminal. A new attempt never makes a
+terminal run active again. To repeat work, create a new run.
 
-### Run capability meanings
+## Create and dispatch
 
-| Capability        | Meaning                                                        |
-| ----------------- | -------------------------------------------------------------- |
-| `Active`          | run occupies active execution capacity while queued or running |
-| `Poll`            | API consumers should keep polling for user-visible progress    |
-| `Terminal`        | runtime execution is over for this run state                   |
-| `Cancellable`     | the cancel path may still transition the run                   |
-| `Awaiting review` | the active review-checkpoint API is the next user action       |
-| `Redispatch`      | stale queued runs may be claimed and dispatched again          |
-| `Rerun eligible`  | the rerun API can accept a completed or failed run             |
+1. The API validates the published version, principal, inputs, files, capacity,
+   and optimistic version.
+2. The run and its input/file bindings commit as `queued`.
+3. `FlowRunDispatch` claims a dispatch generation in a new transaction.
+4. `PlatformFlowExecutionBackend` sends a typed task through the platform task
+   runtime.
+5. The platform ARQ adapter invokes `execute_flow_run_task` on the execution
+   queue.
 
-## Step result and attempt states
+Broker acceptance is not treated as exactly-once delivery. The database keeps
+the authoritative dispatch epoch, attempt count, recovery deadline, and
+diagnosis. An unknown send outcome remains recoverable; duplicate workers are
+rejected by status-and-revision CAS.
 
-Each step has one current result row and one row per attempt. The result is what the run reads; attempts keep the history.
+## Step execution and evidence
 
-<div className="flow-docs-mermaid-figure">
+The executor resolves each published step in order. For each execution attempt
+it records:
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-stateDiagram-v2
-  direction LR
-  [*] --> pending
-  pending --> running: executor claims step
-  running --> completed: handler output persisted
-  running --> failed: typed or generic failure
-  running --> cancelled: run cancellation
-  pending --> failed: failed run terminalization
-  pending --> cancelled: cancelled run terminalization
-```
+- immutable attempt-start input and resolved-input lineage;
+- selected model/provider configuration;
+- provider-call lifecycle and token usage;
+- result payload, diagnostics, and generated files;
+- current step-result projection.
 
-</div>
+Attempts are an append-only evidence ledger. They support task retries and
+crash recovery, not a user-facing partial-rerun operation. Mapped inputs execute
+within the same attempt contract and bounded provider-call policy.
 
-| Status      | Active | Meaning                                                        |
-| ----------- | ------ | -------------------------------------------------------------- |
-| `pending`   | yes    | preseeded result waiting for its upstream inputs               |
-| `running`   | yes    | executor claimed the step and is dispatching the handler       |
-| `completed` | no     | handler output and result files were persisted for an attempt  |
-| `failed`    | no     | typed or generic step failure was persisted and the run failed |
-| `cancelled` | no     | run cancellation or terminalization closed an active result    |
+## Review checkpoints
 
-<div className="flow-docs-mermaid-figure">
+When a step's published review policy requires review:
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-stateDiagram-v2
-  direction LR
-  [*] --> started
-  started --> completed: output persisted
-  started --> failed: typed or generic failure
-  started --> cancelled: run cancellation
-```
+1. the completed step result is captured in a revisioned checkpoint;
+2. the run moves to `awaiting_review` in the same lifecycle transaction;
+3. the reviewer may view, edit when allowed, approve, or reject;
+4. approval plus a resume idempotency key queues the same run at its next step;
+5. rejection or expiry terminalizes the run through `FlowRunTerminalizer`.
 
-</div>
+The repository owns checkpoint locks and revision CAS. The service owns
+authorization and transition policy. The runtime opens/resumes checkpoints but
+does not write terminal run state directly.
 
-| Status      | Open | Meaning                                          |
-| ----------- | ---- | ------------------------------------------------ |
-| `started`   | yes  | attempt row was opened before handler dispatch   |
-| `failed`    | no   | attempt finished with a typed or generic error   |
-| `completed` | no   | attempt finished with persisted output           |
-| `cancelled` | no   | attempt was closed because the run was cancelled |
+## Terminalization
 
-### How a step failure ends the run
+`FlowRunTerminalizer` is the only owner of terminal run transitions. The same
+transaction closes active attempts/results, cancels active checkpoints when
+required, finalizes webhook intent, and writes the lifecycle audit outbox.
 
-- `backend/src/eneo/flows/runtime/executor.py` claims the step result, opens a step attempt, dispatches the handler, and handles typed or generic failures.
-- Typed failures go through `_handle_typed_step_failure`; generic exceptions go through `_handle_generic_step_failure`.
-- Both failure paths finish the open attempt, save a failed step result, and call `FlowRunTerminalizer` with a run error code.
-- Downstream steps do not continue after a failed step because terminalization moves the run to `failed`.
-- When the run fails, the terminalizer closes active `pending` or `running` step results and open attempts as failed; when the run is cancelled, it closes them as cancelled. Completed results stay unchanged.
-- `FlowRunRepository` locks the parent run before claiming a step result or opening an attempt, then rechecks that the run is still `queued` or `running`. Terminalization and child mutation therefore share parent-before-child lock order, and a losing child writer cannot recreate active work.
-- Attempt-start failures have no attempt number, so the executor saves the failed result with `attempt_no=None` and terminalizes the run.
+This atomic boundary prevents a terminal run from retaining open attempts or
+missing its audit intent. Delivery of audit and webhook effects happens later
+on the platform maintenance queue.
 
-## Review checkpoint states
+## Recovery and maintenance
 
-`Open` means a checkpoint can still receive a decision, be resumed, or be reconciled by expiry.
+The platform maintenance worker schedules five Flow jobs:
 
-<div className="flow-docs-mermaid-figure">
+- stale-running reconciliation;
+- expired-review reconciliation;
+- stale-queued redispatch;
+- audit-outbox delivery;
+- webhook-outbox delivery.
 
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-stateDiagram-v2
-  direction LR
-  [*] --> awaiting_review
-  awaiting_review --> edited: edit output
-  edited --> edited: edit again
-  awaiting_review --> approved: approve
-  edited --> approved: approve
-  approved --> resumed: resume
-  awaiting_review --> rejected: reject
-  edited --> rejected: reject
-  awaiting_review --> expired: expiry reconciler
-  edited --> expired: expiry reconciler
-  awaiting_review --> cancelled: run terminalized
-  edited --> cancelled: run terminalized
-  approved --> cancelled: run terminalized before resume
-```
+There is no Flow-specific worker, scheduler, Celery application, or transport
+setting. `eneo.worker.platform_tasks` owns ARQ registration; Flow application
+and domain modules contain no ARQ imports.
 
-</div>
+## Starting again
 
-| State             | Open | Expires | Meaning                                                                    |
-| ----------------- | ---- | ------- | -------------------------------------------------------------------------- |
-| `awaiting_review` | yes  | yes     | newly opened checkpoint; review UI can edit, approve, or reject            |
-| `edited`          | yes  | yes     | reviewer changed the proposed step output before deciding                  |
-| `approved`        | yes  | no      | checkpoint can be resumed with an idempotency key                          |
-| `rejected`        | no   | no      | terminal checkpoint decision; run is cancelled with `flow_review_rejected` |
-| `resumed`         | no   | no      | decision replay is idempotent and the run has moved back to queued         |
-| `cancelled`       | no   | no      | terminal checkpoint state after run terminalization or cancellation        |
-| `expired`         | no   | no      | terminal checkpoint state written by `FlowReviewExpiryReconciler`          |
+The removed partial-rerun and invalidation APIs do not exist in the final
+product. “Run again” means creating a new run from a published Flow. This keeps
+the old run and its evidence immutable and makes repeated provider effects
+explicit to the caller.
 
-## Rerun operation states
+## Source of truth
 
-A rerun operation is active from acceptance until the run reaches a terminal status; it then takes the run's terminal status.
-
-<div className="flow-docs-mermaid-figure">
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-stateDiagram-v2
-  direction LR
-  [*] --> queued
-  queued --> running: root attempt starts
-  queued --> completed: run terminalizes
-  running --> completed: run terminalizes
-  queued --> failed: run terminalizes
-  running --> failed: run terminalizes
-  queued --> cancelled: run terminalizes
-  running --> cancelled: run terminalizes
-```
-
-</div>
-
-| Status      | Active | Meaning                                                                        |
-| ----------- | ------ | ------------------------------------------------------------------------------ |
-| `queued`    | yes    | accepted operation waiting for the worker to execute the root invalidated step |
-| `running`   | yes    | root rerun attempt started and downstream invalidated steps are being rebuilt  |
-| `completed` | no     | run terminalized successfully while the rerun operation was active             |
-| `failed`    | no     | run terminalized failed while the rerun operation was active                   |
-| `cancelled` | no     | run terminalized cancelled while the rerun operation was active                |
-
-## Golden paths
-
-### Create and execute a run
-
-<div className="flow-docs-mermaid-figure">
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-sequenceDiagram
-  participant API as "Run API"
-  participant Service as "FlowRunService"
-  participant Dispatch as "Flow dispatch coordinator"
-  participant Worker as "flows.execute task"
-  participant Executor as "FlowRunExecutor"
-  participant Terminalizer as "FlowRunTerminalizer"
-  API->>Service: create run as queued
-  API->>Dispatch: dispatch queued epoch after commit
-  Dispatch->>Worker: publish revisioned task
-  Worker->>Executor: execute run
-  Executor->>Terminalizer: terminalize completed, failed, or cancelled
-```
-
-</div>
-
-- `backend/src/eneo/flows/api/flow_run_lifecycle_router.py` parses the create request and schedules dispatch after commit.
-- `backend/src/eneo/flows/application/flow_run_service.py` creates the run and binds validated runtime inputs.
-- `backend/src/eneo/flows/application/flow_dispatch.py` owns due-attempt claim, broker send, durable acceptance or failure recording, and explicit redrive. Broker delivery remains at-least-once: the bounded recovery clock stays armed until the repository's status-and-revision compare-and-set claims the run, so duplicate deliveries are harmless. Exhaustion after broker acceptance or an interrupted acceptance receipt remains queued for a late worker; an audited redispatch request can rearm the caller-observed exhausted epoch when no delivery claims it, and a retried request cannot reset a later epoch. Only exhaustion with durable backend rejections becomes failed.
-- `backend/src/eneo/flows/runtime/tasks.py` resolves the runtime actor and constructs the executor.
-- `backend/src/eneo/flows/infrastructure/flow_run_repo.py` writes queued to running through `mark_running_if_claimable`.
-- `backend/src/eneo/flows/runtime/executor.py` runs steps and hands terminal outcomes to the terminalizer.
-- `backend/src/eneo/flows/application/flow_run_terminalization.py` writes terminal run state.
-
-### Step execution and handler dispatch
-
-<div className="flow-docs-mermaid-figure">
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-sequenceDiagram
-  participant Executor as "FlowRunExecutor"
-  participant Repo as "FlowRunRepository"
-  participant Runtime as "StepExecutionRuntime"
-  participant Outcome as "run_outcome.py"
-  Executor->>Repo: claim step result
-  Executor->>Runtime: execute typed step handler
-  Runtime-->>Executor: output or typed failure
-  Executor->>Repo: persist step result and attempt
-  Executor->>Outcome: finalize when no active step remains
-```
-
-</div>
-
-- `backend/src/eneo/flows/runtime/executor.py` owns the step loop and failure handling.
-- `backend/src/eneo/flows/infrastructure/flow_run_repo.py` serializes step claims and attempt starts against terminalization by locking and revalidating the parent run before child mutation.
-- `backend/src/eneo/flows/runtime/step_execution_runtime.py` owns handler dispatch.
-- `backend/src/eneo/flows/runtime/run_outcome.py` chooses the terminal run outcome from step results.
-
-### Review checkpoint pause, decision, and resume
-
-<div className="flow-docs-mermaid-figure">
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-sequenceDiagram
-  participant Executor as "FlowRunExecutor"
-  participant Repo as "ReviewCheckpointRepository"
-  participant API as "Review API"
-  participant Terminalizer as "FlowRunTerminalizer"
-  participant Dispatch as "Flow dispatch coordinator"
-  participant Worker as "flows.execute task"
-  Executor->>Repo: open checkpoint for completed reviewed step
-  Repo-->>Executor: run becomes awaiting_review
-  API->>Repo: edit and approve checkpoint
-  API->>Repo: resume approved checkpoint with idempotency key
-  Repo-->>API: run is queued
-  API->>Dispatch: dispatch resumed queued epoch after commit
-  Dispatch->>Worker: publish revisioned task
-  API->>Repo: reject active checkpoint
-  API->>Terminalizer: terminalize run as cancelled with flow_review_rejected
-```
-
-</div>
-
-- `backend/src/eneo/flows/runtime/executor.py` requests checkpoint opening after a reviewed step completes.
-- `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py` writes checkpoint states and run await/resume transitions.
-- `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py` validates review API use cases.
-- `backend/src/eneo/flows/application/flow_dispatch.py` owns the resumed queue epoch's bounded dispatch lifecycle.
-- `backend/src/eneo/flows/runtime/tasks.py` executes the queued run after resume dispatch.
-- `backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py` expires active checkpoints and cancels the run through the terminalizer; `runtime/tasks.py` owns the `flows.reconcile_review_expiry` task.
-
-### Rerun with invalidation
-
-<div className="flow-docs-mermaid-figure">
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-sequenceDiagram
-  participant API as "Rerun API"
-  participant Service as "FlowRunRerunService"
-  participant Graph as "Rerun graph"
-  participant Repo as "FlowRunRerunRepository"
-  participant Dispatch as "Flow dispatch coordinator"
-  participant Worker as "flows.execute task"
-  participant Executor as "FlowRunExecutor"
-  API->>Service: request rerun for one completed step
-  Service->>Graph: collect downstream invalidated steps
-  Service->>Repo: accept or replay operation
-  Repo-->>API: run reset to queued with invalidation rows
-  API->>Dispatch: dispatch rerun queue epoch after commit
-  Dispatch->>Worker: publish revisioned task when operation is new
-  Executor->>Repo: link new attempts as invalidated steps rerun
-```
-
-</div>
-
-- `backend/src/eneo/flows/application/flow_run_rerun_service.py` normalizes request payloads and fingerprinting.
-- `backend/src/eneo/flows/flow_run_rerun_graph.py` owns downstream invalidation graph construction.
-- `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py` persists rerun operations and resets the run to queued.
-- `backend/src/eneo/flows/application/flow_dispatch.py` owns the rerun queue epoch's bounded dispatch lifecycle.
-- `backend/src/eneo/flows/runtime/executor.py` links rerun invalidated steps to new attempts.
-
-### Bind uploaded files to a run
-
-<div className="flow-docs-mermaid-figure">
-
-```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#f8f6f0", "primaryColor": "#e8ded1", "primaryTextColor": "#242620", "primaryBorderColor": "#6f7b5d", "secondaryColor": "#d7e0d2", "tertiaryColor": "#f1ece4", "lineColor": "#78816f", "edgeLabelBackground": "#f8f6f0", "clusterBkg": "#f4efe7", "clusterBorder": "#9a8a73", "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif"}}}%%
-sequenceDiagram
-  participant UploadAPI as "Runtime upload API"
-  participant FileService as "FlowRuntimeFileService"
-  participant UploadRepo as "FlowRuntimeUploadRepository"
-  participant RunService as "FlowRunService"
-  participant StepInputs as "flow_run_step_inputs.py"
-  participant Rows as "flow_run_step_input_file_rows.py"
-  UploadAPI->>FileService: upload file for published step
-  FileService->>UploadRepo: create flow_runtime_uploaded_files row
-  RunService->>StepInputs: validate step_inputs[step_id].file_ids
-  StepInputs->>UploadRepo: list_bound_file_ids_for_owner(lock_for_binding=True)
-  RunService->>Rows: insert flow_run_step_input_files for attempt 1
-```
-
-</div>
-
-- `FlowRuntimeFileService` validates upload MIME type and size for a published runtime step before the file can be reused in a run.
-- `FlowRuntimeUploadRepository` writes `flow_runtime_uploaded_files` with the flow, tenant, step, and principal owner.
-- Run creation accepts `step_inputs[step_id].file_ids`; `flow_run_step_inputs.py` checks file access, limits, and existing upload binding.
-- Binding validation calls `list_bound_file_ids_for_owner(..., lock_for_binding=True)` before relational `flow_run_step_input_files` rows are inserted.
-- Reruns copy or replace `flow_run_step_input_files` rows for rerun attempts; there is no JSON step-input branch.
-
-## Source guards
-
-<details>
-<summary>25 guarded source files</summary>
-
-| Source                                                                     | Guarded lifecycle role                                                                                                                                     |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend/src/eneo/flows/enums.py`                                          | Run status vocabulary: run statuses, step statuses, status capabilities, review checkpoint states, and rerun operation states.                             |
-| `backend/src/eneo/flows/api/flow_run_router.py`                            | Run router aggregate: feature-router registration for lifecycle, review, rerun, steps, and evidence.                                                       |
-| `backend/src/eneo/flows/api/flow_run_lifecycle_router.py`                  | Run lifecycle API adapter: status capabilities, create, list, get, cancel, and redispatch HTTP adaptation.                                                 |
-| `backend/src/eneo/flows/api/flow_run_review_router.py`                     | Run review API adapter: active, edit, approve, reject, and resume review checkpoint HTTP adaptation.                                                       |
-| `backend/src/eneo/flows/api/flow_run_rerun_router.py`                      | Run rerun API adapter: step-rerun HTTP adaptation and dispatch scheduling.                                                                                 |
-| `backend/src/eneo/flows/application/flow_run_service.py`                   | Run service: run creation, input normalization, and relational runtime-file binding.                                                                       |
-| `backend/src/eneo/flows/application/flow_dispatch.py`                      | Dispatch coordinator: due-attempt claim orchestration, broker send, and durable acceptance or failure recording.                                           |
-| `backend/src/eneo/flows/domain/flow_run_recovery_policy.py`                | Dispatch recovery policy: bounded dispatch attempts, retry delays, and stale-running thresholds.                                                           |
-| `backend/src/eneo/flows/infrastructure/flow_run_repo.py`                   | Run repository: dispatch compare-and-set, queued-to-running claim, parent-first step mutation locks, active step-result closure, and open-attempt closure. |
-| `backend/src/eneo/flows/runtime/tasks.py`                                  | Runtime task: worker entrypoint, actor resolution, tracing, executor construction, and stale-run task orchestration.                                       |
-| `backend/src/eneo/flows/runtime/flow_runtime_health.py`                    | Runtime health: dispatch backlog and stale-running health classification without lifecycle writes.                                                         |
-| `backend/src/eneo/flows/runtime/executor.py`                               | Executor: step claim, step execution, review pause, rerun attempt linking, and finalization handoff.                                                       |
-| `backend/src/eneo/flows/application/flow_run_terminalization.py`           | Terminalizer: terminal run status writes, run error writes, active checkpoint cancellation, and active rerun closure.                                      |
-| `backend/src/eneo/flows/runtime/run_outcome.py`                            | Run outcome: final run outcome selection from current step results.                                                                                        |
-| `backend/src/eneo/flows/infrastructure/flow_run_review_checkpoint_repo.py` | Review checkpoint repository: review checkpoint persistence, state transitions, and run await/resume transitions.                                          |
-| `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py` | Review checkpoint service: review API use cases and domain-error to API-error translation.                                                                 |
-| `backend/src/eneo/flows/application/flow_review_expiry_reconciliation.py`  | Review expiry reconciler: expired review checkpoint reconciliation and run cancellation handoff.                                                           |
-| `backend/src/eneo/flows/application/flow_run_rerun_service.py`             | Rerun service: rerun request normalization, validation, fingerprinting, and command creation.                                                              |
-| `backend/src/eneo/flows/flow_run_rerun_graph.py`                           | Rerun graph: downstream invalidation graph construction.                                                                                                   |
-| `backend/src/eneo/flows/infrastructure/flow_run_rerun_repo.py`             | Rerun repository: rerun operation persistence, invalidated-step rows, input overrides, and run reset to queued.                                            |
-| `backend/src/eneo/flows/flow_run_step_inputs.py`                           | Step input validation: runtime step input normalization, upload access validation, and binding locks.                                                      |
-| `backend/src/eneo/flows/flow_runtime_file_service.py`                      | Runtime file service: runtime upload validation and reusable upload registration.                                                                          |
-| `backend/src/eneo/flows/flow_runtime_upload_repo.py`                       | Runtime upload repository: runtime upload owner, tenant, flow, and step binding checks.                                                                    |
-| `backend/src/eneo/flows/infrastructure/flow_run_step_input_file_rows.py`   | Step input file rows: relational run step-input file row construction and insertion.                                                                       |
-| `backend/tests/unittests/flows/test_flow_docs_site_contract.py`            | Committed lifecycle page parity, enum coverage, and source-reference drift guard.                                                                          |
-
-</details>
-
-## Related
-
-<Cards num={2}>
-
-<Cards.Card
-  title="Key decisions"
-  href="/docs/flows-for-developers/key-decisions"
-  arrow
-/>
-
-<Cards.Card
-  title="When things fail"
-  href="/docs/flows-for-developers/when-things-fail"
-  arrow
-/>
-
-</Cards>
+- Statuses and capabilities: `backend/src/eneo/flows/enums.py`
+- Run creation: `backend/src/eneo/flows/application/flow_run_service.py`
+- Dispatch: `backend/src/eneo/flows/application/flow_dispatch.py`
+- Execution task: `backend/src/eneo/flows/runtime/tasks.py`
+- Executor: `backend/src/eneo/flows/runtime/executor.py`
+- Review service: `backend/src/eneo/flows/application/flow_run_review_checkpoint_service.py`
+- Terminalization: `backend/src/eneo/flows/application/flow_run_terminalization.py`
+- Platform registration: `backend/src/eneo/worker/platform_tasks.py`

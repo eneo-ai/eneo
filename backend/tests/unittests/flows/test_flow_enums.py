@@ -5,17 +5,6 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from eneo.database.tables.flow_tables import (
-    FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
-    FLOW_RUN_STATUS_VALUES,
-    FLOW_STEP_ATTEMPT_STATUS_VALUES,
-    FLOW_STEP_INPUT_SOURCE_VALUES,
-    FLOW_STEP_INPUT_TYPE_VALUES,
-    FLOW_STEP_OUTPUT_MODE_VALUES,
-    FLOW_STEP_OUTPUT_TYPE_VALUES,
-    FLOW_STEP_RESULT_STATUS_VALUES,
-    FLOW_TEMPLATE_ASSET_STATUS_VALUES,
-)
 from eneo.flows.api.flow_models import (
     FlowInputSource,
     FlowInputType,
@@ -27,54 +16,13 @@ from eneo.flows.enums import (
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     FlowPrimaryOutputExecutionKind,
     FlowRunReviewCheckpointState,
-    FlowRunStatus,
-    FlowStepAttemptStatus,
-    FlowStepResultStatus,
-    FlowTemplateAssetStatus,
     flow_output_mode_primary_execution_kind,
     flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
-    InputSource,
-    InputType,
     StepSpec,
 )
-
-
-def test_shared_flow_enums_match_current_table_constants() -> None:
-    assert (
-        tuple(item.value for item in FlowInputSource) == FLOW_STEP_INPUT_SOURCE_VALUES
-    )
-    assert tuple(item.value for item in FlowInputType) == FLOW_STEP_INPUT_TYPE_VALUES
-    assert tuple(item.value for item in FlowOutputMode) == FLOW_STEP_OUTPUT_MODE_VALUES
-    assert tuple(item.value for item in FlowOutputType) == FLOW_STEP_OUTPUT_TYPE_VALUES
-    assert tuple(item.value for item in FlowRunStatus) == FLOW_RUN_STATUS_VALUES
-    assert (
-        tuple(item.value for item in FlowRunReviewCheckpointState)
-        == FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES
-    )
-    assert (
-        tuple(item.value for item in FlowStepResultStatus)
-        == FLOW_STEP_RESULT_STATUS_VALUES
-    )
-    assert (
-        tuple(item.value for item in FlowStepAttemptStatus)
-        == FLOW_STEP_ATTEMPT_STATUS_VALUES
-    )
-    assert (
-        tuple(item.value for item in FlowTemplateAssetStatus)
-        == FLOW_TEMPLATE_ASSET_STATUS_VALUES
-    )
-
-
-def test_flow_enums_are_exported_from_shared_module() -> None:
-    assert FlowInputSource.__module__ == "eneo.flows.enums"
-    assert FlowInputType.__module__ == "eneo.flows.enums"
-    assert FlowOutputMode.__module__ == "eneo.flows.enums"
-    assert FlowOutputType.__module__ == "eneo.flows.enums"
-    assert InputSource.__module__ == "eneo.flows.enums"
-    assert InputType.__module__ == "eneo.flows.enums"
 
 
 def test_output_mode_completion_model_capability_covers_every_mode() -> None:

@@ -1,5 +1,12 @@
 # Flow launch scope and lifecycle
 
+> **Historical record.** The final Flow tidy supersedes this ADR where it
+> describes classification-based retention, retention preview/confirmation,
+> tombstones, or user/service partial rerun. Current behavior is documented in
+> [Flow architecture](../flows/architecture.md): simple inherited retention and
+> a new complete run to repeat work. The remaining decisions below explain
+> historical intent and must not override the shipped implementation.
+
 - **Status:** Accepted
 - **Date:** 2026-07-11
 - **Last revised:** 2026-07-24

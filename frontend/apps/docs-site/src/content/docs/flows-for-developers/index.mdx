@@ -27,14 +27,14 @@ flowchart LR
 
 Flows are Eneo's versioned AI workflow runtime. The useful mental model is:
 authoring creates a draft, publish freezes a version, run executes that version,
-review can pause a run, and rerun can invalidate work after a completed step.
+review can pause a run, and a new run repeats completed work when needed.
 
 ## The code layers
 
 | Layer            | Owns                                                                  | Start here when                                                      |
 | ---------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `api`            | HTTP adapters, OpenAPI-facing schemas, and response assembly          | A route, status code, or public error changes                        |
-| `application`    | Use cases and request-independent orchestration                       | A flow, run, review, rerun, evidence, or retention operation changes |
+| `application`    | Use cases and request-independent orchestration                       | A flow, run, review, evidence, or retention operation changes        |
 | `domain`         | Typed contracts, policies, value objects, and invariants              | A lifecycle rule or authored/runtime contract changes                |
 | `infrastructure` | SQLAlchemy repositories and storage adapters                          | Persistence, tenant scope, locks, or schema usage changes            |
 | `runtime`        | Worker tasks, executor, step handlers, output formatting, and tracing | Step execution, retries, terminalization handoff, or OTel changes    |
@@ -64,7 +64,7 @@ or authoring code mutates run history, the boundary is probably wrong.
 | Build against the public API           | [Flows API Guide](/guides/flows-api-guide)                                                            | Request and response shapes for consumer integrations              |
 | Review module ownership                | [How Flows is built](/docs/flows-for-developers/how-built)                                            | Which layer and source module owns the change                      |
 | Review persistence or retention        | [The data schema](/docs/flows-for-developers/data-schema)                                             | Which tables, foreign keys, delete rules, and JSONB owners apply   |
-| Review run or rerun lifecycle behavior | [The run lifecycle](/docs/flows-for-developers/run-lifecycle)                                         | Which service owns each state transition and recovery path         |
+| Review run lifecycle behavior          | [The run lifecycle](/docs/flows-for-developers/run-lifecycle)                                         | Which service owns each state transition and recovery path         |
 | Review error behavior                  | [When things fail](/docs/flows-for-developers/when-things-fail)                                       | Which typed error reaches the API consumer and what action follows |
 | Review architecture decisions          | [Key decisions](/docs/flows-for-developers/key-decisions)                                             | Which long-term tradeoffs the implementation depends on            |
 | Prepare or review a Flow PR            | [Reviewing Flows code](/docs/flows-for-developers/reviewing-flows-code)                               | Which files to touch and which validation command proves the work  |
