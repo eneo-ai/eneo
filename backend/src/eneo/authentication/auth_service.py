@@ -76,8 +76,16 @@ class AuthService:
         user: UserInDB | None,
         secret_key: str | None = None,
         audience: str = JWT_AUDIENCE,
-        expires_in: int = JWT_EXPIRY_TIME_MINUTES,
+        expires_in: float = JWT_EXPIRY_TIME_MINUTES,
+        extra_claims: dict[str, Any] | None = None,
     ) -> str:
+        """Mint an access token; ``expires_in`` is in minutes.
+
+        ``extra_claims`` follows the same contract as the MCP token above:
+        unknown claims ride through ``JWTPayload`` on decode and are read out
+        separately via :meth:`get_verified_claims`. Reserved JWT claims cannot
+        be overridden through it.
+        """
         if user is None:
             raise ValueError("user is required to create an access token")
 
@@ -97,11 +105,17 @@ class AuthService:
             **jwt_meta.model_dump(),
             **jwt_creds.model_dump(),
         )
+        payload = token_payload.model_dump()
+        if extra_claims:
+            reserved = set(extra_claims) & set(payload)
+            if reserved:
+                raise ValueError(
+                    f"extra_claims may not override reserved claims: {sorted(reserved)}"
+                )
+            payload.update(extra_claims)
         # NOTE - previous versions of pyjwt ("<2.0") returned the token as bytes insted of a string.
         # That is no longer the case and the `.decode("utf-8")` has been removed.
-        access_token = jwt.encode(
-            token_payload.model_dump(), secret_key, algorithm=JWT_ALGORITHM
-        )
+        access_token = jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
         return access_token
 
     def create_scoped_mcp_token(
@@ -144,6 +158,20 @@ class AuthService:
     def get_username_from_token(self, token: str, secret_key: str) -> str | None:
         return self.get_jwt_payload(token, key=str(secret_key)).username
 
+    def get_verified_claims(
+        self,
+        token: str,
+        key: str,
+        aud: str = JWT_AUDIENCE,
+        algs: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Verified raw claims, including ones ``JWTPayload`` does not model."""
+        algs = algs or [JWT_ALGORITHM]
+        try:
+            return jwt.decode(token, key=key, audience=aud, algorithms=algs)
+        except jwt.PyJWTError:
+            raise AuthenticationException("Could not validate token credentials.")
+
     def get_jwt_payload(
         self,
         token: str,
@@ -151,12 +179,11 @@ class AuthService:
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
     ) -> JWTPayload:
-        algs = algs or [JWT_ALGORITHM]
         try:
-            decoded_token = jwt.decode(token, key=key, audience=aud, algorithms=algs)
-            payload = JWTPayload(**decoded_token)
-
-        except (jwt.PyJWTError, ValidationError):
+            payload = JWTPayload(
+                **self.get_verified_claims(token, key=key, aud=aud, algs=algs)
+            )
+        except ValidationError:
             raise AuthenticationException("Could not validate token credentials.")
 
         return payload

@@ -33,8 +33,11 @@ CATEGORY_MAPPINGS = {
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
+    ActionType.MODULE_SET_REPLACED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
-    # SCIM Provisioning Actions
+    ActionType.MODULE_REMOVED_FROM_TENANT.value: "admin_actions",
+    ActionType.MODULE_CLIENT_CONFIG_UPDATED.value: "admin_actions",
+    # SCIM Provisioning Actions (11 actions)
     ActionType.SCIM_USER_PROVISIONED.value: "admin_actions",
     ActionType.SCIM_USER_RECONCILED.value: "admin_actions",
     ActionType.SCIM_USER_REACTIVATED.value: "admin_actions",
@@ -136,6 +139,9 @@ CATEGORY_MAPPINGS = {
     ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_ENABLED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_DISABLED.value: "security_events",
+    ActionType.MODULE_AUTH_TICKET_ISSUED.value: "security_events",
+    ActionType.MODULE_AUTH_TOKEN_EXCHANGED.value: "security_events",
+    ActionType.MODULE_AUTH_TOKEN_REFRESHED.value: "security_events",
     # File Operations (4 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",

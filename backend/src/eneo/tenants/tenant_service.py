@@ -6,6 +6,7 @@ from pydantic import HttpUrl
 
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import ModelId
+from eneo.modules.module import ModuleTenantAssignment
 from eneo.tenants.crawler_settings_helper import get_all_crawler_settings
 from eneo.tenants.masking import mask_api_key
 from eneo.tenants.provider_field_config import validate_provider_credentials
@@ -202,8 +203,20 @@ class TenantService:
         self._validate(tenant, tenant_id)
         return await self.repo.update_show_model_pricing(tenant_id, show_model_pricing)
 
-    async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
-        return await self.repo.add_modules(list_of_module_ids, tenant_id)
+    async def replace_modules(
+        self, list_of_module_ids: list[ModelId], tenant_id: UUID
+    ) -> TenantInDB:
+        return await self.repo.replace_modules(list_of_module_ids, tenant_id)
+
+    async def enable_module(
+        self, tenant_id: UUID, module_id: UUID
+    ) -> ModuleTenantAssignment:
+        return await self.repo.enable_module(tenant_id=tenant_id, module_id=module_id)
+
+    async def disable_module(
+        self, tenant_id: UUID, module_id: UUID
+    ) -> ModuleTenantAssignment:
+        return await self.repo.disable_module(tenant_id=tenant_id, module_id=module_id)
 
     async def set_credential(
         self,

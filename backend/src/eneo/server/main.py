@@ -470,9 +470,11 @@ def get_application():
                 if isinstance(operation, dict) and "security" in operation:
                     security = cast(list[dict[str, list[Any]]], operation["security"])
                     operation["security"] = [
-                        {"APIKeyAuth" if k == "default" else k: v}
+                        {
+                            "APIKeyAuth" if k == "default" else k: v
+                            for k, v in sec.items()
+                        }
                         for sec in security
-                        for k, v in sec.items()
                     ]
 
         # WSO2 compatibility: Remove invalid "NOT_PROVIDED" defaults from schemas

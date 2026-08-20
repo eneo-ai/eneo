@@ -14,10 +14,11 @@ from sqlalchemy.orm import selectinload
 
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.module_table import Modules
-from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.tenant_table import Tenants, tenants_modules_table
 from eneo.main import exceptions
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
+from eneo.modules.module import ModuleTenantAssignment
 from eneo.tenants.masking import mask_api_key
 from eneo.tenants.tenant import TenantBase, TenantInDB, TenantUpdate
 
@@ -89,23 +90,115 @@ class TenantRepository:
 
         return await self.delegate.get_all()
 
-    async def add_modules(self, list_of_module_ids: list[ModelId], tenant_id: UUID):
-        module_ids = [module.id for module in list_of_module_ids]
+    async def replace_modules(
+        self, list_of_module_ids: list[ModelId], tenant_id: UUID
+    ) -> TenantInDB:
+        """Replace the tenant's complete module set.
+
+        This preserves the existing bulk endpoint's historical semantics. New
+        callers that enable or disable one module should use the targeted
+        methods below instead of performing a read-modify-write cycle.
+        """
+        module_ids = list(dict.fromkeys(module.id for module in list_of_module_ids))
         module_stmt = sa.select(Modules).filter(Modules.id.in_(module_ids))
         modules = await self.session.scalars(module_stmt)
+        replacement_modules = list(modules.all())
+        if {module.id for module in replacement_modules} != set(module_ids):
+            raise exceptions.NotFoundException("Module not found.")
 
+        # Every assignment mutation locks the same tenant row. This preserves
+        # full-set replacement semantics when targeted PUT/DELETE requests run
+        # concurrently for the tenant.
+        tenant = await self._get_tenant_with_modules(tenant_id, for_update=True)
+
+        tenant.modules = replacement_modules
+
+        return TenantInDB.model_validate(tenant)
+
+    async def enable_module(
+        self, tenant_id: UUID, module_id: UUID
+    ) -> ModuleTenantAssignment:
+        """Atomically enable one module without changing other assignments."""
+        module_key = await self._require_module_assignment_target(
+            tenant_id=tenant_id, module_id=module_id
+        )
+        insert = (
+            postgresql.insert(tenants_modules_table)
+            .values(tenant_id=tenant_id, module_id=module_id)
+            .on_conflict_do_nothing(
+                index_elements=[
+                    tenants_modules_table.c.tenant_id,
+                    tenants_modules_table.c.module_id,
+                ]
+            )
+            .returning(tenants_modules_table.c.module_id)
+        )
+        inserted_module_id = (await self.session.execute(insert)).scalar_one_or_none()
+
+        return ModuleTenantAssignment(
+            tenant_id=tenant_id,
+            module_id=module_id,
+            module_key=module_key,
+            enabled=True,
+            changed=inserted_module_id is not None,
+        )
+
+    async def disable_module(
+        self, tenant_id: UUID, module_id: UUID
+    ) -> ModuleTenantAssignment:
+        """Atomically disable one module and delete its client config."""
+        module_key = await self._require_module_assignment_target(
+            tenant_id=tenant_id, module_id=module_id
+        )
+        delete = (
+            sa.delete(tenants_modules_table)
+            .where(
+                tenants_modules_table.c.tenant_id == tenant_id,
+                tenants_modules_table.c.module_id == module_id,
+            )
+            .returning(tenants_modules_table.c.module_id)
+        )
+        deleted_module_id = (await self.session.execute(delete)).scalar_one_or_none()
+
+        return ModuleTenantAssignment(
+            tenant_id=tenant_id,
+            module_id=module_id,
+            module_key=module_key,
+            enabled=False,
+            changed=deleted_module_id is not None,
+        )
+
+    async def _require_module_assignment_target(
+        self, tenant_id: UUID, module_id: UUID
+    ) -> str:
+        """Validate both foreign-key targets and return the public module key."""
+        tenant_exists = await self.session.scalar(
+            sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
+        )
+        if tenant_exists is None:
+            raise exceptions.NotFoundException("Tenant not found.")
+
+        module_key = await self.session.scalar(
+            sa.select(Modules.name).where(Modules.id == module_id)
+        )
+        if module_key is None:
+            raise exceptions.NotFoundException("Module not found.")
+        return module_key
+
+    async def _get_tenant_with_modules(
+        self, tenant_id: UUID, *, for_update: bool = False
+    ) -> Tenants:
         tenant_stmt = (
             sa.select(Tenants)
             .where(Tenants.id == tenant_id)
             .options(selectinload(Tenants.modules))
         )
+        if for_update:
+            tenant_stmt = tenant_stmt.with_for_update()
         tenant = await self.session.scalar(tenant_stmt)
         if tenant is None:
             raise exceptions.NotFoundException("Tenant not found.")
-
-        tenant.modules = list(modules.all())
-
-        return TenantInDB.model_validate(tenant)
+        return tenant
 
     async def update_tenant(self, tenant: TenantUpdate) -> TenantInDB:
         return cast(TenantInDB, await self.delegate.update(tenant))

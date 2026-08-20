@@ -67,6 +67,10 @@ if TYPE_CHECKING:
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+ApiKeyRevokingContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 
 def _raise_if_flow_managed(assistant: "Assistant", assistant_id: UUID) -> None:
@@ -709,7 +713,7 @@ async def update_assistant(
 )
 async def delete_assistant(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyRevokingContainer,
 ):
     service = container.assistant_service()
     current_user = container.user()

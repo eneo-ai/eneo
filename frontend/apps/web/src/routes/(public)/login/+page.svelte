@@ -262,7 +262,10 @@
       // Dynamic import to avoid SSR issues
       const { eneo } = await import("$lib/api/client");
 
-      const response = await eneo.auth.initiateAuth({ tenant: slug });
+      const response = await eneo.auth.initiateAuth({
+        tenant: slug,
+        state: data.oidcFrontendState
+      });
 
       // Allow natural browser history navigation - back button returns to tenant selector
       window.location.href = response.authorization_url;

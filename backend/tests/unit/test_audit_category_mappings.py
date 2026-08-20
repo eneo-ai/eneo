@@ -79,7 +79,10 @@ class TestCategoryMappings:
             ActionType.CREDENTIALS_UPDATED,
             ActionType.FEDERATION_UPDATED,
             ActionType.MODULE_ADDED,
+            ActionType.MODULE_SET_REPLACED,
             ActionType.MODULE_ADDED_TO_TENANT,
+            ActionType.MODULE_REMOVED_FROM_TENANT,
+            ActionType.MODULE_CLIENT_CONFIG_UPDATED,
         ]
 
         for action_type in admin_action_types:
@@ -129,6 +132,9 @@ class TestCategoryMappings:
             ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED,
             ActionType.SECURITY_CLASSIFICATION_ENABLED,
             ActionType.SECURITY_CLASSIFICATION_DISABLED,
+            ActionType.MODULE_AUTH_TICKET_ISSUED,
+            ActionType.MODULE_AUTH_TOKEN_EXCHANGED,
+            ActionType.MODULE_AUTH_TOKEN_REFRESHED,
         ]
 
         for action_type in security_actions:

@@ -73,6 +73,10 @@ from eneo.users.user import (
 logger = get_logger(__name__)
 router = APIRouter()
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
+AdminApiKeyMutationContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 AdminApiKeyGuard = Annotated[
     None, Depends(require_api_key_permission(ApiKeyPermission.ADMIN))
 ]
@@ -604,7 +608,7 @@ async def update_user(
         },
     },
 )
-async def delete_user(username: str, container: AdminContainer):
+async def delete_user(username: str, container: AdminApiKeyMutationContainer):
     """
     Soft delete a user account.
 
@@ -685,7 +689,10 @@ async def delete_user(username: str, container: AdminContainer):
         404: {"description": "User not found in your tenant"},
     },
 )
-async def deactivate_user(username: str, container: AdminContainer):
+async def deactivate_user(
+    username: str,
+    container: AdminApiKeyMutationContainer,
+):
     """
     Deactivate a user account for temporary leave.
 
@@ -1657,7 +1664,7 @@ async def get_api_key_admin(
 async def update_api_key_admin(
     id: UUID,
     payload: ApiKeyUpdateRequest,
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1689,7 +1696,7 @@ async def update_api_key_admin(
 )
 async def revoke_api_key_admin_deprecated(
     id: UUID,
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     admin_service = container.admin_service()
@@ -1725,7 +1732,7 @@ async def revoke_api_key_admin_deprecated(
 )
 async def revoke_api_key_admin(
     id: UUID,
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
@@ -1765,7 +1772,7 @@ async def revoke_api_key_admin(
 )
 async def suspend_api_key_admin(
     id: UUID,
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
@@ -1801,7 +1808,7 @@ async def suspend_api_key_admin(
 )
 async def reactivate_api_key_admin(
     id: UUID,
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1834,7 +1841,7 @@ async def reactivate_api_key_admin(
 )
 async def rotate_api_key_admin(
     id: UUID,
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ):
@@ -1873,7 +1880,7 @@ async def extend_api_key_expiration_admin(
         ApiKeyExtendRequest,
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ):
     admin_service = container.admin_service()
@@ -1907,7 +1914,7 @@ async def extend_api_key_expiration_admin(
 )
 async def purge_api_key_admin(
     id: UUID,
-    container: AdminContainer,
+    container: AdminApiKeyMutationContainer,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
     admin_service = container.admin_service()
