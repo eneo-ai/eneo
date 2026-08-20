@@ -480,6 +480,72 @@ def test_create_depth_four_primitive_array_survives_full_compile_contract() -> N
     assert validation.valid, validation.errors
 
 
+def test_document_report_preserves_depth_four_source_contract_after_wrapping() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Document inventory",
+            "plan_rationale": "Keep document facts separate in the final report.",
+            "steps": [
+                {
+                    "name": "Extract document facts",
+                    "instructions": "Extract source-grounded facts from every document.",
+                    "output_fields": [
+                        {
+                            "name": "inventory",
+                            "field_type": "object",
+                            "description": "Structured document inventory.",
+                            "children": [
+                                {
+                                    "name": "document_sections",
+                                    "field_type": "array",
+                                    "description": "One section per document.",
+                                    "children": [
+                                        {
+                                            "name": "facts",
+                                            "field_type": "array",
+                                            "description": "Facts from the document.",
+                                            "children": [
+                                                {
+                                                    "name": "fact",
+                                                    "field_type": "string",
+                                                    "description": "One source-grounded fact.",
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            report_disposition="per_source_sections",
+            runtime_max_files=4,
+            ui_language="en",
+        ),
+    )
+
+    schema = compiled.steps[0].output_contract
+    assert schema is not None
+    fact_schema = schema["properties"]["documents"]["items"]["properties"]["inventory"][
+        "properties"
+    ]["document_sections"]["items"]["properties"]["facts"]["items"]["properties"][
+        "fact"
+    ]
+    assert fact_schema["type"] == "string"
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
 def test_related_document_package_keeps_named_results_as_hints() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {

@@ -21,6 +21,9 @@ StructuredFieldType = Literal["string", "number", "boolean", "object", "array"]
 
 # Authoring depth guardrail; cost is bounded by the serialized tool schema.
 MAX_STRUCTURED_FIELD_DEPTH = 4
+# Compilation may add one server-owned envelope around a valid authored graph.
+# Keep that expansion bounded without making the provider author another level.
+MAX_COMPILED_STRUCTURED_FIELD_DEPTH = MAX_STRUCTURED_FIELD_DEPTH + 1
 STRUCTURED_FIELD_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 
 
@@ -273,7 +276,10 @@ class NewStepDraft(BaseModel):
         if self.instructions is None:
             raise ValueError("Steps require non-empty text values.")
         if self.output_fields:
-            ensure_structured_field_depth(self.output_fields)
+            ensure_structured_field_depth(
+                self.output_fields,
+                max_depth=MAX_COMPILED_STRUCTURED_FIELD_DEPTH,
+            )
         return self
 
 
@@ -297,6 +303,7 @@ def ensure_structured_field_depth(
     *,
     depth: int = 1,
     parent_path: str = "",
+    max_depth: int = MAX_STRUCTURED_FIELD_DEPTH,
 ) -> None:
     # Naming the offending branch is what makes the rejection repairable:
     # a bare depth message sent a live repair loop through five attempts
@@ -311,10 +318,10 @@ def ensure_structured_field_depth(
                 "siblings after normalization."
             )
         sibling_names.add(folded_name)
-        if depth > MAX_STRUCTURED_FIELD_DEPTH:
+        if depth > max_depth:
             raise ValueError(
                 f"{field_path}: structured field nesting depth cannot exceed "
-                f"{MAX_STRUCTURED_FIELD_DEPTH}; flatten this branch or move "
+                f"{max_depth}; flatten this branch or move "
                 "its details into the description."
             )
         if field.fields:
@@ -322,10 +329,12 @@ def ensure_structured_field_depth(
                 field.fields,
                 depth=depth + 1,
                 parent_path=field_path,
+                max_depth=max_depth,
             )
         if field.item_fields:
             ensure_structured_field_depth(
                 field.item_fields,
                 depth=depth + 1,
                 parent_path=field_path,
+                max_depth=max_depth,
             )

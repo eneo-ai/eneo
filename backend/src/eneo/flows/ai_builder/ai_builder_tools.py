@@ -309,6 +309,10 @@ def admit_propose_flow_tool_arguments(
         arguments=admitted,
         tool_schema=tool_schema,
     )
+    admitted = _discard_primitive_field_boolean_children(
+        arguments=admitted,
+        tool_schema=tool_schema,
+    )
     validate_propose_flow_tool_arguments(
         arguments=admitted,
         tool_schema=tool_schema,
@@ -365,6 +369,82 @@ def _discard_server_owned_result_key_children(
     if updated_result_keys is None:
         return arguments
     return {**arguments, RESULT_KEYS_ARGUMENT: updated_result_keys}
+
+
+def _discard_primitive_field_boolean_children(
+    *,
+    arguments: dict[str, Any],
+    tool_schema: ProposalToolSchema,
+) -> dict[str, Any]:
+    """Discard a non-structural boolean copied onto a primitive field.
+
+    A boolean cannot describe nested fields, and primitive fields cannot own
+    them. Nested field records remain untouched so a contradictory primitive
+    type still fails admission instead of silently losing authored content.
+    """
+
+    parameters = tool_schema["function"]["parameters"]
+    raw_properties = parameters.get("properties")
+    if not isinstance(raw_properties, dict) or "steps" not in raw_properties:
+        return arguments
+
+    raw_steps = arguments.get("steps")
+    if not isinstance(raw_steps, list):
+        return arguments
+
+    admitted_steps: list[object] = []
+    changed = False
+    for raw_step in cast(list[object], raw_steps):
+        if not isinstance(raw_step, dict):
+            admitted_steps.append(raw_step)
+            continue
+        step = cast(dict[str, object], raw_step)
+        raw_fields = step.get("output_fields")
+        if not isinstance(raw_fields, list):
+            admitted_steps.append(step)
+            continue
+        admitted_fields, fields_changed = _discard_boolean_primitive_children(
+            cast(list[object], raw_fields)
+        )
+        if not fields_changed:
+            admitted_steps.append(step)
+            continue
+        changed = True
+        admitted_steps.append({**step, "output_fields": admitted_fields})
+
+    if not changed:
+        return arguments
+    return {**arguments, "steps": admitted_steps}
+
+
+def _discard_boolean_primitive_children(
+    fields: list[object],
+) -> tuple[list[object], bool]:
+    admitted_fields: list[object] = []
+    changed = False
+    for raw_field in fields:
+        if not isinstance(raw_field, dict):
+            admitted_fields.append(raw_field)
+            continue
+        field = cast(dict[str, object], raw_field)
+        admitted_field = field
+        children = field.get("children")
+        if field.get("field_type") in {"string", "number", "boolean"} and isinstance(
+            children, bool
+        ):
+            admitted_field = {
+                key: value for key, value in field.items() if key != "children"
+            }
+            changed = True
+        elif isinstance(children, list):
+            admitted_children, children_changed = _discard_boolean_primitive_children(
+                cast(list[object], children)
+            )
+            if children_changed:
+                admitted_field = {**field, "children": admitted_children}
+                changed = True
+        admitted_fields.append(admitted_field)
+    return admitted_fields, changed
 
 
 def _rehome_misplaced_create_children(
