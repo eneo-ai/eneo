@@ -20000,13 +20000,13 @@ export interface components {
     FlowStepAttemptPublic: {
       /** Attempt No */
       attempt_no: number;
-      /** Celery Task Id */
-      dispatch_task_id?: string | null;
       /**
        * Created At
        * Format: date-time
        */
       created_at: string;
+      /** Dispatch Task Id */
+      dispatch_task_id?: string | null;
       /** @description Stable machine-readable attempt failure code. */
       error_code?:
         | (

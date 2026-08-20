@@ -74,7 +74,7 @@ export function createClient(args) {
     throw new TypeError("Configure either apiKey or token, not both.");
   }
 
-  const version = "DEV-20260819T181700Z"; // # Client version auto-updates when running the updater, do not edit this line.
+  const version = "DEV-20260820T082656Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
 
