@@ -806,13 +806,26 @@ async def test_user_list_pagination_and_filtering(client, default_user_token):
     assert len(page_one_payload["items"]) == 1
     assert page_one_payload["total_count"] >= 3
     assert page_one_payload["next_cursor"] is not None
+    assert page_one_payload["items"][0]["name"] == "Paged PK"
 
+    # The cursor anchors on the last emitted row: the immediately older key
+    # must appear on the next page, not be silently skipped.
     page_two = await client.get(
         f"/api/v1/api-keys?limit=1&cursor={page_one_payload['next_cursor']}",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert page_two.status_code == 200, page_two.text
-    assert len(page_two.json()["items"]) == 1
+    page_two_payload = page_two.json()
+    assert len(page_two_payload["items"]) == 1
+    assert page_two_payload["items"][0]["name"] == "Paged SK 2"
+
+    # And stepping back returns the exact page we came from.
+    page_back = await client.get(
+        f"/api/v1/api-keys?limit=1&cursor={page_two_payload['previous_cursor']}&previous=true",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert page_back.status_code == 200, page_back.text
+    assert [item["name"] for item in page_back.json()["items"]] == ["Paged PK"]
 
     filtered = await client.get(
         "/api/v1/api-keys?key_type=pk_",

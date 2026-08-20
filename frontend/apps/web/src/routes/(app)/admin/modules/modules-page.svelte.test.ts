@@ -92,10 +92,13 @@ describe("module administration page", () => {
       })
     );
     await vi.waitFor(() => expect(listModules).toHaveBeenCalledTimes(2));
+    expect(listApiKeys).toHaveBeenCalledTimes(1);
     expect(listApiKeys).toHaveBeenNthCalledWith(1, {
       limit: 200,
       state: "active",
-      key_type: "sk_"
+      key_type: "sk_",
+      ownership: "service",
+      min_permission: "write"
     });
     expect(installModule.mock.calls[0][0]).not.toHaveProperty("tenantId");
   });
@@ -113,17 +116,23 @@ describe("module administration page", () => {
     expect(listApiKeys).toHaveBeenNthCalledWith(1, {
       limit: 200,
       state: "active",
-      key_type: "sk_"
+      key_type: "sk_",
+      ownership: "service",
+      min_permission: "write"
     });
     expect(listApiKeys).toHaveBeenNthCalledWith(2, {
       limit: 200,
-      cursor: "page-2",
       state: "active",
-      key_type: "sk_"
+      key_type: "sk_",
+      ownership: "service",
+      min_permission: "write",
+      cursor: "page-2"
     });
 
     clickElement(page.getByRole("button", { name: /edit/ }).element());
-    await expect.element(page.getByText(/Reports module/)).toBeVisible();
+    await expect
+      .element(page.getByLabelText("module_admin_service_key").getByText(/Reports module/))
+      .toBeVisible();
   });
 
   test("requires confirmation before uninstalling", async () => {
@@ -140,6 +149,20 @@ describe("module administration page", () => {
     await vi.waitFor(() => expect(uninstallModule).toHaveBeenCalledWith({ moduleKey: "reports" }));
     await vi.waitFor(() => expect(listModules).toHaveBeenCalledTimes(2));
     await expect.element(dialog).not.toBeInTheDocument();
+  });
+
+  test("blocks saving a stale bound key when it is no longer eligible", async () => {
+    listApiKeys
+      .mockReset()
+      .mockResolvedValue({ items: [], total_count: 0, count: 0, next_cursor: null });
+    render(ModulesPage);
+
+    await expect.element(page.getByText("reports", { exact: true })).toBeVisible();
+    clickElement(page.getByRole("button", { name: /edit/ }).element());
+
+    await expect.element(page.getByText("module_admin_bound_key_missing")).toBeVisible();
+    clickElement(page.getByRole("button", { name: "module_admin_update" }).element());
+    expect(installModule).not.toHaveBeenCalled();
   });
 
   test("keeps uninstall errors in the open confirmation dialog", async () => {

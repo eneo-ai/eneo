@@ -281,6 +281,10 @@ flowchart TD
   binding.
 - **Uninstalling a module deletes its client config.** Reinstalling
   later requires re-binding the redirect URIs and service key.
+- **Unbinding without uninstalling:** a `PUT` with `"service_key_id": null`
+  severs ticket exchange while the installation and its callbacks stay in
+  place — the incident-response step between a working installation and a
+  full uninstall.
 - Key rotation is downtime-free at depth one: the rotated successor is
   accepted until the operator updates the binding. Rotating twice without
   updating the binding breaks the chain.

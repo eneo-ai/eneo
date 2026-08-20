@@ -14,6 +14,9 @@ from eneo.main.models import InDB
 # exchange its first token but never validate or renew the session.
 MODULE_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 _MODULE_KEY_PATTERN = re.compile(MODULE_KEY_PATTERN)
+# The key is stored in a global, never-pruned registry and rides in URLs and
+# JWT audiences, so its length is bounded at registration and routing alike.
+MODULE_KEY_MAX_LENGTH = 64
 
 
 def _normalize_redirect_uris(value: list[str]) -> list[str]:
@@ -52,7 +55,7 @@ class ModuleBase(BaseModel):
 class ModuleCreate(ModuleBase):
     """Registration contract for a new stable module key."""
 
-    name: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=MODULE_KEY_MAX_LENGTH)
 
     @field_validator("name")
     @classmethod
@@ -65,10 +68,16 @@ class ModuleCreate(ModuleBase):
         return value
 
 
-class ModuleClientConfig(BaseModel):
-    """Auth-broker client config for a module: which callback URLs are allowed
-    and which sk_ key alone may exchange the module's login tickets."""
+class ModuleTenantClientConfig(BaseModel):
+    """Auth-broker client config read model: which callback URLs are allowed
+    and which sk_ key alone may exchange the module's login tickets.
 
+    Fields stay nullable because assignments that predate the complete
+    installation command may hold partial or empty configs.
+    """
+
+    tenant_id: UUID
+    module_id: UUID
     redirect_uris: Optional[list[str]] = None
     service_key_id: Optional[UUID] = None
 
@@ -78,25 +87,6 @@ class ModuleClientConfig(BaseModel):
         if value is None:
             return None
         return _normalize_redirect_uris(value)
-
-    def update_values(self) -> dict[str, object]:
-        """Return only fields explicitly supplied by the PATCH caller.
-
-        An explicit ``null`` remains an update while an omitted field is left
-        untouched. Keeping this distinction on the request model prevents
-        persistence adapters from accidentally turning PATCH into PUT.
-        """
-        values: dict[str, object] = {}
-        if "redirect_uris" in self.model_fields_set:
-            values["redirect_uris"] = self.redirect_uris
-        if "service_key_id" in self.model_fields_set:
-            values["service_key_id"] = self.service_key_id
-        return values
-
-
-class ModuleTenantClientConfig(ModuleClientConfig):
-    tenant_id: UUID
-    module_id: UUID
 
 
 class ModuleTenantAssignment(BaseModel):
@@ -110,10 +100,16 @@ class ModuleTenantAssignment(BaseModel):
 
 
 class ModuleInstallationConfig(BaseModel):
-    """Complete, tenant-implicit configuration accepted by the admin UI."""
+    """Complete, tenant-implicit configuration accepted by the admin UI.
+
+    ``service_key_id`` must be present but may be an explicit ``null``: that
+    severs ticket exchange (no key can trade the module's login tickets) while
+    keeping the module installed and its callbacks intact — the incident
+    response step between "working installation" and "full uninstall".
+    """
 
     redirect_uris: list[str] = Field(min_length=1)
-    service_key_id: UUID
+    service_key_id: Optional[UUID]
 
     @field_validator("redirect_uris")
     @classmethod

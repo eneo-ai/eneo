@@ -31,6 +31,7 @@
   let moduleKey = $state("");
   let redirectUrisInput = $state("");
   let serviceKeyId = $state("");
+  let boundKeyMissing = $state(false);
   let editingModuleKey = $state<string | null>(null);
   let pendingRemoval = $state<ModuleInstallation | null>(null);
   let removalDialogOpen = $state(false);
@@ -39,15 +40,6 @@
   const formTitle = $derived(
     editingModuleKey ? m.module_admin_edit_title() : m.module_admin_add_title()
   );
-
-  function isUsableModuleKey(key: ApiKeyV2): boolean {
-    return (
-      key.ownership === "service" &&
-      key.key_type === "sk_" &&
-      key.state === "active" &&
-      (key.permission === "write" || key.permission === "admin")
-    );
-  }
 
   function serviceKeyLabel(key: ApiKeyV2): string {
     return `${key.name} · ${key.key_prefix}••••${key.key_suffix}`;
@@ -64,19 +56,25 @@
     ];
   }
 
-  async function listUsableServiceKeys(): Promise<ApiKeyV2[]> {
+  async function listCompatibleServiceKeys(): Promise<ApiKeyV2[]> {
+    // Eligibility (active, service-owned sk_ with write-or-better) is decided
+    // by the backend filters, so the picker cannot drift from the broker's
+    // binding rules.
     const keys: ApiKeyV2[] = [];
     const visitedCursors: string[] = [];
     let cursor: string | null = null;
 
     do {
-      const page = await eneo.apiKeys.admin.list(
-        cursor
-          ? { limit: 200, cursor, state: "active", key_type: "sk_" }
-          : { limit: 200, state: "active", key_type: "sk_" }
-      );
+      const page = await eneo.apiKeys.admin.list({
+        limit: 200,
+        state: "active",
+        key_type: "sk_",
+        ownership: "service",
+        min_permission: "write",
+        ...(cursor && { cursor })
+      });
       for (const key of page.items) {
-        if (isUsableModuleKey(key) && !keys.some((existing) => existing.id === key.id)) {
+        if (!keys.some((existing) => existing.id === key.id)) {
           keys.push(key);
         }
       }
@@ -92,13 +90,23 @@
     return keys;
   }
 
-  async function loadModules() {
+  async function refreshInstallations() {
+    errorMessage = null;
+    try {
+      installations = (await eneo.modules.list()).items;
+    } catch (error) {
+      console.error(error);
+      errorMessage = getErrorMessage(error);
+    }
+  }
+
+  async function loadPage() {
     loading = true;
     errorMessage = null;
     try {
       const [modulePage, compatibleServiceKeys] = await Promise.all([
         eneo.modules.list(),
-        listUsableServiceKeys()
+        listCompatibleServiceKeys()
       ]);
       installations = modulePage.items;
       serviceKeys = compatibleServiceKeys;
@@ -114,13 +122,19 @@
     moduleKey = "";
     redirectUrisInput = "";
     serviceKeyId = "";
+    boundKeyMissing = false;
     editingModuleKey = null;
   }
 
   function editInstallation(installation: ModuleInstallation) {
     moduleKey = installation.module_key;
     redirectUrisInput = (installation.redirect_uris ?? []).join("\n");
-    serviceKeyId = installation.service_key_id ?? "";
+    const boundKeyId = installation.service_key_id ?? "";
+    const boundKeyUsable = boundKeyId !== "" && serviceKeys.some((key) => key.id === boundKeyId);
+    // A bound key that fell out of the eligible list (revoked, expired,
+    // rotated) must not ride along silently into the next save.
+    serviceKeyId = boundKeyUsable ? boundKeyId : "";
+    boundKeyMissing = boundKeyId !== "" && !boundKeyUsable;
     editingModuleKey = installation.module_key;
     errorMessage = null;
     document.getElementById("module-installation-form")?.scrollIntoView({
@@ -144,7 +158,7 @@
       });
       toast.success(m.module_admin_saved());
       resetForm();
-      await loadModules();
+      await refreshInstallations();
     } catch (error) {
       console.error(error);
       errorMessage = getErrorMessage(error);
@@ -170,7 +184,7 @@
       removalDialogOpen = false;
       pendingRemoval = null;
       removalError = null;
-      await loadModules();
+      await refreshInstallations();
     } catch (error) {
       console.error(error);
       removalError = getErrorMessage(error);
@@ -179,7 +193,7 @@
     }
   }
 
-  onMount(() => void loadModules());
+  onMount(() => void loadPage());
 </script>
 
 <svelte:head>
@@ -218,6 +232,7 @@
                 <Table.Row>
                   <Table.Head>{m.module_admin_module_key()}</Table.Head>
                   <Table.Head>{m.module_admin_callback_urls()}</Table.Head>
+                  <Table.Head>{m.module_admin_service_key()}</Table.Head>
                   <Table.Head>{m.module_admin_status()}</Table.Head>
                   <Table.Head class="text-right">{m.module_admin_actions()}</Table.Head>
                 </Table.Row>
@@ -234,6 +249,25 @@
                           <span class="text-muted text-sm">—</span>
                         {/each}
                       </div>
+                    </Table.Cell>
+                    <Table.Cell>
+                      {#if installation.service_key_id}
+                        {@const boundKey = serviceKeys.find(
+                          (key) => key.id === installation.service_key_id
+                        )}
+                        {#if boundKey}
+                          <span class="text-sm">{serviceKeyLabel(boundKey)}</span>
+                        {:else}
+                          <span
+                            class="text-muted font-mono text-sm"
+                            title={installation.service_key_id}
+                          >
+                            {installation.service_key_id.slice(0, 8)}…
+                          </span>
+                        {/if}
+                      {:else}
+                        <span class="text-muted text-sm">—</span>
+                      {/if}
                     </Table.Cell>
                     <Table.Cell>
                       <Badge variant={installation.configured ? "default" : "destructive"}>
@@ -324,6 +358,12 @@
               </Select.Content>
             </Select.Root>
             <Field.Description>{m.module_admin_service_key_help()}</Field.Description>
+            {#if boundKeyMissing && !serviceKeyId}
+              <Alert.Root variant="destructive" role="alert">
+                <AlertCircle />
+                <Alert.Description>{m.module_admin_bound_key_missing()}</Alert.Description>
+              </Alert.Root>
+            {/if}
           </Field.Field>
 
           {#if !loading && serviceKeys.length === 0}

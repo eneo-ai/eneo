@@ -4465,6 +4465,7 @@
   "module_admin_service_key": "Service key",
   "module_admin_service_key_placeholder": "Select an active service key",
   "module_admin_service_key_help": "Use an sk_ key owned by a service with write or admin permission and the narrowest resource scope the module needs.",
+  "module_admin_bound_key_missing": "The previously bound service key is no longer usable (revoked, expired, or rotated). Select a new key and save the configuration.",
   "module_admin_no_service_keys_title": "No compatible service key",
   "module_admin_no_service_keys_description": "Create an active service key with write or admin permission before installing the module.",
   "module_admin_manage_service_keys": "Manage API keys",

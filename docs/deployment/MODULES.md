@@ -102,7 +102,15 @@ The API exposes only these lifecycle operations:
   organization;
 - `PUT /api/v1/admin/modules/{module_key}/` — install or completely
   reconfigure one module;
-- `DELETE /api/v1/admin/modules/{module_key}/` — uninstall one module.
+- `DELETE /api/v1/admin/modules/{module_key}/` — uninstall one module. A module
+  that is not installed for the organization answers 404, whether or not the
+  key exists elsewhere.
+
+During incident response, a `PUT` with `"service_key_id": null` severs ticket
+exchange immediately while keeping the module installed and its callbacks
+intact — no key can trade the module's login tickets until an administrator
+binds one again. This avoids revoking a key that may still be in rotation
+grace for other duties.
 
 ## Module login and request authorization
 

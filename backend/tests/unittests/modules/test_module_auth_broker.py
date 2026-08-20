@@ -21,7 +21,11 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.modules.module import ModuleClientConfig, ModuleInDB, ModuleTenantClientConfig
+from eneo.modules.module import (
+    ModuleInDB,
+    ModuleInstallationConfig,
+    ModuleTenantClientConfig,
+)
 from eneo.modules.module_auth import (
     MODULE_HANDOFF_AT_CLAIM,
     MODULE_TENANT_ID_CLAIM,
@@ -126,7 +130,6 @@ def make_broker(module=None, config=None, user=None, redis=None):
     user_service = AsyncMock()
     api_key_repo = AsyncMock()
     api_key_repo.get.return_value = make_api_key()
-    api_key_repo.get_for_update.return_value = make_api_key()
     auth_service = AuthService()
 
     broker = ModuleAuthBroker(
@@ -647,35 +650,33 @@ class TestRefreshToken:
         assert kwargs["tenant_id"] == TENANT_ID
 
 
-class TestModuleClientConfig:
+class TestModuleInstallationConfig:
     def test_redirect_uris_are_normalized_and_deduplicated(self):
-        config = ModuleClientConfig(
+        config = ModuleInstallationConfig(
             redirect_uris=[
                 "https://TTT.example.com/auth/callback/",
                 "https://ttt.example.com/auth/callback",
-            ]
+            ],
+            service_key_id=None,
         )
 
         assert config.redirect_uris == [REDIRECT_URI]
 
     def test_invalid_redirect_uri_is_rejected(self):
         with pytest.raises(ValidationError):
-            ModuleClientConfig(
-                redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"]
+            ModuleInstallationConfig(
+                redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"],
+                service_key_id=None,
             )
 
-    def test_update_values_preserve_omitted_fields(self):
-        config = ModuleClientConfig(redirect_uris=[REDIRECT_URI])
+    def test_service_key_must_be_present_but_may_be_explicitly_null(self):
+        with pytest.raises(ValidationError):
+            ModuleInstallationConfig(redirect_uris=[REDIRECT_URI])
 
-        assert config.update_values() == {"redirect_uris": [REDIRECT_URI]}
-
-    def test_update_values_keep_explicit_null(self):
-        config = ModuleClientConfig(service_key_id=None)
-
-        assert config.update_values() == {"service_key_id": None}
-
-    def test_empty_update_has_no_values(self):
-        assert ModuleClientConfig().update_values() == {}
+        unbound = ModuleInstallationConfig(
+            redirect_uris=[REDIRECT_URI], service_key_id=None
+        )
+        assert unbound.service_key_id is None
 
 
 class TestModuleTicketRequest:
@@ -714,13 +715,13 @@ class TestModuleServiceKeyRegistration:
             tenant_id=TENANT_ID, service_key_id=SERVICE_KEY_ID
         )
 
-        broker.api_key_repo.get_for_update.assert_awaited_once_with(
-            key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID
+        broker.api_key_repo.get.assert_awaited_once_with(
+            key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID, for_update=True
         )
 
     async def test_rejects_unknown_or_wrong_tenant_key(self):
         broker = make_broker()
-        broker.api_key_repo.get_for_update.return_value = None
+        broker.api_key_repo.get.return_value = None
 
         with pytest.raises(BadRequestException, match="target tenant"):
             await broker.validate_client_config_service_key(
@@ -737,7 +738,7 @@ class TestModuleServiceKeyRegistration:
     )
     async def test_rejects_key_that_can_never_exchange(self, key_overrides, message):
         broker = make_broker()
-        broker.api_key_repo.get_for_update.return_value = make_api_key(**key_overrides)
+        broker.api_key_repo.get.return_value = make_api_key(**key_overrides)
 
         with pytest.raises(BadRequestException, match=message):
             await broker.validate_client_config_service_key(
@@ -761,7 +762,7 @@ class TestModuleServiceKeyRegistration:
         """Binding a dead key would persist a config under which every ticket
         exchange fails at API-key authentication."""
         broker = make_broker()
-        broker.api_key_repo.get_for_update.return_value = make_api_key(**key_overrides)
+        broker.api_key_repo.get.return_value = make_api_key(**key_overrides)
 
         with pytest.raises(BadRequestException, match=message):
             await broker.validate_client_config_service_key(
@@ -770,7 +771,7 @@ class TestModuleServiceKeyRegistration:
 
     async def test_accepts_key_expiring_in_the_future(self):
         broker = make_broker()
-        broker.api_key_repo.get_for_update.return_value = make_api_key(
+        broker.api_key_repo.get.return_value = make_api_key(
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
 

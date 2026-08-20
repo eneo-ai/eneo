@@ -7627,13 +7627,13 @@ export interface paths {
     get?: never;
     /**
      * Install Module
-     * @description Idempotently register, enable and fully configure one module for the authenticated user's organization. The service key must already exist in that organization and be an active, service-owned sk_ key with write or admin permission.
+     * @description Idempotently register, enable and fully configure one module for the authenticated user's organization. The service key must already exist in that organization and be an active, service-owned sk_ key with write or admin permission. An explicit null service_key_id keeps the module installed but severs ticket exchange until a key is bound again.
      */
     put: operations["install_module_api_v1_admin_modules__module_key___put"];
     post?: never;
     /**
      * Uninstall Module
-     * @description Idempotently uninstall one module from the authenticated user's organization. Removing the assignment also deletes its callback and service-key binding.
+     * @description Uninstall one module from the authenticated user's organization. Removing the assignment also deletes its callback and service-key binding. A module that is not installed for the organization returns 404 whether or not the key exists elsewhere; concurrent retries are safe and report changed=false.
      */
     delete: operations["uninstall_module_api_v1_admin_modules__module_key___delete"];
     options?: never;
@@ -14455,15 +14455,17 @@ export interface components {
     /**
      * ModuleInstallationConfig
      * @description Complete, tenant-implicit configuration accepted by the admin UI.
+     *
+     *     ``service_key_id`` must be present but may be an explicit ``null``: that
+     *     severs ticket exchange (no key can trade the module's login tickets) while
+     *     keeping the module installed and its callbacks intact — the incident
+     *     response step between "working installation" and "full uninstall".
      */
     ModuleInstallationConfig: {
       /** Redirect Uris */
       redirect_uris: string[];
-      /**
-       * Service Key Id
-       * Format: uuid
-       */
-      service_key_id: string;
+      /** Service Key Id */
+      service_key_id: string | null;
     };
     /**
      * ModuleResourceSessionResponse
@@ -30037,6 +30039,8 @@ export interface operations {
         user_relation?: components["schemas"]["ApiKeyUserRelation"];
         search?: string | null;
         expires_within_days?: number | null;
+        ownership?: components["schemas"]["ApiKeyOwnership"] | null;
+        min_permission?: components["schemas"]["ApiKeyPermission"] | null;
       };
       header?: never;
       path?: never;

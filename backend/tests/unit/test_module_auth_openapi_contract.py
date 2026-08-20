@@ -48,12 +48,19 @@ def test_module_handoff_and_admin_openapi_use_public_module_key():
     install_config = schemas["ModuleInstallationConfig"]
     assert install_config["required"] == ["redirect_uris", "service_key_id"]
     assert install_config["properties"]["redirect_uris"]["minItems"] == 1
+    # Required-but-nullable: an explicit null severs ticket exchange without
+    # uninstalling; an omitted key is still a validation error.
+    assert install_config["properties"]["service_key_id"]["anyOf"] == [
+        {"type": "string", "format": "uuid"},
+        {"type": "null"},
+    ]
 
     assignment_path = paths["/api/v1/admin/modules/{module_key}/"]
     assert {"put", "delete"} == set(assignment_path)
     module_key = assignment_path["put"]["parameters"][0]
     assert module_key["name"] == "module_key"
     assert module_key["schema"]["pattern"] == "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    assert module_key["schema"]["maxLength"] == 64
     assert assignment_path["put"]["requestBody"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/ModuleInstallationConfig"}

@@ -163,8 +163,13 @@ def paginate_keys(
 
     if not previous:
         if len(keys) > limit:
-            next_cursor = keys[limit].created_at
             page = keys[:limit]
+            # Anchor on the last emitted row: the repo filters strictly
+            # created_at < cursor, so anchoring on the first row BEYOND the
+            # page would skip that row on the next request. Rows tied on the
+            # last emitted timestamp can still be skipped — a limitation of
+            # the single-column cursor.
+            next_cursor = page[-1].created_at
         else:
             next_cursor = None
             page = keys
@@ -177,8 +182,12 @@ def paginate_keys(
         }
 
     if len(keys) > limit:
-        page = keys[1:]
-        previous_cursor = keys[0].created_at
+        # The repo's inclusive >= filter returns rows ascending from the
+        # cursor row itself, so the target page is the first `limit` rows;
+        # the extra row proves an earlier page exists and is its oldest row —
+        # the next backward token.
+        page = keys[:limit]
+        previous_cursor = keys[limit].created_at
     else:
         page = keys
         previous_cursor = None

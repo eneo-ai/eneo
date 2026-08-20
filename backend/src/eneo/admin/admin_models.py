@@ -6,6 +6,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from eneo.authentication.auth_models import (
+    ApiKeyOwnership,
+    ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
@@ -185,6 +187,8 @@ class AdminApiKeysQueryParams(BaseModel):
     user_relation: ApiKeyUserRelation = ApiKeyUserRelation.OWNER
     search: str | None = None
     expires_within_days: int | None = None
+    ownership: ApiKeyOwnership | None = None
+    min_permission: ApiKeyPermission | None = None
 
 
 class AdminApiKeyUsageQueryParams(BaseModel):

@@ -12,7 +12,6 @@ from eneo.database.tables.module_table import Modules
 from eneo.database.tables.tenant_table import tenants_modules_table
 from eneo.main.exceptions import NameCollisionException
 from eneo.modules.module import (
-    ModuleClientConfig,
     ModuleCreate,
     ModuleInDB,
     ModuleInstallation,
@@ -81,8 +80,7 @@ class ModuleRepository:
         if record is not None:
             return ModuleInDB.model_validate(record)
 
-        module_key = module.model_dump(mode="json")["name"]
-        existing = await self.get_module_by_key(module_key)
+        existing = await self.get_module_by_key(module.name)
         if existing is None:
             raise RuntimeError("Module upsert did not create or resolve its identity.")
         return existing
@@ -138,49 +136,21 @@ class ModuleRepository:
             for row in rows
         ]
 
-    async def get_installation(
-        self, *, tenant_id: UUID, module_id: UUID
-    ) -> Optional[ModuleInstallation]:
-        stmt = (
-            sa.select(
-                Modules.id.label("module_id"),
-                Modules.name.label("module_key"),
-                tenants_modules_table.c.redirect_uris,
-                tenants_modules_table.c.service_key_id,
-            )
-            .join(
-                tenants_modules_table,
-                sa.and_(
-                    tenants_modules_table.c.module_id == Modules.id,
-                    tenants_modules_table.c.tenant_id == tenant_id,
-                ),
-            )
-            .where(Modules.id == module_id)
-        )
-        row = (await self.session.execute(stmt)).mappings().first()
-        if row is None:
-            return None
-        return ModuleInstallation(
-            module_id=row["module_id"],
-            module_key=row["module_key"],
-            redirect_uris=row["redirect_uris"] or [],
-            service_key_id=row["service_key_id"],
-        )
-
     async def update_client_config(
-        self, tenant_id: UUID, module_id: UUID, config: ModuleClientConfig
+        self,
+        *,
+        tenant_id: UUID,
+        module_id: UUID,
+        redirect_uris: list[str],
+        service_key_id: Optional[UUID],
     ) -> Optional[ModuleTenantClientConfig]:
-        updates = config.update_values()
-        if not updates:
-            raise ValueError("Module client config PATCH requires at least one field.")
-
         stmt = (
             sa.update(tenants_modules_table)
             .where(
                 tenants_modules_table.c.tenant_id == tenant_id,
                 tenants_modules_table.c.module_id == module_id,
             )
-            .values(**updates)
+            .values(redirect_uris=redirect_uris, service_key_id=service_key_id)
             .returning(
                 tenants_modules_table.c.tenant_id,
                 tenants_modules_table.c.module_id,

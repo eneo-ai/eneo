@@ -8,7 +8,12 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
-from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyState, ApiKeyV2InDB
+from eneo.authentication.auth_models import (
+    PERMISSION_LEVEL_ORDER,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyV2InDB,
+)
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.users_table import Users
 
@@ -25,29 +30,18 @@ class ApiKeysV2Repository:
 
         return ApiKeyV2InDB.model_validate(record)
 
-    async def get(self, *, key_id: UUID, tenant_id: UUID) -> Optional[ApiKeyV2InDB]:
-        query = (
-            sa.select(self.table)
-            .where(self.table.id == key_id)
-            .where(self.table.tenant_id == tenant_id)
-        )
-        record = await self.session.scalar(query)
-
-        if record is None:
-            return None
-
-        return ApiKeyV2InDB.model_validate(record)
-
-    async def get_for_update(
-        self, *, key_id: UUID, tenant_id: UUID
+    async def get(
+        self, *, key_id: UUID, tenant_id: UUID, for_update: bool = False
     ) -> Optional[ApiKeyV2InDB]:
-        """Return and lock a key until the surrounding transaction completes."""
+        """Return the key; with ``for_update`` the row stays locked until the
+        surrounding transaction completes."""
         query = (
             sa.select(self.table)
             .where(self.table.id == key_id)
             .where(self.table.tenant_id == tenant_id)
-            .with_for_update()
         )
+        if for_update:
+            query = query.with_for_update()
         record = await self.session.scalar(query)
 
         if record is None:
@@ -111,6 +105,7 @@ class ApiKeysV2Repository:
         search: str | None = None,
         expires_within_days: int | None = None,
         ownership: str | None = None,
+        min_permission: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -127,10 +122,14 @@ class ApiKeysV2Repository:
             search=search,
             expires_within_days=expires_within_days,
             ownership=ownership,
+            min_permission=min_permission,
         )
         if cursor is not None:
             if previous:
-                query = query.where(self.table.created_at > cursor)
+                # Inclusive: the previous_cursor token is the oldest row of
+                # the page being returned to (see paginate_keys), so a strict
+                # comparison would drop that row from every backward step.
+                query = query.where(self.table.created_at >= cursor)
             else:
                 query = query.where(self.table.created_at < cursor)
 
@@ -192,6 +191,7 @@ class ApiKeysV2Repository:
         search: str | None = None,
         expires_within_days: int | None = None,
         ownership: str | None = None,
+        min_permission: str | None = None,
     ) -> int:
         query = cast(
             Select[Any],
@@ -210,6 +210,7 @@ class ApiKeysV2Repository:
             search=search,
             expires_within_days=expires_within_days,
             ownership=ownership,
+            min_permission=min_permission,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -227,9 +228,18 @@ class ApiKeysV2Repository:
         search: str | None,
         expires_within_days: int | None,
         ownership: str | None = None,
+        min_permission: str | None = None,
     ) -> Select[Any]:
         if ownership is not None:
             query = query.where(self.table.ownership == ownership)
+        if min_permission is not None:
+            required = PERMISSION_LEVEL_ORDER.get(min_permission, 0)
+            allowed = [
+                permission
+                for permission, level in PERMISSION_LEVEL_ORDER.items()
+                if level >= required
+            ]
+            query = query.where(self.table.permission.in_(allowed))
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type.value)
         if scope_id is not None:

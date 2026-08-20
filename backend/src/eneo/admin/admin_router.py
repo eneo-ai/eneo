@@ -1434,6 +1434,8 @@ async def list_api_keys_admin(
         created_by_user_id=creator_filter,
         search=normalized_search,
         expires_within_days=query.expires_within_days,
+        ownership=query.ownership.value if query.ownership else None,
+        min_permission=query.min_permission.value if query.min_permission else None,
     )
     total_count = await repo.count(
         tenant_id=tenant_id,
@@ -1445,6 +1447,8 @@ async def list_api_keys_admin(
         created_by_user_id=creator_filter,
         search=normalized_search,
         expires_within_days=query.expires_within_days,
+        ownership=query.ownership.value if query.ownership else None,
+        min_permission=query.min_permission.value if query.min_permission else None,
     )
 
     paginated = paginate_keys(

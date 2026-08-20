@@ -9,6 +9,7 @@ from eneo.authentication.auth_dependencies import (
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
 from eneo.modules.module import (
+    MODULE_KEY_MAX_LENGTH,
     MODULE_KEY_PATTERN,
     ModuleInstallation,
     ModuleInstallationChange,
@@ -31,7 +32,9 @@ _MutationContainer = Annotated[
     Depends(get_container(with_user=True, transaction_scope="function")),
 ]
 _ReadContainer = Annotated[Container, Depends(get_container(with_user=True))]
-_ModuleKey = Annotated[str, Path(pattern=MODULE_KEY_PATTERN)]
+_ModuleKey = Annotated[
+    str, Path(pattern=MODULE_KEY_PATTERN, max_length=MODULE_KEY_MAX_LENGTH)
+]
 
 
 @router.get(
@@ -58,7 +61,8 @@ async def list_module_installations(
         "Idempotently register, enable and fully configure one module for the "
         "authenticated user's organization. The service key must already exist "
         "in that organization and be an active, service-owned sk_ key with write "
-        "or admin permission."
+        "or admin permission. An explicit null service_key_id keeps the module "
+        "installed but severs ticket exchange until a key is bound again."
     ),
     responses=responses.get_responses([400]),
 )
@@ -77,9 +81,11 @@ async def install_module(
     "/{module_key}/",
     response_model=ModuleInstallationChange,
     description=(
-        "Idempotently uninstall one module from the authenticated user's "
-        "organization. Removing the assignment also deletes its callback and "
-        "service-key binding."
+        "Uninstall one module from the authenticated user's organization. "
+        "Removing the assignment also deletes its callback and service-key "
+        "binding. A module that is not installed for the organization returns "
+        "404 whether or not the key exists elsewhere; concurrent retries are "
+        "safe and report changed=false."
     ),
     responses=responses.get_responses([404]),
 )
