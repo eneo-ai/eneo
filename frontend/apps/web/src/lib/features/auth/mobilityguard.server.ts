@@ -12,7 +12,12 @@ import { dev } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import { getBackendUrl } from "$lib/core/environment.server";
 import type { Cookies } from "@sveltejs/kit";
-import { createCodePair, encodeState, setFrontendAuthCookie } from "./auth.server";
+import {
+  createCodePair,
+  encodeState,
+  resolveSafeLoginDestination,
+  setFrontendAuthCookie
+} from "./auth.server";
 import { getRequestEvent } from "$app/server";
 
 const MobilityguardCookie = "mobilityguard-verifier" as const;
@@ -62,6 +67,7 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
   }
 
   const { codeVerifier, codeChallenge } = await createCodePair();
+  const requestedDestination = event.url.searchParams.get("next");
 
   event.cookies.set(MobilityguardCookie, codeVerifier, {
     path: "/",
@@ -79,7 +85,7 @@ export async function getMobilityguardLink(event: { url: URL; cookies: Cookies }
     redirect_uri: `${getPublicOrigin()}/login/callback`,
     state: encodeState({
       loginMethod: "mobilityguard",
-      next: event.url.searchParams.get("next")
+      next: requestedDestination === null ? null : resolveSafeLoginDestination(requestedDestination)
     }),
     code_challenge: codeChallenge,
     code_challenge_method: "S256"

@@ -77,19 +77,22 @@ describe("createClient path parameters", () => {
     expect(requestHeaders.has("X-API-Key")).toBe(false);
   });
 
-  it("rejects clients configured with both authentication options", () => {
-    const fetch = vi.fn();
+  it("supports endpoints that require both authentication options", async () => {
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+    const apiKey = "synthetic-service-key";
+    const token = "synthetic-user-access-token";
+    const client = createClient({
+      baseUrl: "https://api.example.test",
+      apiKey,
+      token,
+      fetch
+    });
 
-    expect(() =>
-      createClient({
-        baseUrl: "https://api.example.test",
-        apiKey: "synthetic-service-key",
-        token: "synthetic-user-access-token",
-        fetch
-      })
-    ).toThrow(new TypeError("Configure either apiKey or token, not both."));
+    await client.fetch("/api/v1/module-auth/example/session/", { method: "get" });
 
-    expect(fetch).not.toHaveBeenCalled();
+    const requestHeaders = new Headers(fetch.mock.calls[0][1].headers);
+    expect(requestHeaders.get("X-API-Key")).toBe(apiKey);
+    expect(requestHeaders.get("Authorization")).toBe(`Bearer ${token}`);
   });
 
   it.each([

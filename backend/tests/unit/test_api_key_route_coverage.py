@@ -126,7 +126,8 @@ INTENTIONALLY_UNGUARDED = {
     "/token-usage": "Admin scope + admin key permission guards (not resource guard)",
     "/templates": "Read-only discovery endpoints",
     "/sysadmin": "Separate super API key auth, out of scope",
-    "/modules": "Separate auth, out of scope",
+    "/modules": "Protected by the separate super-duper module key dependency",
+    "/module-auth": "Module auth handoff: ticket issue is session-only; token exchange is registered service-key-bound in ModuleAuthBroker",
     "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
     "/api-key-capacity": "Read-only description of the calling key's own rate-limit budget. There is no resource to permission: the key can only ever see itself, and a session caller with no key is rejected with 403.",
@@ -156,6 +157,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/integrations": "SharePoint webhook routes share /integrations prefix but lack scope guards (external callbacks); main integration_router has TENANT_ADMIN guards",
     "/sysadmin": "Protected by super API key dependency",
     "/modules": "Protected by super-duper API key dependency",
+    "/module-auth": "Module auth handoff uses bearer-session ticket issue and service API-key token exchange",
     "/auth": "Public federation auth endpoints",
     "/api-docs": "Public API documentation endpoint",
     "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
@@ -863,6 +865,7 @@ MUTATING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/sysadmin/": "Gated by the separate super-admin API key dependency, not user API keys",
     "/modules/": "Gated by the separate super-duper module key dependency",
+    "/module-auth/": "Gated by the module auth broker's session and registered service-key dependencies",
     "/auth/callback": "Public OIDC federation callback — no API key context",
     "/users/login/": "Public login endpoints — no API key context",
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",

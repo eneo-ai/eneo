@@ -63,6 +63,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+ApiKeyRevokingContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 
 async def _space_response(container: Container, space: "Space") -> SpacePublic:
@@ -361,7 +365,7 @@ async def get_security_classification_impact_analysis(
 )
 async def delete_space(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyRevokingContainer,
 ):
     service = container.space_service()
     user = container.user()
@@ -1266,7 +1270,7 @@ async def change_role_of_member(
 async def remove_space_member(
     id: UUID,
     user_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyRevokingContainer,
 ):
     service = container.space_service()
     current_user = container.user()

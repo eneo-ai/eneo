@@ -33,7 +33,13 @@ class ActionType(str, Enum):
     PROMPT_LIBRARY_ENTRY_UPDATED = "prompt_library_entry_updated"
     PROMPT_LIBRARY_ENTRY_DELETED = "prompt_library_entry_deleted"
     MODULE_ADDED = "module_added"
+    MODULE_SET_REPLACED = "module_set_replaced"
     MODULE_ADDED_TO_TENANT = "module_added_to_tenant"
+    MODULE_REMOVED_FROM_TENANT = "module_removed_from_tenant"
+    MODULE_CLIENT_CONFIG_UPDATED = "module_client_config_updated"
+    MODULE_AUTH_TICKET_ISSUED = "module_auth_ticket_issued"
+    MODULE_AUTH_TOKEN_EXCHANGED = "module_auth_token_exchanged"
+    MODULE_AUTH_TOKEN_REFRESHED = "module_auth_token_refreshed"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"

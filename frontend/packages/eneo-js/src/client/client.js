@@ -48,10 +48,11 @@ function isRequestValidationResponse(value) {
 
 /**
  * Creates a client to request eneo resources over a typesafe interface.
- * Accepts either an API key or a user token; supplying both throws a TypeError.
+ * Accepts an API key, a user token, or both when an endpoint requires dual credentials.
  * @param {Object} args
  * @param  {string} args.baseUrl Base URL of the Eneo backend
  * @param  {string} [args.apiKey] Eneo API key
+ * @param  {string} [args.apiKeyHeaderName] API-key header configured by the backend, defaults to X-API-Key
  * @param  {string} [args.token] Eneo auth token obtained through logging in
  * @param {(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>} [args.fetch] Alternative fetch function to use, defaults to native fetch
  * @returns {Client}
@@ -70,21 +71,19 @@ export function createClient(args) {
   ) {
     throw new TypeError("token must be a non-empty string.");
   }
-  if (args.apiKey !== undefined && args.token !== undefined) {
-    throw new TypeError("Configure either apiKey or token, not both.");
-  }
-
   const version = "DEV-20260820T082656Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
+  const apiKeyHeaderName = args.apiKeyHeaderName?.trim() || "X-API-Key";
 
-  /** @type {{"X-API-Key": string} | {Authorization: string} | {}} */
-  const auth =
-    args.apiKey !== undefined
-      ? { "X-API-Key": args.apiKey }
-      : args.token !== undefined
-        ? { Authorization: `Bearer ${args.token}` }
-        : {};
+  /** @type {Record<string, string>} */
+  const auth = {};
+  if (args.apiKey !== undefined) {
+    auth[apiKeyHeaderName] = args.apiKey;
+  }
+  if (args.token !== undefined) {
+    auth.Authorization = `Bearer ${args.token}`;
+  }
 
   return {
     fetch: async (endpoint, { method, params, requestBody, signal, headers }) => {
