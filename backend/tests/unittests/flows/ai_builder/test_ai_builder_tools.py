@@ -173,6 +173,41 @@ class TestBuildToolSchema:
         assert admitted["steps"][-1]["citations_requested"] is True
         assert "knowledge_refs" in arguments
 
+    def test_create_admission_discards_identical_duplicate_step_tail(self) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        fields = [
+            {
+                "name": "summary",
+                "field_type": "string",
+                "description": "A concise summary.",
+            }
+        ]
+        arguments = {
+            "flow_name": "Grounded assessment",
+            "plan_rationale": "Assess the submitted material.",
+            "steps": [
+                {
+                    "name": "Assess material",
+                    "instructions": "Assess only the supplied material.",
+                    "model_ref": "model.default",
+                    "output_fields": fields,
+                }
+            ],
+            "model_ref": "model.default",
+            "output_fields": fields,
+        }
+
+        admitted = admit_propose_flow_tool_arguments(
+            arguments=arguments,
+            tool_schema=schema,
+        )
+
+        assert "model_ref" not in admitted
+        assert "output_fields" not in admitted
+        assert admitted["steps"][-1]["model_ref"] == "model.default"
+        assert admitted["steps"][-1]["output_fields"] == fields
+        assert "model_ref" in arguments
+
     def test_create_schema_projects_runtime_identity_without_argument_shape_change(
         self,
     ) -> None:

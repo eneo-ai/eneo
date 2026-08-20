@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    RESULT_KEYS_ARGUMENT,
     ProposalObligationProjection,
     build_create_flow_tool_schema,
     parse_create_flow_intent_arguments,
@@ -289,17 +290,23 @@ def admit_propose_flow_tool_arguments(
     arguments: dict[str, Any],
     tool_schema: ProposalToolSchema,
 ) -> dict[str, Any]:
-    """Admit one proposal payload after lossless schema-guided normalization.
+    """Admit one proposal payload after deterministic schema-guided normalization.
 
     Some non-strict tool implementations occasionally close the adjacent
     ``steps`` and ``output_fields`` arrays at the wrong boundary. The prepared
     create schema makes those cases unambiguous: each complete object matches
-    exactly one of the two shapes. Rehome only that exact shape, then apply the
-    unchanged proposal schema to the full payload.
+    exactly one of the two shapes. Models can also copy ``output_fields``
+    children into the flat, server-owned ``result_keys`` projection. Rehome the
+    unambiguous array entries and discard only that non-authoritative nested
+    copy, then apply the unchanged proposal schema to the full payload.
     """
 
     admitted = _rehome_misplaced_create_children(
         arguments=arguments,
+        tool_schema=tool_schema,
+    )
+    admitted = _discard_server_owned_result_key_children(
+        arguments=admitted,
         tool_schema=tool_schema,
     )
     validate_propose_flow_tool_arguments(
@@ -307,6 +314,57 @@ def admit_propose_flow_tool_arguments(
         tool_schema=tool_schema,
     )
     return admitted
+
+
+def _discard_server_owned_result_key_children(
+    *,
+    arguments: dict[str, Any],
+    tool_schema: ProposalToolSchema,
+) -> dict[str, Any]:
+    """Discard nested shape guesses the prepared result-key schema does not own."""
+
+    raw_root_properties = tool_schema["function"]["parameters"].get("properties")
+    if not isinstance(raw_root_properties, dict):
+        return arguments
+    result_keys_schema = cast(dict[str, object], raw_root_properties).get(
+        RESULT_KEYS_ARGUMENT
+    )
+    if not isinstance(result_keys_schema, dict):
+        return arguments
+    raw_record_schemas = cast(dict[str, object], result_keys_schema).get("properties")
+    if not isinstance(raw_record_schemas, dict):
+        return arguments
+
+    raw_result_keys = arguments.get(RESULT_KEYS_ARGUMENT)
+    if not isinstance(raw_result_keys, dict):
+        return arguments
+
+    admitted_result_keys = cast(dict[str, object], raw_result_keys)
+    updated_result_keys: dict[str, object] | None = None
+    for name, raw_record in admitted_result_keys.items():
+        record_schema = cast(dict[str, object], raw_record_schemas).get(name)
+        if not isinstance(raw_record, dict) or not isinstance(record_schema, dict):
+            continue
+        raw_allowed_properties = cast(dict[str, object], record_schema).get(
+            "properties"
+        )
+        if (
+            not isinstance(raw_allowed_properties, dict)
+            or "children" in raw_allowed_properties
+            or "children" not in raw_record
+        ):
+            continue
+        if updated_result_keys is None:
+            updated_result_keys = dict(admitted_result_keys)
+        updated_result_keys[name] = {
+            key: value
+            for key, value in cast(dict[str, object], raw_record).items()
+            if key != "children"
+        }
+
+    if updated_result_keys is None:
+        return arguments
+    return {**arguments, RESULT_KEYS_ARGUMENT: updated_result_keys}
 
 
 def _rehome_misplaced_create_children(
@@ -432,9 +490,9 @@ def _rehome_misplaced_create_children(
 
     # A non-strict tool implementation can also close the final step object
     # before its optional tail. Rehome only keys that the prepared schema says
-    # are optional step properties and never valid at the root. If the final
-    # step already carries the key, leave the duplicate invalid rather than
-    # guessing which value should win.
+    # are optional step properties and never valid at the root. An identical
+    # duplicate is redundant and can be discarded; conflicting values stay
+    # invalid rather than guessing which value should win.
     root_keys = frozenset(properties)
     step_tail_keys = allowed_step_keys - root_keys - required_step_keys
     misplaced_tail = step_tail_keys.intersection(admitted)
@@ -446,13 +504,22 @@ def _rehome_misplaced_create_children(
         return admitted
     final_step = cast(dict[str, object], tail_steps[-1])
     movable_tail = tuple(key for key in misplaced_tail if key not in final_step)
-    if not movable_tail:
+    redundant_tail = tuple(
+        key
+        for key in misplaced_tail
+        if key in final_step and admitted[key] == final_step[key]
+    )
+    removable_tail = (*movable_tail, *redundant_tail)
+    if not removable_tail:
         return admitted
-    updated = {key: value for key, value in admitted.items() if key not in movable_tail}
-    tail_steps[-1] = {
-        **final_step,
-        **{key: admitted[key] for key in movable_tail},
+    updated = {
+        key: value for key, value in admitted.items() if key not in removable_tail
     }
+    if movable_tail:
+        tail_steps[-1] = {
+            **final_step,
+            **{key: admitted[key] for key in movable_tail},
+        }
     updated["steps"] = tail_steps
     return updated
 
