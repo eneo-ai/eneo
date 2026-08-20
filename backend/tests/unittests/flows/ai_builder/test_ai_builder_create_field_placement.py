@@ -116,9 +116,9 @@ def test_runtime_field_purpose_places_on_final_semantic_topology(
 @pytest.mark.parametrize(
     ("purpose", "expected_references"),
     [
-        ("interpret_input", [0, 1, 0, 1]),
-        ("shape_result", [0, 0, 0, 1]),
-        ("whole_flow", [0, 1, 1, 1]),
+        ("interpret_input", [0, 1, 1]),
+        ("shape_result", [0, 0, 1]),
+        ("whole_flow", [0, 1, 1]),
     ],
 )
 def test_template_overlap_uses_exact_purpose_truth_table(
