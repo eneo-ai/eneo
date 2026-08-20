@@ -41,6 +41,10 @@ from eneo.server.protocol import responses
 router = APIRouter()
 
 AdminContainer = Annotated[Container, Depends(get_container(with_user=True))]
+ApiKeyRevokingAdminContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 
 def _role_to_public(
@@ -151,7 +155,7 @@ async def install_helper(kind: HelperKind, container: AdminContainer):
     description="Uninstall the active helper for a kind (deletes its role and assistant).",
     responses=responses.get_responses([400, 403]),
 )
-async def uninstall_helper(kind: HelperKind, container: AdminContainer):
+async def uninstall_helper(kind: HelperKind, container: ApiKeyRevokingAdminContainer):
     """Uninstall the active helper for ``kind`` (role + assistant)."""
     service = container.org_space_assistant_role_service()
     await service.uninstall_helper(kind=kind)

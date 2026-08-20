@@ -1,9 +1,15 @@
 import { dev } from "$app/environment";
 import { getRequestEvent } from "$app/server";
-import { type RequestEvent } from "@sveltejs/kit";
+import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
+import { type Cookies, type RequestEvent } from "@sveltejs/kit";
 
 export const EneoIdTokenCookie = "auth";
 export const EneoAccessTokenCookie = "acc";
+export const OidcLoginResumeCookie = "oidc-login-resume";
+
+const OIDC_LOGIN_RESUME_MAX_AGE_SECONDS = 10 * 60;
+// Leave room for the cookie name and attributes below the common 4 KiB limit.
+const OIDC_LOGIN_RESUME_MAX_ENCODED_LENGTH = 3000;
 
 export const setFrontendAuthCookie = async (tokens: {
   id_token: string;
@@ -46,6 +52,11 @@ export const setFrontendAuthCookie = async (tokens: {
       secure: !dev,
       sameSite: "lax"
     });
+  } else {
+    // `acc` is a provider access token (currently Zitadel), not a second copy
+    // of the Eneo session JWT. Authentication methods without such a token
+    // must remove a stale value left by an earlier provider login.
+    cookies.delete(EneoAccessTokenCookie, { path: "/" });
   }
 };
 
@@ -121,12 +132,14 @@ async function generateCodeChallenge(verifier: string) {
   return challenge;
 }
 
-// Helpers for state to send/receive via zitadel
-type LoginMehtod = "zitadel" | "mobilityguard";
+// Helpers for state shared by every login provider.
+type LoginMethod = "zitadel" | "mobilityguard" | "oidc";
 
 export type LoginStateParam = {
-  loginMethod: LoginMehtod;
+  loginMethod: LoginMethod;
   next: string | null;
+  /** Server-generated correlation value for the HttpOnly resume cookie. */
+  attemptId?: string;
 };
 
 export type LogoutStateParam = {
@@ -153,4 +166,175 @@ export function decodeState<T extends LoginStateParam | LogoutStateParam>(
     }
   }
   return null;
+}
+
+/**
+ * Resolve an untrusted post-login destination without rewriting its encoding.
+ *
+ * `next` crosses form fields and OIDC state. Validation may decode a copy to
+ * catch browser path ambiguities, but the returned value is always the exact
+ * original string so opaque module state is not double-decoded.
+ */
+export function resolveSafeLoginDestination(destination: unknown): string {
+  return resolveValidatedLoginDestination(destination) ?? DEFAULT_LANDING_PAGE;
+}
+
+function resolveValidatedLoginDestination(destination: unknown): string | null {
+  if (
+    typeof destination !== "string" ||
+    !destination.startsWith("/") ||
+    destination.startsWith("//") ||
+    destination.includes("\\") ||
+    containsControlCharacter(destination)
+  ) {
+    return null;
+  }
+
+  try {
+    const decodedForValidation = decodeURIComponent(destination);
+    if (
+      decodedForValidation.startsWith("//") ||
+      decodedForValidation.includes("\\") ||
+      containsControlCharacter(decodedForValidation)
+    ) {
+      return null;
+    }
+
+    const validationOrigin = "https://login-destination.invalid";
+    if (new URL(destination, validationOrigin).origin !== validationOrigin) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return destination;
+}
+
+function containsControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
+}
+
+export function resolveLoginStateDestination(state: string | null): string {
+  return resolveOptionalLoginStateDestination(state) ?? DEFAULT_LANDING_PAGE;
+}
+
+export function resolveOptionalLoginStateDestination(state: string | null): string | null {
+  const decodedState = decodeState<LoginStateParam>(state);
+  return resolveValidatedLoginDestination(decodedState?.next);
+}
+
+/**
+ * Remember one already-validated local destination while the browser is away
+ * at a generic OIDC provider. The value is HttpOnly and can never carry an
+ * external redirect. Oversized values are discarded instead of risking a
+ * rejected Set-Cookie header.
+ */
+type OidcLoginResumeBinding = {
+  attemptId: string;
+  destination: string;
+};
+
+const OIDC_ATTEMPT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function rememberOidcLoginDestination(
+  cookies: Cookies,
+  destination: unknown,
+  attemptId: string
+): void {
+  const safeDestination = resolveValidatedLoginDestination(destination);
+  const binding: OidcLoginResumeBinding = {
+    attemptId,
+    destination: safeDestination ?? ""
+  };
+  const serializedBinding = JSON.stringify(binding);
+
+  try {
+    if (
+      safeDestination === null ||
+      !OIDC_ATTEMPT_ID_PATTERN.test(attemptId) ||
+      encodeURIComponent(serializedBinding).length > OIDC_LOGIN_RESUME_MAX_ENCODED_LENGTH
+    ) {
+      clearOidcLoginDestination(cookies);
+      return;
+    }
+  } catch {
+    clearOidcLoginDestination(cookies);
+    return;
+  }
+
+  cookies.set(OidcLoginResumeCookie, serializedBinding, {
+    path: "/",
+    httpOnly: true,
+    maxAge: OIDC_LOGIN_RESUME_MAX_AGE_SECONDS,
+    secure: !dev,
+    sameSite: "lax"
+  });
+}
+
+/**
+ * Read a one-shot generic OIDC resume destination bound to this callback.
+ *
+ * The signed state is still validated by the backend before authentication.
+ * Here its unverified frontend payload is used only as a correlation value
+ * against an HttpOnly cookie. A mismatch is left untouched so a parallel
+ * login attempt cannot consume another tab's destination.
+ */
+export async function consumeOidcLoginDestination(
+  cookies: Cookies,
+  callbackState: string | null
+): Promise<string | null> {
+  const encodedBinding = cookies.get(OidcLoginResumeCookie);
+  if (encodedBinding === undefined) {
+    return null;
+  }
+
+  let binding: OidcLoginResumeBinding;
+  try {
+    const candidate = JSON.parse(encodedBinding) as Partial<OidcLoginResumeBinding>;
+    if (
+      typeof candidate.attemptId !== "string" ||
+      !OIDC_ATTEMPT_ID_PATTERN.test(candidate.attemptId) ||
+      typeof candidate.destination !== "string"
+    ) {
+      clearOidcLoginDestination(cookies);
+      return null;
+    }
+    binding = {
+      attemptId: candidate.attemptId,
+      destination: candidate.destination
+    };
+  } catch {
+    clearOidcLoginDestination(cookies);
+    return null;
+  }
+
+  const destination = resolveValidatedLoginDestination(binding.destination);
+  if (destination === null) {
+    clearOidcLoginDestination(cookies);
+    return null;
+  }
+  if (callbackState === null) {
+    return null;
+  }
+
+  const statePayload = (await parseJwt(callbackState)) as { frontend_state?: unknown };
+  const frontendState =
+    typeof statePayload.frontend_state === "string"
+      ? decodeState<LoginStateParam>(statePayload.frontend_state)
+      : null;
+  if (frontendState?.attemptId !== binding.attemptId) {
+    return null;
+  }
+
+  clearOidcLoginDestination(cookies);
+  return destination;
+}
+
+export function clearOidcLoginDestination(cookies: Cookies): void {
+  cookies.delete(OidcLoginResumeCookie, { path: "/" });
 }

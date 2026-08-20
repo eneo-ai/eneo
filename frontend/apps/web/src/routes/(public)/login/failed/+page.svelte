@@ -33,7 +33,9 @@
     </div>
 
     <div class="shadowed border-default bg-primary flex flex-col gap-3 p-4">
-      <Button href={localizeHref("/login")} variant="primary">{m.try_logging_in_again()}</Button>
+      <Button href={localizeHref(data.retryUrl)} variant="primary">
+        {m.try_logging_in_again()}
+      </Button>
     </div>
   </div>
 </div>

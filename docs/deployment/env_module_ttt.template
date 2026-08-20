@@ -9,9 +9,15 @@
 # USER LOGIN: modules have no IdP configuration of their own. Users log in
 # via their Eneo session (SSO handoff from the backend) - see MODULES.md.
 
-# Scoped Eneo service key (sk_...) - mint per MODULES.md, narrowest scope
-# that covers the module's needs. Rotate via the API keys admin UI/API.
-ENEO_MODULE_API_KEY=sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Published Flow selected after package import, review, and publication.
+# A Flow ID alone is not sufficient: do not enable the module until the
+# installed Eneo release exposes the Flow runtime contract required by the
+# verified module image.
+TAL_TILL_TEXT_FLOW_ID=flow_replace_me
+
+# Scoped Eneo service key (sk_...) - mint per MODULES.md with the narrowest
+# scope that covers the module's needs. Never expose it to browser code.
+ENEO_API_KEY=sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 # Session cookie signing secret (32+ chars): openssl rand -hex 32
 SESSION_SECRET=

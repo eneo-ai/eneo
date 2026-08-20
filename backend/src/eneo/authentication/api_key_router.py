@@ -67,6 +67,10 @@ from eneo.server.dependencies.container import get_container
 from eneo.users.user import UserInDB
 
 router = APIRouter(tags=["API Keys"])
+ApiKeyMutationContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 _API_KEY_EXAMPLE = {
     "id": "3cbf5fde-7288-4f03-bf06-f71c14f76854",
@@ -905,7 +909,7 @@ async def get_api_key_usage(
 )
 async def create_api_key(
     payload: Annotated[ApiKeyCreateRequest, Body(examples=[_CREATE_API_KEY_EXAMPLE])],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _perm_guard: None = Depends(require_permission(Permission.API_KEYS)),
     # Defense-in-depth: require_session_auth rejects API-key callers first, so
@@ -1099,7 +1103,7 @@ async def update_api_key(
             ],
         ),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
@@ -1129,7 +1133,7 @@ async def update_api_key(
 )
 async def revoke_api_key_deprecated(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
@@ -1161,7 +1165,7 @@ async def revoke_api_key_deprecated(
 )
 async def revoke_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1195,7 +1199,7 @@ async def revoke_api_key(
 )
 async def rotate_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
@@ -1233,7 +1237,7 @@ async def extend_api_key_expiration(
         ApiKeyExtendRequest,
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
@@ -1265,7 +1269,7 @@ async def extend_api_key_expiration(
 )
 async def purge_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
@@ -1299,7 +1303,7 @@ async def purge_api_key(
 )
 async def suspend_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
@@ -1333,7 +1337,7 @@ async def suspend_api_key(
 )
 async def reactivate_api_key(
     id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ApiKeyMutationContainer,
     _session_guard: None = Depends(require_session_auth),
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:

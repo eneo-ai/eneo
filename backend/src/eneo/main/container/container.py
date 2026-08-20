@@ -282,6 +282,7 @@ from eneo.mcp_servers.presentation.assemblers.mcp_server_tool_assembler import (
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
+from eneo.modules.module_auth import ModuleAuthBroker
 from eneo.modules.module_repo import ModuleRepository
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.runtime import object_content_runtime
@@ -1336,6 +1337,16 @@ class Container(containers.DeclarativeContainer):
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,
         session=session,
+    )
+    module_auth_broker = providers.Factory(
+        ModuleAuthBroker,
+        redis_client=redis_client,
+        module_repo=module_repo,
+        api_key_repo=api_key_v2_repo,
+        user_repo=user_repo,
+        user_service=user_service,
+        auth_service=auth_service,
+        audit_service=audit_service,
     )
     admin_service = providers.Factory(
         AdminService,
