@@ -227,7 +227,6 @@ class Settings(BaseSettings):
     tavily_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
     eneo_super_api_key: Optional[str] = None
-    eneo_super_duper_api_key: Optional[str] = None
 
     # Infrastructure dependencies
     postgres_user: str

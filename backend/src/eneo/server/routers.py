@@ -568,7 +568,7 @@ router.include_router(
     tenant_crawler_settings_router, prefix="/sysadmin", tags=["sysadmin"]
 )
 router.include_router(tenant_federation_router, prefix="/sysadmin", tags=["sysadmin"])
-router.include_router(module_router, prefix="/modules", tags=["modules"])
+router.include_router(module_router, prefix="/admin/modules", tags=["modules"])
 router.include_router(module_auth_router, prefix="/module-auth", tags=["module-auth"])
 router.include_router(
     federation_router, prefix="", tags=["authentication"]

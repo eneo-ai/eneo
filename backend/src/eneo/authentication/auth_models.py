@@ -544,7 +544,6 @@ class ApiKeyNotificationPolicyUpdate(BaseModel):
 
 class SuperApiKeyStatus(BaseModel):
     super_api_key_configured: bool
-    super_duper_api_key_configured: bool
 
     model_config = ConfigDict(extra="forbid")
 

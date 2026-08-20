@@ -539,13 +539,12 @@ server {
 
 ## API Key Hierarchy
 
-Eneo uses a three-tier API key system for different administrative tasks.
+Eneo uses environment and user/service credentials for separate tasks.
 
-| Key                     | Environment Variable       | Purpose                                                            |
-| ----------------------- | -------------------------- | ------------------------------------------------------------------ |
-| **Super API Key**       | `ENEO_SUPER_API_KEY`       | Sysadmin operations: tenants, users, credentials, crawler settings |
-| **Super Duper API Key** | `ENEO_SUPER_DUPER_API_KEY` | Module management: assigning modules to tenants                    |
-| **User API Key**        | Generated per user         | Admin operations within a tenant via `/api/v1/admin/`              |
+| Key               | Source                 | Purpose                                                            |
+| ----------------- | ---------------------- | ------------------------------------------------------------------ |
+| **Super API Key** | `ENEO_SUPER_API_KEY`   | Sysadmin operations: tenants, users, credentials, crawler settings |
+| **User/API key**  | Generated in Eneo      | Organization operations allowed by the user's role and key scope   |
 
 <Callout type="info">
   **Service Account Pattern:** We recommend creating a dedicated admin account
@@ -655,13 +654,12 @@ To use system administration endpoints (tenants, credentials, crawler settings),
 ENEO_SUPER_API_KEY=your-secure-api-key
 ```
 
-### Modules API Access
+### Module administration
 
-To manage module assignments to tenants, set a separate higher-privileged API key:
-
-```bash
-ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
-```
+Configure modules in **Administration → Modules** with an ordinary signed-in
+administrator holding the `modules` permission. The organization is derived
+from the session; module administration does not require a separate environment
+key or a tenant ID.
 
 ---
 

@@ -38,6 +38,23 @@ class ApiKeysV2Repository:
 
         return ApiKeyV2InDB.model_validate(record)
 
+    async def get_for_update(
+        self, *, key_id: UUID, tenant_id: UUID
+    ) -> Optional[ApiKeyV2InDB]:
+        """Return and lock a key until the surrounding transaction completes."""
+        query = (
+            sa.select(self.table)
+            .where(self.table.id == key_id)
+            .where(self.table.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        record = await self.session.scalar(query)
+
+        if record is None:
+            return None
+
+        return ApiKeyV2InDB.model_validate(record)
+
     async def get_by_hash(
         self,
         *,

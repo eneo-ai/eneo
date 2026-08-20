@@ -1366,7 +1366,7 @@ async def update_model_pricing_visibility(
     response_model=SuperApiKeyStatus,
     tags=["Admin API Keys"],
     summary="Get super API key status",
-    description="Return whether super and super-duper API keys are configured in environment settings.",
+    description="Return whether the sysadmin API key is configured in environment settings.",
     responses={
         200: {
             "description": "Super key configuration status.",
@@ -1374,7 +1374,6 @@ async def update_model_pricing_visibility(
                 "application/json": {
                     "example": {
                         "super_api_key_configured": True,
-                        "super_duper_api_key_configured": False,
                     }
                 }
             },
@@ -1392,7 +1391,6 @@ async def get_super_api_key_status(
 
     return SuperApiKeyStatus(
         super_api_key_configured=bool(settings.eneo_super_api_key),
-        super_duper_api_key_configured=bool(settings.eneo_super_duper_api_key),
     )
 
 

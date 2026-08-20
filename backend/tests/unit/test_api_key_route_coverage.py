@@ -125,7 +125,6 @@ INTENTIONALLY_UNGUARDED = {
     "/token-usage": "Admin scope + admin key permission guards (not resource guard)",
     "/templates": "Read-only discovery endpoints",
     "/sysadmin": "Separate super API key auth, out of scope",
-    "/modules": "Protected by the separate super-duper module key dependency",
     "/module-auth": "Module auth handoff: ticket issue is session-only; token exchange is registered service-key-bound in ModuleAuthBroker",
     "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
@@ -154,7 +153,6 @@ INTENTIONALLY_SCOPE_FREE = {
     "/ai-models": "Model listing endpoint",
     "/integrations": "SharePoint webhook routes share /integrations prefix but lack scope guards (external callbacks); main integration_router has TENANT_ADMIN guards",
     "/sysadmin": "Protected by super API key dependency",
-    "/modules": "Protected by super-duper API key dependency",
     "/module-auth": "Module auth handoff uses bearer-session ticket issue and service API-key token exchange",
     "/auth": "Public federation auth endpoints",
     "/api-docs": "Public API documentation endpoint",
@@ -162,6 +160,11 @@ INTENTIONALLY_SCOPE_FREE = {
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
     "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with require_session_auth; service-layer checks authorize the authenticated user",
+}
+
+INTENTIONALLY_SCOPE_FREE_EXACT = {
+    "/admin/modules/": "Session-only module administration derives organization scope from the user",
+    "/admin/modules/{module_key}/": "Session-only module administration derives organization scope from the user",
 }
 
 
@@ -226,6 +229,8 @@ class TestRouteCoverage:
             if not path or path == "/":
                 continue
             if _route_has_scope_check_dep(route):
+                continue
+            if path in INTENTIONALLY_SCOPE_FREE_EXACT:
                 continue
 
             prefix = _extract_path_prefix(path)
@@ -417,6 +422,7 @@ class TestTenantAdminApiKeyGuards:
     # Routes under /integrations that are external callbacks/auth flows
     # (sharepoint webhooks, OAuth flows) — intentionally unguarded
     INTEGRATION_CALLBACK_PREFIXES = ("/integrations/sharepoint/", "/integrations/auth/")
+    SESSION_ONLY_ADMIN_PREFIXES = ("/admin/modules",)
 
     def test_admin_surfaces_have_scope_and_admin_key_guards(self):
         prefixes = [
@@ -445,6 +451,11 @@ class TestTenantAdminApiKeyGuards:
                 path = getattr(route, "path", "")
                 if any(path.startswith(p) for p in self.INTEGRATION_CALLBACK_PREFIXES):
                     continue  # External callback/auth, intentionally unguarded
+                if any(path.startswith(p) for p in self.SESSION_ONLY_ADMIN_PREFIXES):
+                    assert self._has_dependency(route, "require_session_auth"), (
+                        f"{path} missing require_session_auth"
+                    )
+                    continue
                 assert self._has_dependency(route, "_scope_check_dep"), (
                     f"{path} missing _scope_check_dep"
                 )
@@ -825,7 +836,7 @@ MUTATING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Listed here so the walker does not flag them as missing v2 guards.
 MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/sysadmin/": "Gated by the separate super-admin API key dependency, not user API keys",
-    "/modules/": "Gated by the separate super-duper module key dependency",
+    "/admin/modules/": "Session-only routes gated by Permission.MODULES; organization scope comes from the user",
     "/module-auth/": "Gated by the module auth broker's session and registered service-key dependencies",
     "/auth/callback": "Public OIDC federation callback — no API key context",
     "/users/login/": "Public login endpoints — no API key context",

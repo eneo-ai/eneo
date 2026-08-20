@@ -214,7 +214,11 @@ class ModuleAuthBroker:
         registration remain owned by normal API-key authentication, as do IP
         allowlists and rate limits, and take effect on the next request.
         """
-        api_key = await self.api_key_repo.get(
+        # Hold the key row through the installation transaction. Lifecycle
+        # mutations update the same row, so revoke/suspend and installation
+        # are serialized instead of allowing a dead key to be persisted after
+        # validation.
+        api_key = await self.api_key_repo.get_for_update(
             key_id=service_key_id, tenant_id=tenant_id
         )
         if api_key is None:
