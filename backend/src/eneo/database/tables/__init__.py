@@ -12,7 +12,6 @@ _TABLE_MODULES = (
     "eneo.database.tables.app_template_table",
     "eneo.database.tables.assistant_table",
     "eneo.database.tables.assistant_template_table",
-    "eneo.database.tables.chat_session_mcp_state_table",
     "eneo.database.tables.collections_table",
     "eneo.database.tables.completion_model_migration_history_table",
     "eneo.database.tables.feature_flag_table",

@@ -9,3 +9,6 @@ LOG_LEVEL=info
 
 # Node environment for module runtimes
 NODE_ENV=production
+
+# Must match backend API_KEY_HEADER_NAME when a module uses @eneo/eneo-js.
+ENEO_API_KEY_HEADER_NAME=X-API-Key

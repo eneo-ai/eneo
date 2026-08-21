@@ -40,6 +40,17 @@ JWT_SECRET=
 JWT_TOKEN_PREFIX=Bearer
 URL_SIGNING_KEY=
 
+# Module auth broker (optional module applications, see MODULES.md)
+# Ticket: one-time login handoff carrier; only needs to cover one redirect.
+#MODULE_AUTH_TICKET_TTL_SECONDS=30
+# Module user token: must comfortably exceed a module's longest single
+# request. Modules refresh proactively, so keep this short.
+#MODULE_AUTH_TOKEN_EXPIRY_MINUTES=60
+# Hard ceiling on one module session measured from login handoff. Refresh
+# slides the token window but never extends past this; afterwards the module
+# re-runs the login handoff (transparent while the Eneo session is alive).
+#MODULE_AUTH_MAX_SESSION_HOURS=8
+
 # ----------------------------------------------------------------------------
 # Authentication Configuration
 # ----------------------------------------------------------------------------

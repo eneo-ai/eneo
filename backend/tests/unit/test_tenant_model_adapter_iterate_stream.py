@@ -464,6 +464,79 @@ async def test_non_streaming_supports_multiple_tool_rounds():
     }
 
 
+class _ErrorSecondRoundMCPProxy(_FakeMCPProxy):
+    async def call_tools_parallel(self, proxy_calls):
+        self.calls.append(proxy_calls)
+        is_error = len(self.calls) > 1
+        text = "boom" if is_error else "tool-ok"
+        return [
+            {"content": [{"type": "text", "text": text}], "is_error": is_error}
+            for _ in proxy_calls
+        ]
+
+
+async def test_non_streaming_populates_tool_calls_metadata_for_replay():
+    adapter = _make_completion_adapter()
+    mcp_proxy = _ErrorSecondRoundMCPProxy()
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
+            finish_reason="tool_calls",
+        ),
+        _response(
+            tool_calls=[_response_tool_call("call_2", '{"q":"second"}')],
+            finish_reason="tool_calls",
+        ),
+        _response(content="final answer"),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.tool_calls_metadata is not None
+    assert len(completion.tool_calls_metadata) == 2
+    succeeded, failed = completion.tool_calls_metadata
+
+    assert succeeded.tool_call_id == "call_1"
+    assert succeeded.server_name == "Server"
+    assert succeeded.tool_name == "tool"
+    assert succeeded.title == "Tool title"
+    assert succeeded.mcp_tool_name == "server__tool"
+    assert succeeded.arguments == {"q": "first"}
+    assert succeeded.approved is True
+    assert succeeded.result_status == "succeeded"
+    assert succeeded.result == "tool-ok"
+
+    assert failed.tool_call_id == "call_2"
+    assert failed.arguments == {"q": "second"}
+    assert failed.result_status == "failed"
+    assert failed.result == json.dumps({"error": "boom"})
+
+
+async def test_non_streaming_without_tool_calls_has_no_tool_metadata():
+    adapter = _make_completion_adapter()
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=_response(content="plain answer")),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=_FakeMCPProxy(),
+        )
+
+    assert completion.text == "plain answer"
+    assert completion.tool_calls_metadata is None
+
+
 def test_tool_result_budget_admits_until_exhausted_then_withholds():
     budget = _ToolResultBudget(token_limit=4, litellm_model="openai/test-model")
 

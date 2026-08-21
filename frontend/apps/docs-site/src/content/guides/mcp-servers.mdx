@@ -1,6 +1,6 @@
 # MCP Servers
 
-Model Context Protocol (MCP) servers give assistants access to external tools and live data. This guide covers setup, tool approval, user-specific catalogs, session state, and day-to-day operation.
+Model Context Protocol (MCP) servers give assistants access to external tools and live data. This guide covers setup, tool approval, user-specific catalogs, cross-turn state, and day-to-day operation.
 
 import { Callout } from 'nextra/components'
 
@@ -85,8 +85,8 @@ Eneo sends the available values in these headers:
 
 Empty values are omitted. Text values are stripped of control characters and
 percent-encoded as UTF-8; the receiving server must decode them before display
-or matching. Headers are sent during connection checks, tool discovery, tool
-calls, and protocol-session termination.
+or matching. Headers are sent during connection checks, tool discovery, and
+tool calls.
 
 <Callout type="warning">
   Forwarded headers are identity claims from Eneo, not a replacement for a
@@ -240,35 +240,32 @@ flowchart LR
 4. The model receives only the approved/live intersection. Descriptions and schemas always come from the approved catalog, not the live response.
 5. If the model selects a tool, Eneo calls the same remote server and returns the result to the model.
 
-### Stateful MCP sessions
+### Cross-turn state for stateful servers
 
-An Eneo conversation and an MCP protocol session are related but not identical.
-Before the first MCP connection, Eneo commits the new conversation and the
-user's message. When a server assigns an `Mcp-Session-Id`, Eneo stores it per
-conversation and server, then resumes it on later turns even though each turn
-opens a fresh HTTP transport. The catalog probe and the later tool call use that
-same logical session, so tools activated by earlier calls remain available.
+Eneo opens a fresh MCP connection for every completion and does not persist or
+resume MCP protocol sessions. This follows the direction of the MCP
+specification (revision 2026-07-28 removes protocol-level sessions): a server
+that needs state to span several user turns should mint an explicit handle and
+exchange it through tool calls, not rely on transport-session affinity.
 
-The session ID is committed in a short database transaction before Eneo treats
-the remote session as durable. If that commit fails, Eneo attempts to terminate
-the new remote session rather than leaving an unreachable session behind.
+The pattern:
 
-```mermaid
-sequenceDiagram
-  participant E as Eneo
-  participant D as PostgreSQL
-  participant M as MCP server
-  E->>D: Commit a new conversation and user message
-  E->>D: Load session ID for this conversation and server
-  E->>M: Connect or resume
-  M-->>E: Session ID and live tools
-  E->>D: Commit a newly assigned session ID
-  E->>M: Call tools in the same logical session
-```
+1. The tool that creates the state (for example, ingesting an uploaded file)
+   returns a handle in its result text, such as `workspace_id: ws_8a3b`.
+2. Later tools accept that handle as an ordinary parameter. Eneo replays
+   earlier tool calls and results to the model on every turn, so the model can
+   read the handle from turn 1 and pass it on turn 5.
+3. The server binds each handle to the forwarded identity headers
+   (`X-Eneo-User-Id`, `X-Eneo-Tenant-Id`) and rejects calls where they do not
+   match. Possession of a handle alone must never grant access: handles appear
+   in conversation history and logs by design.
+4. The server expires held state with its own TTL. Eneo does not signal
+   conversation deletion to remote servers.
 
-Deleting a conversation attempts to terminate its remote sessions. Local
-deletion still completes if a remote server is unavailable, so stateful MCP
-servers should also enforce a reasonable idle timeout.
+Two reliability details for server authors: repeat the handle in every tool
+result (long conversations drop the oldest turns from model context first, so
+a handle mentioned only once can age out), and state in the tool descriptions
+that the model should reuse the handle from earlier results.
 
 ### Security and failure boundaries
 
@@ -279,7 +276,6 @@ servers should also enforce a reasonable idle timeout.
 | User cannot see an approved tool | Omit it from this request |
 | Identity-scoped discovery fails or times out | Omit that server's tools from this request |
 | Catalog exceeds an admin limit | Reject the entire catalog for this request; save nothing |
-| New protocol session cannot be persisted | Terminate it and omit that discovery result |
 | Admin cannot see a user-only tool during sync | Keep the existing tool; absence is not deletion evidence |
 
 ### Checklist for MCP server operators
@@ -287,7 +283,7 @@ servers should also enforce a reasonable idle timeout.
 - Support Streamable HTTP and return a user-scoped `tools/list` when identity forwarding is enabled.
 - Authorize every list and call request; do not rely on the model or Eneo's catalog as your only access check.
 - Keep tool names stable and treat description/schema changes as reviewed contract changes.
-- If state continuity matters, support `Mcp-Session-Id`, session termination, and idle expiration.
+- If state continuity matters, mint explicit handles in tool results, bind them to the forwarded identity, and expire them with a TTL.
 - Ensure Eneo can reach the endpoint within the configured connect and list-tools timeouts.
 
 ---
@@ -345,10 +341,9 @@ by the remote server.
 
 ### Stateful Tools Lose Their State
 
-- Check whether the server returned and accepts `Mcp-Session-Id`.
-- Verify the server did not restart or evict the logical session.
-- Configure an idle timeout long enough for normal conversation gaps.
-- Check backend logs for session resume or termination failures.
+- Verify the server returns its state handle in tool results and accepts it as a parameter on later calls.
+- Verify the server did not restart or expire the held state; configure a TTL long enough for normal conversation gaps.
+- In very long conversations the oldest turns leave the model's context; servers should repeat the handle in every result.
 
 ### Pending Changes Won't Clear
 

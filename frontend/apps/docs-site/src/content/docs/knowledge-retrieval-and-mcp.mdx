@@ -291,9 +291,7 @@ The mounted HTTP applications live for the backend process lifetime. The
 - it is discarded when the request finishes.
 
 The internal FastMCP applications use stateless HTTP. They do not assign an MCP
-protocol session ID, so Eneo's per-conversation MCP session persistence
-naturally has nothing to store for them. Any healthy backend worker can serve a
-loopback call.
+protocol session ID, and any healthy backend worker can serve a loopback call.
 
 ### Internal authentication and scope
 
@@ -462,26 +460,22 @@ problems. The former must be reachable by URL-consuming tools that need file
 bytes. The latter must be reachable by Eneo's own backend so it can call its
 built-in MCP routes.
 
-## Session state and conversation replay
+## Conversation replay of tool use
 
-External MCP servers may assign an `Mcp-Session-Id`. Eneo stores that ID per
-Eneo conversation and external server, resumes it on later turns, and attempts
-to terminate it when the conversation is deleted. A new HTTP transport can
-therefore continue the same logical remote session.
-
-Internal loopback servers are stateless, but their calls are still persisted in
-the conversation's tool trace. Tool metadata records the exact prefixed name,
-arguments, result status, and result text needed to replay prior tool use to the
-model. MCP resource blocks are captured generically, regardless of whether the
-provider was internal or external.
-
-The distinction is:
+Eneo opens a fresh MCP connection per completion and does not persist MCP
+protocol sessions. Cross-turn continuity lives in the conversation's tool
+trace instead: tool metadata records the exact prefixed name, arguments,
+result status, and result text needed to replay prior tool use to the model.
+MCP resource blocks are captured generically, regardless of whether the
+provider was internal or external. A server that holds state across turns
+returns an explicit handle in its tool results; because prior results are
+replayed, the model can pass that handle to later calls.
 
 | State | Internal loopback | External stateful server |
 | --- | --- | --- |
 | Conversation tool trace | Persisted | Persisted |
-| Remote MCP protocol session | None | Persisted and resumed when assigned |
-| Data authority | Current Eneo services and authorization | Remote server's session and authorization |
+| Cross-turn server state | None | Keyed to handles the server returns in tool results |
+| Data authority | Current Eneo services and authorization | Remote server's own authorization |
 
 ## Failure and degradation behavior
 
