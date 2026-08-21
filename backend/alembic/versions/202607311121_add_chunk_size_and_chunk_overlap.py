@@ -7,7 +7,7 @@ mismatch, so upgrading cannot trigger a mass re-index. The partial index scopes 
 SharePoint delta's drift check to one source.
 
 Revision ID: 202607311121
-Revises: 202608121500
+Revises: 202608211300
 Create Date: 2026-07-31 11:21:00.000000
 """
 
@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "202607311121"
-down_revision: str | None = "202608121500"
+down_revision: str | None = "202608211300"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
