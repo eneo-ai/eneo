@@ -743,8 +743,10 @@ interpretation and the fixed 45-minute spacing rule by user decision on
   `/workspace/.codex/artifacts/slice2-evidence-manifest-20260810/`
   (self-replaying, hashed) and
   `/workspace/.codex/artifacts/evidence-freeze-20260809/`.
-- Night window: no work 01:00–06:00 Stockholm (Codex included; no
-  launches after ~00:10).
+- Night window: no work 00:10–07:00 Stockholm, Codex included (user decision
+  2026-08-22, replacing the earlier 01:00–06:00 window). A pass at xhigh may
+  run an hour, so do not launch one after ~23:10; stop anything still running
+  at 00:10 and resume it by session name at 07:00.
 
 ## Recorded user decisions
 1. ~~Permission to edit `.devcontainer/docker-compose.yml` for the
