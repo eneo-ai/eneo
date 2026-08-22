@@ -607,7 +607,7 @@ orchestrator verifies every diff and owns all git.
 ### Measurement cadence
 After a material Builder ownership slice, use one repetition of the
 final-frozen manifest as the broad progress smoke; derive its population from
-the tracked manifest rather than a prose constant (currently 158 cases). Use
+the tracked manifest rather than a prose constant. Use
 an affected named cohort at ×3 when the slice transfers measured behavior or
 when attribution needs protection from provider variance; Luna's lower cost
 makes this the default targeted check rather than an exceptional tranche-only
@@ -703,6 +703,18 @@ interpretation and the fixed 45-minute spacing rule by user decision on
   protected path stays untouchable, and pre-existing devcontainer
   content must survive. The historical L1a exception has landed; it
   does not authorize later devcontainer changes.
+- Lane exception, granted 2026-08-21 (decision O0 of that lane): the Flow AI
+  Builder tidy refactor commits and pushes `refactor/flows-tidy-ai-builder`.
+  Its execution authority is
+  [tidy-ai-builder-plan.md](tidy-ai-builder-plan.md), which owns its own slice
+  checkboxes and receipts and binds to the rulings, cadence and guardrails
+  here. The exception covers that lane only.
+- Corpus population for that lane: the tracked manifest stays the population
+  owner, as NO PROSE POPULATION CONSTANTS requires. The lane's uncommitted tree
+  adds the case-id range `evidence_municipal_173` through `robustness_182`,
+  which lands as a corpus release in slice 0.4 of its plan, after the broad
+  comparison on the manifest as tracked today. Until 0.4 lands, that range is
+  outside the population and is not comparable evidence.
 - Commits: set `ENEO_DEVCONTAINER_NAME` only to a validator whose
   `/workspace` bind source is this exact checkout (currently
   `eneo-flows-clean-pyright`). `developz_devcontainer-eneo-1` mounts a
