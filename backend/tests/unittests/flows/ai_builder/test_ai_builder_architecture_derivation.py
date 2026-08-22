@@ -176,6 +176,27 @@ def test_derives_docx_template_architecture_from_resolved_slots() -> None:
     ]
 
 
+def test_derives_json_to_docx_template_architecture_without_document_upload() -> None:
+    draft = derive_architecture_commit_draft(
+        _state_with_slots(
+            primary_runtime_input="json",
+            terminal_output="docx_document",
+            docx_output_mode="template_fill_docx",
+        )
+    )
+
+    assert draft is not None
+    assert [triple.model_dump() for triple in draft.tuples_chain] == [
+        {
+            "input_type": "json",
+            "output_type": "docx",
+            "output_mode": "template_fill",
+        }
+    ]
+    assert draft.chosen_patterns == ["json_to_artifact_report"]
+    assert draft.required_capabilities == ["input_json", "output_mode_template_fill"]
+
+
 def test_derives_audio_to_pdf_architecture_without_document_scope() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(

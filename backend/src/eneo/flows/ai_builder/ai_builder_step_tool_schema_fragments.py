@@ -200,6 +200,15 @@ def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
                 ),
             },
             "required": {"type": "boolean", "default": True},
+            "nullable": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Whether a required primitive field may be null when the "
+                    "source explicitly lacks the value. Keep false for object "
+                    "and array fields."
+                ),
+            },
             "children": {
                 **children_schema,
                 "description": (

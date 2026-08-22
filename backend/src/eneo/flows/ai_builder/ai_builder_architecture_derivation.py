@@ -336,7 +336,10 @@ def _primary_pattern_id(
     output_type: FlowOutputType,
     output_mode: FlowOutputMode,
 ) -> str | None:
-    if output_mode is FlowOutputMode.TEMPLATE_FILL:
+    if output_mode is FlowOutputMode.TEMPLATE_FILL and input_type in {
+        FlowInputType.DOCUMENT,
+        FlowInputType.FILE,
+    }:
         return "document_to_docx_template"
     if input_type is FlowInputType.JSON and output_type is FlowOutputType.JSON:
         return "json_to_structured_payload"

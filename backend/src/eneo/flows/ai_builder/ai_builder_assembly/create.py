@@ -95,6 +95,9 @@ _SOURCE_INPUT_TYPES = frozenset(
     }
 )
 _FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
+_TEMPLATE_SOURCE_INPUT_TYPES = _FILE_INPUT_TYPES | frozenset(
+    {InputType.JSON, InputType.TEXT}
+)
 CreateAssemblyRejectionReason = Literal[
     "aggregate_requires_text_or_document_output",
     "all_previous_step_cannot_use_explicit_refs",
@@ -1069,19 +1072,28 @@ def _assemble_docx_template_fill(
     # several sources, cross-checking them); the fixed chain already reads
     # every file through its per-source reader, so any aggregation intent
     # assembles to the same linear template topology.
-    if runtime_input_type not in _FILE_INPUT_TYPES:
+    if runtime_input_type not in _TEMPLATE_SOURCE_INPUT_TYPES:
         return _reject("docx_template_shape_unsupported")
-    reader_step = template_variable_reader_step(
-        runtime_input_type=runtime_input_type,
-        runtime_required=runtime_required,
-        runtime_max_files=runtime_max_files,
-        ui_language=ui_language,
+    reader_step = (
+        template_variable_reader_step(
+            runtime_input_type=runtime_input_type,
+            runtime_required=runtime_required,
+            runtime_max_files=runtime_max_files,
+            ui_language=ui_language,
+        )
+        if runtime_input_type in _FILE_INPUT_TYPES
+        else None
     )
     semantic_steps: list[PlannedStep] = []
     previous_step = reader_step
     for index, semantic_step in enumerate(intent.steps):
         is_terminal_semantic_step = index == len(intent.steps) - 1
         step_index = index + 1
+        input_source = (
+            InputSource.FLOW_INPUT
+            if previous_step is None
+            else InputSource.PREVIOUS_STEP
+        )
         if semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs:
             return _reject(
                 "docx_template_shape_unsupported",
@@ -1098,11 +1110,14 @@ def _assemble_docx_template_fill(
                         step_index=step_index,
                     )
                 step_output_type = OutputType.JSON
-                step_input_type = _linear_step_input_type(
-                    input_source=InputSource.PREVIOUS_STEP,
-                    runtime_input_type=runtime_input_type,
-                    previous_output_type=previous_step.output_type,
-                    output_type=step_output_type,
+                step_input_type = (
+                    runtime_input_type
+                    if previous_step is None
+                    else (
+                        InputType.TEXT
+                        if previous_step.output_type == OutputType.TEXT
+                        else InputType.JSON
+                    )
                 )
             else:
                 if semantic_step.output_type not in {None, OutputType.TEXT}:
@@ -1112,9 +1127,13 @@ def _assemble_docx_template_fill(
                     )
                 step_output_type = OutputType.TEXT
                 step_input_type = (
-                    InputType.TEXT
-                    if previous_step.output_type == OutputType.TEXT
-                    else InputType.JSON
+                    runtime_input_type
+                    if previous_step is None
+                    else (
+                        InputType.TEXT
+                        if previous_step.output_type == OutputType.TEXT
+                        else InputType.JSON
+                    )
                 )
         else:
             step_output_type = _linear_step_output_type(
@@ -1136,21 +1155,23 @@ def _assemble_docx_template_fill(
                     step_index=step_index,
                 )
             step_input_type = _linear_step_input_type(
-                input_source=InputSource.PREVIOUS_STEP,
+                input_source=input_source,
                 runtime_input_type=runtime_input_type,
-                previous_output_type=previous_step.output_type,
+                previous_output_type=(
+                    previous_step.output_type if previous_step is not None else None
+                ),
                 output_type=step_output_type,
             )
         planned_step = PlannedStep(
             role="transform",
             name=semantic_step.name,
             instructions=semantic_step.instructions,
-            input_source=InputSource.PREVIOUS_STEP,
+            input_source=input_source,
             input_type=step_input_type,
             output_type=step_output_type,
             output_mode=OutputMode.PASS_THROUGH,
             underlag_channel=derive_underlag_channel(
-                input_source=InputSource.PREVIOUS_STEP,
+                input_source=input_source,
                 input_type=step_input_type,
                 previous_step=previous_step,
                 previous_field_refs=(),
@@ -1164,6 +1185,8 @@ def _assemble_docx_template_fill(
         semantic_steps.append(planned_step)
         previous_step = planned_step
 
+    if previous_step is None:
+        return _reject("docx_template_shape_unsupported")
     fixed_template_fill_step = template_fill_step(ui_language=ui_language)
     fixed_template_fill_step = replace(
         fixed_template_fill_step,
@@ -1174,7 +1197,11 @@ def _assemble_docx_template_fill(
             previous_field_refs=(),
         ),
     )
-    planned_steps = (reader_step, *semantic_steps, fixed_template_fill_step)
+    planned_steps = (
+        *((reader_step,) if reader_step is not None else ()),
+        *semantic_steps,
+        fixed_template_fill_step,
+    )
     completed_steps = _apply_per_source_reader_execution(
         planned_steps,
         ui_language=ui_language,

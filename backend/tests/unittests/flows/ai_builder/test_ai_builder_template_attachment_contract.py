@@ -341,6 +341,197 @@ def test_contract_binds_nested_placeholder_to_declared_string_leaf() -> None:
     }
 
 
+def test_contract_binds_required_nullable_nested_string_leaf() -> None:
+    spec = _template_spec()
+    extract = spec.steps[1].model_copy(
+        update={
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "sections": {
+                        "type": "object",
+                        "properties": {
+                            "decision": {
+                                "type": "object",
+                                "properties": {"note": {"type": ["string", "null"]}},
+                                "required": ["note"],
+                                "additionalProperties": False,
+                            }
+                        },
+                        "required": ["decision"],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": ["sections"],
+                "additionalProperties": False,
+            }
+        }
+    )
+    spec = spec.model_copy(update={"steps": [spec.steps[0], extract, spec.steps[2]]})
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=("sections.decision.note",),
+    )
+
+    assert contracted.steps[-1].output_config == {
+        "bindings": {
+            "sections.decision.note": (
+                "{{ step_b.output.structured.sections.decision.note }}"
+            )
+        }
+    }
+
+
+def test_contract_promotes_optional_nested_string_path_required_by_template() -> None:
+    spec = _template_spec()
+    extract = spec.steps[1].model_copy(
+        update={
+            "output_contract": {
+                "type": "object",
+                "properties": {
+                    "sections": {
+                        "type": "object",
+                        "properties": {
+                            "decision": {
+                                "type": "object",
+                                "properties": {"note": {"type": "string"}},
+                                "required": [],
+                                "additionalProperties": False,
+                            }
+                        },
+                        "required": [],
+                        "additionalProperties": False,
+                    }
+                },
+                "required": [],
+                "additionalProperties": False,
+            }
+        }
+    )
+    spec = spec.model_copy(update={"steps": [spec.steps[0], extract, spec.steps[2]]})
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=("sections.decision.note",),
+    )
+
+    contract = contracted.steps[1].output_contract
+    assert contract is not None
+    assert contract["required"] == ["sections"]
+    sections = contract["properties"]["sections"]
+    assert sections["required"] == ["decision"]
+    assert sections["properties"]["decision"]["required"] == ["note"]
+    assert contracted.steps[-1].output_config == {
+        "bindings": {
+            "sections.decision.note": (
+                "{{ step_b.output.structured.sections.decision.note }}"
+            )
+        }
+    }
+
+
+def test_contract_materializes_missing_nested_placeholder_on_json_preparation() -> None:
+    spec = _template_spec()
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=(
+            "customer.name",
+            "arende.diarienummer",
+            "arende.plats",
+        ),
+    )
+
+    preparation = contracted.steps[1]
+    assert preparation.output_contract == {
+        "type": "object",
+        "properties": {
+            "customer": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+            "arende": {
+                "type": "object",
+                "properties": {
+                    "diarienummer": {
+                        "type": "string",
+                        "description": (
+                            "Value for DOCX template placeholder 'arende.diarienummer'."
+                        ),
+                    },
+                    "plats": {
+                        "type": "string",
+                        "description": (
+                            "Value for DOCX template placeholder 'arende.plats'."
+                        ),
+                    },
+                },
+                "required": ["diarienummer", "plats"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["customer", "arende"],
+        "additionalProperties": False,
+    }
+    assert preparation.assistant_spec is not None
+    assert "arende.diarienummer" in preparation.assistant_spec.instructions
+    assert "arende.plats" in preparation.assistant_spec.instructions
+    assert contracted.steps[-1].output_config == {
+        "bindings": {
+            "customer.name": "{{ step_b.output.structured.customer.name }}",
+            "arende.diarienummer": (
+                "{{ step_b.output.structured.arende.diarienummer }}"
+            ),
+            "arende.plats": "{{ step_b.output.structured.arende.plats }}",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("placeholder", "failure_code"),
+    [
+        ("section. value", "template_placeholder_path_invalid"),
+        (
+            "one.two.three.four.five.six",
+            "template_placeholder_depth_exceeded",
+        ),
+    ],
+)
+def test_contract_rejects_unresolvable_or_too_deep_materialized_path(
+    placeholder: str,
+    failure_code: str,
+) -> None:
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        apply_template_attachment_contract(
+            _template_spec(),
+            selected_template_count=1,
+            placeholders=(placeholder,),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == failure_code
+
+
+def test_contract_bounds_server_materialized_template_paths() -> None:
+    placeholders = tuple(f"section.value_{index}" for index in range(101))
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        apply_template_attachment_contract(
+            _template_spec(),
+            selected_template_count=1,
+            placeholders=placeholders,
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "template_placeholder_materialization_limit_exceeded"
+    )
+
+
 def test_contract_drops_unused_text_step_before_template_fill() -> None:
     spec = _template_spec()
     unused_text_step = StepSpec(
@@ -388,6 +579,52 @@ def test_contract_drops_unused_text_step_before_template_fill() -> None:
         "bindings": {"customer.name": "{{ step_b.output.structured.customer.name }}"}
     }
     assert contracted.steps[-1].input_bindings is None
+
+
+def test_contract_drops_unused_json_step_before_template_fill() -> None:
+    spec = _template_spec()
+    unused_json_step = StepSpec(
+        plan_step_ref="step_date",
+        name="Prepare date",
+        assistant_spec=AssistantSpec(instructions="Prepare the runtime date."),
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        output_type=OutputType.JSON,
+        output_contract={
+            "type": "object",
+            "properties": {"datum": {"type": "string"}},
+            "required": ["datum"],
+            "additionalProperties": False,
+        },
+    )
+    spec = spec.model_copy(
+        update={
+            "steps": [
+                spec.steps[0],
+                spec.steps[1],
+                unused_json_step,
+                spec.steps[2],
+            ]
+        }
+    )
+
+    contracted = apply_template_attachment_contract(
+        spec,
+        selected_template_count=1,
+        placeholders=("customer.name", "datum"),
+    )
+
+    assert [step.plan_step_ref for step in contracted.steps] == [
+        "step_a",
+        "step_b",
+        "step_c",
+    ]
+    assert contracted.steps[-1].output_config == {
+        "bindings": {
+            "customer.name": "{{ step_b.output.structured.customer.name }}",
+            "datum": "{{ datum }}",
+        }
+    }
 
 
 def test_contract_keeps_text_step_referenced_by_template() -> None:

@@ -103,6 +103,7 @@ class StructuredFieldDraft(BaseModel):
     field_type: StructuredFieldType
     description: str
     required: bool = True
+    nullable: bool = False
     fields: list["StructuredFieldDraft"] | None = None
     item_fields: list["StructuredFieldDraft"] | None = None
     # An object whose members are deliberately left open. The flag itself is
@@ -150,6 +151,10 @@ class StructuredFieldDraft(BaseModel):
         if self.allow_additional_properties and self.field_type != "object":
             raise ValueError(
                 f"Only object fields may leave their members open ({self.name!r})."
+            )
+        if self.nullable and self.field_type in {"object", "array"}:
+            raise ValueError(
+                f"Only primitive structured fields may be nullable ({self.name!r})."
             )
         if self.allow_additional_properties and self.fields is not None:
             # The compiler answers "declared members" before "open members", so

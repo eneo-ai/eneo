@@ -827,6 +827,9 @@ def _schema_type_hint(schema: dict[str, Any]) -> str:
             return "object"
         if "array" in declared:
             return "array"
+        non_null_types = [item for item in declared if item != "null"]
+        if len(non_null_types) == 1:
+            return non_null_types[0]
     if isinstance(schema.get("properties"), dict):
         return "object"
     if "items" in schema:

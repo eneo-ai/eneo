@@ -125,12 +125,16 @@ def _confirmed_runtime_field(
     *,
     purpose: RuntimeMetadataFieldPurpose = "interpret_input",
     required: bool = False,
+    field_type: str = "text",
+    options: tuple[str, ...] = (),
 ) -> ConfirmedRuntimeMetadataField:
     return ConfirmedRuntimeMetadataField(
         value=FlowInputFieldIntent(
             variable_name=variable_name,
             label=label,
+            field_type=field_type,
             required=required,
+            options=list(options),
             provenance="user_confirmed",
         ),
         purpose=purpose,
@@ -480,6 +484,229 @@ def test_create_depth_four_primitive_array_survives_full_compile_contract() -> N
     assert validation.valid, validation.errors
 
 
+def test_required_nullable_scalar_survives_tool_to_compiled_contract() -> None:
+    arguments = {
+        "flow_name": "Archive delivery",
+        "plan_rationale": "Preserve explicitly missing metadata as null.",
+        "steps": [
+            {
+                "name": "Read archive metadata",
+                "instructions": "Return null when classification is absent.",
+                "output_fields": [
+                    {
+                        "name": "classification",
+                        "field_type": "string",
+                        "description": "Declared classification, or null when absent.",
+                        "nullable": True,
+                    }
+                ],
+            }
+        ],
+    }
+    tool_schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        )
+    )
+
+    validate_propose_flow_tool_arguments(arguments=arguments, tool_schema=tool_schema)
+    intent = parse_create_flow_intent_arguments(arguments)
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.JSON,
+        ),
+    )
+
+    output_contract = compiled.steps[0].output_contract
+    assert output_contract is not None
+    assert output_contract["required"] == ["classification"]
+    assert output_contract["properties"]["classification"]["type"] == [
+        "string",
+        "null",
+    ]
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_json_input_can_fill_docx_template_from_nested_prepared_fields() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Markupplåtelsebeslut",
+            "plan_rationale": "Prepare reviewed fields and fill the selected template.",
+            "steps": [
+                {
+                    "name": "Förbered beslut",
+                    "instructions": "Prepare source-grounded nested decision fields.",
+                    "output_fields": [
+                        {
+                            "name": "arende",
+                            "field_type": "object",
+                            "description": "Ärendets uppgifter.",
+                            "children": [
+                                {
+                                    "name": "diarienummer",
+                                    "field_type": "string",
+                                    "description": "Ärendets diarienummer.",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.JSON,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.TEMPLATE_FILL,
+            pattern_ids=("json_to_artifact_report",),
+            selected_template_count=1,
+            selected_template_placeholders=("arende.diarienummer",),
+        ),
+    )
+
+    assert len(compiled.steps) == 2
+    preparation_step = compiled.steps[0]
+    assert preparation_step.name == "Förbered beslut"
+    assert preparation_step.input_source is InputSource.FLOW_INPUT
+    assert preparation_step.input_type is InputType.JSON
+    assert preparation_step.input_contract is None
+    assert preparation_step.input_bindings is None
+    assert all(step.input_type is not InputType.DOCUMENT for step in compiled.steps)
+    assert compiled.steps[-1].output_mode is OutputMode.TEMPLATE_FILL
+    assert compiled.steps[-1].output_config == {
+        "bindings": {
+            "arende.diarienummer": (
+                "{{ step_a.output.structured.arende.diarienummer }}"
+            )
+        }
+    }
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_template_checkpoint_targets_used_structured_result() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Reviewed template decision",
+            "plan_rationale": "Prepare, review, and fill the decision template.",
+            "steps": [
+                {
+                    "name": "Prepare decision content",
+                    "instructions": "Prepare the source-grounded decision text.",
+                    "output_fields": [
+                        {
+                            "name": "decision_text",
+                            "field_type": "string",
+                            "description": "The reviewed decision text.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Prepare runtime date",
+                    "instructions": "Prepare the runtime date for the template.",
+                    "output_fields": [
+                        {
+                            "name": "datum",
+                            "field_type": "string",
+                            "description": "The runtime date.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.JSON,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.TEMPLATE_FILL,
+            pattern_ids=("json_to_artifact_report",),
+            selected_template_count=1,
+            selected_template_placeholders=("decision_text", "datum"),
+            checkpoint_intents=(
+                CheckpointIntent(
+                    evidence_level="explicit",
+                    producer_kind="structured_result",
+                    operation="set",
+                    mode=FlowStepReviewMode.EDIT,
+                    confidence="high",
+                    evidence=[
+                        "quote:user_message:1:Edit the decision before template fill."
+                    ],
+                ),
+            ),
+        ),
+    )
+
+    assert len(compiled.steps) == 2
+    structured_result, template_fill = compiled.steps
+    assert structured_result.output_type is OutputType.JSON
+    assert structured_result.review_policy is not None
+    assert structured_result.review_policy.mode is FlowStepReviewMode.EDIT
+    assert template_fill.output_mode is OutputMode.TEMPLATE_FILL
+    assert template_fill.review_policy is None
+    assert template_fill.output_config == {
+        "bindings": {
+            "decision_text": "{{ step_a.output.structured.decision_text }}",
+            "datum": "{{ datum }}",
+        }
+    }
+
+
+def test_text_input_fills_docx_without_generic_reader_step() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Decision letter",
+            "plan_rationale": "Prepare the supplied text for the selected template.",
+            "steps": [
+                {
+                    "name": "Prepare decision text",
+                    "instructions": "Write the source-grounded decision summary.",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Decision summary grounded in the input.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.DOCX,
+            final_output_mode=OutputMode.TEMPLATE_FILL,
+            selected_template_count=1,
+            selected_template_placeholders=("summary",),
+        ),
+    )
+
+    assert len(compiled.steps) == 2
+    preparation_step, template_step = compiled.steps
+    assert preparation_step.name == "Prepare decision text"
+    assert preparation_step.input_source is InputSource.FLOW_INPUT
+    assert preparation_step.input_type is InputType.TEXT
+    assert preparation_step.output_type is OutputType.JSON
+    assert template_step.output_config == {
+        "bindings": {"summary": "{{ step_a.output.structured.summary }}"}
+    }
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
 def test_document_report_preserves_depth_four_source_contract_after_wrapping() -> None:
     intent = parse_create_flow_intent_arguments(
         {
@@ -618,7 +845,7 @@ def test_compile_context_rejects_input_schema_for_non_json_runtime_input() -> No
         )
 
 
-def test_compiler_rejects_input_schema_with_composite_flow_input_bindings() -> None:
+def test_compiler_merges_distinct_form_fields_into_root_json_schema() -> None:
     intent = parse_create_flow_intent_arguments(
         {
             "flow_name": "Normalize case JSON",
@@ -632,6 +859,75 @@ def test_compiler_rejects_input_schema_with_composite_flow_input_bindings() -> N
         }
     )
 
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.JSON,
+            final_output_type=OutputType.JSON,
+            flow_input_schema={
+                "type": "object",
+                "properties": {"case_id": {"type": "string"}},
+                "required": ["case_id"],
+                "additionalProperties": False,
+            },
+            runtime_input_fields=(
+                _confirmed_runtime_field("case_type", "Case type", required=True),
+            ),
+        ),
+    )
+
+    assert [field.name for field in compiled.form_fields or ()] == ["case_type"]
+    assert compiled.steps[0].input_bindings is None
+    assert compiled.steps[0].input_contract == {
+        "type": "object",
+        "properties": {
+            "case_id": {"type": "string"},
+            "case_type": {"type": "string"},
+        },
+        "required": ["case_id", "case_type"],
+        "additionalProperties": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("declared_schema", "runtime_field"),
+    [
+        (
+            {"type": "string"},
+            _confirmed_runtime_field("case_type", "Case type", required=False),
+        ),
+        (
+            {"type": "string", "enum": ["A"]},
+            _confirmed_runtime_field("case_type", "Case type", required=True),
+        ),
+        (
+            {"type": "array", "items": {"type": "string", "enum": ["A"]}},
+            _confirmed_runtime_field(
+                "case_type",
+                "Case type",
+                required=True,
+                field_type="multiselect",
+            ),
+        ),
+    ],
+)
+def test_compiler_rejects_form_field_overlapping_root_json_property(
+    declared_schema: dict[str, object],
+    runtime_field: ConfirmedRuntimeMetadataField,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Normalize case JSON",
+            "plan_rationale": "Use one typed runtime payload.",
+            "steps": [
+                {
+                    "name": "Normalize case",
+                    "instructions": "Validate the case payload.",
+                }
+            ],
+        }
+    )
+
     with pytest.raises(AIBuilderArchitectureError) as exc_info:
         compile_create_intent_to_spec(
             intent,
@@ -640,7 +936,43 @@ def test_compiler_rejects_input_schema_with_composite_flow_input_bindings() -> N
                 final_output_type=OutputType.JSON,
                 flow_input_schema={
                     "type": "object",
-                    "properties": {"case_id": {"type": "string"}},
+                    "properties": {"case_type": declared_schema},
+                    "required": ["case_type"],
+                    "additionalProperties": False,
+                },
+                runtime_input_fields=(runtime_field,),
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "flow_input_schema_composite_bindings_unsupported"
+    )
+
+
+def test_compiler_rejects_form_field_conflicting_with_root_json_schema() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Normalize case JSON",
+            "plan_rationale": "Use one typed runtime payload.",
+            "steps": [
+                {
+                    "name": "Normalize case",
+                    "instructions": "Validate the case payload.",
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            intent,
+            context=CreateCompileContext(
+                runtime_input_type=InputType.JSON,
+                final_output_type=OutputType.JSON,
+                flow_input_schema={
+                    "type": "object",
+                    "properties": {"case_type": {"type": "number"}},
+                    "additionalProperties": False,
                 },
                 runtime_input_fields=(
                     _confirmed_runtime_field("case_type", "Case type", required=True),

@@ -408,7 +408,12 @@ async def _load_template_file(
             file_id=asset.file_id,
             tenant_id=tenant_id,
         )
-        template_file = (await file_content_loader.load([metadata]))[metadata.id]
+        template_file = (
+            await file_content_loader.load(
+                [metadata],
+                include_text_original_bytes=True,
+            )
+        )[metadata.id]
     except NotFoundException:
         raise TypedIOValidationException(
             "The published DOCX template asset file is no longer available. Re-publish the flow with a current template.",

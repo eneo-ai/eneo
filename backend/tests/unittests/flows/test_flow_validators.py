@@ -1225,6 +1225,40 @@ def test_validate_steps_publish_accepts_label_structured_source_ref() -> None:
     )
 
 
+def test_validate_steps_accepts_nullable_scalar_structured_source_ref() -> None:
+    validate_steps(
+        [
+            _step(
+                1,
+                user_description="Collect intake",
+                output_type="json",
+                output_contract={
+                    "type": "object",
+                    "properties": {"classification": {"type": ["string", "null"]}},
+                    "required": ["classification"],
+                },
+            ),
+            _step(
+                2,
+                user_description="Summarize",
+                input_type="text",
+                output_type="text",
+                output_mode="compose_text",
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "step_ref": "Collect intake",
+                            "output": "structured",
+                            "field_path": "classification",
+                        }
+                    ]
+                },
+            ),
+        ],
+        require_complete_template_fill_config=True,
+    )
+
+
 @pytest.mark.parametrize(
     ("step_ref", "code"),
     [

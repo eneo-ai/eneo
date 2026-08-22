@@ -565,6 +565,47 @@ def test_edit_overlay_add_step_uses_previous_structured_field_from_preserved_ste
     )
 
 
+def test_edit_overlay_rejects_flow_input_json_with_previous_step_dependency() -> None:
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        compile_ordered_edit_proposal(
+            base_spec=_base_spec(
+                _step(
+                    "step_a",
+                    "existing_step_1",
+                    "Extract",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {"answer": {"type": "string"}},
+                    },
+                )
+            ),
+            proposal=_edit_proposal(
+                steps=[
+                    ModifyExistingStep(existing_step_ref="existing_step_1"),
+                    AddStep(
+                        step=_new_step(
+                            "Combine JSON inputs",
+                            input_source=InputSource.FLOW_INPUT,
+                            input_type=InputType.JSON,
+                            uses_previous_fields=[
+                                PreviousFieldRef(from_step=1, field_path="answer")
+                            ],
+                        )
+                    ),
+                ],
+            ),
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE
+    assert exc_info.value.context == {
+        "input_source": "flow_input",
+        "input_type": "json",
+        "uses_previous_fields": 1,
+        "uses_previous_outputs": 0,
+    }
+
+
 def test_step_input_bindings_emit_source_refs_for_previous_output() -> None:
     bindings = compile_step_input_bindings(
         input_source=InputSource.PREVIOUS_STEP,
@@ -616,6 +657,22 @@ def test_step_input_bindings_emit_source_refs_for_implicit_structured_blob() -> 
 
     assert bindings == {"source_refs": [{"step_ref": "step_a", "output": "structured"}]}
     assert _lowered_question(bindings) == "{{ step_a.output.structured }}"
+
+
+@pytest.mark.parametrize("uses_form_fields", [[], ["case_id"]])
+def test_step_input_bindings_leave_flow_input_json_implicit(
+    uses_form_fields: list[str],
+) -> None:
+    bindings = compile_step_input_bindings(
+        input_source=InputSource.FLOW_INPUT,
+        input_type=InputType.JSON,
+        uses_form_fields=uses_form_fields,
+        uses_previous_fields=[],
+        uses_previous_outputs=[],
+        prior_steps=[],
+    )
+
+    assert bindings is None
 
 
 def test_step_input_bindings_keep_immediate_field_suppression() -> None:

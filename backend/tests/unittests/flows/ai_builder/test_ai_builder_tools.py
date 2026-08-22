@@ -360,6 +360,7 @@ class TestBuildToolSchema:
             "field_type",
             "description",
             "required",
+            "nullable",
             "children",
         }
         assert field_schema["additionalProperties"] is False

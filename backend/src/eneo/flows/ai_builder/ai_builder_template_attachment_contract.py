@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import TypeGuard, cast
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
@@ -10,8 +11,15 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    MAX_COMPILED_STRUCTURED_FIELD_DEPTH,
+)
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
+)
+from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
+    NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
 from eneo.flows.domain.runtime_input import build_runtime_input_config
@@ -29,6 +37,8 @@ from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_variable_definitions import (
     PREVIOUS_STEP_TEXT_ALIAS,
     form_field_reference_expression,
+    is_reserved_runtime_variable,
+    is_step_alias_variable,
     template_placeholder_form_field_name,
 )
 
@@ -43,6 +53,7 @@ _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
 )
 _MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH = 80
 MAX_TEMPLATE_PREPARATION_STAGES = 5
+MAX_TEMPLATE_MATERIALIZED_PATHS = NAMED_RESULT_EVIDENCE_MAX_ITEMS
 _TRANSCRIPTION_PLACEHOLDERS = frozenset(
     {
         FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -112,6 +123,10 @@ def apply_template_attachment_contract(
         spec,
         placeholders=normalized_placeholders,
     )
+    spec = _materialize_nested_template_outputs(
+        spec,
+        placeholders=normalized_placeholders,
+    )
     form_fields = list(spec.form_fields or ())
     terminal_step = spec.steps[-1]
     bindings: dict[str, str] = {}
@@ -176,13 +191,13 @@ def apply_template_attachment_contract(
         if key not in _LOCAL_TEMPLATE_CONFIG_KEYS and key != "bindings"
     }
     portable_output_config["bindings"] = bindings
-    preparation_steps = _drop_unused_template_text_predecessor(
+    preparation_steps = _drop_unused_template_predecessor(
         steps=spec.steps[:-1],
         bindings=bindings,
     )
-    dropped_text_predecessor = len(preparation_steps) != len(spec.steps) - 1
+    dropped_predecessor = len(preparation_steps) != len(spec.steps) - 1
     terminal_update: dict[str, object] = {"output_config": portable_output_config}
-    if dropped_text_predecessor:
+    if dropped_predecessor:
         dropped_step = spec.steps[-2]
         terminal_update["input_bindings"] = _without_step_source_refs(
             terminal_step.input_bindings,
@@ -212,6 +227,20 @@ def _normalized_unique_placeholders(placeholders: Sequence[str]) -> tuple[str, .
         placeholder = raw_placeholder.strip()
         if not placeholder or placeholder in seen:
             continue
+        if "." in placeholder:
+            segments = tuple(segment.strip() for segment in placeholder.split("."))
+            if (
+                any(not segment for segment in segments)
+                or ".".join(segments) != placeholder
+            ):
+                raise _architecture_error(
+                    failure_code="template_placeholder_path_invalid",
+                    detail=(
+                        "The selected DOCX contains a placeholder with an invalid "
+                        "variable path. Remove whitespace around dots and empty path "
+                        "segments."
+                    ),
+                )
         normalized.append(placeholder)
         seen.add(placeholder)
     return tuple(normalized)
@@ -308,16 +337,26 @@ def _declared_string_output_paths(
 
     if schema.get("type") == "array":
         return ()
-    if schema.get("type") == "string":
+    if _schema_accepts_string(schema):
         return (".".join(prefix),) if prefix else ()
 
     properties = cast(object, schema.get("properties"))
     if not isinstance(properties, Mapping):
         return ()
+    raw_required = schema.get("required")
+    required: set[str] = (
+        {item for item in cast(Sequence[object], raw_required) if isinstance(item, str)}
+        if isinstance(raw_required, list)
+        else set()
+    )
 
     paths: list[str] = []
     for raw_name, raw_schema in cast(Mapping[object, object], properties).items():
-        if not isinstance(raw_name, str) or not isinstance(raw_schema, Mapping):
+        if (
+            not isinstance(raw_name, str)
+            or raw_name not in required
+            or not isinstance(raw_schema, Mapping)
+        ):
             continue
         paths.extend(
             _declared_string_output_paths(
@@ -328,30 +367,216 @@ def _declared_string_output_paths(
     return tuple(paths)
 
 
-def _drop_unused_template_text_predecessor(
+def _schema_accepts_string(schema: Mapping[str, object]) -> bool:
+    raw_type = schema.get("type")
+    if raw_type == "string":
+        return True
+    if not isinstance(raw_type, list):
+        return False
+    declared_types = {
+        item for item in cast(list[object], raw_type) if isinstance(item, str)
+    }
+    return declared_types == {"string", "null"}
+
+
+def _materialize_nested_template_outputs(
+    spec: FlowDraftSpecCore,
+    *,
+    placeholders: tuple[str, ...],
+) -> FlowDraftSpecCore:
+    """Make server-known nested DOCX fields part of one JSON preparation step.
+
+    Dotted template placeholders cannot be runtime form fields. When no prior
+    step already declares one, the template itself is authoritative evidence
+    that the Flow must prepare that string path. Adding it here keeps the
+    provider from having to reproduce a contract Eneo has already inspected.
+    Explicit Flow variable expressions remain validation-only and are never
+    reinterpreted as output field names.
+    """
+
+    candidate_index = next(
+        (
+            index
+            for index in range(len(spec.steps) - 2, -1, -1)
+            if spec.steps[index].output_type is OutputType.JSON
+            and isinstance(spec.steps[index].output_contract, Mapping)
+        ),
+        None,
+    )
+    if candidate_index is None:
+        return spec
+
+    candidate = spec.steps[candidate_index]
+    contract = deepcopy(cast(dict[str, object], candidate.output_contract))
+    added_paths: list[str] = []
+    for placeholder in placeholders:
+        if "." not in placeholder:
+            continue
+        namespace = placeholder.split(".", 1)[0].casefold()
+        if (
+            is_reserved_runtime_variable(namespace)
+            or is_step_alias_variable(namespace)
+            or namespace.startswith("step_")
+        ):
+            continue
+        if _explicit_runtime_binding(placeholder=placeholder, spec=spec) is not None:
+            continue
+        if _folded_step_output_binding(placeholder=placeholder, spec=spec) is not None:
+            continue
+        path = tuple(placeholder.split("."))
+        if len(path) > MAX_COMPILED_STRUCTURED_FIELD_DEPTH:
+            raise _architecture_error(
+                failure_code="template_placeholder_depth_exceeded",
+                detail=(
+                    "The selected DOCX contains a nested placeholder deeper than "
+                    "the compiled Flow schema supports."
+                ),
+                max_depth=MAX_COMPILED_STRUCTURED_FIELD_DEPTH,
+            )
+        if len(placeholder) > NAMED_RESULT_FIELD_NAME_MAX_LENGTH:
+            raise _architecture_error(
+                failure_code="template_placeholder_materialization_limit_exceeded",
+                detail=(
+                    "The selected DOCX contains a placeholder path too large to "
+                    "materialize safely."
+                ),
+                max_path_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
+            )
+        expanded_contract = deepcopy(contract)
+        if _add_required_string_path(
+            expanded_contract,
+            path=path,
+            placeholder=placeholder,
+        ):
+            if len(added_paths) >= MAX_TEMPLATE_MATERIALIZED_PATHS:
+                raise _architecture_error(
+                    failure_code=(
+                        "template_placeholder_materialization_limit_exceeded"
+                    ),
+                    detail=(
+                        "The selected DOCX requires more server-materialized "
+                        "fields than one Flow step can safely prepare."
+                    ),
+                    max_paths=MAX_TEMPLATE_MATERIALIZED_PATHS,
+                )
+            contract = expanded_contract
+            added_paths.append(placeholder)
+
+    if not added_paths:
+        return spec
+
+    instructions = candidate.assistant_spec.instructions.rstrip()
+    required_fields = "\n".join(
+        f"- {path}: Value for DOCX template placeholder '{path}'."
+        for path in added_paths
+    )
+    assistant_spec = candidate.assistant_spec.model_copy(
+        update={
+            "instructions": (
+                f"{instructions}\n\nRequired DOCX template fields:\n{required_fields}"
+            )
+        }
+    )
+    updated_candidate = candidate.model_copy(
+        update={
+            "assistant_spec": assistant_spec,
+            "output_contract": contract,
+        }
+    )
+    steps = list(spec.steps)
+    steps[candidate_index] = updated_candidate
+    return spec.model_copy(update={"steps": steps})
+
+
+def _add_required_string_path(
+    schema: dict[str, object],
+    *,
+    path: tuple[str, ...],
+    placeholder: str,
+) -> bool:
+    if not path or any(not part for part in path):
+        return False
+
+    node: dict[str, object] = schema
+    for index, part in enumerate(path):
+        raw_properties = node.get("properties")
+        if not isinstance(raw_properties, dict):
+            return False
+        properties = cast(dict[str, object], raw_properties)
+        raw_required = node.setdefault("required", [])
+        if not isinstance(raw_required, list):
+            return False
+        required = cast(list[object], raw_required)
+        if part not in required:
+            required.append(part)
+
+        existing = properties.get(part)
+        is_leaf = index == len(path) - 1
+        if is_leaf:
+            if existing is None:
+                properties[part] = {
+                    "type": "string",
+                    "description": (
+                        f"Value for DOCX template placeholder '{placeholder}'."
+                    ),
+                }
+                return True
+            return isinstance(existing, Mapping) and _schema_accepts_string(
+                cast(Mapping[str, object], existing)
+            )
+
+        if existing is None:
+            created: dict[str, object] = {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            }
+            properties[part] = created
+            existing = created
+        if not isinstance(existing, dict):
+            return False
+        child = cast(dict[str, object], existing)
+        if child.get("type") != "object":
+            return False
+        node = child
+    return False
+
+
+def _drop_unused_template_predecessor(
     *,
     steps: Sequence[StepSpec],
     bindings: Mapping[str, str],
 ) -> Sequence[StepSpec]:
-    """Remove a model-authored text step that cannot affect template output."""
+    """Remove a model-authored step that cannot affect template output."""
 
     if len(steps) < 2:
         return steps
     candidate = steps[-1]
     if (
         candidate.output_mode is not OutputMode.PASS_THROUGH
-        or candidate.output_type is not OutputType.TEXT
-        or candidate.review_policy is not None
+        or candidate.output_type not in {OutputType.JSON, OutputType.TEXT}
+        or (
+            candidate.output_type is OutputType.TEXT
+            and candidate.review_policy is not None
+        )
     ):
         return steps
 
     candidate_order = len(steps)
-    used_expressions = {
-        "{{ " + PREVIOUS_STEP_TEXT_ALIAS + " }}",
-        "{{ " + candidate.plan_step_ref + ".output.text }}",
-        "{{ step_" + str(candidate_order) + ".output.text }}",
-    }
-    if used_expressions.intersection(bindings.values()):
+    candidate_reference_prefixes = (
+        "{{ " + candidate.plan_step_ref + ".output.",
+        "{{ step_" + str(candidate_order) + ".output.",
+    )
+    if any(
+        expression.startswith(candidate_reference_prefixes)
+        for expression in bindings.values()
+    ):
+        return steps
+    if (
+        candidate.output_type is OutputType.TEXT
+        and "{{ " + PREVIOUS_STEP_TEXT_ALIAS + " }}" in bindings.values()
+    ):
         return steps
     return steps[:-1]
 
@@ -512,6 +737,7 @@ def _architecture_error(
 
 
 __all__ = [
+    "MAX_TEMPLATE_MATERIALIZED_PATHS",
     "MAX_TEMPLATE_PREPARATION_STAGES",
     "apply_template_attachment_contract",
     "selected_template_is_readable",

@@ -369,6 +369,19 @@ def compile_step_input_bindings(
         ref_kind="uses_previous_outputs",
         prior_steps=prior_steps,
     )
+    if input_source is InputSource.FLOW_INPUT and input_type is InputType.JSON:
+        if uses_previous_fields or uses_previous_outputs:
+            raise AIBuilderBadRequestException(
+                "Flow-input JSON cannot be combined with previous-step dependencies.",
+                code=AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE,
+                context={
+                    "input_source": input_source.value,
+                    "input_type": input_type.value,
+                    "uses_previous_fields": len(uses_previous_fields),
+                    "uses_previous_outputs": len(uses_previous_outputs),
+                },
+            )
+        return None
     if input_source.value == "all_previous_steps":
         return None
 
@@ -910,7 +923,7 @@ def _compile_object_schema(fields: list[StructuredFieldDraft]) -> dict[str, Any]
 
 def _compile_field_schema(field: StructuredFieldDraft) -> dict[str, Any]:
     schema: dict[str, Any] = {
-        "type": field.field_type,
+        "type": ([field.field_type, "null"] if field.nullable else field.field_type),
         "title": field.name.replace("_", " ").capitalize(),
         "description": field.description,
     }

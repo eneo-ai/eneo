@@ -708,7 +708,8 @@ async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> No
         tenant_id=run.tenant_id,
     )
     deps.file_content_loader.load.assert_awaited_once_with(
-        [file_repo.get_by_id.return_value]
+        [file_repo.get_by_id.return_value],
+        include_text_original_bytes=True,
     )
     assert output.output_payload_extensions["template_provenance"] == {
         "template_name": "template.docx",
@@ -760,7 +761,8 @@ async def test_execute_template_fill_step_resolves_asset_id_only_config() -> Non
         tenant_id=run.tenant_id,
     )
     deps.file_content_loader.load.assert_awaited_once_with(
-        [file_repo.get_by_id.return_value]
+        [file_repo.get_by_id.return_value],
+        include_text_original_bytes=True,
     )
     assert output.output_payload_extensions["template_provenance"] == {
         "template_name": "template.docx",

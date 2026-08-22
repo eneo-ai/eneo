@@ -59,7 +59,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.flow_variable_definitions import (
     FLOW_INPUT_JSON_ALIAS,
 )
-from eneo.json_types import JsonObject
+from eneo.json_types import JsonObject, JsonValue
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -218,6 +218,24 @@ def compile_create_intent_to_spec(
             runtime_input_type=runtime_input_type,
         )
         compiled_spec = assembly_spec
+        if (
+            context is not None
+            and context.selected_template_count is not None
+            and context.checkpoint_intents is not None
+        ):
+            # Template normalization keeps an intentionally reviewed report
+            # writer, but may remove an unused JSON preparation step. Project
+            # once to protect the writer, then again below onto final topology.
+            compiled_spec = project_checkpoint_intents(
+                compiled_spec,
+                context.checkpoint_intents,
+            )
+        if context is not None and context.selected_template_count is not None:
+            compiled_spec = apply_template_attachment_contract(
+                compiled_spec,
+                selected_template_count=context.selected_template_count,
+                placeholders=context.selected_template_placeholders,
+            )
         if context is not None and context.checkpoint_intents is not None:
             compiled_spec = project_checkpoint_intents(
                 compiled_spec,
@@ -263,12 +281,6 @@ def compile_create_intent_to_spec(
                         "mismatch_count": len(mismatches),
                     },
                 )
-        if context is not None and context.selected_template_count is not None:
-            compiled_spec = apply_template_attachment_contract(
-                compiled_spec,
-                selected_template_count=context.selected_template_count,
-                placeholders=context.selected_template_placeholders,
-            )
         if template_preparation_stage_limit_exceeded(compiled_spec):
             raise AIBuilderArchitectureError(
                 public_code="architecture_materialization_failed",
@@ -489,17 +501,90 @@ def _apply_flow_input_schema(
             },
         )
 
+    input_contract = _flow_input_schema_with_form_fields(
+        flow_input_schema,
+        form_fields=spec.form_fields or [],
+        step_index=target_index + 1,
+    )
+
     compiled_steps = list(spec.steps)
     compiled_steps[target_index] = target_step.model_copy(
         update={
             "input_bindings": None,
-            "input_contract": cast(
-                FlowPersistedJsonObject,
-                deepcopy(flow_input_schema),
-            ),
+            "input_contract": input_contract,
         }
     )
     return spec.model_copy(update={"steps": compiled_steps})
+
+
+def _flow_input_schema_with_form_fields(
+    flow_input_schema: JsonObject,
+    *,
+    form_fields: list[FormFieldSpec],
+    step_index: int,
+) -> FlowPersistedJsonObject:
+    merged = cast(FlowPersistedJsonObject, deepcopy(flow_input_schema))
+    if merged.get("type") != "object":
+        _raise_flow_input_schema_form_conflict(step_index=step_index)
+    raw_properties = merged.get("properties")
+    if raw_properties is None:
+        raw_properties = {}
+        merged["properties"] = raw_properties
+    raw_required = merged.get("required")
+    if raw_required is None:
+        raw_required = []
+        merged["required"] = raw_required
+    if not isinstance(raw_properties, dict) or not isinstance(raw_required, list):
+        _raise_flow_input_schema_form_conflict(step_index=step_index)
+    properties = cast(JsonObject, raw_properties)
+    required = cast(list[JsonValue], raw_required)
+
+    for field in form_fields:
+        form_schema = _form_field_json_schema(field)
+        existing = properties.get(field.name)
+        if existing is None:
+            properties[field.name] = form_schema
+        else:
+            _raise_flow_input_schema_form_conflict(
+                step_index=step_index,
+                field_name=field.name,
+            )
+        if field.required and field.name not in required:
+            required.append(field.name)
+    return merged
+
+
+def _form_field_json_schema(field: FormFieldSpec) -> FlowPersistedJsonObject:
+    if field.type == "number":
+        return {"type": "number"}
+    if field.type == "multiselect":
+        items: FlowPersistedJsonObject = {"type": "string"}
+        if field.options:
+            items["enum"] = list(field.options)
+        return {"type": "array", "items": items}
+    schema: FlowPersistedJsonObject = {"type": "string"}
+    if field.type == "select" and field.options:
+        schema["enum"] = list(field.options)
+    return schema
+
+
+def _raise_flow_input_schema_form_conflict(
+    *,
+    step_index: int,
+    field_name: str | None = None,
+) -> None:
+    raise AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail=(
+            "The resolved JSON input schema conflicts with a confirmed "
+            "runtime form field."
+        ),
+        log_context={
+            "failure_code": "flow_input_schema_composite_bindings_unsupported",
+            "step_index": step_index,
+            "field_name": field_name,
+        },
+    )
 
 
 def _template_fields_prepared_by_intent(

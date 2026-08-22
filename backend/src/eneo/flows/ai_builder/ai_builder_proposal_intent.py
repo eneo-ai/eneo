@@ -296,10 +296,15 @@ class CreateStructuredFieldIntent(BaseModel):
     field_type: StructuredFieldType
     description: str
     required: bool = True
+    nullable: bool = False
     children: list["CreateStructuredFieldIntent"] | None = None
 
     @model_validator(mode="after")
     def _validate_children(self) -> "CreateStructuredFieldIntent":
+        if self.nullable and self.field_type in ("object", "array"):
+            raise ValueError(
+                f"Only primitive structured fields may be nullable ({self.name!r})."
+            )
         if self.field_type not in ("object", "array") and self.children is not None:
             raise ValueError(
                 f"Only object or array fields may declare children ({self.name!r})."
@@ -321,6 +326,7 @@ class CreateStructuredFieldIntent(BaseModel):
             field_type=self.field_type,
             description=self.description,
             required=self.required,
+            nullable=self.nullable,
             fields=children if self.field_type == "object" else None,
             item_fields=children if self.field_type == "array" else None,
             allow_additional_properties=(
