@@ -33,7 +33,11 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     SessionStatus,
     TargetKind,
 )
-from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderPublicError
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCategory,
+    AIBuilderErrorPhase,
+    AIBuilderPublicError,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
@@ -334,6 +338,46 @@ class AIBuilderClassifierDiagnosticsResponse(BaseModel):
 
     session_id: UUID
     classifier_runs: list[AIBuilderClassifierDiagnostic]
+
+
+class ReportClientErrorRequest(BaseModel):
+    """One client-observed Builder failure, in the UI's own error identity.
+
+    The fields mirror the stable part of the parsed `AIBuilderError` the
+    frontend renders — code, category, phase, request_id — the part clients
+    are told to branch on. No display text is accepted: the session and the
+    request id resolve the details server-side. `client_event_id` is minted
+    by the client per observed error; replaying the same report is a no-op
+    (best-effort deduplication).
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "client_event_id": "3f6ad7a6-1d5f-4b70-9df7-6a4a4de4d7e1",
+                "phase": "planner",
+                "category": "upstream",
+                "code": "planner_upstream_error",
+                "session_id": "00000000-0000-0000-0000-000000000001",
+                "request_id": "9ffea2154b4dacfa7728a7d5c1d977b8",
+            }
+        },
+    )
+
+    client_event_id: UUID
+    # The closed vocabularies, typed into the public contract: the canonical
+    # server enums plus the one value each that only the frontend parser
+    # synthesizes.
+    phase: AIBuilderErrorPhase | Literal["client"]
+    category: AIBuilderErrorCategory | Literal["network"]
+    # `code` stays forward-compatible on purpose: client-synthesized codes
+    # are an open set owned by the frontend parser, and rejecting an unknown
+    # code would drop telemetry for exactly the newest failure modes. The
+    # pattern keeps it a machine-readable identifier, never prose.
+    code: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
+    session_id: UUID | None = None
+    request_id: str | None = Field(default=None, max_length=64)
 
 
 class CreateSessionRequest(BaseModel):

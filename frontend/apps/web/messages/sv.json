@@ -5917,6 +5917,8 @@
   "audit_action_flow_run_review_checkpoint_cancelled_description": "En granskningspunkt för flöde avbröts.",
   "audit_action_flow_run_review_checkpoint_expired": "Granskningspunkt för flöde utgången",
   "audit_action_flow_run_review_checkpoint_expired_description": "En granskningspunkt för flöde gick ut innan ett beslut fattades.",
+  "audit_action_ai_builder_client_error_reported": "AI Builder-klientfel rapporterat",
+  "audit_action_ai_builder_client_error_reported_description": "AI Builder-gränssnittet rapporterade ett fel som användaren såg.",
   "audit_action_ai_builder_session_created": "AI Builder-session skapad",
   "audit_action_ai_builder_session_created_description": "En Flow AI Builder-session skapades.",
   "audit_action_ai_builder_plan_approved": "AI Builder-plan godkänd",

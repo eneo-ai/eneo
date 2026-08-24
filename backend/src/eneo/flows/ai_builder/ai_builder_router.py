@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     CreateSessionRequest,
     PlanApprovalResponse,
     PlanResponse,
+    ReportClientErrorRequest,
     RevisePlanRequest,
     SendMessageRequest,
     SessionListItemResponse,
@@ -700,6 +701,80 @@ def _ai_builder_json_error_response(
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/client-errors",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    operation_id="report_ai_builder_client_error",
+    summary="Report AI Builder Client Error",
+    description=(
+        "Persist one client-observed Builder failure using the stable error "
+        "identity the UI parsed (code, category, phase, request_id) — no "
+        "display text — so operators can join the user-visible symptom to "
+        "the stored session. Replaying a client_event_id is a no-op "
+        "(best-effort deduplication)."
+    ),
+    responses={
+        204: {
+            "description": "The client error report is stored (or was already stored)."
+        },
+        403: _ai_builder_error_response(
+            description="Caller lacks the Flow AI Builder permission.",
+            message="You do not have permission to use Flow AI Builder.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+        ),
+    },
+)
+async def report_client_error(
+    body: ReportClientErrorRequest,
+    container: ContainerWithUserExplicitTransactionDep,
+):
+    database_session = cast(AsyncSession, container.session())
+    async with database_session.begin():
+        user = container.user()
+        require_flow_action(user, FlowApiAction.BUILDER_CLIENT_ERROR_REPORT)
+        repo = container.ai_builder_repo()
+        error_id, resolved_session_id = await repo.record_client_error(
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            client_event_id=body.client_event_id,
+            session_id=body.session_id,
+            phase=str(body.phase),
+            category=str(body.category),
+            code=body.code,
+            request_id=body.request_id,
+        )
+        if error_id is None:
+            # A replayed client_event_id: already stored and audited once.
+            return
+        audit_service = _get_audit_service(container)
+        await audit_service.log(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED,
+            entity_type=EntityType.AI_BUILDER_CLIENT_ERROR,
+            entity_id=error_id,
+            description=f"Client reported AI builder error ({body.code})",
+            metadata=dict(
+                AuditMetadata.minimal(
+                    actor_id=user.id,
+                    target_id=error_id,
+                    extra={
+                        "phase": str(body.phase),
+                        "category": str(body.category),
+                        "code": body.code,
+                        # The tenant-resolved session that was stored — never
+                        # the client's unverified claim.
+                        "session_id": (
+                            str(resolved_session_id) if resolved_session_id else None
+                        ),
+                        "request_id": body.request_id,
+                    },
+                )
+            ),
+        )
 
 
 @router.post(

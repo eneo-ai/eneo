@@ -1107,6 +1107,65 @@ STALL-POLICY, never fixed by restoring a table.
   import-linter, vulture and the full Builder suite; route the ten hardcoded English
   fallback strings in the frontend through Paraglide keys; final broad ×3 and the
   release cohort ×5 per the cadence.
+- [ ] **6.4 Failure ledger (owner addition, 2026-08-24).** Production failure
+  telemetry so operators and harness agents can join a user-visible Builder
+  failure to its stored session, reusing the error identity that already
+  exists instead of inventing a second vocabulary:
+  - `builder_client_errors` table storing the STABLE part of the parsed
+    `AIBuilderError` the UI rendered (`phase`, `category`, `code`,
+    `request_id` — the part clients branch on; no display text leaves the
+    client) plus a client-minted `client_event_id` under a
+    `(tenant_id, client_event_id)` unique key — replaying a report is a no-op
+    (best-effort deduplication: insert `ON CONFLICT DO NOTHING`, audit only on
+    first insert). Unknown or foreign-tenant `session_id` is nulled at write
+    and tenant-bound by a composite `(session_id, tenant_id)` FK. Retention:
+    referential cleanup by cascade (session, then tenant) plus a 90-day TTL
+    step in the existing daily data-retention worker — 90 days is the API's
+    maximum queryable window, so older rows have no consumer (fixed
+    invariant, owned once in `ai_builder_failure_ledger.MAX_WINDOW_DAYS` and
+    read by the API bound, the CLI bound and the TTL step; deletion runs one
+    batch per worker transaction, mirroring the flow-run purge loop).
+  - `POST /flows/ai-builder/client-errors` (204, behind
+    `FlowApiAction.BUILDER_CLIENT_ERROR_REPORT` under the standard Builder
+    permission contract, audited with `AuditMetadata.minimal` recording the
+    tenant-resolved session, never the client claim), with a real producer:
+    `FlowAIBuilderDriver` reports every fresh client-observed parse through a
+    deferred fire-and-forget seam (telemetry never queues ahead of recovery
+    work; rehydrated committed-turn errors are never reported — the server
+    already persisted them; a failed resume carries the caller's known
+    session id, not the cleared state). `schema.d.ts` and the audit-action
+    labels regenerated through the canonical pipeline.
+  - Shared `ai_builder_failure_ledger.py` collector (typed `FailureSummary`
+    of `FailureSection`s; the RESPONSE is bounded to 20 families × 5 samples
+    with explicit `total_families`/`truncated` accounting and deterministic
+    ordering — the grouping scan itself is bounded by the 90-day window and
+    TTL, not by row count, a stated decision) over three stores: the builder
+    latest-turn failure SNAPSHOT (`latest_turn_state` failure states plus
+    committed-with-error; per-turn history is not persisted, the backend log
+    owns it, and the time filter is the session's generic `updated_at` —
+    current state on recently-updated sessions, not failure history), failed
+    and cancelled flow runs by `error_json->>'code'`, and client errors by
+    category/code (phase and category typed into the public contract as the
+    canonical enums plus the client-only "client"/"network" values; `code`
+    stays a pattern-bounded open identifier so a new client failure mode is
+    never dropped). Consumed by `scripts/ai_builder_failure_summary.py` and
+    sysadmin `GET /ai-builder/failure-summary/` (super-API-key auth); window
+    ownership and the TTL mechanics are in the retention bullet above.
+  - Deliberately NOT built, decided rather than missed: no admin UI; no rate
+    limiter on the authenticated endpoint (per-tenant auth plus dedup; spam
+    requires fresh UUIDs from an authenticated Builder user in their own
+    tenant); no preaggregation or query-plan evidence (super-API-key operator
+    surface, 90-day max window now also the storage TTL, prerelease volume —
+    a preaggregated owner is built when real volume gives it a requirement);
+    no per-turn backend failure events (the snapshot naming is honest about
+    that; persisting a structured failure fact at turn terminalization is a
+    recorded future candidate, owned by the turn lifecycle, not this slice).
+    Acceptance: unit suites (flows + data_retention), pyright, single Alembic
+    head, frontend check+lint+driver tests, and integration tests proving
+    persist+audit, replay no-op, unknown-session nulling in row and audit,
+    403 without the Builder permission, session-cascade retention, all three
+    collector sections against canonically-constructed seeded failures, and
+    explicit truncation at 21 families.
 
 ---
 

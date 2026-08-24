@@ -59,6 +59,7 @@ const FLOW_AI_BUILDER_ROUTES = {
   planApprove: "/api/v1/flows/ai-builder/plans/{plan_id}/approve",
   planCreate: "/api/v1/flows/ai-builder/plans/{plan_id}/create",
   planRevise: "/api/v1/flows/ai-builder/plans/{plan_id}/revise",
+  clientErrors: "/api/v1/flows/ai-builder/client-errors",
   flowUnpublish: "/api/v1/flows/{id}/unpublish/"
 } as const;
 
@@ -439,7 +440,7 @@ export class FlowAIBuilderDriver {
       }
     } catch (e) {
       if (sessionGeneration !== this.#sessionGeneration) return;
-      this.#state.error = parseAIBuilderError({
+      this.#state.error = this.#parseAndReportError({
         transport: "apply",
         payload: e,
         fallbackMessage: "Failed to create session"
@@ -509,11 +510,14 @@ export class FlowAIBuilderDriver {
       })) as AIBuilderSession;
     } catch (error) {
       if (sessionGeneration !== this.#sessionGeneration) return;
-      this.#state.error = parseAIBuilderError({
-        transport: "apply",
-        payload: error,
-        fallbackMessage: "Failed to resume the saved draft."
-      });
+      this.#state.error = this.#parseAndReportError(
+        {
+          transport: "apply",
+          payload: error,
+          fallbackMessage: "Failed to resume the saved draft."
+        },
+        { sessionId }
+      );
       return;
     } finally {
       if (this.#pendingResumeOwner === pendingResumeOwner) {
@@ -598,7 +602,7 @@ export class FlowAIBuilderDriver {
       this.#requiresAuthoritativeRefresh = refreshIsRequired;
       if (refreshIsRequired && this.#state.error === null) {
         this.#authoritativeRefreshError = true;
-        this.#state.error = parseAIBuilderError({
+        this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: error,
           fallbackMessage: "Failed to refresh the AI Builder session."
@@ -902,7 +906,7 @@ export class FlowAIBuilderDriver {
     } catch (e) {
       if (!abortController.signal.aborted && ownsCurrentStream()) {
         this.#requiresAuthoritativeRefresh = true;
-        this.#state.error = parseAIBuilderError({
+        this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: e,
           fallbackMessage: "The AI Builder stream failed. Please try again."
@@ -946,7 +950,7 @@ export class FlowAIBuilderDriver {
       this.#notify();
     } catch (e) {
       if (this.#ownsPlan(owner, plan.plan_id)) {
-        this.#state.error = parseAIBuilderError({
+        this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: e,
           fallbackMessage: "Failed to approve plan"
@@ -1024,7 +1028,7 @@ export class FlowAIBuilderDriver {
         }
       }
 
-      const parsed = parseAIBuilderError({
+      const parsed = this.#parseAndReportError({
         transport: "apply",
         payload: initialError,
         fallbackMessage: "Failed to create the flow"
@@ -1115,7 +1119,7 @@ export class FlowAIBuilderDriver {
       return result;
     } catch (e: unknown) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
-      const parsed = parseAIBuilderError({
+      const parsed = this.#parseAndReportError({
         transport: "apply",
         payload: e,
         fallbackMessage: "Failed to apply plan"
@@ -1168,7 +1172,7 @@ export class FlowAIBuilderDriver {
       this.#notify();
     } catch (e) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
-      this.#state.error = parseAIBuilderError({
+      this.#state.error = this.#parseAndReportError({
         transport: "apply",
         payload: e,
         fallbackMessage: "Failed to unpublish flow"
@@ -1181,7 +1185,7 @@ export class FlowAIBuilderDriver {
       return await this.#applyPlan(plan, owner);
     } catch (e) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
-      const parsedApplyError = parseAIBuilderError({
+      const parsedApplyError = this.#parseAndReportError({
         transport: "apply",
         payload: e,
         fallbackMessage: "Failed to apply plan"
@@ -1260,7 +1264,7 @@ export class FlowAIBuilderDriver {
       this.#notify();
     } catch (e) {
       if (this.#ownsPlan(owner, plan.plan_id)) {
-        this.#state.error = parseAIBuilderError({
+        this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: e,
           fallbackMessage: "Failed to revise plan"
@@ -1626,6 +1630,50 @@ export class FlowAIBuilderDriver {
       fallbackMessage: "The AI Builder turn failed. Please try again."
     });
     this.#state.error = isSoftBlockAIBuilderError(error) ? null : error;
+  }
+
+  /** Parse a fresh client-observed failure and report it, fire-and-forget.
+   *  Rehydrated committed-turn errors are parsed elsewhere and never
+   *  reported: the server already persisted them. Reporting must never
+   *  break the UI, so every failure path here is swallowed. */
+  #parseAndReportError(
+    input: Parameters<typeof parseAIBuilderError>[0],
+    options?: { sessionId?: string | null }
+  ): AIBuilderError {
+    const parsed = parseAIBuilderError(input);
+    this.#reportClientError(parsed, options);
+    return parsed;
+  }
+
+  #reportClientError(error: AIBuilderError, options?: { sessionId?: string | null }): void {
+    // Deferred off the failure path: recovery fetches that follow an error
+    // must never queue behind telemetry.
+    const sessionId = options?.sessionId ?? this.#state.session?.session_id ?? null;
+    setTimeout(() => this.#sendClientErrorReport(error, sessionId), 0);
+  }
+
+  #sendClientErrorReport(error: AIBuilderError, sessionId: string | null): void {
+    try {
+      void this.#transport
+        .fetch(FLOW_AI_BUILDER_ROUTES.clientErrors, {
+          method: "post",
+          requestBody: {
+            "application/json": {
+              client_event_id: crypto.randomUUID(),
+              phase: error.phase,
+              category: error.category,
+              code: error.code,
+              request_id: error.request_id,
+              // The caller's known session wins: some failures (resume)
+              // happen after driver state was cleared.
+              session_id: sessionId
+            }
+          }
+        })
+        .catch(() => {});
+    } catch {
+      // Never let telemetry interfere with the failing operation itself.
+    }
   }
 
   #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {

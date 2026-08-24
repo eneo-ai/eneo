@@ -549,6 +549,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_review_checkpoint_expired,
     description: m.audit_action_flow_run_review_checkpoint_expired_description
   },
+  ai_builder_client_error_reported: {
+    name: m.audit_action_ai_builder_client_error_reported,
+    description: m.audit_action_ai_builder_client_error_reported_description
+  },
   ai_builder_session_created: {
     name: m.audit_action_ai_builder_session_created,
     description: m.audit_action_ai_builder_session_created_description

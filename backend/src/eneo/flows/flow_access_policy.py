@@ -32,6 +32,7 @@ class FlowApiAction(str, Enum):
     BUILDER_PLAN_APPROVE = "builder_plan_approve"
     BUILDER_PLAN_APPLY = "builder_plan_apply"
     BUILDER_PLAN_REVISE = "builder_plan_revise"
+    BUILDER_CLIENT_ERROR_REPORT = "builder_client_error_report"
     REVIEW = "review"
     RESUME = "resume"
     AUDIT_VIEW = "audit_view"
@@ -123,6 +124,12 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
         requires_flow_edit=True,
     ),
     FlowApiAction.BUILDER_SESSION_READ: FlowActionRequirement(
+        required_permissions=_BUILDER_PERMISSIONS,
+        denial_message="You do not have permission to use Flow AI Builder.",
+        service_key_capability="ai_builder",
+        requires_flow_edit=True,
+    ),
+    FlowApiAction.BUILDER_CLIENT_ERROR_REPORT: FlowActionRequirement(
         required_permissions=_BUILDER_PERMISSIONS,
         denial_message="You do not have permission to use Flow AI Builder.",
         service_key_capability="ai_builder",

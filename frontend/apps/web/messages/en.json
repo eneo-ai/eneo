@@ -5917,6 +5917,8 @@
   "audit_action_flow_run_review_checkpoint_cancelled_description": "A flow review checkpoint was cancelled.",
   "audit_action_flow_run_review_checkpoint_expired": "Flow Review Checkpoint Expired",
   "audit_action_flow_run_review_checkpoint_expired_description": "A flow review checkpoint expired before a decision was made.",
+  "audit_action_ai_builder_client_error_reported": "AI Builder Client Error Reported",
+  "audit_action_ai_builder_client_error_reported_description": "The AI Builder frontend reported a client-observed error.",
   "audit_action_ai_builder_session_created": "AI Builder Session Created",
   "audit_action_ai_builder_session_created_description": "A Flow AI Builder session was created.",
   "audit_action_ai_builder_plan_approved": "AI Builder Plan Approved",

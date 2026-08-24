@@ -2915,6 +2915,130 @@ describe("FlowAIBuilderDriver", () => {
   });
 });
 
+describe("FlowAIBuilderDriver client error reporting", () => {
+  const CLIENT_ERRORS_ROUTE = "/api/v1/flows/ai-builder/client-errors";
+
+  function clientErrorCalls(fetch: ReturnType<typeof vi.fn>) {
+    return fetch.mock.calls.filter(([route]) => route === CLIENT_ERRORS_ROUTE);
+  }
+
+  it("reports a failed resume with the caller's session id and the stable identity only", async () => {
+    const fetchError = {
+      status: 503,
+      response: {
+        schema_version: 2,
+        code: "planner_upstream_error",
+        category: "upstream",
+        message: "The saved draft could not be loaded.",
+        phase: "planner",
+        eneo_error_code: 9024,
+        request_id: "request-resume"
+      }
+    };
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === CLIENT_ERRORS_ROUTE) return Promise.resolve(undefined);
+      return Promise.reject(fetchError);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    vi.useFakeTimers();
+    try {
+      await driver.resumeSession("session-gone");
+      // The report is deliberately deferred behind a timer; drain it.
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const reports = clientErrorCalls(fetch);
+    expect(reports).toHaveLength(1);
+    const body = reports[0][1].requestBody["application/json"];
+    // The resume cleared driver state, so the payload must carry the
+    // caller's known session id, not null.
+    expect(body.session_id).toBe("session-gone");
+    expect(body.phase).toBe("planner");
+    expect(body.category).toBe("upstream");
+    expect(body.code).toBe("planner_upstream_error");
+    expect(body.request_id).toBe("request-resume");
+    expect(body.client_event_id).toMatch(/^[0-9a-f-]{36}$/);
+    // No display text leaves the client.
+    expect(body).not.toHaveProperty("message");
+  });
+
+  it("swallows a failing telemetry request without disturbing the error state", async () => {
+    const fetchError = { status: 500, response: { message: "boom" } };
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === CLIENT_ERRORS_ROUTE) {
+        return Promise.reject(new Error("telemetry down"));
+      }
+      return Promise.reject(fetchError);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    vi.useFakeTimers();
+    try {
+      await driver.resumeSession("session-gone");
+      // Drain the deferred report; its rejection must not surface.
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(clientErrorCalls(fetch)).toHaveLength(1);
+    expect(driver.state.error).not.toBeNull();
+  });
+
+  it("does not report a rehydrated committed-turn error", async () => {
+    const sessionWithCommittedError = makeSession({
+      session_id: "session-committed",
+      latest_turn: {
+        client_turn_id: "11111111-1111-4111-8111-111111111111",
+        state: "committed",
+        user_message_id: "11111111-1111-4111-8111-111111111112",
+        error: {
+          schema_version: 2,
+          code: "planner_upstream_error",
+          category: "upstream",
+          message: "The planner could not produce a plan.",
+          phase: "planner",
+          eneo_error_code: 9024,
+          request_id: "request-committed"
+        },
+        requires_duplicate_provider_spend_acknowledgement: false,
+        retry_request: {
+          client_turn_id: "11111111-1111-4111-8111-111111111111",
+          message: "Build a flow",
+          model_id: "11111111-1111-4111-8111-111111111113",
+          ui_language: "sv",
+          acknowledge_duplicate_provider_spend: false
+        }
+      }
+    });
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === CLIENT_ERRORS_ROUTE) return Promise.resolve(undefined);
+      if (route.includes("/models")) {
+        return Promise.resolve({ models: [makeModel()], default_model_id: null });
+      }
+      if (route.includes("/sessions/")) {
+        return Promise.resolve(sessionWithCommittedError);
+      }
+      return Promise.resolve({ sessions: [] });
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    vi.useFakeTimers();
+    try {
+      await driver.resumeSession("session-committed");
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(driver.state.error?.code).toBe("planner_upstream_error");
+    expect(clientErrorCalls(fetch)).toHaveLength(0);
+  });
+});
+
 describe("FlowAIBuilderDriver conversation hydration", () => {
   it("hydrates a public question_answer into the typed ChatMessage field", async () => {
     const { driver } = makeDriver({

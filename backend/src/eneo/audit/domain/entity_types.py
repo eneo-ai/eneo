@@ -37,4 +37,5 @@ class EntityType(str, Enum):
     FLOW_RUN = "flow_run"
     FLOW_RUN_REVIEW_CHECKPOINT = "flow_run_review_checkpoint"
     AI_BUILDER_SESSION = "ai_builder_session"
+    AI_BUILDER_CLIENT_ERROR = "ai_builder_client_error"
     USER_GROUP = "user_group"
