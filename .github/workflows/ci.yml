@@ -165,6 +165,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --python 3.11 --frozen --all-groups
 
+      - name: Verify Alembic migration graph
+        run: uv run pytest -q tests/unit/test_alembic_migration_graph.py
+
       - name: Ruff lint
         run: uv run ruff check src/eneo --output-format github
 
