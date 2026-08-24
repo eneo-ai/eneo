@@ -629,6 +629,18 @@ Builder errors at most 1.42% and accepted p95 at most 33.825 seconds, subject to
 the frozen comparator's variance rules. A guard breach is a rollback/attribution
 event, not an acceptable trade for higher conformance.
 
+Accepted-latency p95 ≤ 33.825 seconds is certified only by acquisitions run on
+the measurement environment frozen with `ddb3ccd84f98`. A result from another
+environment is non-certifying for that absolute guard; it is neither a pass nor
+a waiver. Outside the sealed environment, a development slice may use
+immediate-parent non-inferiority only when parent and candidate are acquired
+back-to-back on the same idle validated stack, with identical model, harness,
+corpus, concurrency, and worker topology, using a latency margin declared and
+justified before either acquisition. This relative gate does not replace
+sealed-environment certification at the next tranche or release gate. This
+ruling applies only to acquisitions begun after its adoption (adopted
+2026-08-24, peer-gate iteration 15 wording, verbatim).
+
 Before a sealed suite that executes generated Flows, preflight the dedicated
 measurement tenant's runtime capacity and API request budget and record both in
 the suite manifest. The request preflight records a conservative whole-suite
