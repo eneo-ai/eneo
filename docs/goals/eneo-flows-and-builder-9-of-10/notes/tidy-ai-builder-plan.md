@@ -638,6 +638,38 @@ Answered by the owner on 2026-08-21, before any commit:
 
 O3 is still open and is set after the 4.1 measurement.
 
+- **O9 (owner, 2026-08-24): quality and smartness are in scope.** The owner
+  extended this plan beyond §1's "deleted complexity, not accuracy" verdict: the
+  Flow AI Builder must come out of this program measurably better — higher
+  conformance, not brittle, no errors, asking relevant questions — with zero
+  regression tolerated on any dimension. Concretely: after Phase 0 completes, a
+  conformance phase is authored from evidence, not memory: the adjudication ledger
+  over the largest failing check families (starting with
+  `expected_leaf_output_fields`, ~40 unique cases), each ledger entry classified
+  PRODUCT-GAP / CASE-OVERSPEC / BOUNDARY with prompt quotes. PRODUCT-GAP classes
+  become targeted quality slices under the same per-dimension no-regression rule
+  and cohort measurement as every other slice; CASE-OVERSPEC classes become a
+  corpus-wide, prompt-quote-backed contract release per the master program's
+  rescored-case discipline, never a per-case loosening. Each authored slice gets
+  the standard peer gate before landing.
+  **First adjudication complete (2026-08-24), 12-case sample of the 40-case
+  `expected_leaf_output_fields` family, full ledger in
+  `.codex/artifacts/adjudication-leaf-output-fields-20260824.md`:** 5 PRODUCT-GAP,
+  5 CASE-OVERSPEC, 2 boundary; 30 % of the family flips between identical-code
+  runs, so ~15 of 40 cases are not adjudicable from a single run. Three product
+  mechanisms identified with bundle evidence: (a) whole-plan collapse to one prose
+  step with an empty contract while the instruction names every fact; (b) a
+  recurring generic six-key report scaffold replacing domain fields; (c) terminal
+  steps flattening per-entity arrays into run-level scalars, losing row identity.
+  One matcher defect: exact-match naming penalizes plans that use the prompt's own
+  words verbatim. A candidate corpus rule exists (whole-word subsequence
+  containment, restricted to leaf properties with exact matching kept for entity
+  identifiers): 15 of 40 resolve outright, 22 improve. Strongest evidence: for two
+  flipping cases the same code produced the exact expected field names in another
+  run, so those contracts are achievable and the failure is compilation variance.
+  O9 slices are authored from these mechanisms, validated against repeated runs,
+  never a per-case loosening.
+
 ---
 
 ## 6. Phases and slices
@@ -653,7 +685,7 @@ is written.
   the cohorts below; derive the fixture inventory from the case references and the
   manifest (expect 10 prompts and 19 attachments, every manifest entry referenced);
   obtain O0, O1 and O2 from the owner. Nothing is staged.
-- [ ] **0.1b Track the authority.** After O0, one commit: this plan copied to
+- [x] **0.1b Track the authority.** After O0, one commit: this plan copied to
   `docs/goals/eneo-flows-and-builder-9-of-10/notes/tidy-ai-builder-plan.md` (with the
   local scratch paths of section 3 replaced by artifact-relative references and the
   review trail kept), the worktree-root `refactorplan.md` reduced to a one-line
@@ -663,7 +695,7 @@ is written.
   never counts (NO PROSE POPULATION CONSTANTS). This commit precedes every product
   commit; from here the tracked copy is the only authority and checkboxes are ticked
   there.
-- [ ] **0.1c Repair the migration graph.** `backend/alembic` has two heads at
+- [x] **0.1c Repair the migration graph.** `backend/alembic` has two heads at
   HEAD: `202608041200` (module auth client config, which arrived with the upstream
   SSO broker) and `202608201200` (the squashed Builder schema). `202608041200` is a
   direct child of `202608121500`; `202608201200` descends from it through
@@ -701,7 +733,7 @@ is written.
   for a contract violation. Rewriting the shebang of the 79 affected scripts to the
   current interpreter fixed them: 23 passed. No package was reinstalled.
 
-- [ ] **0.3 Baseline on the unchanged corpus, acquired before either product
+- [x] **0.3 Baseline on the unchanged corpus, acquired before either product
   cohort lands.**
   The cohorts ×3 and the broad ×1 run against a backend built from clean HEAD, on
   the manifest as tracked at HEAD, with the same repetitions and the same
@@ -718,7 +750,33 @@ is written.
   lane's own fresh database and `REDIS_HOST` at its own Redis, and mount an
   artifacts directory for the rejected-proposal and raw-classifier captures. The
   worker runs `cd /workspace/backend && bash run.sh`; never `docker restart` a
-  worker container.
+  worker container. **This branch has no celery.** Flow execution runs on arq, and
+  it needs three worker processes, not one: `eneo.worker.arq.WorkerSettings` (the
+  general worker, 12 functions, none of them flow-related),
+  `eneo.worker.platform_tasks.PlatformExecutionWorkerSettings` (which owns
+  `flows.execute`) and
+  `eneo.worker.platform_tasks.PlatformMaintenanceWorkerSettings` (reconcile and
+  redispatch crons). **A Builder conversation completes without any of them, which
+  makes this trap quiet**: the suite runs to completion and only the cases that
+  execute their generated Flow fail, as `execution_failure` with "runtime execution
+  timed out". Before trusting any acquisition, assert that `flow_runs` contains no
+  rows stuck in `queued`; a smoke case that only reaches a plan proves nothing about
+  execution. Set the measurement key's `rate_limit` to `-1`, the code's unlimited
+  sentinel (`api_key_rate_limiter.py:166`), because a space-scoped key otherwise
+  defaults to 5000 requests per hour and a single broad plus cohort acquisition
+  exceeds it.
+  Four harness guards refuse a badly set up run, and each is right, so satisfy them
+  rather than working around them: the harness must be invoked **from the clean
+  checkout**, because live release execution requires a clean tracked source
+  revision and the lane worktree is dirty; the measurement key must be **space
+  scoped**, or the capacity preflight refuses with
+  `measurement_key_not_space_scoped`; `--run-suite` is the unfiltered benchmark and
+  **cannot be combined** with `--case-id`, `--cohort` or `--max-cases`, so a cohort
+  runs as an exploratory suite without it; and `init_db.py` creates an
+  "Organization space", so select the measurement space by name rather than taking
+  the first row. `app_version` in a suite receipt is the evaluator's own build and
+  is a timestamp by convention, in the sealed reference too; the candidate identity
+  is verified through `/version` and recorded in the slice receipt.
   Predeclared cohorts, as named predicates over the `cohorts` field of the tracked
   cases file, evaluated at run time and never restated as counts: cohort (a) is
   `attachment_or_template ∪ form_fields ∪ docx`, cohort (b) is
@@ -781,6 +839,15 @@ is written.
   by replacing its owner, not by patching it inside the held cohort. Attributed
   twice, independently, by two sessions; see
   `.codex/artifacts/integration-sixth-failure-attribution-20260822.md`.
+  **The landing rule's owner is the master program's measurement cadence**
+  (`master-program.md`, "Measurement cadence"); this plan does not restate it.
+  Per slice, this plan owns only the specifics: the named cohort predicate, the
+  predeclared noise margin in cases (declared before acquisition and passed to
+  `ai_builder_battle_compare.py --noise-margin`), and the comparison lineage,
+  always the immediate parent. The comparator's JSON output is the canonical
+  evidence; receipts summarize it and cite its path. Everything else — what the
+  broad ×1 judges, which floors are frozen, what a confirmed regression means —
+  is the master's wording, read there, not paraphrased here.
   Stage by hunk; never stage `.artifacts/` or protected files. Acceptance: each
   commit passes the Builder unit suite, the integration suite and its peer gate,
   **verified in a clean checkout of that commit's own SHA** — a suite run in the
@@ -1126,7 +1193,9 @@ STALL-POLICY, never fixed by restoring a table.
 
 ## 10. Review trail
 
-Receipts: 0.1, 0.1b, 0.1c and 0.5 in
+Receipts: 0.2 (a) in
+`.codex/artifacts/implementation-receipts/0.2a-template-cohort.md`; 0.3 in `.codex/artifacts/implementation-receipts/0.3-baseline.md`;
+0.1, 0.1b, 0.1c and 0.5 in
 `.codex/artifacts/implementation-receipts/0.1-0.1b-0.5-inventory-authority-lane-env.md`.
 
 Codex peer loop, session `tidy-ai-builder-plan-review`, model `gpt-5.6-sol`, effort
