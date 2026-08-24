@@ -1065,6 +1065,7 @@ _EXPECTATION_KEYS = frozenset(
         "expected_form_field_groups",
         "expected_input_contract_schema",
         "expected_input_field_contracts",
+        "expected_key_decisions",
         "expected_leaf_output_field_groups",
         "expected_output_contract_schema",
         "expected_output_modes",
@@ -1578,6 +1579,48 @@ def _validate_release_expectations(
     input_field_contracts = expected.get("expected_input_field_contracts")
     if input_field_contracts is not None:
         _validate_input_field_contracts(path, case_id, input_field_contracts)
+    key_decisions = expected.get("expected_key_decisions")
+    if key_decisions is not None:
+        if not isinstance(key_decisions, list) or not key_decisions:
+            raise ValueError(
+                f"{path} case {case_id}.expected_key_decisions must be a "
+                "non-empty list."
+            )
+        for index, entry in enumerate(key_decisions):
+            if not isinstance(entry, Mapping) or not set(entry) <= {
+                "topic",
+                "question_id",
+            }:
+                raise ValueError(
+                    f"{path} case {case_id}.expected_key_decisions[{index}] "
+                    "allows only topic and question_id."
+                )
+            topic = entry.get("topic")
+            if not isinstance(topic, str) or not topic or topic != topic.strip():
+                raise ValueError(
+                    f"{path} case {case_id}.expected_key_decisions[{index}]"
+                    ".topic must be a non-empty string without surrounding "
+                    "whitespace."
+                )
+            question_id = entry.get("question_id")
+            if question_id is not None and (
+                not isinstance(question_id, str)
+                or not question_id
+                or question_id != question_id.strip()
+            ):
+                raise ValueError(
+                    f"{path} case {case_id}.expected_key_decisions[{index}]"
+                    ".question_id must be a non-empty string without "
+                    "surrounding whitespace when present."
+                )
+        folded_topics = [
+            str(entry.get("topic") or "").casefold() for entry in key_decisions
+        ]
+        if len(folded_topics) != len(set(folded_topics)):
+            raise ValueError(
+                f"{path} case {case_id}.expected_key_decisions has duplicate "
+                "topics (case-insensitive); a topic names one decision."
+            )
     first_pass = expected.get("expected_first_pass_authoring")
     if first_pass is not None:
         _validate_first_pass_authoring_expectation(path, case_id, first_pass)
@@ -3419,6 +3462,22 @@ def _run_case(
         ):
             version = str(requirements_summary.get("requirements_version") or "")
             if version and version not in confirmed_requirement_versions:
+                declared_decisions = (case.expected or {}).get("expected_key_decisions")
+                if isinstance(declared_decisions, list) and declared_decisions:
+                    failed_decision_checks = [
+                        check
+                        for check in _key_decision_checks(
+                            declared=declared_decisions,
+                            disclosed=_normalized_key_decisions(
+                                requirements_summary.get("key_decisions")
+                            ),
+                        )
+                        if check["passed"] is not True
+                    ]
+                    if failed_decision_checks:
+                        # Do not confirm a disclosure that violates the case
+                        # contract; the quality report records why.
+                        break
                 confirmed_requirement_versions.add(version)
                 interactions.append(
                     _send_and_fetch(
@@ -6672,6 +6731,7 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
     repair_feedback_texts: list[str] = []
     question_like_text_events: list[str] = []
     assumptions: list[str] = []
+    latest_key_decisions: list[JsonObject] = []
     server_ask_question_text_only_count = 0
     self_correction_quality_failure_count = 0
 
@@ -6727,6 +6787,14 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
                     saw_server_ask_question_usage = True
         if saw_server_ask_question_usage and not saw_question_event:
             server_ask_question_text_only_count += 1
+        # One owner for "which disclosure": the same accessor the confirm
+        # guard reads (stream event first, conversation-metadata fallback).
+        # Last interaction with a disclosure wins.
+        summary_payload = _latest_requirements_summary(interaction)
+        if summary_payload is not None and "key_decisions" in summary_payload:
+            latest_key_decisions = _normalized_key_decisions(
+                summary_payload.get("key_decisions")
+            )
 
     return {
         "event_counts": event_counts,
@@ -6740,6 +6808,7 @@ def _interaction_event_summary(interactions: object) -> JsonObject:
         "question_like_text_events": question_like_text_events[:5],
         "server_ask_question_text_only_count": server_ask_question_text_only_count,
         "assumptions": assumptions,
+        "latest_key_decisions": latest_key_decisions,
         "error_codes": error_codes,
         "self_correction_quality_failure_count": (
             self_correction_quality_failure_count
@@ -7440,6 +7509,91 @@ def _contains_topic(values: list[str], topic: str) -> bool:
     return any(folded_topic in value.casefold() for value in values)
 
 
+def _normalized_key_decisions(raw: object) -> list[JsonObject]:
+    """One shape for disclosed decisions, shared by the confirm guard and
+    the event summary: topic, settling question id, derived-ness."""
+
+    if not isinstance(raw, list):
+        return []
+    return [
+        {
+            "topic": str(decision.get("topic") or ""),
+            "question_id": (
+                decision["question_id"]
+                if isinstance(decision.get("question_id"), str)
+                else None
+            ),
+            "is_derived": decision.get("is_derived") is not False,
+        }
+        for decision in raw
+        if isinstance(decision, Mapping)
+    ]
+
+
+def _key_decision_checks(
+    *,
+    declared: object,
+    disclosed: object,
+) -> list[JsonObject]:
+    """Checks for `expected_key_decisions` against the confirmed disclosure.
+
+    Each declared entry is `{"topic": ..., "question_id": ...?}`. The topic
+    must appear among the disclosed `key_decisions` (casefolded equality).
+    Where the case declares a `question_id`, the decision must be ANSWERED:
+    the disclosed entry carries exactly that settling question id and is not
+    derived. Unexpected extra disclosures are not failures — today's
+    semantics only guard what the case names.
+    """
+
+    checks: list[JsonObject] = []
+    declared_entries = [
+        entry
+        for entry in (declared if isinstance(declared, list) else [])
+        if isinstance(entry, Mapping)
+    ]
+    disclosed_entries = [
+        entry
+        for entry in (disclosed if isinstance(disclosed, list) else [])
+        if isinstance(entry, Mapping)
+    ]
+    disclosed_by_topic = {
+        str(entry.get("topic") or "").casefold(): entry for entry in disclosed_entries
+    }
+    for entry in declared_entries:
+        topic = str(entry.get("topic") or "")
+        match = disclosed_by_topic.get(topic.casefold())
+        checks.append(
+            {
+                "name": f"key_decision_topic:{topic}",
+                "passed": match is not None,
+                "actual": sorted(disclosed_by_topic),
+                "expected": topic,
+            }
+        )
+        declared_question_id = entry.get("question_id")
+        if match is None or not isinstance(declared_question_id, str):
+            continue
+        answered = (
+            match.get("question_id") == declared_question_id
+            and match.get("is_derived") is False
+        )
+        checks.append(
+            {
+                "name": f"key_decision_answered:{topic}",
+                "passed": answered,
+                "actual": {
+                    "question_id": match.get("question_id"),
+                    "is_derived": match.get("is_derived"),
+                },
+                "expected": {
+                    "question_id": declared_question_id,
+                    "is_derived": False,
+                },
+            }
+        )
+    return checks
+
+
 def _quality_report(
     *,
     plan: JsonObject | None,
@@ -7728,6 +7882,14 @@ def _quality_report(
             missing_topics == [],
             assumptions,
             expected_assumption_topics,
+        )
+    declared_key_decisions = expected.get("expected_key_decisions")
+    if isinstance(declared_key_decisions, list) and declared_key_decisions:
+        checks.extend(
+            _key_decision_checks(
+                declared=declared_key_decisions,
+                disclosed=event_summary.get("latest_key_decisions"),
+            )
         )
     forbidden_assumption_topics = _string_list(
         expected.get("forbidden_assumption_topics")

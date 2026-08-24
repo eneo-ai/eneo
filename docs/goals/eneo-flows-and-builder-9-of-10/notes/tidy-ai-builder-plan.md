@@ -867,9 +867,8 @@ is written.
   read `git diff --cached` and confirm three things: the template checkpoint test
   uses `evidence_level`, no `authorized_requirements_version` change is staged,
   and no cohort (b) or (c) symbol appears.
-- [ ] **0.3b Harness: disclosed-decision assertions.** Generic capability and
-  self-tests (4.6), against the tracked corpus; `_quality_report` decomposed by
-  expectation key if touched. No case contract changes.
+- [x] **0.3b Harness: disclosed-decision assertions.** Generic capability and
+  self-tests (4.6), against the tracked corpus. No case contract changes.
 - [ ] **0.4 Corpus release.** Cases 173–182, the fixture files the manifest and the
   cases reference, the manifest, and the harness changes that depend on them, as one
   commit; the gate fails on any unreferenced or unstaged fixture file. New lineage

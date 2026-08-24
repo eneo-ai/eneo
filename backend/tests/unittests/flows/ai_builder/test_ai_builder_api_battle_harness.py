@@ -9044,3 +9044,365 @@ def test_a_truncated_capacity_response_refuses_instead_of_unwinding(
         "kind": "response_transport_error",
         "detail": "IncompleteRead",
     }
+
+
+def test_key_decision_expectations_assert_topic_and_settling_question() -> None:
+    harness = _battle_harness()
+    disclosed = [
+        {"topic": "Syfte", "question_id": "purpose_of_processing", "is_derived": False},
+        {"topic": "Utdataformat", "question_id": None, "is_derived": True},
+    ]
+
+    report = harness._quality_report(
+        plan=None,
+        summary={"has_plan": False},
+        expected={
+            "allow_question_instead_of_plan": True,
+            "expected_key_decisions": [
+                {"topic": "syfte", "question_id": "purpose_of_processing"},
+                {"topic": "Utdataformat"},
+                {"topic": "Saknat beslut"},
+            ],
+        },
+        event_summary={"latest_key_decisions": disclosed},
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    # Topic matching is casefolded; the derived decision passes topic-only.
+    assert checks["key_decision_topic:syfte"]["passed"] is True
+    assert checks["key_decision_answered:syfte"]["passed"] is True
+    assert checks["key_decision_topic:Utdataformat"]["passed"] is True
+    assert "key_decision_answered:Utdataformat" not in checks
+    assert checks["key_decision_topic:Saknat beslut"]["passed"] is False
+
+
+def test_key_decision_answered_fails_for_derived_or_other_question() -> None:
+    harness = _battle_harness()
+    report = harness._quality_report(
+        plan=None,
+        summary={"has_plan": False},
+        expected={
+            "allow_question_instead_of_plan": True,
+            "expected_key_decisions": [
+                {"topic": "Syfte", "question_id": "purpose_of_processing"},
+            ],
+        },
+        event_summary={
+            "latest_key_decisions": [
+                # Right topic, but the Builder derived it rather than asking.
+                {"topic": "Syfte", "question_id": None, "is_derived": True},
+            ]
+        },
+    )
+
+    checks = {check["name"]: check for check in report["checks"]}
+    assert checks["key_decision_topic:Syfte"]["passed"] is True
+    assert checks["key_decision_answered:Syfte"]["passed"] is False
+    assert checks["key_decision_answered:Syfte"]["expected"] == {
+        "question_id": "purpose_of_processing",
+        "is_derived": False,
+    }
+
+
+def test_event_summary_keeps_only_the_last_disclosed_key_decisions() -> None:
+    harness = _battle_harness()
+    interactions = [
+        {
+            "events": [
+                {
+                    "event": "requirements_summary",
+                    "data": {
+                        "assumptions": [],
+                        "key_decisions": [
+                            {"topic": "Gammalt beslut", "is_derived": True}
+                        ],
+                    },
+                }
+            ]
+        },
+        {
+            "events": [
+                {
+                    "event": "requirements_summary",
+                    "data": {
+                        "assumptions": [],
+                        "key_decisions": [
+                            {
+                                "topic": "Syfte",
+                                "question_id": "purpose_of_processing",
+                                "is_derived": False,
+                            }
+                        ],
+                    },
+                }
+            ]
+        },
+    ]
+
+    summary = harness._interaction_event_summary(interactions)
+
+    assert summary["latest_key_decisions"] == [
+        {
+            "topic": "Syfte",
+            "question_id": "purpose_of_processing",
+            "is_derived": False,
+        }
+    ]
+
+
+def test_expected_key_decisions_case_shape_is_validated() -> None:
+    harness = _battle_harness()
+
+    def _validate(entries: object) -> None:
+        harness._validate_release_expectations(
+            path="cases.json",
+            case_id="case_1",
+            expected={
+                "allow_question_instead_of_plan": True,
+                "expected_key_decisions": entries,
+            },
+        )
+
+    _validate([{"topic": "Syfte", "question_id": "purpose_of_processing"}])
+    _validate([{"topic": "Utdataformat"}])
+    for invalid in (
+        [],
+        [{"topic": ""}],
+        [{"topic": " Syfte"}],
+        [{"topic": "Syfte "}],
+        [{"topic": "Syfte", "question_id": ""}],
+        [{"topic": "Syfte", "question_id": " "}],
+        [{"topic": "Syfte", "question_id": " id"}],
+        [{"topic": "Syfte", "extra": "nope"}],
+        [{"topic": "Syfte"}, {"topic": "syfte"}],
+        ["Syfte"],
+    ):
+        with raises(ValueError):
+            _validate(invalid)
+
+
+def _drive_key_decision_case(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+    *,
+    declared: list[dict[str, object]],
+    disclosed: list[dict[str, object]],
+    via_metadata: bool = False,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Run _run_case with one disclosure and record every send.
+
+    ``via_metadata`` delivers the disclosure only through
+    ``latest_session.conversation`` message metadata — the supported fallback
+    path — instead of a stream event.
+    """
+
+    harness = _battle_harness()
+    case = harness.BattleCase(
+        case_id="key-decision-guard",
+        prompt="Bygg ett flöde.",
+        expected={
+            "allow_question_instead_of_plan": True,
+            "expected_key_decisions": declared,
+        },
+    )
+    config = harness.ApiConfig(
+        base_url="http://localhost:8123/api/v1",
+        api_key="test-key",
+        timeout_seconds=1,
+    )
+
+    send_calls: list[dict[str, object]] = []
+
+    def send_and_fetch(**kwargs: object) -> dict[str, object]:
+        send_calls.append(dict(kwargs))
+        if len(send_calls) == 1:
+            summary_data = {
+                "requirements_version": "v1",
+                "assumptions": [],
+                "key_decisions": disclosed,
+            }
+            if via_metadata:
+                events: list[dict[str, object]] = []
+                latest_session: dict[str, object] = {
+                    "latest_plan_id": None,
+                    "conversation": [
+                        {
+                            "role": "assistant",
+                            "metadata": {"requirements_summary": summary_data},
+                        }
+                    ],
+                }
+            else:
+                events = [{"event": "requirements_summary", "data": summary_data}]
+                latest_session = {"latest_plan_id": None}
+            return {
+                "client_turn_id": "turn-1",
+                "message": kwargs["message"],
+                "question_answer": None,
+                "events": events,
+                "latest_session": latest_session,
+                "plan_id": None,
+                "plan": None,
+                "plan_summary": harness._summarize_plan(None),
+            }
+        plan = {"plan_id": "plan-1", "proposal": {"spec": {"steps": []}}}
+        return {
+            "client_turn_id": f"turn-{len(send_calls)}",
+            "message": kwargs["message"],
+            "question_answer": kwargs.get("question_answer"),
+            "events": [{"event": "plan", "data": plan}],
+            "latest_session": {"latest_plan_id": "plan-1"},
+            "plan_id": "plan-1",
+            "plan": plan,
+            "plan_summary": harness._summarize_plan(plan),
+        }
+
+    def request_json(**kwargs: object) -> dict[str, object]:
+        path = kwargs["path"]
+        method = kwargs["method"]
+        if method == "POST" and path == "/flows/ai-builder/sessions":
+            return {"session_id": _TEST_SESSION_ID}
+        if path == f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}/models":
+            return {
+                "default_model_id": "model-a",
+                "models": [{"id": "model-a", "name": "gpt-a", "provider": "openai"}],
+            }
+        if path == f"/flows/ai-builder/sessions/{_TEST_SESSION_ID}":
+            return {
+                "latest_plan_id": None,
+                "telemetry": {
+                    "llm_calls_made_total": 0,
+                    "repair_attempts_total": 0,
+                    "parse_repair_attempts_total": 0,
+                    "prompt_tokens_total": 0,
+                    "completion_tokens_total": 0,
+                    "total_tokens_total": 0,
+                    "wall_clock_ms_total": 1,
+                },
+            }
+        if path.endswith("/_diagnostics/classifier-slots"):
+            return {"session_id": _TEST_SESSION_ID, "classifier_runs": []}
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setattr(harness, "_send_and_fetch", send_and_fetch)
+    monkeypatch.setattr(harness, "_request_json", request_json)
+    monkeypatch.setattr(harness, "_optional_request_json", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        harness,
+        "_git_output",
+        lambda *args: "a" * 40 if args == ("rev-parse", "HEAD") else "",
+    )
+
+    bundle = harness._run_case(
+        case=case,
+        config=config,
+        args=SimpleNamespace(
+            space_id="space-1",
+            model_id="model-a",
+            file_ids=(),
+            ui_language="sv",
+            auto_confirm_requirements=True,
+            timeout_seconds=1,
+        ),
+        existing_session_id=None,
+        artifact_output_dir=tmp_path,
+    )
+    return bundle, send_calls
+
+
+def test_a_mismatched_disclosure_withholds_the_confirmation(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    bundle, send_calls = _drive_key_decision_case(
+        monkeypatch,
+        tmp_path,
+        declared=[{"topic": "Syfte", "question_id": "purpose_of_processing"}],
+        disclosed=[{"topic": "Syfte", "question_id": None, "is_derived": True}],
+    )
+
+    # Only the opening prompt was sent: the mismatch produced no further
+    # provider call and no plan. The quality report is the one owner of the
+    # refusal's evidence.
+    assert len(send_calls) == 1
+    assert bundle["plan_id"] is None
+    checks = {check["name"]: check for check in bundle["quality_report"]["checks"]}
+    assert checks["key_decision_topic:Syfte"]["passed"] is True
+    assert checks["key_decision_answered:Syfte"]["passed"] is False
+
+
+def test_a_matching_disclosure_confirms_content_free_and_whole_version(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    bundle, send_calls = _drive_key_decision_case(
+        monkeypatch,
+        tmp_path,
+        declared=[{"topic": "Syfte", "question_id": "purpose_of_processing"}],
+        disclosed=[
+            {
+                "topic": "Syfte",
+                "question_id": "purpose_of_processing",
+                "is_derived": False,
+            }
+        ],
+    )
+
+    assert bundle["plan_id"] == "plan-1"
+    assert len(send_calls) == 2
+    confirmation = send_calls[1]
+    # Confirmation stays content-free and whole-version: the canonical
+    # message plus the confirmed version, never decision content.
+    assert confirmation["message"] == harness.CONFIRM_MESSAGE
+    payload = confirmation["question_answer"]
+    assert payload == {
+        "kind": "requirements_confirmation",
+        "requirements_confirmed": True,
+        "ui_language": "sv",
+        "requirements_version": "v1",
+    }
+
+
+def test_metadata_only_disclosure_is_guarded_and_scored_identically(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    # The disclosure arrives only through conversation metadata, never a
+    # stream event: guard and quality report must read the same source.
+    bundle, send_calls = _drive_key_decision_case(
+        monkeypatch,
+        tmp_path,
+        declared=[{"topic": "Syfte", "question_id": "purpose_of_processing"}],
+        disclosed=[
+            {
+                "topic": "Syfte",
+                "question_id": "purpose_of_processing",
+                "is_derived": False,
+            }
+        ],
+        via_metadata=True,
+    )
+
+    assert bundle["plan_id"] == "plan-1"
+    assert len(send_calls) == 2
+    checks = {check["name"]: check for check in bundle["quality_report"]["checks"]}
+    assert checks["key_decision_topic:Syfte"]["passed"] is True
+    assert checks["key_decision_answered:Syfte"]["passed"] is True
+
+
+def test_metadata_only_mismatch_withholds_and_reports_the_real_reason(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    bundle, send_calls = _drive_key_decision_case(
+        monkeypatch,
+        tmp_path,
+        declared=[{"topic": "Syfte", "question_id": "purpose_of_processing"}],
+        disclosed=[{"topic": "Syfte", "question_id": None, "is_derived": True}],
+        via_metadata=True,
+    )
+
+    assert len(send_calls) == 1
+    assert bundle["plan_id"] is None
+    checks = {check["name"]: check for check in bundle["quality_report"]["checks"]}
+    # The real provenance: topic disclosed, decision not answered — not a
+    # phantom "topic missing".
+    assert checks["key_decision_topic:Syfte"]["passed"] is True
+    assert checks["key_decision_answered:Syfte"]["passed"] is False
