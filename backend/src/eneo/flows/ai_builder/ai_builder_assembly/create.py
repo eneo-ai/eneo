@@ -15,6 +15,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
     DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK,
     admit_document_report_semantic_shape,
     append_terminal_helper_output_fields,
+    apply_multi_source_reader_consumer_contract,
     lower_document_report_topology,
     requested_output_section_contracts,
 )
@@ -98,6 +99,15 @@ _FILE_INPUT_TYPES = frozenset({InputType.DOCUMENT, InputType.FILE})
 _TEMPLATE_SOURCE_INPUT_TYPES = _FILE_INPUT_TYPES | frozenset(
     {InputType.JSON, InputType.TEXT}
 )
+# Structural ceiling on the fan-in the compiler synthesizes for per-source
+# plans: the number of distinct prior structured fields a consuming step may
+# be bound to. A binding/context complexity invariant, not a byte proxy — the
+# runtime's inline byte cap enforces size independently. Measured plans sit
+# far below this; the current observations live in the slice's measurement
+# receipt. Fixed invariant, not policy; changing it takes a measured receipt,
+# not configuration.
+MAX_STRUCTURED_FAN_IN_REFS = 64
+
 CreateAssemblyRejectionReason = Literal[
     "aggregate_requires_text_or_document_output",
     "all_previous_step_cannot_use_explicit_refs",
@@ -120,6 +130,7 @@ CreateAssemblyRejectionReason = Literal[
     "source_file_first_step_requires_json",
     "step_output_type_mismatch",
     "terminal_schema_requires_json_terminal",
+    "structured_fan_in_exceeds_limit",
     "unsupported_aggregation_intent",
     "unsupported_architecture_hints",
     "unsupported_final_output_type",
@@ -129,6 +140,11 @@ CreateAssemblyRejectionReason = Literal[
 ]
 
 _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
+    "structured_fan_in_exceeds_limit": (
+        "The plan carries too many distinct structured fields forward between "
+        "steps. Consolidate earlier JSON steps or reduce their output_fields so "
+        "later steps consume fewer distinct fields."
+    ),
     "aggregate_requires_text_or_document_output": (
         "Aggregate and compare create flows must end in text or a document artifact; "
         "remove the JSON terminal shape or make the flow linear."
@@ -448,6 +464,11 @@ def _assemble_create_intent(
         ui_language=ui_language,
     )
     semantic_origin_eligibility = (True,) * len(semantic_steps)
+    per_source_runtime = (
+        runtime_input_type in _FILE_INPUT_TYPES
+        and runtime_max_files is not None
+        and runtime_max_files != 1
+    )
     semantic_steps, semantic_origin_eligibility = admit_document_report_semantic_shape(
         semantic_steps,
         semantic_origin_eligibility,
@@ -455,6 +476,7 @@ def _assemble_create_intent(
         final_semantic_output_type=terminal_semantic_output_type,
         source_reader_required_fields=source_reader_required_fields,
         report_disposition=report_disposition,
+        per_source_runtime=per_source_runtime,
         ui_language=ui_language,
         reserved_source_output_field_names=frozenset(
             record.value.variable_name for record in runtime_input_fields
@@ -479,6 +501,7 @@ def _assemble_create_intent(
                 result_contract_output_fields=result_contract_output_fields,
                 result_contract_required_roles=result_contract_required_roles,
                 terminal_output_schema=terminal_output_schema,
+                per_source_runtime=per_source_runtime,
                 ui_language=ui_language,
             )
         )
@@ -488,6 +511,17 @@ def _assemble_create_intent(
                 False,
                 *semantic_origin_eligibility[followup_step_index:],
             )
+        if per_source_runtime and terminal_semantic_output_type is OutputType.TEXT:
+            semantic_steps = _semantic_steps_with_requested_output_sections(
+                semantic_steps,
+                requested_output_sections=requested_output_sections,
+                ui_language=ui_language,
+            )
+    if per_source_runtime and report_disposition is None:
+        semantic_steps = apply_multi_source_reader_consumer_contract(
+            semantic_steps,
+            ui_language=ui_language,
+        )
     previous_output_type: OutputType | None = None
     has_source_prefix = False
     if runtime_input_type == InputType.AUDIO:
@@ -520,17 +554,36 @@ def _assemble_create_intent(
                 "source_file_first_step_requires_json",
                 step_index=index + 1,
             )
-        aggregate_terminal_previous_refs = _aggregate_terminal_previous_structured_refs(
+        structured_previous_refs = _aggregate_terminal_previous_structured_refs(
             planned_steps=tuple(planned_steps),
             aggregation_intent=aggregation_intent,
             is_terminal_semantic_step=is_terminal_semantic_step,
         )
         if (
+            not structured_previous_refs
+            and index > 0
+            and step_output_type in {OutputType.JSON, OutputType.TEXT}
+            and report_disposition in {None, "synthesized_overview"}
+            and per_source_runtime
+            and (
+                (report_disposition is None and step_output_type is OutputType.JSON)
+                or len(planned_steps) >= 2
+            )
+        ):
+            structured_previous_refs = _prior_structured_field_refs(
+                tuple(planned_steps)
+            )
+            if len(structured_previous_refs) > MAX_STRUCTURED_FAN_IN_REFS:
+                return _reject(
+                    "structured_fan_in_exceeds_limit",
+                    step_index=index + 1,
+                )
+        if (
             is_terminal_semantic_step
             and aggregation_intent == "compare"
             and step_output_type == OutputType.JSON
             and len(planned_steps) >= 2
-            and not aggregate_terminal_previous_refs
+            and not structured_previous_refs
         ):
             # Silent fan-in would hide which producer failed to declare its
             # contract; a compare JSON terminal must consume typed refs.
@@ -544,7 +597,7 @@ def _assemble_create_intent(
             aggregation_intent=aggregation_intent,
             has_source_prefix=has_source_prefix,
             prior_step_count=len(planned_steps),
-            aggregate_terminal_uses_source_refs=bool(aggregate_terminal_previous_refs),
+            aggregate_terminal_uses_source_refs=bool(structured_previous_refs),
         )
         if input_source == InputSource.ALL_PREVIOUS_STEPS and (
             semantic_step.uses_previous_fields or semantic_step.uses_previous_outputs
@@ -563,7 +616,7 @@ def _assemble_create_intent(
             planned_steps[-1] if input_source == InputSource.PREVIOUS_STEP else None
         )
         previous_field_refs = (
-            aggregate_terminal_previous_refs
+            structured_previous_refs
             or _derived_terminal_text_previous_field_refs(
                 planned_steps=tuple(planned_steps),
                 input_source=input_source,
@@ -895,6 +948,7 @@ def _semantic_steps_with_result_contract_fields(
     result_contract_output_fields: tuple[StructuredFieldDraft, ...],
     result_contract_required_roles: tuple[ResultOutputFieldRole, ...],
     terminal_output_schema: JsonObject | None,
+    per_source_runtime: bool,
     ui_language: str | None,
 ) -> tuple[tuple[SemanticStepIntent, ...], int | None]:
     semantic_steps = tuple(steps)
@@ -971,7 +1025,21 @@ def _semantic_steps_with_result_contract_fields(
     # transcription), so single-step flows over other inputs keep the model
     # repair path instead.
     if not result_contract_required_roles:
-        return semantic_steps, None
+        # Only per-source report flows get the prose helper; every other flow
+        # keeps its terminal instructions untouched, this function's
+        # pre-multi-source behaviour.
+        if not per_source_runtime:
+            return semantic_steps, None
+        prose_terminal = terminal_step.model_copy(
+            update={
+                "instructions": append_terminal_helper_output_fields(
+                    terminal_step.instructions,
+                    result_contract_output_fields,
+                    ui_language=ui_language,
+                )
+            }
+        )
+        return (*semantic_steps[:-1], prose_terminal), None
     insert_at = len(semantic_steps) - 1
     if insert_at == 0 and runtime_input_type != InputType.AUDIO:
         return semantic_steps, None
@@ -987,6 +1055,40 @@ def _semantic_steps_with_result_contract_fields(
         ),
         *semantic_steps[insert_at:],
     ), insert_at
+
+
+def _semantic_steps_with_requested_output_sections(
+    steps: tuple[SemanticStepIntent, ...],
+    *,
+    requested_output_sections: RequestedOutputSections,
+    ui_language: str | None,
+) -> tuple[SemanticStepIntent, ...]:
+    if (
+        not steps
+        or not requested_output_sections.high_confidence
+        or not requested_output_sections.sections
+    ):
+        return steps
+    heading_lines = "\n".join(
+        f"- {heading}" for heading in requested_output_sections.sections
+    )
+    heading_instruction = (
+        "Use these required report headings in this order:\n"
+        if ui_language == "en"
+        else "Använd följande obligatoriska rapportrubriker i denna ordning:\n"
+    )
+    addition = f"{heading_instruction}{heading_lines}"
+    terminal_step = steps[-1]
+    if addition in terminal_step.instructions:
+        return steps
+    return (
+        *steps[:-1],
+        terminal_step.model_copy(
+            update={
+                "instructions": f"{terminal_step.instructions.rstrip()}\n\n{addition}"
+            }
+        ),
+    )
 
 
 def _result_contract_followup_step(
@@ -1345,6 +1447,14 @@ def _aggregate_terminal_previous_structured_refs(
         or not is_terminal_semantic_step
         or len(planned_steps) < 2
     ):
+        return ()
+    return _prior_structured_field_refs(planned_steps)
+
+
+def _prior_structured_field_refs(
+    planned_steps: tuple[PlannedStep, ...],
+) -> tuple[PreviousFieldRef, ...]:
+    if not planned_steps:
         return ()
     if any(
         step.output_type != OutputType.JSON or not step.output_fields

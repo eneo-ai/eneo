@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_critic_context,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    CreateFlowIntent,
     FlowInputFieldIntent,
     ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
@@ -1626,6 +1627,425 @@ def test_committed_report_disposition_lowers_minimal_semantic_intent(
     assert all(
         step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
     )
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+@pytest.mark.parametrize("runtime_input_type", [InputType.DOCUMENT, InputType.FILE])
+def test_multi_source_report_normalizes_every_runtime_file_before_analysis(
+    runtime_input_type: InputType,
+) -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source comparison",
+            "plan_rationale": "Compare three runtime sources without losing lineage.",
+            "steps": [
+                {
+                    "name": "Read the driver report",
+                    "instructions": (
+                        "Read the driver report and preserve its reported times."
+                    ),
+                    "output_fields": [
+                        {
+                            "name": "reported_times",
+                            "field_type": "array",
+                            "description": "Times reported by the driver.",
+                            "children": [
+                                {
+                                    "name": "time",
+                                    "field_type": "string",
+                                    "description": "One reported time.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Write the comparison",
+                    "instructions": (
+                        "Compare the schedule with the preceding material and "
+                        "write a source-grounded report."
+                    ),
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=runtime_input_type,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="compare",
+            report_disposition=None,
+            result_contract_output_fields=(
+                StructuredFieldDraft(
+                    name="open_questions",
+                    field_type="string",
+                    description="Questions that remain unresolved across sources.",
+                ),
+            ),
+            result_contract_required_roles=("open_questions",),
+            runtime_max_files=3,
+            ui_language="en",
+        ),
+    )
+
+    reader = compiled.steps[0]
+    runtime_input = reader.input_config["runtime_input"]
+    assert runtime_input["execution_mode"] == "per_source"
+    assert runtime_input["max_files"] == 3
+    assert set(reader.output_contract["properties"]) == {"documents"}
+    document_fields = reader.output_contract["properties"]["documents"]["items"][
+        "properties"
+    ]
+    assert "source_label" in document_fields
+    assert "source_file_id" in document_fields
+    # The authored typed record survives per-source admission, and the fallback
+    # material capture is its SIBLING inside each document item: nesting it
+    # into the authored array meant an empty array could represent no material.
+    assert "reported_times" in document_fields
+    assert document_fields["reported_times"]["type"] == "array"
+    assert "time" in document_fields["reported_times"]["items"]["properties"]
+    assert "source_material" in document_fields
+    assert "current source" in reader.assistant_spec.instructions
+    assert "driver report" in reader.assistant_spec.instructions
+
+    source_consumer = compiled.steps[1]
+    assert source_consumer.input_source is InputSource.PREVIOUS_STEP
+    assert "documents" in str(source_consumer.input_bindings)
+    assert source_consumer.input_contract == reader.output_contract
+    assert (
+        "complete normalized source set" in source_consumer.assistant_spec.instructions
+    )
+    assert all(
+        "complete normalized source set" not in step.assistant_spec.instructions
+        for step in compiled.steps[2:]
+    )
+    assert "open_questions" in str([step.output_contract for step in compiled.steps])
+    assert all(
+        step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
+    )
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_multi_source_overview_preserves_source_facts_through_json_stages() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source comparison",
+            "plan_rationale": "Compare every source before writing the report.",
+            "steps": [
+                {
+                    "name": "Read sources",
+                    "instructions": "Read every source.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "children": [
+                                {
+                                    "name": "source_name",
+                                    "field_type": "string",
+                                    "description": "Source file name.",
+                                },
+                                {
+                                    "name": "case_id",
+                                    "field_type": "string",
+                                    "description": "Case identifier.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Compare sources",
+                    "instructions": "Compare the normalized source records.",
+                    "output_fields": [
+                        {
+                            "name": "conflicts",
+                            "field_type": "array",
+                            "description": "Conflicting source facts.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Assess follow-up",
+                    "instructions": "Identify follow-up from the comparison.",
+                    "output_fields": [
+                        {
+                            "name": "open_questions",
+                            "field_type": "array",
+                            "description": "Questions requiring follow-up.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the complete source-grounded report.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="linear",
+            report_disposition="synthesized_overview",
+            runtime_max_files=3,
+            ui_language="en",
+        ),
+    )
+
+    expected_analysis_step_names = {
+        "Read sources",
+        "Compare sources",
+        "Assess follow-up",
+        "Write report",
+    }
+    analysis_steps = [
+        step for step in compiled.steps if step.name in expected_analysis_step_names
+    ]
+    assert [step.name for step in analysis_steps] == [
+        "Read sources",
+        "Compare sources",
+        "Assess follow-up",
+        "Write report",
+    ]
+    reader_item_properties = analysis_steps[0].output_contract["properties"][
+        "documents"
+    ]["items"]["properties"]
+    assert "source_material" in reader_item_properties
+    assert analysis_steps[1].input_bindings is None
+    assert analysis_steps[1].input_contract == analysis_steps[0].output_contract
+    assert {
+        (ref["step_ref"], ref["field_path"])
+        for ref in analysis_steps[2].input_bindings["source_refs"]
+    } == {("step_a", "documents"), ("step_b", "conflicts")}
+    assert {
+        (ref["step_ref"], ref["field_path"])
+        for ref in analysis_steps[3].input_bindings["source_refs"]
+    } == {
+        ("step_c", "open_questions"),
+        ("step_c", "overall_overview"),
+    }
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_multi_source_report_preserves_confirmed_sections_without_layout_choice() -> (
+    None
+):
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source comparison",
+            "plan_rationale": "Compare every runtime source in one report.",
+            "steps": [
+                {
+                    "name": "Read the driver report",
+                    "instructions": "Extract exact times from the driver report.",
+                    "output_fields": [
+                        {
+                            "name": "reported_times",
+                            "field_type": "string",
+                            "description": "Times reported by the driver.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write the comparison",
+                    "instructions": "Compare the available evidence.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="compare",
+            report_disposition=None,
+            result_contract_output_fields=(
+                StructuredFieldDraft(
+                    name="uncertainty",
+                    field_type="string",
+                    description="Uncertainty that the sources cannot resolve.",
+                ),
+                StructuredFieldDraft(
+                    name="open_questions",
+                    field_type="string",
+                    description="Questions that remain unresolved across sources.",
+                ),
+            ),
+            result_contract_required_roles=(),
+            requested_output_sections=RequestedOutputSections(
+                sections=(
+                    "Source timeline",
+                    "Conflicting facts",
+                    "Unresolved questions",
+                    "Source list",
+                ),
+                confidence="high",
+            ),
+            runtime_max_files=3,
+            ui_language="en",
+        ),
+    )
+
+    assert len(compiled.steps) == 3
+    writer_instructions = compiled.steps[-2].assistant_spec.instructions
+    assert "Uncertainty that the sources cannot resolve" in writer_instructions
+    assert "Questions that remain unresolved across sources" in writer_instructions
+    assert "Source timeline" in writer_instructions
+    assert "Conflicting facts" in writer_instructions
+    assert "Unresolved questions" in writer_instructions
+    assert "Source list" in writer_instructions
+    assert validate_spec(compiled).valid
+
+
+def test_multi_source_analysis_stages_receive_source_set_and_prior_derivations() -> (
+    None
+):
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source comparison",
+            "plan_rationale": "Compare three runtime sources without a lossy chain.",
+            "steps": [
+                {
+                    "name": "Read the first source",
+                    "instructions": "Capture source-grounded facts.",
+                    "output_fields": [
+                        {
+                            "name": "reported_time",
+                            "field_type": "string",
+                            "description": "Time reported by the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Read schedule facts",
+                    "instructions": "Extract the planned time from the source set.",
+                    "output_fields": [
+                        {
+                            "name": "planned_time",
+                            "field_type": "string",
+                            "description": "Scheduled time.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Read GPS facts",
+                    "instructions": "Extract the observed time from the source set.",
+                    "output_fields": [
+                        {
+                            "name": "observed_time",
+                            "field_type": "string",
+                            "description": "Observed time.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Compare source facts",
+                    "instructions": "Compare reported, planned, and observed times.",
+                    "output_fields": [
+                        {
+                            "name": "comparison",
+                            "field_type": "string",
+                            "description": "Source-grounded comparison.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write a source-grounded report.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="compare",
+            report_disposition=None,
+            runtime_max_files=3,
+            ui_language="en",
+        ),
+    )
+
+    expected_fields_by_step = (
+        (2, {"documents"}),
+        (3, {"documents", "planned_time"}),
+        (4, {"documents", "planned_time", "observed_time"}),
+    )
+    for step_number, expected_fields in expected_fields_by_step:
+        step = compiled.steps[step_number - 1]
+        assert step.input_source is InputSource.PREVIOUS_STEP
+        assert step.input_bindings is not None
+        assert set(step.input_contract["properties"]) == expected_fields
+        assert all(
+            field_name in str(step.input_bindings) for field_name in expected_fields
+        )
+    assert all(
+        step.input_source is not InputSource.ALL_PREVIOUS_STEPS
+        for step in compiled.steps
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_single_source_report_preserves_authored_reader_contract() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Single source report",
+            "plan_rationale": "Extract the one uploaded report.",
+            "steps": [
+                {
+                    "name": "Read the driver report",
+                    "instructions": "Read the driver report.",
+                    "output_fields": [
+                        {
+                            "name": "reported_time",
+                            "field_type": "string",
+                            "description": "The reported time.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write the report",
+                    "instructions": "Write the final report.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            runtime_max_files=1,
+            ui_language="en",
+        ),
+    )
+
+    reader = compiled.steps[0]
+    assert set(reader.output_contract["properties"]) == {"reported_time"}
+    assert "execution_mode" not in reader.input_config["runtime_input"]
+    assert reader.assistant_spec.instructions.startswith("Read the driver report.")
+    assert "complete normalized source set" not in reader.assistant_spec.instructions
     validation = validate_spec(compiled)
     assert validation.valid, validation.errors
 
@@ -4398,6 +4818,7 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
         "date",
         "author",
         "summary",
+        "source_material",
     ]
     assert "documents" not in item_properties
     reader_instructions = reader_step.assistant_spec.instructions
@@ -4405,7 +4826,8 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     assert "source_label" not in reader_instructions
     assert "source_file_id" not in reader_instructions
     assert (
-        "Allowed fields for items of documents: title, date, author, summary."
+        "Allowed fields for items of documents: title, date, author, summary, "
+        "source_material."
     ) in reader_instructions
     assert (
         "Allowed fields for items of documents: source_label" not in reader_instructions
@@ -6185,16 +6607,20 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     assert list(documents_schema["items"]["properties"]) == [
         "source_label",
         "source_file_id",
+        "source_material",
     ]
     assert documents_schema["items"]["required"] == [
         "source_label",
         "source_file_id",
+        "source_material",
     ]
     reader_instructions = reader_step.assistant_spec.instructions
     assert "körs en gång per uppladdad källa" in reader_instructions
     assert "source_label" not in reader_instructions
     assert "source_file_id" not in reader_instructions
-    assert "Allowed fields for items of documents:" not in reader_instructions
+    assert (
+        "Allowed fields for items of documents: source_material." in reader_instructions
+    )
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
 
@@ -6357,6 +6783,74 @@ def test_single_json_to_pdf_report_preserves_structured_extraction() -> None:
     )
     assert "Källstödda sakuppgifter" in writer_step.assistant_spec.instructions
     assert renderer_step.output_mode == OutputMode.RENDER_VERBATIM
+    assert validate_spec(compiled).valid
+
+
+def test_json_report_preserves_root_facts_through_derived_json_stages() -> None:
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Structured inspection report",
+            "plan_rationale": "Validate observations before writing the report.",
+            "steps": [
+                {
+                    "name": "Normalize input",
+                    "instructions": "Normalize the runtime JSON.",
+                    "output_fields": [
+                        {
+                            "name": "case_id",
+                            "field_type": "string",
+                            "description": "Case identifier from runtime input.",
+                        },
+                        {
+                            "name": "observations",
+                            "field_type": "array",
+                            "description": "Source observations.",
+                        },
+                    ],
+                },
+                {
+                    "name": "Assess observations",
+                    "instructions": "Assess the normalized observations.",
+                    "output_fields": [
+                        {
+                            "name": "assessment",
+                            "field_type": "string",
+                            "description": "Assessment of the observations.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the report with its case identifier.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.JSON,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            ui_language="en",
+        ),
+    )
+
+    normalize_step, assessment_step, writer_step, renderer_step = compiled.steps
+    assert normalize_step.input_source is InputSource.FLOW_INPUT
+    assert normalize_step.input_bindings is None
+    assert assessment_step.input_bindings is None
+    assert assessment_step.input_contract == normalize_step.output_contract
+    assert {
+        (ref["step_ref"], ref["field_path"])
+        for ref in writer_step.input_bindings["source_refs"]
+    } == {
+        ("step_a", "case_id"),
+        ("step_a", "observations"),
+        ("step_b", "assessment"),
+    }
+    assert renderer_step.output_mode is OutputMode.RENDER_VERBATIM
     assert validate_spec(compiled).valid
 
 
@@ -7369,3 +7863,244 @@ def test_aggregate_json_terminal_still_rejects() -> None:
         excinfo.value.log_context.get("failure_code")
         == "assembly_aggregate_requires_text_or_document_output"
     )
+
+
+def test_general_text_terminal_keeps_authored_instructions_without_prose_helper() -> (
+    None
+):
+    # The prose helper that lists result-contract fields in the terminal
+    # instructions is per-source report behaviour. A single-source text flow
+    # with an unroled result contract keeps its authored instructions
+    # byte-for-byte, which was this path's behaviour before the multi-source
+    # slice.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Summary",
+            "plan_rationale": "Summarize the submitted document.",
+            "steps": [
+                {
+                    "name": "Read the document",
+                    "instructions": "Read the document.",
+                },
+                {
+                    "name": "Write the summary",
+                    "instructions": "Write a short summary.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.TEXT,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            result_contract_output_fields=(
+                StructuredFieldDraft(
+                    name="open_questions",
+                    field_type="string",
+                    description="Unresolved questions.",
+                ),
+            ),
+            result_contract_required_roles=(),
+            ui_language="en",
+        ),
+    )
+
+    assert compiled.steps[-1].assistant_spec.instructions == "Write a short summary."
+    assert validate_spec(compiled).valid
+
+
+def test_general_text_terminal_keeps_instructions_without_requested_sections() -> None:
+    # Requested report headings are rendered by the per-source report path (and
+    # by the report topology owner for report flows); an ordinary text flow
+    # never gets heading instructions appended.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Notice",
+            "plan_rationale": "Draft the notice.",
+            "steps": [
+                {
+                    "name": "Draft the notice",
+                    "instructions": "Draft the notice text.",
+                }
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.TEXT,
+            final_output_type=OutputType.TEXT,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            requested_output_sections=RequestedOutputSections(
+                sections=("Bakgrund", "Beslut"),
+                confidence="high",
+            ),
+            ui_language="sv",
+        ),
+    )
+
+    assert compiled.steps[-1].assistant_spec.instructions == "Draft the notice text."
+    assert validate_spec(compiled).valid
+
+
+def test_per_source_fan_in_over_the_ceiling_is_rejected_at_compilation() -> None:
+    # The ceiling is a structural binding/context invariant on
+    # compiler-synthesized per-source fan-in: one over it is refused at
+    # compilation with feedback the model can act on.
+    with pytest.raises(AIBuilderArchitectureError) as exc_info:
+        compile_create_intent_to_spec(
+            _wide_per_source_intent(64),
+            context=CreateCompileContext(
+                runtime_input_type=InputType.DOCUMENT,
+                final_output_type=OutputType.PDF,
+                final_output_mode=OutputMode.RENDER_VERBATIM,
+                aggregation_intent="compare",
+                report_disposition=None,
+                runtime_max_files=3,
+                ui_language="en",
+            ),
+        )
+
+    assert exc_info.value.log_context["failure_code"] == (
+        "assembly_structured_fan_in_exceeds_limit"
+    )
+
+
+def test_material_capture_leaves_sibling_authored_arrays_unchanged() -> None:
+    # The material capture belongs to the source-document container only. An
+    # authored sibling array beside `documents` must come through byte-for-byte,
+    # not gain an injected capture field.
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Källgranskning",
+            "plan_rationale": "Compare sources and keep the authored contract.",
+            "steps": [
+                {
+                    "name": "Read the sources",
+                    "instructions": "Capture the documents and open questions.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "Per-document material.",
+                            "children": [
+                                {
+                                    "name": "summary",
+                                    "field_type": "string",
+                                    "description": "Document summary.",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "open_items",
+                            "field_type": "array",
+                            "description": "Items to follow up.",
+                            "children": [
+                                {
+                                    "name": "item",
+                                    "field_type": "string",
+                                    "description": "One item.",
+                                }
+                            ],
+                        },
+                    ],
+                },
+                {
+                    "name": "Write the comparison",
+                    "instructions": "Write a source-grounded comparison.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="compare",
+            report_disposition=None,
+            runtime_max_files=3,
+            ui_language="en",
+        ),
+    )
+
+    properties = compiled.steps[0].output_contract["properties"]
+    document_fields = properties["documents"]["items"]["properties"]
+    assert "source_material" in document_fields
+    open_item_fields = properties["open_items"]["items"]["properties"]
+    assert set(open_item_fields) == {"item"}
+    assert validate_spec(compiled).valid
+
+
+def _wide_per_source_intent(derived_field_count: int) -> CreateFlowIntent:
+    return parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Wide comparison",
+            "plan_rationale": "Compare sources across many facts.",
+            "steps": [
+                {
+                    "name": "Read the sources",
+                    "instructions": "Capture source facts.",
+                    "output_fields": [
+                        {
+                            "name": "reported_time",
+                            "field_type": "string",
+                            "description": "Time reported by the source.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Derive the fact matrix",
+                    "instructions": "Derive every comparison fact.",
+                    "output_fields": [
+                        {
+                            "name": f"fact_{index}",
+                            "field_type": "string",
+                            "description": f"Fact {index}.",
+                        }
+                        for index in range(derived_field_count)
+                    ],
+                },
+                {
+                    "name": "Compare source facts",
+                    "instructions": "Compare the derived facts.",
+                    "output_fields": [
+                        {
+                            "name": "comparison",
+                            "field_type": "string",
+                            "description": "Source-grounded comparison.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write a source-grounded report.",
+                },
+            ],
+        }
+    )
+
+
+def test_per_source_fan_in_at_the_ceiling_compiles() -> None:
+    # Exactly MAX_STRUCTURED_FAN_IN_REFS distinct prior identities: the reader
+    # contributes its documents contract and the derived matrix the rest. The
+    # boundary itself is legal.
+    compiled = compile_create_intent_to_spec(
+        _wide_per_source_intent(63),
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            aggregation_intent="compare",
+            report_disposition=None,
+            runtime_max_files=3,
+            ui_language="en",
+        ),
+    )
+    assert validate_spec(compiled).valid

@@ -36,6 +36,9 @@ from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     planned_step_is_source_reader,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import LintWarning
+from eneo.flows.ai_builder.ai_builder_field_identity import (
+    fold_result_field_name,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
@@ -68,6 +71,7 @@ def admit_document_report_semantic_shape(
     final_semantic_output_type: OutputType,
     source_reader_required_fields: tuple[SourceCaptureField, ...],
     report_disposition: ReportDisposition | None,
+    per_source_runtime: bool,
     ui_language: str | None,
     reserved_source_output_field_names: frozenset[str] = frozenset(),
 ) -> tuple[tuple[SemanticStepIntent, ...], tuple[bool, ...]]:
@@ -86,6 +90,52 @@ def admit_document_report_semantic_shape(
         or final_semantic_output_type != OutputType.TEXT
     ):
         return semantic_steps, eligibility
+
+    if per_source_runtime and report_disposition is None:
+        reader_step = semantic_steps[0]
+        # The authored reader fields are the model's typed record of which
+        # source facts downstream steps need. They are wrapped into the
+        # per-source ``documents[]`` items by the admission helper below, never
+        # replaced: substituting a generic material field here discarded typed
+        # facts like reported times while the injected instructions still told
+        # the model to preserve them.
+        reader_fields = tuple(reader_step.output_fields or ())
+        reader_fields = complete_structured_source_reader_fields(
+            reader_fields,
+            required_fields=source_reader_required_fields,
+            reserved_field_names=reserved_source_output_field_names,
+        )
+        admitted_reader = reader_step.model_copy(
+            update={
+                "name": _source_report_reader_name(ui_language),
+                "instructions": _per_source_report_reader_instructions(
+                    reader_step.instructions,
+                    ui_language=ui_language,
+                ),
+                "output_type": OutputType.JSON,
+                "output_fields": list(
+                    _admitted_document_report_source_fields(
+                        reader_fields,
+                        ui_language=ui_language,
+                        reserved_field_names=reserved_source_output_field_names,
+                    )
+                ),
+            }
+        )
+        if len(semantic_steps) == 1:
+            writer_step = reader_step.model_copy(
+                update={
+                    "name": _source_report_writer_name(ui_language),
+                    "instructions": reader_step.instructions,
+                    "output_type": OutputType.TEXT,
+                    "output_fields": None,
+                }
+            )
+            return (admitted_reader, writer_step), (
+                eligibility[0],
+                eligibility[0],
+            )
+        return (admitted_reader, *semantic_steps[1:]), eligibility
 
     if len(semantic_steps) == 1:
         semantic_step = semantic_steps[0]
@@ -114,6 +164,7 @@ def admit_document_report_semantic_shape(
             source_fields = _admitted_document_report_source_fields(
                 source_fields,
                 ui_language=ui_language,
+                reserved_field_names=reserved_source_output_field_names,
             )
         reader_step = semantic_step.model_copy(
             update={
@@ -159,6 +210,7 @@ def admit_document_report_semantic_shape(
                 _admitted_document_report_source_fields(
                     source_fields,
                     ui_language=ui_language,
+                    reserved_field_names=reserved_source_output_field_names,
                 )
             ),
         }
@@ -170,11 +222,62 @@ def _admitted_document_report_source_fields(
     source_fields: tuple[StructuredFieldDraft, ...],
     *,
     ui_language: str | None,
+    reserved_field_names: frozenset[str],
 ) -> tuple[StructuredFieldDraft, ...]:
-    if structured_fields_have_document_items(source_fields):
-        return source_fields
+    # Wrap first, then complete: the fallback material capture must be a
+    # SIBLING of the authored fields inside each document item. Completing
+    # before wrapping nested it inside a sole authored array, so a document
+    # whose array was empty could represent no material at all.
+    if not structured_fields_have_document_items(source_fields):
+        source_fields = (
+            _document_report_source_array_field(source_fields, ui_language=ui_language),
+        )
+    return tuple(
+        field.model_copy(
+            update={
+                "item_fields": list(
+                    _with_document_material_capture(
+                        tuple(field.item_fields or ()),
+                        ui_language=ui_language,
+                        reserved_field_names=reserved_field_names,
+                    )
+                )
+            }
+        )
+        if structured_fields_have_document_items((field,))
+        else field
+        for field in source_fields
+    )
+
+
+def _with_document_material_capture(
+    item_fields: tuple[StructuredFieldDraft, ...],
+    *,
+    ui_language: str | None,
+    reserved_field_names: frozenset[str],
+) -> tuple[StructuredFieldDraft, ...]:
+    material = fold_result_field_name("source_material")
+    if any(fold_result_field_name(field.name) == material for field in item_fields):
+        return item_fields
+    description = (
+        "Exact source facts needed downstream, including identifiers, "
+        "dates, times, numbers, claims, missing values, and uncertainty."
+        if ui_language == "en"
+        else "Exakta källuppgifter som behövs senare, inklusive "
+        "identifierare, datum, tider, tal, påståenden, saknade värden "
+        "och osäkerheter."
+    )
     return (
-        _document_report_source_array_field(source_fields, ui_language=ui_language),
+        *item_fields,
+        StructuredFieldDraft(
+            name=allocate_injected_source_field_name(
+                "source_material",
+                reserved_field_names=reserved_field_names
+                | frozenset(field.name for field in item_fields),
+            ),
+            field_type="string",
+            description=description,
+        ),
     )
 
 
@@ -232,6 +335,81 @@ def _source_report_reader_instructions(ui_language: str | None) -> str:
     if ui_language == "en":
         return "Extract the source-derived fields needed before writing the report."
     return "Extrahera de källbaserade fält som behövs innan rapporten skrivs."
+
+
+def _per_source_report_reader_instructions(
+    authored_instructions: str,
+    *,
+    ui_language: str | None,
+) -> str:
+    if ui_language == "en":
+        contract = (
+            "Read only the current source. Preserve all source-grounded facts "
+            "needed for downstream analysis, including exact identifiers, dates, "
+            "times, numbers, claims, missing values, and uncertainty. Do not infer "
+            "across sources or assume that the current source has a particular "
+            "format. Apply the proposed extraction requirement below only where "
+            "the current source supports it."
+        )
+    else:
+        contract = (
+            "Läs endast den aktuella källan. Bevara alla källgrundade uppgifter som "
+            "behövs för efterföljande analys, inklusive exakta identifierare, datum, "
+            "tider, tal, påståenden, saknade värden och osäkerheter. Dra inga "
+            "slutsatser mellan källor och anta inte att den aktuella källan har ett "
+            "visst format. Tillämpa det föreslagna extraktionskravet nedan endast "
+            "där den aktuella källan stöder det."
+        )
+    return f"{contract}\n\n{authored_instructions}"
+
+
+def _multi_source_downstream_instructions(
+    authored_instructions: str,
+    *,
+    ui_language: str | None,
+) -> str:
+    if ui_language == "en":
+        contract = (
+            "The preceding material is the complete normalized source set. Use "
+            "every relevant documents item, preserve each source label, keep "
+            "conflicting values separate, and do not let this step's name limit "
+            "which sources are considered."
+        )
+    else:
+        contract = (
+            "Det föregående materialet är den fullständiga normaliserade "
+            "källuppsättningen. Använd varje relevant documents-post, bevara varje "
+            "källmärkning, håll motstridiga värden åtskilda och låt inte stegets "
+            "namn begränsa vilka källor som beaktas."
+        )
+    if contract in authored_instructions:
+        return authored_instructions
+    return f"{authored_instructions}\n\n{contract}"
+
+
+def apply_multi_source_reader_consumer_contract(
+    steps: Sequence[SemanticStepIntent],
+    *,
+    ui_language: str | None,
+) -> tuple[SemanticStepIntent, ...]:
+    semantic_steps = tuple(steps)
+    if len(semantic_steps) < 2 or not structured_fields_have_document_items(
+        tuple(semantic_steps[0].output_fields or ())
+    ):
+        return semantic_steps
+    consumer = semantic_steps[1]
+    return (
+        semantic_steps[0],
+        consumer.model_copy(
+            update={
+                "instructions": _multi_source_downstream_instructions(
+                    consumer.instructions,
+                    ui_language=ui_language,
+                )
+            }
+        ),
+        *semantic_steps[2:],
+    )
 
 
 def append_terminal_helper_output_fields(
