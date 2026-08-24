@@ -14,12 +14,15 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 
-from .transcription import LoadAudioPayload, resolve_and_transcribe_audio_for_step
+from .transcription import (
+    FlowStepTranscriber,
+    LoadAudioPayload,
+    resolve_and_transcribe_audio_for_step,
+)
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
     from eneo.files.file_models import FileInfo
-    from eneo.files.transcriber import Transcriber
     from eneo.flows.domain.flow import FlowRun
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
     from eneo.model_providers.domain.provider_call_observer import (
@@ -62,7 +65,7 @@ class AudioRuntimeRequest:
 
 @dataclass(frozen=True)
 class AudioRuntimeDeps:
-    transcriber: "Transcriber"
+    transcriber: FlowStepTranscriber
     space_repo: "SpaceRepository"
     flow_run_repo: "FlowRunRepository"
     audit_service: "AuditService | None"

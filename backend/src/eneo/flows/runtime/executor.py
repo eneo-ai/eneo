@@ -204,7 +204,7 @@ from eneo.spaces.space_repo import SpaceRepository
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.audit.application.audit_service import AuditService
-    from eneo.files.transcriber import Transcriber
+    from eneo.flows.runtime.transcription import FlowStepTranscriber
     from eneo.spaces.space import Space
 
 
@@ -467,7 +467,7 @@ class FlowRunExecutor:
         audit_service: AuditService | None = None,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
         references_service: ReferencesService | None = None,
-        transcriber: Transcriber | None = None,
+        transcriber: FlowStepTranscriber | None = None,
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
         config: FlowRunExecutorConfig | None = None,

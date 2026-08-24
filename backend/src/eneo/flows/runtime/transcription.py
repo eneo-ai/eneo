@@ -5,7 +5,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
@@ -24,6 +24,25 @@ from eneo.model_providers.domain.provider_call_observer import (
 
 # Reads one authorized audio file's bytes, immediately before transcription.
 LoadAudioPayload: TypeAlias = Callable[[UUID], Awaitable["File"]]
+
+
+class FlowStepTranscriber(Protocol):
+    """What a flow audio step needs from a transcription engine.
+
+    Satisfied by ``Transcriber`` (model-registry LiteLLM path) and
+    ``RemoteFlowTranscriber`` (external transcription service).
+    """
+
+    async def transcribe(
+        self,
+        file: "File",
+        transcription_model: "TranscriptionModel",
+        *,
+        language: str | None = None,
+        persist_cache_to_file: bool = True,
+        observer: "ProviderCallObserver | None" = None,
+    ) -> "TranscribedAudio": ...
+
 
 # Must stay aligned with
 # frontend/apps/web/src/lib/features/audio/recordingSession.ts::buildSegmentFilenameBase.
@@ -107,7 +126,7 @@ def _join_transcription_blocks(
 
 if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
-    from eneo.files.transcriber import Transcriber
+    from eneo.files.transcriber import TranscribedAudio
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -203,7 +222,7 @@ async def resolve_transcription_model_for_step(
 async def transcribe_audio_input(
     *,
     files: list["FileInfo"],
-    transcriber: "Transcriber",
+    transcriber: FlowStepTranscriber,
     transcription_model: "TranscriptionModel",
     language: str,
     step_order: int,
@@ -345,7 +364,7 @@ async def resolve_and_transcribe_audio_for_step(
     step_order: int,
     files: list["FileInfo"],
     requested_ids: list[UUID],
-    transcriber: "Transcriber",
+    transcriber: FlowStepTranscriber,
     max_files: int,
     max_inline_text_bytes: int,
     load_audio_payload: LoadAudioPayload,

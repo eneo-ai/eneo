@@ -56,6 +56,7 @@ from eneo.flows.runtime.flow_run_actor import (
 )
 from eneo.flows.runtime.flow_runtime_trace import FlowRunSpanContext, trace_flow_run
 from eneo.flows.runtime.flow_webhook_delivery import FlowWebhookDeliveryResult
+from eneo.flows.runtime.remote_transcription import build_remote_flow_transcriber
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
@@ -337,8 +338,16 @@ async def _execute_flow_run_async_traced(
                 encryption_service=runtime_container.encryption_service(),
                 audit_service=runtime_container.audit_service(),
                 references_service=runtime_container.references_service(),
-                transcriber=runtime_container.transcriber(
-                    file_service=runtime_file_service
+                # Deployment-level switch: an external transcription service,
+                # when configured, replaces the model-registry engine for flow
+                # audio steps only. The flow's configured transcription model
+                # remains the governance anchor either way.
+                transcriber=(
+                    build_remote_flow_transcriber(get_settings())
+                    if get_settings().flow_transcription_service_url
+                    else runtime_container.transcriber(
+                        file_service=runtime_file_service
+                    )
                 ),
                 config=FlowRunExecutorConfig.from_settings(
                     max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
