@@ -2010,7 +2010,7 @@ async def test_send_http_request_stream_cap_raises_typed_error(user, monkeypatch
             self.headers = {}
             self.extensions = {"network_stream": _FakeNetworkStream()}
 
-        async def aiter_bytes(self):
+        async def aiter_raw(self):
             yield b"1234"
             yield b"56789"
 
@@ -2070,9 +2070,9 @@ async def test_send_http_request_webhook_mode_skips_body_read(user, monkeypatch)
             self.headers = {"X-Test": "1"}
             self.extensions = {"network_stream": _FakeNetworkStream()}
 
-        async def aiter_bytes(self):
+        async def aiter_raw(self):
             raise AssertionError(
-                "aiter_bytes should not be called when read_response_body=False"
+                "aiter_raw should not be called when read_response_body=False"
             )
 
         async def aclose(self) -> None:
@@ -2128,7 +2128,7 @@ async def test_send_http_request_blocks_rebound_private_peer(user, monkeypatch):
             self.headers = {}
             self.extensions = {"network_stream": _FakeNetworkStream()}
 
-        async def aiter_bytes(self):
+        async def aiter_raw(self):
             yield b"ok"
 
         async def aclose(self) -> None:
@@ -2187,7 +2187,7 @@ async def test_send_http_request_blocks_peer_not_in_preflight_resolution(
             self.headers = {}
             self.extensions = {"network_stream": _FakeNetworkStream()}
 
-        async def aiter_bytes(self):
+        async def aiter_raw(self):
             yield b"ok"
 
         async def aclose(self) -> None:

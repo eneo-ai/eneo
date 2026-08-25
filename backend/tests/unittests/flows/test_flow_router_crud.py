@@ -52,7 +52,7 @@ from eneo.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.http_transport import SECRET_SENTINEL
+from eneo.flows.http_transport import SECRET_SENTINEL, HttpTransportError
 from eneo.flows.http_transport.request_preview import HttpRequestPreview
 from eneo.flows.http_transport.test_action import HttpTestResult
 from eneo.main.exceptions import UnauthorizedException
@@ -219,10 +219,12 @@ async def test_test_flow_http_round_trips_stored_bearer_secret(monkeypatch):
         def assert_connected_peer_allowed(self, *, response, preflight_resolved_ips):
             return None
 
-    async def _fake_request(self, *, method, url, headers, content, json, timeout):
-        sent["headers"] = dict(headers)
-        request = httpx.Request(method=method, url=url, headers=headers)
-        return httpx.Response(status_code=200, text="ok", request=request)
+        async def send_request(self, **kwargs):
+            sent["headers"] = dict(kwargs["headers"])
+            request = httpx.Request(
+                method=kwargs["method"], url=kwargs["url"], headers=kwargs["headers"]
+            )
+            return httpx.Response(status_code=200, text="ok", request=request)
 
     monkeypatch.setattr(
         flow_http_test_router_module,
@@ -230,8 +232,6 @@ async def test_test_flow_http_round_trips_stored_bearer_secret(monkeypatch):
         _FakeRuntimeHelper,
         raising=False,
     )
-    monkeypatch.setattr(httpx.AsyncClient, "request", _fake_request)
-
     response = await flow_definition_test_flow_http(
         id=flow_id,
         request=_request(),
@@ -286,18 +286,25 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
             guard_calls["peer_status"] = response.status_code
             guard_calls["peer_ips"] = preflight_resolved_ips
 
-    async def _fake_request(self, *, method, url, headers, content, json, timeout):
-        sent.update(
-            {
-                "method": method,
-                "url": str(url),
-                "headers": dict(headers),
-                "json": json,
-                "timeout": timeout,
-            }
-        )
-        request = httpx.Request(method=method, url=url, headers=headers)
-        return httpx.Response(status_code=200, text="ok", request=request)
+        async def send_request(self, **kwargs):
+            sent.update(
+                {
+                    "method": kwargs["method"],
+                    "url": str(kwargs["url"]),
+                    "headers": dict(kwargs["headers"]),
+                    "json": kwargs["json_body"],
+                    "timeout": kwargs["timeout_seconds"],
+                }
+            )
+            request = httpx.Request(
+                method=kwargs["method"], url=kwargs["url"], headers=kwargs["headers"]
+            )
+            response = httpx.Response(status_code=200, text="ok", request=request)
+            kwargs["assert_connected_peer_allowed"](
+                response=response,
+                preflight_resolved_ips=kwargs["preflight_resolved_ips"],
+            )
+            return response
 
     monkeypatch.setattr(
         flow_http_test_router_module,
@@ -305,8 +312,6 @@ async def test_test_flow_http_interpolates_variables_with_real_executor(monkeypa
         _FakeRuntimeHelper,
         raising=False,
     )
-    monkeypatch.setattr(httpx.AsyncClient, "request", _fake_request)
-
     response = await flow_definition_test_flow_http(
         id=flow_id,
         request=_request(),
@@ -434,22 +439,35 @@ async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
             guard_calls["peer_status"] = response.status_code
             guard_calls["peer_ips"] = preflight_resolved_ips
 
-    async def _fake_request(self, *, method, url, headers, content, json, timeout):
-        request = httpx.Request(method=method, url=url, headers=headers)
+        # The peer-check lifecycle itself is proven against the real owner in
+        # test_http_runtime_transport; this fake only records delegation.
+        async def send_request(
+            self,
+            *,
+            method,
+            url,
+            headers,
+            timeout_seconds,
+            body_bytes,
+            json_body,
+            preflight_resolved_ips,
+            assert_connected_peer_allowed,
+        ):
+            guard_calls["transport_url"] = url
+            request = httpx.Request(method=method, url=url, headers=headers)
+            response = httpx.Response(
+                status_code=200,
+                content=b"ok",
+                request=request,
+            )
+            assert_connected_peer_allowed(
+                response=response,
+                preflight_resolved_ips=preflight_resolved_ips,
+            )
+            return response
 
-        class _NetworkStream:
-            @staticmethod
-            def get_extra_info(name):
-                if name == "server_addr":
-                    return ("203.0.113.10", 443)
-                return None
-
-        return httpx.Response(
-            status_code=200,
-            content=b"ok",
-            request=request,
-            extensions={"network_stream": _NetworkStream()},
-        )
+    async def _reject_bespoke_request(*_args, **_kwargs):
+        raise AssertionError("router must send through FlowHttpRuntimeHelper")
 
     async def _fake_execute_http_test(**kwargs):
         await kwargs["send_http_request"](
@@ -479,7 +497,7 @@ async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
         _FakeRuntimeHelper,
         raising=False,
     )
-    monkeypatch.setattr(httpx.AsyncClient, "request", _fake_request)
+    monkeypatch.setattr(httpx.AsyncClient, "request", _reject_bespoke_request)
     monkeypatch.setattr(
         flow_http_test_router_module, "execute_http_test", _fake_execute_http_test
     )
@@ -503,8 +521,46 @@ async def test_test_flow_http_applies_ssrf_runtime_guards(monkeypatch):
 
     assert response.success is True
     assert guard_calls["preflight_url"] == "https://example.org/api"
+    assert guard_calls["transport_url"] == "https://example.org/api"
     assert guard_calls["peer_status"] == 200
     assert guard_calls["peer_ips"] == {"203.0.113.10"}
+
+
+@pytest.mark.asyncio
+async def test_test_flow_http_returns_typed_failure_for_private_url(monkeypatch):
+    container = MagicMock()
+    flow_id = uuid4()
+    user = _user()
+    flow_service = AsyncMock()
+    flow = _flow(flow_id)
+    flow.owner_user_id = user.id
+    flow_service.get_flow.return_value = flow
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = AsyncMock()
+    container.user.return_value = user
+    container.encryption_service.return_value = None
+    _enable_space_access(container)
+
+    response = await flow_definition_test_flow_http(
+        id=flow_id,
+        request=_request(),
+        body=HttpTestRequest(
+            config={
+                "url": "http://127.0.0.1/private",
+                "auth": {"mode": "none"},
+                "body": {"mode": "auto"},
+                "custom_headers": [],
+                "timeout_seconds": 30,
+            },
+            direction="output",
+            method="POST",
+        ),
+        container=container,
+    )
+
+    assert response.success is False
+    assert response.error_code == HttpTransportError.BLOCKED_URL
+    assert response.error_message == "HTTP URL blocked by SSRF policy."
 
 
 def test_find_stored_http_config_logs_parse_failures(caplog, monkeypatch):

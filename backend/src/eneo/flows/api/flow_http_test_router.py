@@ -4,6 +4,7 @@ import logging
 from typing import Annotated, Any, cast
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, Path, Request, status
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -69,8 +70,6 @@ async def test_flow_http(
     body: flow_http_test_models.HttpTestRequest,
     container: Container = Depends(get_container(with_user=True)),
 ):
-    import httpx as _httpx
-
     await require_flow_edit_access(request, container, flow_id=id)
     settings = get_settings()
 
@@ -106,22 +105,18 @@ async def test_flow_http(
         body_bytes: bytes | None = None,
         json_body: dict[str, Any] | list[Any] | None = None,
         **_kwargs: object,
-    ) -> _httpx.Response:
+    ) -> httpx.Response:
         preflight_resolved_ips = await http_runtime.assert_url_allowed(url)
-        async with _httpx.AsyncClient() as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                content=body_bytes,
-                json=json_body,
-                timeout=timeout_seconds,
-            )
-        http_runtime.assert_connected_peer_allowed(
-            response=response,
+        return await http_runtime.send_request(
+            method=method,
+            url=url,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            body_bytes=body_bytes,
+            json_body=json_body,
             preflight_resolved_ips=preflight_resolved_ips,
+            assert_connected_peer_allowed=http_runtime.assert_connected_peer_allowed,
         )
-        return response
 
     result = await execute_http_test(
         config=config,

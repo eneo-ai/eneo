@@ -22508,6 +22508,8 @@ export interface components {
       | "HTTP_TIMEOUT_OUT_OF_RANGE"
       | "HTTP_TIMEOUT"
       | "HTTP_CONNECTION_REFUSED"
+      | "HTTP_BLOCKED_URL"
+      | "HTTP_RESPONSE_TOO_LARGE"
       | "HTTP_STATUS_ERROR";
     /** IconPublic */
     IconPublic: {

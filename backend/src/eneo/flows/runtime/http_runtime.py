@@ -28,7 +28,9 @@ class AssertConnectedPeerAllowedFn(Protocol):
 
 
 class FlowHttpRuntimeHelper:
-    """Flow-only HTTP helper utilities for input/webhook execution paths."""
+    """The Flow HTTP transport owner: SSRF preflight and peer re-check,
+    streamed size caps, and request sending for every Flow HTTP surface
+    (input fetch, webhook delivery, and the authoring test endpoint)."""
 
     def __init__(
         self,
@@ -100,10 +102,17 @@ class FlowHttpRuntimeHelper:
     ) -> httpx.Response:
         timeout = httpx.Timeout(timeout_seconds)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            # The size cap must bound raw response-body bytes: a compressed
+            # body can expand by orders of magnitude in one decode call, so
+            # this transport requests identity encoding (replacing any
+            # case-variant authored value), refuses compressed replies, and
+            # counts raw bytes below.
+            request_headers = httpx.Headers(headers)
+            request_headers["Accept-Encoding"] = "identity"
             request = client.build_request(
                 method,
                 url,
-                headers=headers,
+                headers=request_headers,
                 content=body_bytes,
                 json=json_body,
             )
@@ -126,16 +135,27 @@ class FlowHttpRuntimeHelper:
                 await response.aclose()
                 return detached
 
+            content_encoding = (
+                response.headers.get("content-encoding", "identity").strip().lower()
+            )
+            if content_encoding not in ("", "identity"):
+                await response.aclose()
+                raise TypedIOValidationException(
+                    "HTTP response used a compressed content encoding; this "
+                    "transport requires identity encoding to bound memory.",
+                    code=FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value,
+                )
+
             max_bytes = get_settings().flow_max_inline_text_bytes
             response_bytes = bytearray()
-            async for chunk in response.aiter_bytes():
-                response_bytes.extend(chunk)
-                if len(response_bytes) > max_bytes:
+            async for chunk in response.aiter_raw():
+                if len(response_bytes) + len(chunk) > max_bytes:
                     await response.aclose()
                     raise TypedIOValidationException(
                         "HTTP response exceeded max inline text bytes.",
                         code=FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value,
                     )
+                response_bytes.extend(chunk)
 
             detached = httpx.Response(
                 status_code=response.status_code,
