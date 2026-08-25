@@ -117,11 +117,11 @@ jobs:
             exit 0
           fi
 
-          VALID_PREFIXES="^(dependabot/|feature/|feat/|fix/|hotfix/|security/|chore/|deps/|docs/|test/|refactor/|remove/|ci/)"
+          VALID_PREFIXES="^(dependabot/|feature/|feat/|fix/|hotfix/|security/|chore/|deps/|docs/|test/|refactor/|remove/|ci/|perf/)"
 
           if [[ ! "$BRANCH_NAME" =~ $VALID_PREFIXES ]]; then
             echo "::error::Branch name '$BRANCH_NAME' does not follow the naming convention."
-            echo "Use one of: dependabot/, feature/, feat/, fix/, hotfix/, security/, chore/, deps/, docs/, test/, refactor/, remove/, or ci/."
+            echo "Use one of: dependabot/, feature/, feat/, fix/, hotfix/, security/, chore/, deps/, docs/, test/, refactor/, remove/, ci/, or perf/."
             exit 1
           fi
 
