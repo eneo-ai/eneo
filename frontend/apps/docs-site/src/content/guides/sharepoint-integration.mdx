@@ -89,7 +89,7 @@ These permissions are used for personal spaces and the Service Account method. T
 
 **Additional delegated permission (requested on every sign-in):**
 
-- `Group.Read.All` – categorize SharePoint sites by Microsoft Teams membership, so users can see which sites belong to teams they are a member of, which belong to public teams, and which are other sites. Without it, all sites are shown without categorization.
+- `Group.Read.All` – categorize SharePoint sites by Microsoft Teams membership, so sites belonging to teams the user is a member of are grouped under "My teams" at the top of the site list. Only the user's own group memberships are looked up – Eneo never enumerates the tenant's full group list. Without this permission, all sites are shown without categorization.
 
 > **Important:** Although the *categorization feature* is optional, Eneo requests `Group.Read.All` as part of the sign-in scope on **every** authentication. Because `Group.Read.All` requires admin consent, you must add this permission here **and** include it in the admin consent below. If it is left out or un-consented, only Microsoft Entra ID administrators will be able to sign in – regular users will receive a consent error (AADSTS65001), even though they could otherwise self-consent to `Files.Read.All` and `Sites.Read.All`.
 
@@ -101,7 +101,8 @@ These permissions are **only required if you choose the Tenant App authenticatio
 
 - `Files.Read.All` – read files across the entire organization
 - `Sites.Read.All` – read all SharePoint sites
-- `Group.Read.All` – enable site categorization by Teams membership (see the delegated permissions above; this scope is requested on every sign-in, so it must be consented)
+
+> **Note:** The `Group.Read.All` *application* permission is not needed. Site categorization is based on the signed-in user's own team memberships, which does not exist for app-only authentication – Tenant App previews list sites without categorization. The *delegated* `Group.Read.All` permission above is still requested on every user sign-in.
 
 After adding the permissions, click **Grant admin consent for [your tenant]** to approve them at the organization level.
 
