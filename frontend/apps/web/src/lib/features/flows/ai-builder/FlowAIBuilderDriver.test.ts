@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { m } from "$lib/paraglide/messages";
+import { getLocale, setLocale } from "$lib/paraglide/runtime";
+
 import { FlowAIBuilderDriver, type AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import { parseAIBuilderStreamEvent } from "./protocol";
 import type {
@@ -1756,7 +1759,7 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.streamState).toBe("failed");
   });
 
-  it("stores structured stream errors", async () => {
+  it("preserves server-provided structured stream error messages", async () => {
     const { driver } = makeDriver({
       fetchImpl: vi.fn().mockResolvedValue(makeSession()),
       streamImpl: vi.fn(async (_path, _init, handlers) => {
@@ -1766,7 +1769,7 @@ describe("FlowAIBuilderDriver", () => {
             schema_version: 2,
             code: "planner_stream_failed",
             category: "internal",
-            message: "The AI Builder stream failed. Please try again.",
+            message: "The server could not complete this request.",
             phase: "router",
             request_id: "req-stream",
             eneo_error_code: 9024
@@ -1782,11 +1785,34 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.error).toMatchObject({
       code: "planner_stream_failed",
       category: "internal",
-      message: "The AI Builder stream failed. Please try again.",
+      message: "The server could not complete this request.",
       phase: "router",
       request_id: "req-stream"
     });
     expect(driver.state.streamState).toBe("failed");
+  });
+
+  it("uses the Swedish fallback when a stream transport error has a malformed message", async () => {
+    const previousLocale = getLocale();
+    setLocale("sv", { reload: false });
+    try {
+      const { driver } = makeDriver({
+        fetchImpl: vi.fn().mockRejectedValue(new Error("session refresh unavailable")),
+        streamImpl: vi.fn().mockRejectedValue({
+          status: 503,
+          response: { message: 42 }
+        })
+      });
+      driver.seedState({ session: makeSession() });
+
+      await driver.sendMessage("Build a flow");
+
+      expect(driver.state.error?.message).toBe(
+        m.ai_builder_error_fallback_stream({}, { locale: "sv" })
+      );
+    } finally {
+      setLocale(previousLocale, { reload: false });
+    }
   });
 
   it("hydrates the exact committed turn error when a session is resumed", async () => {

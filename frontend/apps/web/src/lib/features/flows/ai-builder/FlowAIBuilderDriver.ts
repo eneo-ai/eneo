@@ -443,7 +443,7 @@ export class FlowAIBuilderDriver {
       this.#state.error = this.#parseAndReportError({
         transport: "apply",
         payload: e,
-        fallbackMessage: "Failed to create session"
+        fallbackMessage: m.ai_builder_error_fallback_create_session()
       });
       await this.loadDraftSessions();
       this.#notify();
@@ -514,7 +514,7 @@ export class FlowAIBuilderDriver {
         {
           transport: "apply",
           payload: error,
-          fallbackMessage: "Failed to resume the saved draft."
+          fallbackMessage: m.ai_builder_error_fallback_resume_saved_draft()
         },
         { sessionId }
       );
@@ -605,7 +605,7 @@ export class FlowAIBuilderDriver {
         this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: error,
-          fallbackMessage: "Failed to refresh the AI Builder session."
+          fallbackMessage: m.ai_builder_error_fallback_refresh_session()
         });
         this.#notify();
       }
@@ -909,7 +909,7 @@ export class FlowAIBuilderDriver {
         this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: e,
-          fallbackMessage: "The AI Builder stream failed. Please try again."
+          fallbackMessage: m.ai_builder_error_fallback_stream()
         });
         this.#notify();
         await this.#refreshSession(owner);
@@ -953,7 +953,7 @@ export class FlowAIBuilderDriver {
         this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: e,
-          fallbackMessage: "Failed to approve plan"
+          fallbackMessage: m.ai_builder_error_fallback_approve_plan()
         });
         this.#notify();
       }
@@ -1031,7 +1031,7 @@ export class FlowAIBuilderDriver {
       const parsed = this.#parseAndReportError({
         transport: "apply",
         payload: initialError,
-        fallbackMessage: "Failed to create the flow"
+        fallbackMessage: m.ai_builder_error_fallback_create_flow()
       });
       this.#state.applyError = parsed;
       this.#state.createFailureOutcome =
@@ -1122,7 +1122,7 @@ export class FlowAIBuilderDriver {
       const parsed = this.#parseAndReportError({
         transport: "apply",
         payload: e,
-        fallbackMessage: "Failed to apply plan"
+        fallbackMessage: m.ai_builder_error_fallback_apply_plan()
       });
       this.#state.applyError = parsed;
       this.#state.isConflict = isStaleApplyError(parsed);
@@ -1175,7 +1175,7 @@ export class FlowAIBuilderDriver {
       this.#state.error = this.#parseAndReportError({
         transport: "apply",
         payload: e,
-        fallbackMessage: "Failed to unpublish flow"
+        fallbackMessage: m.ai_builder_error_fallback_unpublish_flow()
       });
       this.#notify();
       throw e;
@@ -1188,7 +1188,7 @@ export class FlowAIBuilderDriver {
       const parsedApplyError = this.#parseAndReportError({
         transport: "apply",
         payload: e,
-        fallbackMessage: "Failed to apply plan"
+        fallbackMessage: m.ai_builder_error_fallback_apply_plan()
       });
       this.#state.applyError = buildUnpublishedApplyFailureError({
         flowId,
@@ -1267,7 +1267,7 @@ export class FlowAIBuilderDriver {
         this.#state.error = this.#parseAndReportError({
           transport: "apply",
           payload: e,
-          fallbackMessage: "Failed to revise plan"
+          fallbackMessage: m.ai_builder_error_fallback_revise_plan()
         });
         this.#notify();
       }
@@ -1627,7 +1627,7 @@ export class FlowAIBuilderDriver {
     const error = parseAIBuilderError({
       transport: "sse",
       payload: latestTurn.error,
-      fallbackMessage: "The AI Builder turn failed. Please try again."
+      fallbackMessage: m.ai_builder_error_fallback_turn()
     });
     this.#state.error = isSoftBlockAIBuilderError(error) ? null : error;
   }
