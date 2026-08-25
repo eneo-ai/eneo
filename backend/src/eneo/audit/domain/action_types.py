@@ -33,6 +33,8 @@ class ActionType(str, Enum):
     PROMPT_LIBRARY_ENTRY_UPDATED = "prompt_library_entry_updated"
     PROMPT_LIBRARY_ENTRY_DELETED = "prompt_library_entry_deleted"
     MODULE_ADDED = "module_added"
+    # Historical only: emitted by the removed bulk module-set endpoint. Kept
+    # so stored audit rows remain renderable and filterable.
     MODULE_SET_REPLACED = "module_set_replaced"
     MODULE_ADDED_TO_TENANT = "module_added_to_tenant"
     MODULE_REMOVED_FROM_TENANT = "module_removed_from_tenant"

@@ -4,6 +4,8 @@ import { readable } from "svelte/store";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import "../../../app.css";
 
+const modulePermission = vi.hoisted(() => ({ enabled: true }));
+
 vi.mock("$app/stores", () => ({
   page: readable({
     url: new URL("http://localhost/admin/storage")
@@ -16,7 +18,8 @@ vi.mock("$lib/core/AppContext", () => ({
       display_name: "Test tenant"
     },
     user: {
-      id: "user-1"
+      id: "user-1",
+      hasPermission: (permission: string) => permission === "modules" && modulePermission.enabled
     },
     settings: {
       using_templates: false
@@ -54,8 +57,28 @@ import AdminLayout from "./+layout.svelte";
 
 describe("admin layout navigation", () => {
   beforeEach(async () => {
+    modulePermission.enabled = true;
     await page.viewport(375, 800);
   });
+
+  test.each([
+    [true, true],
+    [false, false]
+  ])(
+    "module navigation permission=%s hasLink=%s",
+    async (hasModulesPermission, expectedVisible) => {
+      modulePermission.enabled = hasModulesPermission;
+      render(AdminLayout);
+      await page.getByRole("button", { name: "admin_nav_toggle" }).click();
+
+      const moduleLink = page.getByRole("link", { name: "module_admin_title" });
+      if (expectedVisible) {
+        await expect.element(moduleLink).toBeVisible();
+      } else {
+        await expect.element(moduleLink).not.toBeInTheDocument();
+      }
+    }
+  );
 
   test("opens the mobile drawer and restores focus to its localized trigger", async () => {
     render(AdminLayout);
