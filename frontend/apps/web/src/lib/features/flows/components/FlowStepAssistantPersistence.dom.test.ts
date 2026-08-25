@@ -88,14 +88,16 @@ describe("Flow step assistant persistence wiring", () => {
       availableModels: reasoningModels
     });
 
-    const reasoningSelect = screen.getByLabelText(m.reasoning_effort()) as HTMLSelectElement;
+    // The widget is a bits-ui Select: the trigger is a button whose text is
+    // the rendered option label, not a native <select> with a value.
+    const reasoningTrigger = screen.getByLabelText(m.reasoning_effort());
 
-    expect(reasoningSelect.value).toBe("high");
+    expect(reasoningTrigger.textContent).toContain(m.parameter_option_high());
 
     await fireEvent.click(screen.getByTestId("select-second-assistant"));
-    expect(reasoningSelect.value).toBe("low");
+    expect(reasoningTrigger.textContent).toContain(m.parameter_option_low());
 
     await fireEvent.click(screen.getByTestId("select-first-assistant"));
-    expect(reasoningSelect.value).toBe("high");
+    expect(reasoningTrigger.textContent).toContain(m.parameter_option_high());
   });
 });

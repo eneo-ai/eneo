@@ -196,7 +196,11 @@
         value={selectValues[kwargName] || "default"}
         onValueChange={(value) => setSelectKwarg(kwargName, value === "default" ? "" : value)}
       >
-        <Select.Trigger class="w-48" aria-label={getKwargLabel(kwargName)}>
+        <Select.Trigger
+          id={`model-setting-${kwargName}`}
+          class="w-48"
+          aria-label={getKwargLabel(kwargName)}
+        >
           {selectValues[kwargName]
             ? getModelKwargOptionLabel(selectValues[kwargName] ?? "")
             : m.default_behavior()}
