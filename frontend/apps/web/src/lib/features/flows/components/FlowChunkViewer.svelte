@@ -58,6 +58,12 @@
     normalizeKnowledgeMatchedCount(matchedChunkCount, recordedPassages.length)
   );
   let hasHiddenMatchedChunks = $derived(totalMatchedChunkCount > recordedPassages.length);
+  let hiddenMatchedCount = $derived(totalMatchedChunkCount - recordedPassages.length);
+  // No zero sentinel: cosine similarity can be negative for every passage,
+  // and the best of those is still the best match.
+  let bestScore = $derived(
+    chunkItems.length > 0 ? Math.max(...chunkItems.map((c) => Number(c.score ?? 0))) : null
+  );
   // The recorded passage is evidence in its own right. When the source document
   // is gone or unreachable, the passage is what the reader came for.
   let showRecordedPassagesInstead = $derived(
@@ -249,6 +255,13 @@
                 </button>
               {/if}
             </div>
+            {#if hasHiddenMatchedChunks}
+              <p class="border-default bg-primary text-muted rounded-md border p-2 text-xs">
+                {m.flow_run_knowledge_hidden_matched_explainer({
+                  count: String(hiddenMatchedCount)
+                })}
+              </p>
+            {/if}
             {#if withheldPassages.length > 0}
               <p
                 class="border-default bg-primary text-secondary rounded-md border p-2 text-xs"
@@ -282,21 +295,34 @@
                       <span class="text-secondary font-semibold">
                         {m.flow_run_knowledge_chunk_label({ chunk: String(passage.chunk_no ?? 0) })}
                       </span>
-                      <Tooltip.Provider delayDuration={150}>
-                        <Tooltip.Root>
-                          <Tooltip.Trigger>
-                            <span
-                              class={[
-                                "rounded-full px-1.5 py-0.5 text-xs font-medium",
-                                getKnowledgeRelevanceBadgeClass(Number(passage.score ?? 0))
-                              ]}
-                            >
-                              {scoreLabel(Number(passage.score ?? 0))}
-                            </span>
-                          </Tooltip.Trigger>
-                          <Tooltip.Content>{Number(passage.score ?? 0).toFixed(2)}</Tooltip.Content>
-                        </Tooltip.Root>
-                      </Tooltip.Provider>
+                      <span class="flex items-center gap-1">
+                        {#if bestScore !== null && Number(passage.score ?? 0) === bestScore && chunkItems.length > 1}
+                          <span
+                            class="bg-accent-dimmer text-accent-stronger rounded-full px-1.5 py-0.5 text-[11px] font-medium"
+                          >
+                            {m.flow_run_knowledge_best_match()}
+                          </span>
+                        {/if}
+                        <Tooltip.Provider delayDuration={150}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger>
+                              <span
+                                class={[
+                                  "rounded-full px-1.5 py-0.5 text-xs font-medium",
+                                  getKnowledgeRelevanceBadgeClass(Number(passage.score ?? 0))
+                                ]}
+                              >
+                                {scoreLabel(Number(passage.score ?? 0))}
+                              </span>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content class="max-w-64 text-pretty">
+                              {m.flow_run_knowledge_relevance_tooltip({
+                                percent: String(Math.round(Number(passage.score ?? 0) * 100))
+                              })}
+                            </Tooltip.Content>
+                          </Tooltip.Root>
+                        </Tooltip.Provider>
+                      </span>
                     </div>
                     <p class="text-muted mt-1 line-clamp-3 text-xs leading-relaxed">
                       {passage.text}
@@ -387,7 +413,7 @@
                       total: String(chunkItems.length)
                     })}
                   {:else if hasHiddenMatchedChunks}
-                    {m.flow_run_knowledge_chunks_displayed_of_matched({
+                    {m.flow_run_knowledge_chunks_shown_of_matched({
                       displayed: String(chunkItems.length),
                       matched: String(totalMatchedChunkCount)
                     })}

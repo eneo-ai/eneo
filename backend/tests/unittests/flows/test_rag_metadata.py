@@ -532,3 +532,42 @@ def test_disclosed_payload_is_returned_untouched() -> None:
 
     assert apply_passage_disclosure(payload, disclosure="text_disclosed") == payload
     assert payload["references"][0]["passages"][0]["text"] is not None
+
+
+def test_all_negative_scores_keep_the_true_best_score() -> None:
+    # Cosine similarity ranges down to -1. A zero sentinel used to report a
+    # best score of 0 that no retrieved segment had.
+    source_id = uuid4()
+    evidence = build_retrieved_knowledge_evidence(
+        [
+            retrieved_info_blob_chunk(
+                info_blob_id=source_id,
+                info_blob_title="Negativt underlag",
+                chunk_no=1,
+                text="första stycket",
+                score=-0.4,
+            ),
+            retrieved_info_blob_chunk(
+                info_blob_id=source_id,
+                info_blob_title="Negativt underlag",
+                chunk_no=2,
+                text="andra stycket",
+                score=-0.2,
+            ),
+        ],
+        policy=_policy(),
+    )
+
+    assert evidence.sources[0].best_score == -0.2
+
+
+def test_recorded_passages_default_matches_the_retrieval_limit() -> None:
+    # The evidence default exists to record everything a version-1 retrieval
+    # can return per source; this binds the two constants so neither drifts
+    # silently.
+    from eneo.assistants.references import VERSION_1_RETRIEVAL_CHUNK_LIMIT
+    from eneo.flows.domain.rag_evidence_policy import (
+        DEFAULT_MAX_RECORDED_PASSAGES_PER_SOURCE,
+    )
+
+    assert DEFAULT_MAX_RECORDED_PASSAGES_PER_SOURCE == VERSION_1_RETRIEVAL_CHUNK_LIMIT

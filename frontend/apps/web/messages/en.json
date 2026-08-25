@@ -5191,7 +5191,7 @@
   "flow_run_knowledge_chunk_label": "Segment",
   "flow_run_knowledge_chunk_position": "{current} of {total}",
   "flow_run_knowledge_chunks_label": "Retrieved segments",
-  "flow_run_knowledge_chunks_displayed_of_matched": "Showing {displayed} of {matched} matched segments",
+  "flow_run_knowledge_chunks_displayed_of_matched": "Showing {displayed} saved of {matched} matched segments",
   "flow_run_knowledge_chunks_matched": "{count} matched segments",
   "flow_run_knowledge_document_description": "Document description",
   "flow_run_knowledge_document_load_failed": "Could not load document.",
@@ -5223,7 +5223,7 @@
   "flow_run_knowledge_relevance_high": "High relevance",
   "flow_run_knowledge_relevance_low": "Low relevance",
   "flow_run_knowledge_relevance_moderate": "Moderate relevance",
-  "flow_run_knowledge_relevance_tooltip": "Relevance shows how strongly the knowledge search matched this source. Score: {score}. It is a search match, not a quality judgment about the source.",
+  "flow_run_knowledge_relevance_tooltip": "Semantic similarity {percent}% between the segment and the retrieval query used during the run. The levels are display labels, not calibrated thresholds. Similarity shows what was retrieved – not how much the AI relied on it.",
   "flow_run_knowledge_segment_header": "Displayed segments ({count})",
   "flow_run_knowledge_segment_header_displayed": "Displayed segments ({displayed} of {matched})",
   "flow_run_knowledge_show_all_sources": "Show all {count} sources",
@@ -6450,5 +6450,9 @@
   "flow_validation_msg_input_contract_inapplicable": "An input contract cannot be used with the step's current settings.",
   "flow_validation_msg_invalid_input_contract_schema": "The step's input schema is invalid. The technical details show the specifics.",
   "flow_validation_msg_invalid_output_contract_schema": "The step's output schema is invalid. The technical details show the specifics.",
-  "flow_validation_msg_output_contract_type_mismatch": "The step's output schema does not match the step's output type."
+  "flow_validation_msg_output_contract_type_mismatch": "The step's output schema does not match the step's output type.",
+  "flow_run_knowledge_hidden_matched_explainer": "Another {count} segments were retrieved during the run but not saved as evidence. The organization's evidence settings, including “Passages per source”, control how much is saved.",
+  "flow_run_knowledge_best_match": "Best match",
+  "flow_run_knowledge_source_relevance_tooltip": "The source's best segment had {percent}% semantic similarity with the retrieval query used during the run. The levels are display labels, not calibrated thresholds.",
+  "flow_run_knowledge_chunks_shown_of_matched": "Showing {displayed} of {matched} matched segments"
 }

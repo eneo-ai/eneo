@@ -35,7 +35,11 @@ RAG_EVIDENCE_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 DEFAULT_MAX_SOURCES_WITH_RECORDED_PASSAGES: Final[int] = 25
-DEFAULT_MAX_RECORDED_PASSAGES_PER_SOURCE: Final[int] = 5
+# Version-1 retrieval returns at most 30 chunks in total, so 30 per source
+# lets a single-source retrieval record everything it returned; the byte
+# budgets below stay the binding bound. The old default of 5 produced the
+# "Visar 5 av 13 matchade" gaps in the run knowledge viewer.
+DEFAULT_MAX_RECORDED_PASSAGES_PER_SOURCE: Final[int] = 30
 DEFAULT_MAX_RECORDED_PASSAGE_BYTES: Final[int] = 4_096
 DEFAULT_MAX_RECORDED_PASSAGE_BYTES_PER_STEP: Final[int] = 131_072
 # A run holds one budget per *attempt*, and attempts are unbounded, so the

@@ -123,8 +123,8 @@
                 </Badge>
               </Tooltip.Trigger>
               <Tooltip.Content class="max-w-72">
-                {m.flow_run_knowledge_relevance_tooltip({
-                  score: Number(reference.best_score ?? 0).toFixed(2)
+                {m.flow_run_knowledge_source_relevance_tooltip({
+                  percent: String(Math.round(Number(reference.best_score ?? 0) * 100))
                 })}
               </Tooltip.Content>
             </Tooltip.Root>

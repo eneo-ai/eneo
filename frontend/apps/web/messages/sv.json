@@ -5191,7 +5191,7 @@
   "flow_run_knowledge_chunk_label": "Segment",
   "flow_run_knowledge_chunk_position": "{current} av {total}",
   "flow_run_knowledge_chunks_label": "Hämtade segment",
-  "flow_run_knowledge_chunks_displayed_of_matched": "Visar {displayed} av {matched} matchade segment",
+  "flow_run_knowledge_chunks_displayed_of_matched": "Visar {displayed} sparade av {matched} matchade segment",
   "flow_run_knowledge_chunks_matched": "{count} matchade segment",
   "flow_run_knowledge_document_description": "Dokumentbeskrivning",
   "flow_run_knowledge_document_load_failed": "Kunde inte ladda dokumentet.",
@@ -5223,7 +5223,7 @@
   "flow_run_knowledge_relevance_high": "Hög relevans",
   "flow_run_knowledge_relevance_low": "Låg relevans",
   "flow_run_knowledge_relevance_moderate": "Medelhög relevans",
-  "flow_run_knowledge_relevance_tooltip": "Relevans visar hur starkt kunskapssökningen matchade den här källan. Poäng: {score}. Det är en sökträff, inte en kvalitetsbedömning av källan.",
+  "flow_run_knowledge_relevance_tooltip": "Semantisk likhet {percent} % mellan avsnittet och sökfrågan som användes vid körningen. Nivåerna är visningsetiketter, inte kalibrerade trösklar. Likheten visar vad som hämtades – inte hur mycket AI:n använde det.",
   "flow_run_knowledge_segment_header": "Visade segment ({count})",
   "flow_run_knowledge_segment_header_displayed": "Visade segment ({displayed} av {matched})",
   "flow_run_knowledge_show_all_sources": "Visa alla {count} källor",
@@ -6450,5 +6450,9 @@
   "flow_validation_msg_input_contract_inapplicable": "Ett indatakontrakt kan inte användas med stegets nuvarande inställningar.",
   "flow_validation_msg_invalid_input_contract_schema": "Stegets indataschema är ogiltigt. Den tekniska beskrivningen visar detaljerna.",
   "flow_validation_msg_invalid_output_contract_schema": "Stegets utdataschema är ogiltigt. Den tekniska beskrivningen visar detaljerna.",
-  "flow_validation_msg_output_contract_type_mismatch": "Stegets utdataschema stämmer inte med stegets utdatatyp."
+  "flow_validation_msg_output_contract_type_mismatch": "Stegets utdataschema stämmer inte med stegets utdatatyp.",
+  "flow_run_knowledge_hidden_matched_explainer": "Ytterligare {count} avsnitt hämtades vid körningen men sparades inte som underlag. Organisationens bevisinställningar, bland annat ”Textavsnitt per källa”, styr hur mycket som sparas.",
+  "flow_run_knowledge_best_match": "Bäst träff",
+  "flow_run_knowledge_source_relevance_tooltip": "Källans bästa avsnitt hade {percent} % semantisk likhet med sökfrågan som användes vid körningen. Nivåerna är visningsetiketter, inte kalibrerade trösklar.",
+  "flow_run_knowledge_chunks_shown_of_matched": "Visar {displayed} av {matched} matchade segment"
 }

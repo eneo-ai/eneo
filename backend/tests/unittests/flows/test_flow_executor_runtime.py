@@ -5201,6 +5201,47 @@ async def test_execute_step_skips_rag_when_input_is_whitespace(user):
 
 
 @pytest.mark.asyncio
+async def test_retrieve_rag_chunks_records_a_full_production_retrieval_for_one_source(
+    user,
+):
+    # Version-1 retrieval returns at most 30 chunks in total. When they all
+    # come from one source, the default policy must record every one — the
+    # old default of 5 dropped 25 of them from the run knowledge viewer.
+    executor, _, _, _ = _build_executor(user)
+    assistant = _assistant_for_execute_step(has_knowledge=True)
+    executor.references_service = AsyncMock()
+
+    source_id = uuid4()
+    chunks = [
+        retrieved_info_blob_chunk(
+            info_blob_id=source_id,
+            info_blob_title="Source 0",
+            chunk_no=chunk_index + 1,
+            score=1.0 - (chunk_index * 0.01),
+            text=f"Chunk {chunk_index} from source 0 " * 8,
+        )
+        for chunk_index in range(30)
+    ]
+    executor.references_service.get_references = AsyncMock(
+        return_value=SimpleNamespace(chunks=chunks, no_duplicate_chunks=chunks[:1])
+    )
+
+    _, metadata, diagnostics = await executor._retrieve_rag_chunks(
+        assistant=assistant,
+        question="what happened?",
+        run_id=uuid4(),
+        step_order=1,
+    )
+
+    assert diagnostics == []
+    assert metadata["status"] == "success"
+    assert metadata["passages_recorded"] == 30
+    assert len(metadata["references"]) == 1
+    assert len(metadata["references"][0]["passages"]) == 30
+    assert metadata["references"][0]["matched_chunk_count"] == 30
+
+
+@pytest.mark.asyncio
 async def test_retrieve_rag_chunks_lists_every_source_and_bounds_passage_detail(
     user,
 ):
@@ -5238,10 +5279,15 @@ async def test_retrieve_rag_chunks_lists_every_source_and_bounds_passage_detail(
     assert metadata["unique_sources"] == 27
     assert len(metadata["references"]) == 27
     assert metadata["sources_with_recorded_passages"] == 25
-    assert metadata["passages_recorded"] == 125
+    # This synthetic fixture (27 sources x 7 chunks) exceeds any real
+    # version-1 retrieval to exercise the source-count cap: 25 recorded
+    # sources x 7 passages each = 175.
+    assert metadata["passages_recorded"] == 175
     assert metadata["raw_chunks_count"] == len(chunks)
     assert metadata["deduped_chunks_count"] == 27
-    assert all(len(reference["passages"]) <= 5 for reference in metadata["references"])
+    # The default policy records up to 30 passages per source, matching
+    # version-1 retrieval's 30-chunk total.
+    assert all(len(reference["passages"]) <= 30 for reference in metadata["references"])
     assert all(
         reference["matched_chunk_count"] == 7 for reference in metadata["references"]
     )

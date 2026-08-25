@@ -8,6 +8,11 @@ from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
 from eneo.main.config import get_settings
 from eneo.services.service import DatastoreResult
 
+# Version-1 retrieval returns at most this many chunks in total. The flows
+# evidence policy default records everything a retrieval can return per
+# source; a contract test binds the two values so neither drifts silently.
+VERSION_1_RETRIEVAL_CHUNK_LIMIT = 30
+
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
@@ -72,7 +77,7 @@ class ReferencesService:
             # **kwargs would silently bind to any parameter semantic_search
             # grows later.
             if version == 1:
-                autocut_cutoff, chunk_limit = 3, 30
+                autocut_cutoff, chunk_limit = 3, VERSION_1_RETRIEVAL_CHUNK_LIMIT
             elif version == 2:
                 autocut_cutoff, chunk_limit = None, num_chunks
             else:

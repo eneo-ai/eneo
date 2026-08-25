@@ -1,3 +1,7 @@
+import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
+
+const scrollBehavior = (): ScrollBehavior => (prefersReducedMotion() ? "auto" : "smooth");
+
 export type HighlightGroupInput = {
   group: string;
   snippets: string[];
@@ -202,7 +206,7 @@ class NativeHighlighter implements FlowDocumentHighlighter {
     const containerRect = this.container.getBoundingClientRect();
     this.container.scrollTo({
       top: rect.top - containerRect.top + this.container.scrollTop - 80,
-      behavior: "smooth"
+      behavior: scrollBehavior()
     });
   }
 }
@@ -290,7 +294,7 @@ class FallbackHighlighter implements FlowDocumentHighlighter {
     }
     this.currentGroup = group;
     this.currentMatchIndex = 0;
-    first.scrollIntoView({ behavior: "smooth", block: "center" });
+    first.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
   }
 
   scrollToNextMatch(): void {
@@ -301,7 +305,7 @@ class FallbackHighlighter implements FlowDocumentHighlighter {
       return;
     }
     this.currentMatchIndex = (this.currentMatchIndex + 1) % marks.length;
-    marks[this.currentMatchIndex].scrollIntoView({ behavior: "smooth", block: "center" });
+    marks[this.currentMatchIndex].scrollIntoView({ behavior: scrollBehavior(), block: "center" });
   }
 
   scrollToPrevMatch(): void {
@@ -312,7 +316,7 @@ class FallbackHighlighter implements FlowDocumentHighlighter {
       return;
     }
     this.currentMatchIndex = (this.currentMatchIndex - 1 + marks.length) % marks.length;
-    marks[this.currentMatchIndex].scrollIntoView({ behavior: "smooth", block: "center" });
+    marks[this.currentMatchIndex].scrollIntoView({ behavior: scrollBehavior(), block: "center" });
   }
 
   destroy(): void {

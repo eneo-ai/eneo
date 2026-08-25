@@ -156,7 +156,7 @@ FLOW_MAPPED_EXECUTION_POLICY_UPDATE_EXAMPLE: JsonDict = {
 FLOW_RAG_EVIDENCE_POLICY_EXAMPLE: JsonDict = {
     "version": 1,
     "max_sources_with_recorded_passages": 25,
-    "max_recorded_passages_per_source": 5,
+    "max_recorded_passages_per_source": 30,
     "max_recorded_passage_bytes": 4096,
     "max_recorded_passage_bytes_per_step": 131072,
     "max_recorded_passage_bytes_per_run_view": 2097152,

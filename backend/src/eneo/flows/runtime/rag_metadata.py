@@ -42,8 +42,12 @@ class _SourceAccumulator:
     source_id: str
     title: str | None
     source_order: int
+    # Cosine similarity ranges down to -1; a zero sentinel would report a
+    # score no retrieved segment had when every match is negative. The
+    # accumulator is only created for a chunk, so construction sets the
+    # first real score.
+    best_score: float
     matched_chunk_count: int = 0
-    best_score: float = 0.0
     chunks: list[InfoBlobChunkInDBWithScore] = field(default_factory=_empty_chunks)
     metadata: dict[str, str] = field(default_factory=_empty_metadata)
 
@@ -78,6 +82,7 @@ def build_retrieved_knowledge_evidence(
                 source_id=source_id,
                 title=_truncate_title(raw_title),
                 source_order=chunk_index,
+                best_score=_safe_score(chunk.score),
             )
             if source_metadata is not None:
                 _collect_source_metadata(entry, source_metadata)
