@@ -9,6 +9,10 @@ on:
     branches:
       - develop
       - 'release/**'
+  # Merge queue candidates (develop + queued PRs). Every scoped job runs in
+  # full here (their conditions only scope pull_request events), and the
+  # aggregate CI job reports the required "CI" check on the candidate.
+  merge_group:
 
 permissions:
   contents: read
@@ -67,7 +71,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-          BEFORE_SHA: ${{ github.event.before || '' }}
+          BEFORE_SHA: ${{ github.event.before || github.event.merge_group.base_sha || '' }}
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
