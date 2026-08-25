@@ -15,6 +15,12 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
+  import {
+    initialDisabledMcpServerIds,
+    loadMcpServerPreferences,
+    saveMcpServerPreferences,
+    type McpServerPreferencesContext
+  } from "../../mcpServerPreferences";
   import { selectEffectiveChatModel } from "../../selectEffectiveChatModel";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
@@ -32,7 +38,7 @@
   };
 
   const chat = getChatService();
-  const { featureFlags } = getAppContext();
+  const { featureFlags, tenant, user } = getAppContext();
 
   const {
     state: { attachments, isUploading, uploadError },
@@ -66,6 +72,29 @@
   // the backend narrows the effective server set accordingly. Mutated in place
   // by ChatMcpServers.
   const disabledMcpServerIds = new SvelteSet<string>();
+
+  function mcpServerPreferencesContext(): McpServerPreferencesContext | null {
+    const partner = chat.partner;
+    if (!partner || partner.type !== "default-assistant") return null;
+
+    return {
+      tenantId: tenant.id,
+      userId: user.id,
+      assistantId: partner.id
+    };
+  }
+
+  function persistMcpServerSelection(disabledServerIds: ReadonlySet<string>) {
+    if (!browser) return;
+    const context = mcpServerPreferencesContext();
+    if (!context) return;
+
+    saveMcpServerPreferences(
+      context,
+      mcpServers.map((server) => server.id),
+      disabledServerIds
+    );
+  }
 
   onMount(() => {
     if (!browser) {
@@ -252,9 +281,14 @@
 
   $effect(() => {
     const validIds = new Set(mcpServers.map((server) => server.id));
+    let selectionChanged = false;
     for (const id of Array.from(disabledMcpServerIds)) {
-      if (!validIds.has(id)) disabledMcpServerIds.delete(id);
+      if (!validIds.has(id)) {
+        disabledMcpServerIds.delete(id);
+        selectionChanged = true;
+      }
     }
+    if (selectionChanged) persistMcpServerSelection(disabledMcpServerIds);
   });
 
   // Seed the toggles from the governance policy's per-server chat defaults.
@@ -268,11 +302,28 @@
     if (conversation === seededConversation) return;
     seededConversation = conversation;
     untrack(() => {
+      const availableServerIds = mcpServers.map((server) => server.id);
+      const defaultDisabledServerIds =
+        partner && "effective_config" in partner
+          ? (partner.effective_config?.default_disabled_mcp_server_ids ?? [])
+          : [];
+      const preferencesContext = mcpServerPreferencesContext();
+      const preferences =
+        browser && preferencesContext ? loadMcpServerPreferences(preferencesContext) : null;
+      const initialDisabledServerIds = initialDisabledMcpServerIds({
+        availableServerIds,
+        defaultDisabledServerIds,
+        preferences
+      });
+
       disabledMcpServerIds.clear();
-      if (partner && "effective_config" in partner) {
-        for (const id of partner.effective_config?.default_disabled_mcp_server_ids ?? []) {
-          disabledMcpServerIds.add(id);
-        }
+      for (const id of initialDisabledServerIds) disabledMcpServerIds.add(id);
+
+      // Normalize an existing preference to the currently available server set.
+      // A missing preference remains missing until the user changes a toggle, so
+      // future governance defaults can still take effect.
+      if (preferences && preferencesContext) {
+        saveMcpServerPreferences(preferencesContext, availableServerIds, disabledMcpServerIds);
       }
     });
   });
@@ -483,6 +534,7 @@
           servers={mcpServers}
           internalServers={internalMcpServers}
           disabledServerIds={disabledMcpServerIds}
+          onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools
         />
       {/if}
