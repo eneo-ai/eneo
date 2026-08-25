@@ -27,6 +27,7 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.published_runtime import load_published_definition
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
 from eneo.server.dependencies.container import get_container
@@ -200,6 +201,10 @@ async def get_flow_graph(
         return build_graph_response(
             versioned_view.published_definition.steps,
             versioned_view.step_results,
+            wizard_metadata=versioned_view.published_definition.metadata().wizard,
+            speaker_identification_available=(
+                get_settings().flow_transcription_service_configured
+            ),
         )
 
     published_access = await require_flow_published_runtime_access(
@@ -213,7 +218,13 @@ async def get_flow_graph(
         version=published_access.published_version,
         tenant_id=published_access.flow.tenant_id,
     )
-    return build_graph_response(published_definition.steps)
+    return build_graph_response(
+        published_definition.steps,
+        wizard_metadata=published_definition.metadata().wizard,
+        speaker_identification_available=(
+            get_settings().flow_transcription_service_configured
+        ),
+    )
 
 
 @router.post(

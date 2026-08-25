@@ -4,6 +4,7 @@ export type FlowWizardMetadata = {
   transcription_enabled?: boolean;
   transcription_model?: { id: string } | null;
   transcription_language?: string;
+  transcription_diarization?: boolean;
 };
 
 export type FlowSaveStatus = "saved" | "saving" | "unsaved";

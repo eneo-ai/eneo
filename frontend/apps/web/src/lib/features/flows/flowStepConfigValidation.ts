@@ -4,6 +4,7 @@ import { getTemplateFillOutputConfig } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
 import { getOutputModeCompatibilityIssue } from "./flowStepTypes";
+import { getSpeakerMappingParticipantsField } from "./speakerMappingConfig";
 
 /** Matches the synthetic token for a reference to a since-deleted step. */
 export const DELETED_STEP_TOKEN = /\{\{step_\d+_deleted/;
@@ -31,6 +32,14 @@ export function computeStepConfigValidationIssues(
           "template_fill_no_template"
         ]);
       }
+    }
+    if (
+      step.output_mode === "speaker_mapping" &&
+      getSpeakerMappingParticipantsField(step) === null
+    ) {
+      entries.set(`${prefix}speaker_mapping_no_participants_field:${step.step_order}`, [
+        "speaker_mapping_no_participants_field"
+      ]);
     }
     if (step.output_mode === "http_post") {
       const config = parseHttpAuthoredConfig(

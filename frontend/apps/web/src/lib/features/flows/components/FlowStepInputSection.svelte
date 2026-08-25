@@ -49,7 +49,9 @@
     onInputTypeChange,
     onRuntimeInputChange,
     onHttpConfigChange,
-    onOpenTranscriptionSettings
+    onOpenTranscriptionSettings,
+    speakerMappingStepOffered = false,
+    onAddSpeakerMappingStep
   }: {
     step: FlowStep;
     isPublished: boolean;
@@ -78,6 +80,8 @@
     onRuntimeInputChange?: (detail: { patch: Partial<FlowRuntimeInputConfigValue> }) => void;
     onHttpConfigChange?: (detail: { config: HttpAuthoredConfig }) => void;
     onOpenTranscriptionSettings?: () => void;
+    speakerMappingStepOffered?: boolean;
+    onAddSpeakerMappingStep?: () => void;
   } = $props();
 
   const isHttpSource = $derived(step.input_source === "http_get");
@@ -479,4 +483,26 @@
       <IconChevronRight class="size-3.5" />
     </button>
   </Alert.Root>
+  {#if speakerMappingStepOffered && transcriptionEnabled}
+    <Alert.Root
+      class="border-accent-default/15 bg-accent-default/5 mb-3 flex items-center justify-between rounded-[1rem] px-5 py-4"
+    >
+      <div class="min-w-0">
+        <p class="text-primary text-[0.8125rem] font-medium">
+          {m.flow_transcription_speaker_mapping_offer_title()}
+        </p>
+        <p class="text-secondary mt-0.5 text-xs leading-relaxed">
+          {m.flow_transcription_speaker_mapping_offer_desc()}
+        </p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={isPublished}
+        onclick={() => onAddSpeakerMappingStep?.()}
+      >
+        {m.flow_transcription_add_speaker_mapping_step()}
+      </Button>
+    </Alert.Root>
+  {/if}
 {/if}

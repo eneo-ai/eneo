@@ -29,6 +29,16 @@ export function isFlowStepReviewPolicySupported(step: Pick<FlowStep, "output_mod
   return !hasOutboundDeliveryOutputMode(step.output_mode);
 }
 
+/** Modes whose review policy is fixed by the engine (always edit review). */
+export function isFlowStepReviewPolicyLocked(step: Pick<FlowStep, "output_mode">): boolean {
+  return step.output_mode === "speaker_mapping";
+}
+
 export function sanitizeFlowStepReviewPolicy(step: FlowStep): FlowStep {
+  if (isFlowStepReviewPolicyLocked(step)) {
+    return step.review_policy?.mode === "edit"
+      ? step
+      : { ...step, review_policy: { mode: "edit" } };
+  }
   return isFlowStepReviewPolicySupported(step) ? step : { ...step, review_policy: null };
 }

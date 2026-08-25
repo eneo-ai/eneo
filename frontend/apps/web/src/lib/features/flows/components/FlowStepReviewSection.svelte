@@ -7,6 +7,7 @@
   import {
     FLOW_STEP_REVIEW_MODE_CHOICES,
     getFlowStepReviewModeChoice,
+    isFlowStepReviewPolicyLocked,
     isFlowStepReviewPolicySupported,
     parseFlowStepReviewModeChoice,
     type FlowStepReviewModeChoice
@@ -24,6 +25,7 @@
 
   const reviewMode = $derived(getFlowStepReviewModeChoice(step));
   const reviewSupported = $derived(isFlowStepReviewPolicySupported(step));
+  const reviewLocked = $derived(isFlowStepReviewPolicyLocked(step));
   const reviewModeLabel = $derived(getReviewModeLabel(reviewMode));
 
   function getReviewModeLabel(mode: FlowStepReviewModeChoice): string {
@@ -50,7 +52,7 @@
       <Select.Root
         type="single"
         value={reviewMode}
-        disabled={isPublished || !reviewSupported}
+        disabled={isPublished || !reviewSupported || reviewLocked}
         onValueChange={(value) =>
           onReviewModeChange?.({
             value: parseFlowStepReviewModeChoice(value ?? "none")
@@ -75,9 +77,11 @@
           : "text-warning-stronger text-xs leading-relaxed"}
         aria-live="polite"
       >
-        {reviewSupported
-          ? m.flow_step_review_policy_help()
-          : m.flow_step_review_policy_outbound_disabled()}
+        {reviewLocked
+          ? m.flow_step_review_policy_speaker_mapping_locked()
+          : reviewSupported
+            ? m.flow_step_review_policy_help()
+            : m.flow_step_review_policy_outbound_disabled()}
       </p>
     </div>
   </Settings.Row>

@@ -4,7 +4,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import Field, computed_field, field_validator, model_validator
@@ -326,6 +326,19 @@ class Settings(BaseSettings):
     flow_transcription_service_poll_interval_seconds: float = 5.0
     flow_transcription_service_poll_timeout_seconds: int = 3300
     flow_transcription_service_result_timeout_seconds: int = 120
+    # full: the service transcribes and diarizes. diarize: the flow's registry
+    # model transcribes (with word timestamps) and the service only adds speaker
+    # labels, so model governance and provider credentials stay in Eneo.
+    flow_transcription_service_mode: Literal["full", "diarize"] = "full"
+
+    @property
+    def flow_transcription_service_configured(self) -> bool:
+        """Whether flow audio steps delegate to the external transcription service."""
+        return bool(
+            self.flow_transcription_service_url
+            and self.flow_transcription_service_api_key
+        )
+
     # Deployment fallback for the per-mapped-step model-call ceiling. Applies when
     # an organization has never configured its own value; None disables mapped
     # authoring platform-wide unless an organization opts in explicitly.

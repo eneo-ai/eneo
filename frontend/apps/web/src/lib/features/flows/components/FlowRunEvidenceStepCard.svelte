@@ -29,6 +29,11 @@
     files_count?: number;
     model?: string;
     language?: string;
+    /** null: no speaker labels requested; "external": labelled; "skipped:<reason>". */
+    diarization?: string | null;
+    diarization_elapsed_ms?: number | null;
+    /** provider_words | forced | segment_split | segment_only, from the service. */
+    alignment?: string | null;
   };
 
   let {
@@ -297,6 +302,21 @@
                     tokens: String(transcription.estimated_tokens ?? 0)
                   })}
                 </Badge>
+                {#if transcription.diarization === "external" && (transcription.alignment === "segment_split" || transcription.alignment === "segment_only")}
+                  <Badge variant="outline" class="border-warning-default/40 text-warning-stronger">
+                    {m.flow_run_transcription_speakers_reduced_precision()}
+                  </Badge>
+                {:else if transcription.diarization === "external"}
+                  <Badge variant="outline" class="border-accent-default/40 text-accent-stronger">
+                    {m.flow_run_transcription_speakers_labelled({
+                      duration: formatElapsedMs(transcription.diarization_elapsed_ms ?? undefined)
+                    })}
+                  </Badge>
+                {:else if transcription.diarization?.startsWith("skipped")}
+                  <Badge variant="outline" class="border-warning-default/40 text-warning-stronger">
+                    {m.flow_run_transcription_speakers_skipped()}
+                  </Badge>
+                {/if}
               </div>
             </Card.Content>
           </Card.Root>

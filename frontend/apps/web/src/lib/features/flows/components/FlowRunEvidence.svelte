@@ -55,6 +55,11 @@
     files_count?: number;
     model?: string;
     language?: string;
+    /** null: no speaker labels requested; "external": labelled; "skipped:<reason>". */
+    diarization?: string | null;
+    diarization_elapsed_ms?: number | null;
+    /** provider_words | forced | segment_split | segment_only, from the service. */
+    alignment?: string | null;
   };
 
   let evidence: EvidencePayload | null = $state(null);

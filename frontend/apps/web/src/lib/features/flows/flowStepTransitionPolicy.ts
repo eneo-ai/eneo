@@ -15,6 +15,10 @@ import {
   type getTemplateFillOutputConfig
 } from "./templateFillConfig";
 import { sanitizeFlowStepReviewPolicy } from "./flowStepReviewPolicy";
+import {
+  buildSpeakerMappingOutputConfig,
+  getSpeakerMappingParticipantsField
+} from "./speakerMappingConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig, type HttpMethod } from "./components/http/httpConfigTypes";
 import { canClearInputBindingSourceRefs, setInputBindingSourceRefs } from "./flowInputBindings";
@@ -248,6 +252,27 @@ export function applyOutputModeChange({
     );
   }
 
+  if (nextMode === "speaker_mapping") {
+    // The proposal must always be confirmed by a person, and the mapping
+    // reads the previous step's transcript; both are set in the same patch so
+    // a draft never fails validation between two clicks.
+    return sanitizeFlowStepReviewPolicy(
+      sanitizeStepCitationMode({
+        ...step,
+        input_source: "previous_step",
+        input_type: "text",
+        output_mode: "speaker_mapping",
+        output_type: "json",
+        output_contract: null,
+        review_policy: { mode: "edit" },
+        output_config: buildSpeakerMappingOutputConfig(
+          step.output_config,
+          getSpeakerMappingParticipantsField(step)
+        )
+      })
+    );
+  }
+
   if (
     nextMode === "pass_through" &&
     step.input_type === "text" &&
@@ -269,7 +294,10 @@ export function applyOutputTypeChange({
   nextType: StepOutputType;
 }): FlowStep {
   const nextMode =
-    step.output_mode === "template_fill" && nextType !== "docx" ? "pass_through" : step.output_mode;
+    (step.output_mode === "template_fill" && nextType !== "docx") ||
+    (step.output_mode === "speaker_mapping" && nextType !== "json")
+      ? "pass_through"
+      : step.output_mode;
 
   return sanitizeFlowStepReviewPolicy(
     sanitizeStepCitationMode({ ...step, output_type: nextType, output_mode: nextMode })

@@ -13,6 +13,10 @@ from eneo.flows.step_lineage import (
     resolve_reference_step_orders,
 )
 from eneo.flows.template_reference_analyzer import analyze_template
+from eneo.flows.transcription_config import (
+    FlowTranscriptionConfigError,
+    parse_transcription_config,
+)
 
 GRAPH_RESPONSE_EXAMPLE: JsonDict = {
     "nodes": [
@@ -39,6 +43,9 @@ class GraphNode(BaseModel):
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
     error_message: str | None = None
+    # Audio steps only: whether this run labels speakers as part of transcription
+    # (speaker identification on, and an external service configured for it).
+    speaker_identification: bool | None = None
 
 
 class GraphEdge(BaseModel):
@@ -283,11 +290,47 @@ def enrich_nodes_with_run_results(
     return enriched
 
 
+def annotate_speaker_identification(
+    nodes: Sequence[GraphNode],
+    *,
+    wizard_metadata: FlowPersistedJsonObject | None,
+    service_configured: bool,
+) -> list[GraphNode]:
+    """Mark audio steps whose transcription will also label speakers.
+
+    Only the external transcription service labels speakers, so without one
+    the flag stays unset regardless of the flow's own setting. Malformed
+    metadata is not the graph's concern; it leaves the nodes untouched.
+    """
+    if not service_configured:
+        return list(nodes)
+    try:
+        config = parse_transcription_config({"wizard": wizard_metadata})
+    except FlowTranscriptionConfigError:
+        return list(nodes)
+    if not (config.enabled and config.diarization):
+        return list(nodes)
+    return [
+        node.model_copy(update={"speaker_identification": True})
+        if node.input_type == "audio"
+        else node
+        for node in nodes
+    ]
+
+
 def build_graph_response(
     steps: Sequence[FlowPersistedJsonObject],
     step_results: Sequence[FlowStepResult] = (),
+    *,
+    wizard_metadata: FlowPersistedJsonObject | None = None,
+    speaker_identification_available: bool = False,
 ) -> GraphResponse:
     nodes, edges = build_graph_from_steps(steps)
     if step_results:
         nodes = enrich_nodes_with_run_results(nodes, step_results)
+    nodes = annotate_speaker_identification(
+        nodes,
+        wizard_metadata=wizard_metadata,
+        service_configured=speaker_identification_available,
+    )
     return GraphResponse(nodes=nodes, edges=edges)

@@ -266,7 +266,9 @@ async def test_audio_resolve_transcribes_in_request_order_and_persists_transcrip
         transcription_model,
         *,
         language=None,
+        diarize=True,
         persist_cache_to_file,
+        max_speakers=None,
         observer=None,
     ):
         assert persist_cache_to_file is False
@@ -425,7 +427,9 @@ async def test_audio_resolve_ignores_shared_file_transcription_cache(user):
         transcription_model,
         *,
         language=None,
+        diarize=True,
         persist_cache_to_file,
+        max_speakers=None,
         observer=None,
     ):
         assert file_obj is file_1
@@ -666,7 +670,9 @@ async def test_audio_resolve_multifile_near_cap_keeps_request_order(user):
         transcription_model,
         *,
         language=None,
+        diarize=True,
         persist_cache_to_file,
+        max_speakers=None,
         observer=None,
     ):
         assert persist_cache_to_file is False

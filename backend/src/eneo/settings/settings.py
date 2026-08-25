@@ -82,6 +82,15 @@ class SettingsPublic(SettingsBase):
     # assistant inline-file-text toggle). Distinct from object_content_enabled,
     # which only reports that the object-content module started.
     object_store_configured: bool = False
+    # Read-only: whether an external transcription service is configured for
+    # flow audio steps. Gates flow authoring UI for options only that service
+    # honours (speaker identification). Computed from deployment config, never
+    # persisted.
+    flow_transcription_service_configured: bool = False
+    # Read-only: how the external service is used ("full" or "diarize"), None
+    # when it is not configured. In "diarize" mode the flow's own transcription
+    # model still transcribes, so the model picker stays meaningful.
+    flow_transcription_service_mode: Literal["full", "diarize"] | None = None
 
 
 class GetModelsResponse(BaseModel):

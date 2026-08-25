@@ -110,7 +110,7 @@ The fields below explain most step behavior.
 | `input_type` | Expected input kind: `text`, `json`, `image`, `audio`, `document`, `file`, or `any`. |
 | `input_bindings` | Structured references to form answers, source refs, or prior structured fields. Prefer this for explicit data flow. |
 | `input_config` | Step input configuration, including HTTP or runtime file settings. |
-| `output_mode` | Execution behavior: `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `template_fill`, or `render_verbatim`. |
+| `output_mode` | Execution behavior: `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `speaker_mapping`, `template_fill`, or `render_verbatim`. |
 | `output_type` | Final type produced by the step: `text`, `json`, `pdf`, or `docx`. |
 | `output_contract` | Typed output shape, validation rules, and artifact expectations. |
 | `output_config` | Renderer, HTTP delivery, or output-mode-specific configuration. |
@@ -139,6 +139,25 @@ replacement guidance is bounded metadata: 4,000 characters for summary or
 setup notes, 20 entries per recommendation/exclusion list, and 1,000 normalized
 characters per entry. It must not contain local knowledge content or
 configuration.
+
+### Speaker mapping (`speaker_mapping`)
+
+A `speaker_mapping` step follows a `transcribe_only` step whose transcript has
+diarized speaker labels (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...`). It requires
+`input_source=previous_step`, `input_type=text`, `output_type=json`, a
+`review_policy` of `edit` (enforced), and `output_config.speaker_mapping.participants_field`
+naming a `text` or `multiselect` form field with the participants. A completion
+model proposes which participant each label is; the step output is the mapping
+(`structured`, fixed contract) plus the transcript with names applied (`text`),
+and the run pauses at the review checkpoint where the reviewer confirms or
+corrects the names. Editing re-derives the text from the mapping and updates
+`{{transkribering}}` on the run input.
+`output_config.speaker_mapping.speaker_count_field` may name a `number` form field; the
+participant count (or, when the participants field is empty, that number) is sent to the
+external service as `max_speakers`, an upper bound for diarization, and recorded as
+`max_speakers` in the transcription step's metadata. Transcripts from several audio files are
+renumbered so labels are unique across the whole transcript. Manual authoring
+only for now; the AI Builder does not plan this step.
 
 ## How data moves between steps
 

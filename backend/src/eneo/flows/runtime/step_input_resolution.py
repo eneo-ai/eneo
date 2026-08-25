@@ -101,6 +101,7 @@ class StepInputResolutionDeps:
     max_inline_text_bytes: int
     logger: Any
     transcription_call_observer: "ProviderCallObserver | None" = None
+    max_speakers_hint: int | None = None
 
 
 @dataclass(frozen=True)
@@ -210,6 +211,7 @@ async def resolve_step_input(
                 requested_ids=requested_ids,
                 max_audio_files=deps.max_audio_files,
                 max_inline_text_bytes=deps.max_inline_text_bytes,
+                max_speakers=deps.max_speakers_hint,
             )
             audio_deps = AudioRuntimeDeps(
                 transcriber=deps.transcriber,
@@ -231,6 +233,20 @@ async def resolve_step_input(
                     StepDiagnostic(
                         code="typed_io_transcript_near_limit",
                         message=audio_resolution.near_inline_limit_message,
+                    )
+                )
+            if audio_resolution.diarization_skipped_message is not None:
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="audio_diarization_skipped",
+                        message=audio_resolution.diarization_skipped_message,
+                    )
+                )
+            if audio_resolution.diarization_reduced_precision_message is not None:
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="audio_diarization_reduced_precision",
+                        message=audio_resolution.diarization_reduced_precision_message,
                     )
                 )
         else:

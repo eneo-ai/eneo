@@ -4,6 +4,7 @@ import type { FlowStep } from "@eneo/eneo-js";
 import {
   buildFlowStepReviewPolicyPatch,
   getFlowStepReviewModeChoice,
+  isFlowStepReviewPolicyLocked,
   isFlowStepReviewPolicySupported,
   parseFlowStepReviewModeChoice,
   sanitizeFlowStepReviewPolicy
@@ -65,5 +66,22 @@ describe("flow step review policy", () => {
     );
 
     expect(result.review_policy).toBeNull();
+  });
+});
+
+describe("speaker mapping review policy", () => {
+  test("is locked to edit review", () => {
+    expect(isFlowStepReviewPolicyLocked(makeStep({ output_mode: "speaker_mapping" }))).toBe(true);
+    expect(isFlowStepReviewPolicyLocked(makeStep({ output_mode: "pass_through" }))).toBe(false);
+    expect(
+      sanitizeFlowStepReviewPolicy(
+        makeStep({ output_mode: "speaker_mapping", review_policy: null })
+      ).review_policy
+    ).toEqual({ mode: "edit" });
+    expect(
+      sanitizeFlowStepReviewPolicy(
+        makeStep({ output_mode: "speaker_mapping", review_policy: { mode: "view" } })
+      ).review_policy
+    ).toEqual({ mode: "edit" });
   });
 });

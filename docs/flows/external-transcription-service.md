@@ -2,13 +2,45 @@
 
 Flow `transcribe_only` steps can delegate transcription to an external
 speaker-diarization service (such as [Tolka](https://github.com/eneo-ai/tolka))
-instead of the model-registry LiteLLM path. The service transcribes and
-diarizes server-side; the flow transcript becomes its rendered, speaker-labeled
-output (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...` lines).
+instead of the model-registry LiteLLM path, or use it only for speaker
+identification. Either way the flow transcript becomes the service's rendered,
+speaker-labeled output (`[HH:MM:SS - HH:MM:SS] SPEAKER_00: ...` lines).
 
 This is a deployment-level switch, not a catalog entry: either the deployment
 has a transcription service configured or it does not. Knowledge uploads and
 app runs always use the model-registry path regardless.
+
+## Modes
+
+| `FLOW_TRANSCRIPTION_SERVICE_MODE` | Transcription | Speaker labels | Flow model picker |
+| --- | --- | --- | --- |
+| `full` (default) | the service | the service | hidden; the flow's model is only the governance anchor |
+| `diarize` | the flow's transcription model (registry, tenant provider credentials), with word timestamps | the service, from those word timestamps (`task=diarize` job) | shown; the model does the transcribing |
+
+`diarize` mode keeps model governance in Eneo and reduces the service to a
+diarization backend (Tolka's `TOLKA_ENGINE=diarize` tier needs no ASR model at
+all). It costs one extra upload of the audio per file (Eneo to the provider,
+then Eneo to the service) and depends on the transcription model returning
+word-level timestamps:
+
+- Word timestamps are requested with `response_format=verbose_json` and
+  `timestamp_granularities=["word"]`. OpenAI `whisper-1` and most self-hosted
+  Whisper servers support this; the `gpt-4o-transcribe` family does not.
+- A provider that rejects or omits them degrades the file to text only. The
+  step still succeeds, the transcript has no speaker labels, run metadata shows
+  `diarization: skipped:no_word_timestamps` and the step carries an
+  `audio_diarization_skipped` diagnostic.
+- A failure of the service after a successful transcription fails the step
+  (the author asked for speaker identification; silently dropping it would
+  hide that).
+
+Speaker labels are assigned per audio file by the service; Eneo renumbers them
+so a multi-file transcript has unique labels, and records a speaker inventory
+in the step's transcription metadata. A follow-up `speaker_mapping` step (see
+`flow-developer-quickstart.md`) can map those labels to real participants.
+
+The frontend reads the mode from `GET /api/v1/settings/`
+(`flow_transcription_service_mode`) to decide whether to show the model picker.
 
 ## Configuration
 
@@ -23,6 +55,7 @@ Set both variables on the backend API **and** the flow execution worker
 | `FLOW_TRANSCRIPTION_SERVICE_POLL_INTERVAL_SECONDS` | no | 5.0 | Delay between job-status polls. |
 | `FLOW_TRANSCRIPTION_SERVICE_POLL_TIMEOUT_SECONDS` | no | 3300 | Deadline for a job to finish. Must stay below `TASK_EXECUTION_TIMEOUT_SECONDS` (3600) so a waiting step fails before the whole run is reaped; startup enforces this. |
 | `FLOW_TRANSCRIPTION_SERVICE_RESULT_TIMEOUT_SECONDS` | no | 120 | HTTP timeout for status and result requests. |
+| `FLOW_TRANSCRIPTION_SERVICE_MODE` | no | `full` | `full` or `diarize`; see Modes above. |
 
 ### Service-side requirements (Tolka)
 
@@ -47,7 +80,7 @@ Set both variables on the backend API **and** the flow execution worker
   entitlement anchor, while the service does the transcribing. Usage seconds
   come from the service's measured duration.
 - **Job flow**: one multipart `POST /v1/jobs` per audio file (with
-  `language` from the flow's transcription config and `diarize=true`), a
+  `language` and `diarize` from the flow's transcription config), a
   status poll every poll-interval, then `GET /v1/jobs/{id}/result`. Submission
   is retried on rate limiting and outages; once a job id exists nothing
   resubmits.
@@ -86,4 +119,6 @@ service's canned speaker-labeled output.
 | Step fails immediately, logs show invalid credentials | Key does not match a token in `TOLKA_API_TOKENS`. |
 | Step fails after ~55 minutes | Poll deadline reached; the service is overloaded or the job is stuck. Check the service's queue depth and worker health. |
 | Steps fail with rate-limit errors | The service's per-client queue cap is full; raise `TOLKA_MAX_QUEUED_JOBS_PER_CLIENT` or add service workers. |
-| Transcript has no speaker labels | The service ran without diarization support; check its engine tier and extras. |
+| Transcript has no speaker labels | Speaker identification is off for the flow (wizard step 2), or the service ran without diarization support; check its engine tier and extras. In `diarize` mode also check the step for an `audio_diarization_skipped` diagnostic: the transcription model returned no word timestamps. |
+| `diarize` mode: service rejects jobs with 422 | The service does not accept `task=diarize` (older Tolka); upgrade it or use `full` mode. |
+| `diarize` mode: steps fail with `diarize_task_unsupported` | The service ignored `task=diarize` and transcribed with its own model (pre-task Tolka); Eneo refuses that result because it did not come from the flow's model. Upgrade the service. |

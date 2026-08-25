@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, NoReturn, cast
+from typing import TYPE_CHECKING, BinaryIO, Literal, NoReturn, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -49,8 +50,14 @@ from eneo.model_providers.domain.provider_call_observer import (
     build_transcription_call_request_facts,
 )
 from eneo.model_providers.infrastructure import litellm_transport
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    TranscriptSegment,
+    TranscriptWord,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from eneo.files.file_models import File
     from eneo.main.config import Settings
     from eneo.model_providers.domain.provider_call_observer import (
@@ -74,6 +81,10 @@ _MAX_CONSECUTIVE_POLL_FAILURES = 5
 _TERMINAL_COMPLETED = "completed"
 _TERMINAL_FAILED = "failed"
 
+# Job kinds the service accepts: transcribe end to end, or label speakers on a
+# transcript the caller produced (words with absolute timestamps).
+JobTask = Literal["transcribe", "diarize"]
+
 
 @dataclass(frozen=True, slots=True)
 class RemoteTranscriptionResult:
@@ -83,6 +94,9 @@ class RemoteTranscriptionResult:
     duration_seconds: float | None
     model: str | None
     language: str | None
+    # How word timestamps were obtained for speaker labelling, when the service
+    # reports it: provider_words | forced | segment_split | segment_only.
+    alignment: str | None = None
 
 
 class RemoteTranscriptionClient:
@@ -125,20 +139,58 @@ class RemoteTranscriptionClient:
         mimetype: str,
         payload: BinaryIO,
         language: str | None,
+        diarize: bool = True,
+        task: JobTask = "transcribe",
+        words: "Sequence[TranscriptWord] | None" = None,
+        segments: "Sequence[TranscriptSegment] | None" = None,
+        model: str | None = None,
+        max_speakers: int | None = None,
     ) -> str:
-        """Submit one audio file as a transcription job and return its job id.
+        """Submit one audio file as a job and return its job id.
+
+        ``task="diarize"`` sends the caller's word-timestamped transcript as a
+        JSON part; the service then only adds speaker labels. ``model`` is
+        echoed back by the service in its result and names what transcribed.
 
         The service admits or rejects before reading the body (queue-full is a
         pre-body 429), so a connection torn down mid-upload is treated as the
         rate limiting it usually is rather than as an unknown outcome.
         """
+        data: dict[str, str] = {
+            "language": language or "auto",
+            "diarize": "true" if diarize else "false",
+        }
+        if task == "diarize":
+            if not words and not segments:
+                raise ValueError("A diarize job needs a timestamped transcript.")
+            data["task"] = task
+            if words:
+                data["words"] = json.dumps(
+                    [
+                        {"word": word.word, "start": word.start, "end": word.end}
+                        for word in words
+                    ],
+                    separators=(",", ":"),
+                )
+            if segments:
+                data["segments"] = json.dumps(
+                    [
+                        {"text": seg.text, "start": seg.start, "end": seg.end}
+                        for seg in segments
+                    ],
+                    separators=(",", ":"),
+                )
+        if model:
+            data["model"] = model
+        if diarize and max_speakers is not None and max_speakers >= 1:
+            data["max_speakers"] = str(max_speakers)
         try:
             async with self._http_client(timeout=self.submit_timeout_seconds) as client:
                 response = await client.post(
                     f"{self.base_url}/v1/jobs",
                     headers=self._headers,
                     files={"file": (filename, payload, mimetype)},
-                    data={"language": language or "auto", "diarize": "true"},
+                    data=data,
                 )
         except httpx.WriteError as exc:
             # The service hangs up mid-upload when it refuses admission; the
@@ -268,6 +320,7 @@ class RemoteTranscriptionClient:
         duration = body.get("duration_seconds")
         model = body.get("model")
         language = body.get("language")
+        alignment = body.get("alignment")
         return RemoteTranscriptionResult(
             text=text,
             duration_seconds=float(duration)
@@ -275,6 +328,7 @@ class RemoteTranscriptionClient:
             else None,
             model=model if isinstance(model, str) else None,
             language=language if isinstance(language, str) else None,
+            alignment=alignment if isinstance(alignment, str) else None,
         )
 
     def _parse_job_id(self, response: httpx.Response) -> str:
@@ -347,9 +401,85 @@ class RemoteFlowTranscriber:
         transcription_model: "TranscriptionModel",
         *,
         language: str | None = None,
+        diarize: bool = True,
         persist_cache_to_file: bool = True,
         observer: "ProviderCallObserver | None" = None,
+        max_speakers: int | None = None,
     ) -> TranscribedAudio:
+        result, audio_seconds = await self._run_job(
+            file,
+            language=language,
+            diarize=diarize,
+            task="transcribe",
+            words=None,
+            segments=None,
+            model=None,
+            observer=observer,
+            max_speakers=max_speakers,
+        )
+        return TranscribedAudio(
+            text=result.text,
+            duration_seconds=result.duration_seconds or audio_seconds,
+            diarization="external" if diarize else None,
+            alignment=result.alignment if diarize else None,
+        )
+
+    async def label_speakers(
+        self,
+        file: "File",
+        *,
+        words: "Sequence[TranscriptWord] | None",
+        model_name: str,
+        segments: "Sequence[TranscriptSegment] | None" = None,
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
+        max_speakers: int | None = None,
+    ) -> RemoteTranscriptionResult:
+        """Have the service add speaker labels to a transcript produced elsewhere.
+
+        The audio is uploaded again for diarization; the transcript comes back
+        rendered with the same speaker-labelled lines a full job produces.
+        """
+        result, _ = await self._run_job(
+            file,
+            language=language,
+            diarize=True,
+            task="diarize",
+            words=words,
+            segments=segments,
+            model=model_name,
+            observer=observer,
+            max_speakers=max_speakers,
+        )
+        # A service that predates diarize jobs ignores the unknown fields and
+        # transcribes the audio itself with its own model. The echoed model is
+        # the only signal, and that text must not replace the flow's transcript.
+        if result.model != model_name:
+            logger.error(
+                "remote_transcription.diarize_unsupported expected_model=%s got=%s",
+                model_name,
+                result.model,
+            )
+            raise OpenAIException(
+                litellm_transport.PROVIDER_ERROR_MESSAGE,
+                code="provider_error",
+                details={"reason": "diarize_task_unsupported", "retryable": False},
+            )
+        return result
+
+    async def _run_job(
+        self,
+        file: "File",
+        *,
+        language: str | None,
+        diarize: bool,
+        task: JobTask,
+        words: "Sequence[TranscriptWord] | None",
+        segments: "Sequence[TranscriptSegment] | None",
+        model: str | None,
+        observer: "ProviderCallObserver | None",
+        max_speakers: int | None = None,
+    ) -> tuple[RemoteTranscriptionResult, float]:
         mimetype: str = file.mimetype or ""
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
@@ -374,6 +504,12 @@ class RemoteFlowTranscriber:
                 filename=str(file.name or temp_file_path.name),
                 mimetype=mimetype,
                 language=language,
+                diarize=diarize,
+                task=task,
+                words=words,
+                segments=segments,
+                model=model,
+                max_speakers=max_speakers,
                 audio_seconds=audio_seconds,
                 audio_digest=audio_digest,
                 observer=observer,
@@ -408,10 +544,7 @@ class RemoteFlowTranscriber:
                     provider_response_id=job_id,
                 ),
             )
-        return TranscribedAudio(
-            text=result.text,
-            duration_seconds=result.duration_seconds or audio_seconds,
-        )
+        return result, audio_seconds
 
     @retry(
         wait=wait_random_exponential(min=1, max=20),
@@ -432,6 +565,12 @@ class RemoteFlowTranscriber:
         filename: str,
         mimetype: str,
         language: str | None,
+        diarize: bool,
+        task: JobTask,
+        words: "Sequence[TranscriptWord] | None",
+        segments: "Sequence[TranscriptSegment] | None",
+        model: str | None,
+        max_speakers: int | None,
         audio_seconds: float,
         audio_digest: str,
         observer: "ProviderCallObserver | None",
@@ -444,9 +583,16 @@ class RemoteFlowTranscriber:
         """
         call_id: UUID | None = None
         if observer is not None:
+            # A diarize job is its own provider call on the same audio; the
+            # suffix keeps it distinguishable from a full transcription of it.
+            requested_model = (
+                f"{self._requested_model}#diarize"
+                if task == "diarize"
+                else self._requested_model
+            )
             call_id = await observer.started(
                 build_transcription_call_request_facts(
-                    requested_model=self._requested_model,
+                    requested_model=requested_model,
                     provider=REMOTE_TRANSCRIPTION_PROVIDER,
                     language=language,
                     audio_digest=audio_digest,
@@ -461,6 +607,12 @@ class RemoteFlowTranscriber:
                     mimetype=mimetype,
                     payload=payload,
                     language=language,
+                    diarize=diarize,
+                    task=task,
+                    words=words,
+                    segments=segments,
+                    model=model,
+                    max_speakers=max_speakers,
                 )
                 return job_id, call_id
         except asyncio.CancelledError:

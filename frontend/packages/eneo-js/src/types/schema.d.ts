@@ -16121,7 +16121,8 @@ export interface components {
       | "http_post"
       | "transcribe_only"
       | "template_fill"
-      | "render_verbatim";
+      | "render_verbatim"
+      | "speaker_mapping";
     /**
      * FlowOutputType
      * @enum {string}
@@ -21839,6 +21840,8 @@ export interface components {
       output_type?: string | null;
       /** Run Status */
       run_status?: string | null;
+      /** Speaker Identification */
+      speaker_identification?: boolean | null;
       /** Step Order */
       step_order?: number | null;
       /** Type */
@@ -28167,6 +28170,13 @@ export interface components {
        * @default false
        */
       file_references_enabled?: boolean;
+      /**
+       * Flow Transcription Service Configured
+       * @default false
+       */
+      flow_transcription_service_configured?: boolean;
+      /** Flow Transcription Service Mode */
+      flow_transcription_service_mode?: ("full" | "diarize") | null;
       /**
        * Object Content Enabled
        * @default false

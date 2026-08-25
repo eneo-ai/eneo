@@ -18,6 +18,10 @@ from eneo.main.exceptions import (
     OpenAIException,
     ProviderRejectedRequestException,
 )
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    TranscriptSegment,
+    TranscriptWord,
+)
 
 JOB_ID = "abc123"
 
@@ -27,6 +31,7 @@ RESULT_BODY = {
     "model": "KBLab/kb-whisper-large",
     "text": "[00:00:00 - 00:00:05] SPEAKER_00: Hej och välkomna.",
     "segments": [],
+    "alignment": "segment_split",
 }
 
 
@@ -140,6 +145,145 @@ async def test_submit_sends_multipart_job_contract() -> None:
     assert b'name="diarize"' in body and b"true" in body
 
 
+async def test_submit_sends_diarize_false_when_speaker_identification_is_off() -> None:
+    service = ScriptedService(submit_responses=[accepted()])
+    client = make_client(service)
+
+    await client.submit(
+        filename="meeting.mp3",
+        mimetype="audio/mpeg",
+        payload=io.BytesIO(b"fake"),
+        language="sv",
+        diarize=False,
+    )
+
+    body = service.requests[0].read()
+    assert b'name="diarize"' in body and b"false" in body
+    assert b"true" not in body
+
+
+async def test_submit_diarize_job_sends_transcript_and_model() -> None:
+    service = ScriptedService(submit_responses=[accepted()])
+    client = make_client(service)
+
+    await client.submit(
+        filename="meeting.mp3",
+        mimetype="audio/mpeg",
+        payload=io.BytesIO(b"fake"),
+        language="sv",
+        task="diarize",
+        words=[TranscriptWord("hej", 0.0, 0.4), TranscriptWord("du", 0.5, 0.7)],
+        model="whisper-1",
+    )
+
+    body = service.requests[0].read()
+    assert b'name="task"' in body and b"diarize" in body
+    assert b'name="model"' in body and b"whisper-1" in body
+    assert b'name="words"' in body
+    assert (
+        b'[{"word":"hej","start":0.0,"end":0.4},{"word":"du","start":0.5,"end":0.7}]'
+        in body
+    )
+
+
+async def test_submit_diarize_job_accepts_segments_without_words() -> None:
+    service = ScriptedService(submit_responses=[accepted()])
+    client = make_client(service)
+
+    await client.submit(
+        filename="meeting.mp3",
+        mimetype="audio/mpeg",
+        payload=io.BytesIO(b"fake"),
+        language="sv",
+        task="diarize",
+        segments=[TranscriptSegment("hej du", 0.0, 0.7)],
+    )
+
+    body = service.requests[0].read()
+    assert b'name="segments"' in body
+    assert b'[{"text":"hej du","start":0.0,"end":0.7}]' in body
+    assert b'name="words"' not in body
+
+
+async def test_submit_sends_max_speakers_bound_only_when_diarizing() -> None:
+    service = ScriptedService(submit_responses=[accepted(), accepted()])
+    client = make_client(service)
+
+    await client.submit(
+        filename="a.mp3",
+        mimetype="audio/mpeg",
+        payload=io.BytesIO(b"x"),
+        language="sv",
+        max_speakers=3,
+    )
+    await client.submit(
+        filename="a.mp3",
+        mimetype="audio/mpeg",
+        payload=io.BytesIO(b"x"),
+        language="sv",
+        diarize=False,
+        max_speakers=3,
+    )
+
+    assert b'name="max_speakers"' in service.requests[0].read()
+    assert b'name="max_speakers"' not in service.requests[1].read()
+
+
+async def test_submit_diarize_job_requires_words() -> None:
+    client = make_client(ScriptedService())
+    with pytest.raises(ValueError):
+        await client.submit(
+            filename="meeting.mp3",
+            mimetype="audio/mpeg",
+            payload=io.BytesIO(b"fake"),
+            language="sv",
+            task="diarize",
+            words=[],
+        )
+
+
+async def test_label_speakers_returns_service_text_and_records_its_own_call() -> None:
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    transcriber = RemoteFlowTranscriber(make_client(service))
+    observer = RecordingObserver()
+
+    result = await transcriber.label_speakers(
+        audio_file(),
+        words=[TranscriptWord("hej", 0.0, 0.4)],
+        model_name=RESULT_BODY["model"],
+        language="sv",
+        observer=observer,
+    )
+
+    assert result.text == RESULT_BODY["text"]
+    [facts] = observer.started_facts
+    assert facts.requested_model.endswith("#diarize")
+    assert len(observer.completed_calls) == 1
+
+
+async def test_label_speakers_rejects_a_service_that_ignored_the_task() -> None:
+    # A pre-task service runs a full transcription and reports its own model.
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    transcriber = RemoteFlowTranscriber(make_client(service))
+
+    with pytest.raises(OpenAIException) as excinfo:
+        await transcriber.label_speakers(
+            audio_file(),
+            words=[TranscriptWord("hej", 0.0, 0.4)],
+            model_name="not-the-service-model",
+        )
+
+    assert excinfo.value.details["reason"] == "diarize_task_unsupported"
+
+
 async def test_transcribe_returns_service_text_verbatim_with_duration() -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
@@ -159,6 +303,8 @@ async def test_transcribe_returns_service_text_verbatim_with_duration() -> None:
 
     assert result.text == RESULT_BODY["text"]
     assert result.duration_seconds == 123.5
+    assert result.diarization == "external"
+    assert result.alignment == "segment_split"
     assert service.submit_count == 1
 
     submit_request = service.requests[0]

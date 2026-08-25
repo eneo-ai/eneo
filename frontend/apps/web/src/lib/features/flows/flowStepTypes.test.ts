@@ -28,6 +28,7 @@ describe("output mode catalog", () => {
       "pass_through",
       "compose_text",
       "transcribe_only",
+      "speaker_mapping",
       "template_fill",
       "render_verbatim",
       "http_post"
@@ -346,5 +347,39 @@ describe("getFlowStepValidationIssues", () => {
         })
       ])
     );
+  });
+});
+
+describe("speaker_mapping output mode", () => {
+  it("is offered only for a text step reading the previous step", () => {
+    const offered = getAvailableOutputModes({
+      step: outputStep({ input_type: "text", input_source: "previous_step" }),
+      isAdvancedMode: false
+    }).map((mode) => mode.value);
+    expect(offered).toContain("speaker_mapping");
+
+    const notOffered = getAvailableOutputModes({
+      step: outputStep({ input_type: "text", input_source: "flow_input" }),
+      isAdvancedMode: false
+    }).map((mode) => mode.value);
+    expect(notOffered).not.toContain("speaker_mapping");
+  });
+
+  it("requires JSON output and flags other formats", () => {
+    expect(
+      getOutputModeCompatibilityIssue(
+        outputStep({ input_type: "text", output_type: "json", output_mode: "speaker_mapping" })
+      )
+    ).toBeNull();
+    expect(
+      getOutputModeCompatibilityIssue(
+        outputStep({ input_type: "text", output_type: "text", output_mode: "speaker_mapping" })
+      )
+    ).toBe("speaker_mapping_requires_text_json");
+    expect(
+      getAvailableOutputTypes(
+        outputStep({ input_type: "text", output_type: "json", output_mode: "speaker_mapping" })
+      ).map((type) => type.value)
+    ).toEqual(["json"]);
   });
 });

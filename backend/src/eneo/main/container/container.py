@@ -1511,6 +1511,7 @@ class Container(containers.DeclarativeContainer):
         flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
         access_policy=flow_run_access_policy,
         flow_run_terminalizer=flow_run_terminalizer,
+        flow_run_repo=flow_run_repo,
     )
     flow_runtime_file_service = providers.Factory(
         FlowRuntimeFileService,

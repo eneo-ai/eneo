@@ -32,6 +32,9 @@ from eneo.flows.domain.flow_step_validation import (
     flow_step_validation_views_from_flow_steps,
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.speaker_mapping_config import (
+    validate_speaker_mapping_output_config,
+)
 from eneo.flows.domain.step_mapped_execution import (
     FlowStepMappedExecutionConfigurationError,
     resolve_step_mapped_execution,
@@ -73,6 +76,7 @@ from eneo.flows.input_binding_contract_rules import (
 from eneo.flows.output_modes import (
     compose_text_violation,
     render_verbatim_violation,
+    speaker_mapping_violation,
     text_document_pass_through_violation,
     transcribe_only_violation,
 )
@@ -213,6 +217,11 @@ def collect_step_graph_issues(
         if form_schema is not None
         else set()
     )
+    form_field_types: dict[str, str] = (
+        {field.name: field.type.value for field in form_schema.fields}
+        if form_schema is not None
+        else {}
+    )
     step_ref_mapping = build_step_ref_mapping(
         {
             "step_order": step.step_order,
@@ -344,6 +353,31 @@ def collect_step_graph_issues(
                     message=text_document_pass_through_error,
                     step_order=step.step_order,
                 )
+            )
+        speaker_mapping_error = speaker_mapping_violation(
+            step_order=step.step_order,
+            input_source=step.input_source,
+            input_type=step.input_type,
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+        )
+        if speaker_mapping_error is not None:
+            issues.append(
+                _flow_step_issue(
+                    code=FlowGraphIssueCode.FLOW_STEP_INVALID,
+                    message=speaker_mapping_error,
+                    step_order=step.step_order,
+                )
+            )
+        if step.output_mode == "speaker_mapping":
+            _capture_flow_step_validation(
+                issues,
+                FlowGraphIssueCode.FLOW_STEP_INVALID,
+                lambda: validate_speaker_mapping_output_config(
+                    step=step,
+                    form_field_types=form_field_types,
+                    require_complete_config=require_complete_template_fill_config,
+                ),
             )
         if step.output_mode == "template_fill":
             _capture_flow_step_validation(
@@ -720,6 +754,12 @@ def _validate_output_contract_compatibility(*, step: FlowStepValidationView) -> 
     if step.output_mode == "render_verbatim":
         raise FlowStepValidationError(
             f"Step {step.step_order}: output_contract is not supported for output_mode 'render_verbatim'.",
+            step_order=step.step_order,
+        )
+    if step.output_mode == "speaker_mapping":
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: output_contract is fixed for output_mode "
+            "'speaker_mapping' and cannot be authored.",
             step_order=step.step_order,
         )
     if step.output_type == "text":
