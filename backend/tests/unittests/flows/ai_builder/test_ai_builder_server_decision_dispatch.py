@@ -11,9 +11,6 @@ from pydantic import ValidationError
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
-from eneo.flows.ai_builder.ai_builder_action_policy import (
-    NAMED_RESULT_PROJECTION_MAX_ITEMS,
-)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     canonical_architecture_commit_payload,
     finalize_architecture_commit,
@@ -757,7 +754,7 @@ async def test_chained_confirmation_of_an_edit_session_ignores_named_result_admi
             confidence="high",
             evidence=[f"quote:user_message:user-1:field_{index}"],
         )
-        for index in range(NAMED_RESULT_PROJECTION_MAX_ITEMS + 1)
+        for index in range(13)
     ]
     state.architecture_commit = _finalized_commit_for_state(state)
     repo.load_planning_state.return_value = state

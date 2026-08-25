@@ -13,8 +13,6 @@ from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    RESULT_KEYS_ARGUMENT,
-    ProposalObligationProjection,
     build_create_flow_tool_schema,
     parse_create_flow_intent_arguments,
 )
@@ -51,7 +49,6 @@ def build_propose_flow_tool_schema(
     current_steps: list["FlowStep"] | None = None,
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
-    obligation_projection: ProposalObligationProjection | None = None,
 ) -> ProposalToolSchema:
     if current_steps is None:
         return cast(
@@ -61,7 +58,6 @@ def build_propose_flow_tool_schema(
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
                 is_pure_audio_transcription=is_pure_audio_transcription,
                 confirmed_runtime_inputs=confirmed_runtime_inputs,
-                obligation_projection=obligation_projection,
             ),
         )
     return cast(
@@ -295,8 +291,7 @@ def admit_propose_flow_tool_arguments(
     Some non-strict tool implementations occasionally close the adjacent
     ``steps`` and ``output_fields`` arrays at the wrong boundary or emit a
     punctuation-only property while closing them. The prepared create schema
-    makes those cases unambiguous. Models can also copy ``output_fields``
-    children into the flat, server-owned ``result_keys`` projection. Normalize
+    makes those cases unambiguous. Normalize
     only those lossless shapes, then apply the unchanged proposal schema to the
     full payload.
     """
@@ -305,15 +300,7 @@ def admit_propose_flow_tool_arguments(
         arguments=arguments,
         tool_schema=tool_schema,
     )
-    admitted = _rehome_steps_from_result_projection(
-        arguments=admitted,
-        tool_schema=tool_schema,
-    )
     admitted = _rehome_misplaced_create_children(
-        arguments=admitted,
-        tool_schema=tool_schema,
-    )
-    admitted = _discard_server_owned_result_key_children(
         arguments=admitted,
         tool_schema=tool_schema,
     )
@@ -398,96 +385,6 @@ def _without_punctuation_only_unknown_properties(
         {key: value for key, value in record.items() if key not in debris_keys},
         True,
     )
-
-
-def _rehome_steps_from_result_projection(
-    *,
-    arguments: dict[str, Any],
-    tool_schema: ProposalToolSchema,
-) -> dict[str, Any]:
-    """Move a misplaced step list out of the server-owned result projection."""
-
-    if "steps" in arguments:
-        return arguments
-    raw_result_keys = arguments.get(RESULT_KEYS_ARGUMENT)
-    if not isinstance(raw_result_keys, dict):
-        return arguments
-    result_keys = cast(dict[str, object], raw_result_keys)
-    misplaced_steps = result_keys.get("steps")
-    if not isinstance(misplaced_steps, list):
-        return arguments
-
-    root_properties = tool_schema["function"]["parameters"].get("properties")
-    if not isinstance(root_properties, dict):
-        return arguments
-    result_keys_schema = cast(dict[str, object], root_properties).get(
-        RESULT_KEYS_ARGUMENT
-    )
-    if not isinstance(result_keys_schema, dict):
-        return arguments
-    projected_properties = cast(dict[str, object], result_keys_schema).get("properties")
-    if not isinstance(projected_properties, dict) or "steps" in projected_properties:
-        return arguments
-
-    admitted_result_keys = {
-        key: value for key, value in result_keys.items() if key != "steps"
-    }
-    return {
-        **arguments,
-        RESULT_KEYS_ARGUMENT: admitted_result_keys,
-        "steps": misplaced_steps,
-    }
-
-
-def _discard_server_owned_result_key_children(
-    *,
-    arguments: dict[str, Any],
-    tool_schema: ProposalToolSchema,
-) -> dict[str, Any]:
-    """Discard nested shape guesses the prepared result-key schema does not own."""
-
-    raw_root_properties = tool_schema["function"]["parameters"].get("properties")
-    if not isinstance(raw_root_properties, dict):
-        return arguments
-    result_keys_schema = cast(dict[str, object], raw_root_properties).get(
-        RESULT_KEYS_ARGUMENT
-    )
-    if not isinstance(result_keys_schema, dict):
-        return arguments
-    raw_record_schemas = cast(dict[str, object], result_keys_schema).get("properties")
-    if not isinstance(raw_record_schemas, dict):
-        return arguments
-
-    raw_result_keys = arguments.get(RESULT_KEYS_ARGUMENT)
-    if not isinstance(raw_result_keys, dict):
-        return arguments
-
-    admitted_result_keys = cast(dict[str, object], raw_result_keys)
-    updated_result_keys: dict[str, object] | None = None
-    for name, raw_record in admitted_result_keys.items():
-        record_schema = cast(dict[str, object], raw_record_schemas).get(name)
-        if not isinstance(raw_record, dict) or not isinstance(record_schema, dict):
-            continue
-        raw_allowed_properties = cast(dict[str, object], record_schema).get(
-            "properties"
-        )
-        if (
-            not isinstance(raw_allowed_properties, dict)
-            or "children" in raw_allowed_properties
-            or "children" not in raw_record
-        ):
-            continue
-        if updated_result_keys is None:
-            updated_result_keys = dict(admitted_result_keys)
-        updated_result_keys[name] = {
-            key: value
-            for key, value in cast(dict[str, object], raw_record).items()
-            if key != "children"
-        }
-
-    if updated_result_keys is None:
-        return arguments
-    return {**arguments, RESULT_KEYS_ARGUMENT: updated_result_keys}
 
 
 def _normalize_structured_field_children(

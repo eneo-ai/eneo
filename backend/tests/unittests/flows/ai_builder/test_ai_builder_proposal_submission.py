@@ -58,10 +58,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    ObligatedResultKey,
-    ProposalObligationProjection,
-)
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolRetryOutcome,
     build_self_correction_error_event,
@@ -1218,84 +1214,6 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
         "data_quality_notes"
     ]
     assert len(arguments["steps"]) == 2
-
-
-@pytest.mark.asyncio
-async def test_repair_invocation_validates_the_prepared_schema_before_compilation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(REJECTED_PROPOSAL_CAPTURE_DIR_ENV, str(tmp_path))
-    submission = _make_submission()
-    planning_state = _committed_text_planning_state()
-    resource_catalog = build_ai_builder_resource_catalog(
-        available_models=[], available_kbs=[]
-    )
-    private_result_key = "PRIVATE_USER_CONTENT_MUST_NOT_REACH_LOGS"
-    schema = build_propose_flow_tool_schema(
-        resource_catalog=resource_catalog,
-        obligation_projection=ProposalObligationProjection(
-            keys=(ObligatedResultKey(name=private_result_key),)
-        ),
-    )
-    process_create = AsyncMock()
-    config = submission._proposal_retry_config(
-        target_kind=TargetKind.CREATE,
-        assistant_snapshots=None,
-        request_id="req-invalid-repair",
-        planning_state=planning_state,
-        plan_edit_context=None,
-        prior_spec_for_revision=None,
-        usage_tracker=None,
-        proposal_tool_schema=schema,
-        compile_context=create_compile_context_from_planning_state(planning_state),
-    )
-    invalid_arguments = {
-        "flow_name": "Invalid repair",
-        "flow_description": None,
-        "plan_rationale": "Repair the proposal.",
-        "steps": [{"name": "Draft report", "instructions": "Draft the report."}],
-        "assumptions": [],
-        "result_keys": {
-            private_result_key: {
-                "field_type": "unsupported-private-shape",
-                "description": "Private result content.",
-                "required": True,
-            }
-        },
-    }
-    invocation = _make_retry_invocation(
-        resource_catalog=resource_catalog,
-        arguments=invalid_arguments,
-    )
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission.logger.info"
-        ) as log_info,
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission."
-            "process_create_intent_arguments",
-            new=process_create,
-        ),
-    ):
-        result = await config.process_tool_invocation(invocation)
-
-    assert result.failure_kind == "parse"
-    assert result.failure_codes == frozenset({"proposal_parse_schema"})
-    assert result.feedback is not None and private_result_key in result.feedback
-    log_info.assert_called_once_with(
-        "ai_builder_proposal_schema_rejected session_id=%s validator=%s",
-        invocation.turn.session_id,
-        "enum",
-    )
-    assert private_result_key not in repr(log_info.call_args)
-    process_create.assert_not_awaited()
-    captures = list(tmp_path.glob("rejected-proposal-*.json"))
-    assert len(captures) == 1
-    captured = json.loads(captures[0].read_text(encoding="utf-8"))
-    assert captured["session_id"] == str(invocation.turn.session_id)
-    assert captured["arguments"] == invalid_arguments
 
 
 @pytest.mark.asyncio

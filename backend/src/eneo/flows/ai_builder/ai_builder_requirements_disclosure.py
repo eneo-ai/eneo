@@ -709,11 +709,12 @@ def _named_result_summary_line(
             f"The user named content that the final result must preserve: {names}."
         )
     if projection is None:
-        # Nothing is being projected — an edit has no create schema to project
-        # into, an exact declared schema owns the shape, or this is not a
-        # structured result at all — so describing flat placement would
-        # describe something that is not happening. The confirmation is hashed,
-        # so a sentence that does not apply would be attested to as if it did.
+        # No attested contract is in force — an edit has no create contract
+        # to verify, an exact declared schema owns the shape, or this is not
+        # a structured result at all — so describing flat placement would
+        # describe something that is not happening. The confirmation is
+        # hashed, so a sentence that does not apply would be attested to as
+        # if it did.
         return preserved
     # The placement limitation belongs here, not in a later error: these fields
     # are built side by side at the top level, so a user who described one

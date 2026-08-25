@@ -613,7 +613,6 @@ def build_proposal_prepared(
             if compile_context is not None and not is_edit_mode
             else ()
         ),
-        obligation_projection=obligation_projection,
     )
     proposal_request_budget = budget_policy.proposal_request_budget(
         context_window_tokens=max_input_tokens,

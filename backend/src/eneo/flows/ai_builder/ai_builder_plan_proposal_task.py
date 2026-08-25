@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import assert_never
 
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    named_result_projection,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
@@ -97,6 +100,32 @@ def build_plan_proposal_system_prompt(
     )
     section_rule = _requested_output_sections_design_rule(requested_output_sections)
     terminal_document_rule = _terminal_document_design_rule(planning_state)
+    # One owner (named_result_projection) feeds the prompt, admission and
+    # the compiled postcondition, so the names the model is told to declare
+    # are exactly the names verification demands.
+    obligation_projection = named_result_projection(
+        planning_state, is_edit_mode=is_edit_mode
+    )
+    projected_names_rule = (
+        (
+            "- The user attested to these named results: "
+            + ", ".join(
+                f"`{key.name}`"
+                + (f" (type {key.declared_shape})" if key.declared_shape else "")
+                for key in obligation_projection.keys
+            )
+            + ". Before submitting, check the FINAL step's output_fields "
+            "against this list: (1) every attested name appears at the top "
+            "level of the final step's output_fields — the final step, not "
+            "an earlier one; (2) the spelling is exactly as written above; "
+            "(3) each name is declared exactly once, with an accurate "
+            "description; (4) attested names of type object or array are "
+            "declared with nullable false. Missing, renamed, duplicated or "
+            "wrongly typed names are rejected."
+        )
+        if obligation_projection is not None and obligation_projection.keys
+        else None
+    )
     result_contract_block = render_result_contract_prompt_block(
         derive_result_contract(planning_state)
     )
@@ -121,9 +150,10 @@ def build_plan_proposal_system_prompt(
         "backend-owned fill step.",
         "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
-        "- Use JSON output fields when later steps need specific structured facts.",
+        "- Use JSON output fields when later steps need specific structured facts. Only primitive fields (string, number, boolean) may be nullable; never mark object or array fields nullable.",
         "- Name output_fields as ASCII identifiers folded from the user's own wording (å/ä→a, ö→o, spaces and dots→underscores); keep key names the user asked for, and put display wording in descriptions.",
         "- For source-material reports, include every final-report fact or per-item short summary that must come from the source in the source-reading JSON output_fields. Do not leave user-named facts only in instructions or hide them inside generic facts/notes fields; later text or document steps should consume those fields instead of introducing new source-derived facts only in prose.",
+        *([projected_names_rule] if projected_names_rule is not None else []),
         *([section_rule] if section_rule is not None else []),
         *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime input and final output mechanics from the committed architecture.",

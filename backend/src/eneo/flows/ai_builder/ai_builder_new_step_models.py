@@ -108,11 +108,10 @@ class StructuredFieldDraft(BaseModel):
     item_fields: list["StructuredFieldDraft"] | None = None
     # An object whose members are deliberately left open. The flag itself is
     # server-set only: create admission derives it when the model explicitly
-    # chooses object but declares no static children, and named-result
-    # projection uses it when the user names a group without its members.
-    # General authoring cannot set the flag directly. It stays in dumps because
-    # admission round-trips a field through one — excluding it silently closed
-    # every open group.
+    # chooses object but declares no static children. General authoring
+    # cannot set the flag directly. It stays in dumps because admission
+    # round-trips a field through one — excluding it silently closed every
+    # open group.
     allow_additional_properties: bool = False
 
     @field_validator("name")
