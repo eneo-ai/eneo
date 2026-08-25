@@ -1,5 +1,4 @@
 import re
-from enum import Enum
 from typing import Optional
 from uuid import UUID
 
@@ -7,15 +6,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from eneo.main.config import validate_redirect_uri
 from eneo.main.models import InDB
-
-
-class Modules(str, Enum):
-    """
-    Any change to these enums will result in database changes
-    """
-
-    ENEO_APPLICATIONS = "eneo-applications"
-
 
 # The stable key travels as a URL path segment (the auth-broker session and
 # refresh routes), a module-side environment variable and a JWT-audience
@@ -28,8 +18,8 @@ _MODULE_KEY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 def is_url_safe_module_key(value: str) -> bool:
     """True when the key can travel as a single URL path segment.
 
-    Rows that predate the registration restriction may fail this; they keep
-    working as feature-flag modules but cannot be enabled for login handoff.
+    Rows that predate the registration restriction may fail this; they stay
+    readable but cannot be enabled for login handoff.
     """
     return _MODULE_KEY_PATTERN.fullmatch(value) is not None
 
@@ -44,17 +34,17 @@ class ModuleBase(BaseModel):
     can be introduced if one is needed.
     """
 
-    name: Modules | str
+    name: str
 
 
 class ModuleCreate(ModuleBase):
     """Registration contract for a new stable module key."""
 
-    name: Modules | str = Field(min_length=1)
+    name: str = Field(min_length=1)
 
     @field_validator("name")
     @classmethod
-    def validate_stable_key(cls, value: Modules | str) -> Modules | str:
+    def validate_stable_key(cls, value: str) -> str:
         if not _MODULE_KEY_PATTERN.fullmatch(value):
             raise ValueError(
                 "Module key must be a URL-safe slug: letters and digits plus "

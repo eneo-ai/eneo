@@ -14458,12 +14458,12 @@ export interface components {
      */
     ModuleCreate: {
       /** Name */
-      name: components["schemas"]["Modules"] | string;
+      name: string;
     };
     /** ModuleInDB */
     ModuleInDB: {
       /** Name */
-      name: components["schemas"]["Modules"] | string;
+      name: string;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -14597,12 +14597,6 @@ export interface components {
       /** Username */
       username?: string | null;
     };
-    /**
-     * Modules
-     * @description Any change to these enums will result in database changes
-     * @enum {string}
-     */
-    Modules: "eneo-applications";
     /** MovePausePublic */
     MovePausePublic: {
       /** Policy Revision */
@@ -19941,8 +19935,6 @@ export interface components {
        */
       deleted_at?: string | null;
       access_token?: components["schemas"]["AccessToken"] | null;
-      /** Modules */
-      readonly modules: string[];
       /** User Groups Ids */
       readonly user_groups_ids: string[];
       /** Permissions */
@@ -20115,8 +20107,6 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      /** Modules */
-      readonly modules: string[];
       /** User Groups Ids */
       readonly user_groups_ids: string[];
       /** Permissions */
