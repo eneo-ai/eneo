@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from "$app/state";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
@@ -18,6 +19,12 @@
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
+  import {
+    fetchSharePointFixturePreview,
+    isSharePointFixtureModeRequested,
+    parseSharePointFixtureScenario,
+    type SharePointFixtureScenario
+  } from "./fixtureMode";
 
   type PreviewCategory = "my_teams" | "other_sites" | "onedrive";
 
@@ -54,8 +61,20 @@
   } = getSpacesManager();
   const { addJob, startFastUpdatePolling } = getJobManager();
   const CATEGORY_ORDER: PreviewCategory[] = ["my_teams", "other_sites", "onedrive"];
+  let fixtureScenario = $derived(parseSharePointFixtureScenario(page.url.searchParams));
+  let isFixtureModeRequested = $derived(isSharePointFixtureModeRequested(page.url.searchParams));
 
   let availableResources = $state<PreviewOption[] | null>(null);
+  let loadedPreviewSource = $state<"fixture" | "real" | null>(null);
+  let loadedFixtureScenario = $state<SharePointFixtureScenario | null>(null);
+  let loadedPreviewSourceKey = $state<string | null>(null);
+  let requestedPreviewSourceKey = $derived(
+    isFixtureModeRequested
+      ? `fixture:${fixtureScenario ?? "invalid"}`
+      : `real:${integration.id ?? "missing"}`
+  );
+  let isFixtureSession = $derived(isFixtureModeRequested || loadedPreviewSource === "fixture");
+  let fixtureTreeScenario = $derived(fixtureScenario ?? loadedFixtureScenario);
 
   function getPreviewCategory(site: CategorizedIntegrationKnowledgePreview): PreviewCategory {
     if (site.type === "onedrive") return "onedrive";
@@ -77,6 +96,30 @@
       case "onedrive":
         return "OneDrive";
     }
+  }
+
+  function getFixtureScenarioLabel(scenario: SharePointFixtureScenario): string {
+    switch (scenario) {
+      case "representative":
+        return m.sharepoint_fixture_scenario_representative();
+      case "large_tenant":
+        return m.sharepoint_fixture_scenario_large_tenant();
+      case "empty":
+        return m.sharepoint_fixture_scenario_empty();
+    }
+  }
+
+  function normalizePreviewSite(
+    site: IntegrationKnowledgePreview
+  ): CategorizedIntegrationKnowledgePreview {
+    const category = site.category;
+    return {
+      ...site,
+      category:
+        category === "my_teams" || category === "other_sites" || category === "onedrive"
+          ? category
+          : undefined
+    };
   }
 
   let filteredResources = $derived.by(() => {
@@ -111,17 +154,44 @@
 
   const loadPreview = createAsyncState(async () => {
     const { id } = integration;
+    const activeFixtureScenario = fixtureScenario;
+    const fixtureModeWasRequested = isFixtureModeRequested;
+    loadedPreviewSourceKey = requestedPreviewSourceKey;
+    loadedPreviewSource = null;
+    loadedFixtureScenario = null;
+    availableResources = null;
+    selectedSite = null;
+    selectedItems = [];
+    wrapperName = "";
 
-    if (!id) {
+    if (fixtureModeWasRequested && !activeFixtureScenario) {
+      availableResources = [];
+      return;
+    }
+
+    if (!fixtureModeWasRequested && !id) {
       toast.warning(m.you_need_to_configure_this_integration_before_using_it());
       goBack();
       return;
     }
 
     try {
-      const preview = (await eneo.integrations.knowledge.preview({
-        id
-      })) as CategorizedIntegrationKnowledgePreview[];
+      let preview: CategorizedIntegrationKnowledgePreview[];
+      if (activeFixtureScenario) {
+        preview = (
+          await fetchSharePointFixturePreview(eneo.client, activeFixtureScenario)
+        ).items.map(normalizePreviewSite);
+        loadedPreviewSource = "fixture";
+        loadedFixtureScenario = activeFixtureScenario;
+      } else {
+        if (!id) return;
+        preview = (
+          await eneo.integrations.knowledge.preview({
+            id
+          })
+        ).map(normalizePreviewSite);
+        loadedPreviewSource = "real";
+      }
 
       availableResources = preview
         .map((site) => ({
@@ -251,6 +321,7 @@
   );
 
   const importKnowledge = createAsyncState(async () => {
+    if (isFixtureSession || loadedPreviewSource !== "real") return;
     if (!selectedSite) return;
     if (!selectedEmbeddingModel) return;
     if (dedupedSelection.effectiveEntries.length === 0) return;
@@ -341,7 +412,13 @@
   };
 
   $effect(() => {
-    if ($openController && availableResources === null) {
+    if (!$openController) {
+      if (loadedPreviewSource === null) {
+        loadedPreviewSourceKey = null;
+      }
+      return;
+    }
+    if (loadedPreviewSourceKey !== requestedPreviewSourceKey) {
       loadPreview();
     }
   });
@@ -363,7 +440,24 @@
     <Dialog.Title>{m.import_knowledge_from_sharepoint()}</Dialog.Title>
 
     <Dialog.Section scrollable={false}>
-      {#if $currentSpace.embedding_models.length < 1}
+      {#if isFixtureSession}
+        <div
+          role="alert"
+          class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-3 py-2 text-sm"
+        >
+          <div class="font-bold">
+            {m.sharepoint_fixture_banner_title({
+              scenario: fixtureTreeScenario
+                ? getFixtureScenarioLabel(fixtureTreeScenario)
+                : m.sharepoint_fixture_scenario_invalid()
+            })}
+          </div>
+          <div>{m.sharepoint_fixture_banner_description()}</div>
+        </div>
+        <div class="border-default border-t"></div>
+      {/if}
+
+      {#if !isFixtureSession && $currentSpace.embedding_models.length < 1}
         <p
           class="label-warning border-label-default bg-label-dimmer text-label-stronger m-4 rounded-md border px-2 py-1 text-sm"
         >
@@ -452,6 +546,7 @@
             driveId={selectedSite.type === "onedrive" ? selectedSite.key : undefined}
             siteName={selectedSite.name}
             isOneDrive={isOneDrive ?? false}
+            fixtureScenario={fixtureTreeScenario ?? undefined}
             {selectedItemKeys}
             onToggleSelect={toggleSelectedItem}
           />
@@ -532,15 +627,17 @@
         </div>
       {/if}
 
-      {#if $currentSpace.embedding_models.length > 1}
-        <div class="border-default w-full border-b"></div>
-      {/if}
+      {#if !isFixtureSession}
+        {#if $currentSpace.embedding_models.length > 1}
+          <div class="border-default w-full border-b"></div>
+        {/if}
 
-      <SelectEmbeddingModel
-        hideWhenNoOptions
-        bind:value={selectedEmbeddingModel}
-        selectableModels={$currentSpace.embedding_models}
-      ></SelectEmbeddingModel>
+        <SelectEmbeddingModel
+          hideWhenNoOptions
+          bind:value={selectedEmbeddingModel}
+          selectableModels={$currentSpace.embedding_models}
+        ></SelectEmbeddingModel>
+      {/if}
     </Dialog.Section>
 
     <Dialog.Controls>
@@ -560,17 +657,21 @@
           }
         }}>{m.back()}</Button
       >
-      <Button
-        variant="primary"
-        disabled={importKnowledge.isLoading ||
-          $currentSpace.embedding_models.length === 0 ||
-          !selectedSite ||
-          dedupedSelection.effectiveEntries.length === 0 ||
-          wrapperNameMissing}
-        onclick={importKnowledge}
-      >
-        {importKnowledge.isLoading ? m.importing() : m.import()}
-      </Button>
+      {#if isFixtureSession}
+        <Button variant="primary" disabled>{m.sharepoint_fixture_import_disabled()}</Button>
+      {:else}
+        <Button
+          variant="primary"
+          disabled={importKnowledge.isLoading ||
+            $currentSpace.embedding_models.length === 0 ||
+            !selectedSite ||
+            dedupedSelection.effectiveEntries.length === 0 ||
+            wrapperNameMissing}
+          onclick={importKnowledge}
+        >
+          {importKnowledge.isLoading ? m.importing() : m.import()}
+        </Button>
+      {/if}
     </Dialog.Controls>
   </Dialog.Content>
 </Dialog.Root>
