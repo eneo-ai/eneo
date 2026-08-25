@@ -30,10 +30,10 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Categorization is garnish, not payload: if Graph throttles the team-site
-# lookups, drop it for this request instead of stalling the dialog on
-# Retry-After sleeps.
-CATEGORIZATION_TIMEOUT_SECONDS = 8.0
+# User-specific preview context is garnish, not payload. If Graph throttles
+# membership, team-site, or OneDrive lookups, drop that optional data instead
+# of stalling the dialog on Retry-After sleeps.
+OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS = 8.0
 
 
 class SharePointPreviewService(BasePreviewService):
@@ -68,62 +68,27 @@ class SharePointPreviewService(BasePreviewService):
             token_id=sharepoint_token.id,
             token_refresh_callback=self.token_refresh_callback,
         ) as content_client:
-            sites_result, member_ids_result, drive_result = await asyncio.gather(
-                content_client.get_sites(),
-                content_client.get_my_member_group_ids(),
-                content_client.get_my_drive(),
+            site_previews_result, drive_result = await asyncio.gather(
+                self._load_site_previews(
+                    content_client=content_client,
+                    include_my_teams=True,
+                ),
+                self._load_my_drive(content_client=content_client),
                 return_exceptions=True,
             )
 
-            if isinstance(sites_result, BaseException):
-                logger.error(f"Error fetching SharePoint sites: {sites_result}")
-                raise sites_result
-
-            site_previews = self._to_sharepoint_preview_data(data=sites_result)
-
-            member_group_ids: Optional[list[str]] = None
-            if isinstance(member_ids_result, BaseException):
-                logger.info(
-                    "Could not load memberOf groups; skipping my-teams "
-                    "categorization: %s",
-                    member_ids_result,
+            if isinstance(site_previews_result, BaseException):
+                logger.error(
+                    "Error fetching SharePoint sites: %s", site_previews_result
                 )
-            else:
-                member_group_ids = member_ids_result
+                raise site_previews_result
 
-            categories = await self._categorize_my_team_sites(
-                content_client=content_client,
-                site_previews=site_previews,
-                member_group_ids=member_group_ids,
-            )
-            for preview in site_previews:
-                preview.category = categories.get(
-                    preview.key, self.CATEGORY_OTHER_SITES
-                )
-            results.extend(site_previews)
+            results.extend(site_previews_result)
 
             if isinstance(drive_result, BaseException):
-                # OneDrive may not be available (e.g., permissions not granted)
-                logger.warning(f"Could not fetch OneDrive: {drive_result}")
+                logger.warning("Could not fetch OneDrive: %s", drive_result)
             elif drive_result:
-                owner = drive_result.get("owner", {}).get("user", {})
-                display_name = owner.get("displayName")
-                drive_id = drive_result.get("id")
-                web_url = drive_result.get("webUrl")
-                if isinstance(drive_id, str) and isinstance(web_url, str):
-                    results.append(
-                        IntegrationPreview(
-                            name=(
-                                f"OneDrive - {display_name}"
-                                if isinstance(display_name, str) and display_name
-                                else "OneDrive"
-                            ),
-                            key=drive_id,
-                            url=web_url,
-                            type="onedrive",
-                            category=self.CATEGORY_ONEDRIVE,
-                        )
-                    )
+                results.append(drive_result)
 
         return results
 
@@ -177,9 +142,6 @@ class SharePointPreviewService(BasePreviewService):
                 },
             )
 
-        # Use the token to fetch sites. Client-credential auth has no /me, so
-        # my-teams categorization is not possible here; sites are uncategorized.
-        data = {}
         async with SharePointContentClient(
             base_url="https://graph.microsoft.com",
             api_token=access_token,
@@ -187,14 +149,112 @@ class SharePointPreviewService(BasePreviewService):
             token_refresh_callback=None,  # No refresh callback needed for app auth
         ) as content_client:
             try:
-                data = await content_client.get_sites()
+                return await self._load_site_previews(
+                    content_client=content_client,
+                    # Service Account tokens are delegated and have /me;
+                    # client-credential Tenant App tokens do not.
+                    include_my_teams=tenant_app.is_service_account(),
+                )
             except Exception as e:
                 logger.error(
                     f"Error fetching SharePoint preview data with app auth: {e}"
                 )
                 raise
 
-        return self._to_sharepoint_preview_data(data=data)
+    async def _load_site_previews(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        include_my_teams: bool,
+    ) -> List[IntegrationPreview]:
+        if include_my_teams:
+            sites_result, team_site_map_result = await asyncio.gather(
+                content_client.get_sites(),
+                self._load_my_team_site_map(content_client=content_client),
+                return_exceptions=True,
+            )
+        else:
+            sites_result = await content_client.get_sites()
+            team_site_map_result = {}
+
+        if isinstance(sites_result, BaseException):
+            raise sites_result
+
+        site_previews = self._to_sharepoint_preview_data(data=sites_result)
+        team_site_map = (
+            {}
+            if isinstance(team_site_map_result, BaseException)
+            else team_site_map_result
+        )
+        categories = self._categorize_my_team_sites(
+            site_previews=site_previews,
+            team_site_map=team_site_map,
+        )
+        for preview in site_previews:
+            preview.category = categories.get(preview.key, self.CATEGORY_OTHER_SITES)
+        return site_previews
+
+    async def _load_my_team_site_map(
+        self,
+        *,
+        content_client: SharePointContentClient,
+    ) -> Dict[str, Dict[str, str]]:
+        async def load() -> Dict[str, Dict[str, str]]:
+            member_group_ids = await content_client.get_my_member_group_ids()
+            if not member_group_ids:
+                return {}
+            return await content_client.get_group_root_sites_batched(member_group_ids)
+
+        try:
+            return await asyncio.wait_for(
+                load(),
+                timeout=OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not resolve team sites for my-teams categorization: %s",
+                e if str(e) else type(e).__name__,
+            )
+            return {}
+
+    async def _load_my_drive(
+        self,
+        *,
+        content_client: SharePointContentClient,
+    ) -> Optional[IntegrationPreview]:
+        try:
+            drive_data = await asyncio.wait_for(
+                content_client.get_my_drive(),
+                timeout=OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not fetch OneDrive: %s",
+                e if str(e) else type(e).__name__,
+            )
+            return None
+
+        if not drive_data:
+            return None
+
+        owner = drive_data.get("owner", {}).get("user", {})
+        display_name = owner.get("displayName")
+        drive_id = drive_data.get("id")
+        web_url = drive_data.get("webUrl")
+        if not isinstance(drive_id, str) or not isinstance(web_url, str):
+            return None
+
+        return IntegrationPreview(
+            name=(
+                f"OneDrive - {display_name}"
+                if isinstance(display_name, str) and display_name
+                else "OneDrive"
+            ),
+            key=drive_id,
+            url=web_url,
+            type="onedrive",
+            category=self.CATEGORY_ONEDRIVE,
+        )
 
     def _to_sharepoint_preview_data(
         self,
@@ -217,36 +277,19 @@ class SharePointPreviewService(BasePreviewService):
             previews.append(item)
         return previews
 
-    async def _categorize_my_team_sites(
+    def _categorize_my_team_sites(
         self,
         *,
-        content_client: SharePointContentClient,
         site_previews: List[IntegrationPreview],
-        member_group_ids: Optional[list[str]],
+        team_site_map: Dict[str, Dict[str, str]],
     ) -> Dict[str, str]:
-        """Mark sites backed by the user's own M365 groups as my_teams.
-
-        Only the user's own memberOf groups (typically tens) are resolved, via
-        $batch — never the tenant's full group list.
-        """
+        """Mark sites backed by the user's own M365 groups as my_teams."""
         categories = {
             preview.key: self.CATEGORY_OTHER_SITES
             for preview in site_previews
             if preview.key
         }
-        if not site_previews or not member_group_ids:
-            return categories
-
-        try:
-            site_map = await asyncio.wait_for(
-                content_client.get_group_root_sites_batched(member_group_ids),
-                timeout=CATEGORIZATION_TIMEOUT_SECONDS,
-            )
-        except Exception as e:
-            logger.warning(
-                "Could not resolve team sites for my-teams categorization: %s",
-                e if str(e) else type(e).__name__,
-            )
+        if not site_previews or not team_site_map:
             return categories
 
         by_site_id = {
@@ -258,7 +301,7 @@ class SharePointPreviewService(BasePreviewService):
             if preview.key and preview.url
         }
 
-        for site in site_map.values():
+        for site in team_site_map.values():
             site_key = by_site_id.get(site.get("id") or "") or by_url.get(
                 self._normalize_web_url(site.get("webUrl"))
             )
