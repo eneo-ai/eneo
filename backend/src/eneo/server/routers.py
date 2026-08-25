@@ -66,6 +66,9 @@ from eneo.integration.presentation.integration_router import (
 from eneo.integration.presentation.sharepoint_webhook_router import (
     router as sharepoint_webhook_router,
 )
+from eneo.integration.sharepoint_fixture.router import (
+    router as sharepoint_fixture_router,
+)
 from eneo.jobs.job_router import router as jobs_router
 from eneo.limits.limit_router import router as limit_router
 from eneo.logging.logging_router import router as logging_router
@@ -488,6 +491,12 @@ router.include_router(
     audit_router,
     prefix="",
     tags=["audit"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    sharepoint_fixture_router,
+    prefix="/integrations/sharepoint/fixtures",
+    tags=["integrations", "development-fixtures"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(

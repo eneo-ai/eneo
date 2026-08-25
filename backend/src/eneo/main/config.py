@@ -213,6 +213,11 @@ class Settings(BaseSettings):
     # Controls error detail exposure in API responses
     environment: str = "production"
 
+    # Explicit opt-in for the development-only SharePoint fixture API. Runtime
+    # environment checks provide a second guard so fixture data cannot be
+    # enabled in staging or production by setting this flag alone.
+    sharepoint_fixture_mode_enabled: bool = False
+
     # OpenAPI-only mode flag
     openapi_only_mode: bool = False
 
