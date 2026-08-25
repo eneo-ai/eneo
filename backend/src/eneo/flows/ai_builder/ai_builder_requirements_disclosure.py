@@ -59,6 +59,7 @@ from eneo.flows.ai_builder.planning_state import (
     CheckpointIntent,
     CheckpointProducerKind,
     ConfirmedRuntimeMetadataField,
+    ExactNamedResultPlacement,
     ExampleOutputSchemaInferenceReason,
     FileRole,
     FileRoleEvidence,
@@ -66,6 +67,8 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
     SchemaEvidence,
+    UnplacedNamedResultPlacement,
+    named_result_location_id,
 )
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
@@ -187,8 +190,24 @@ def _named_content_fields(
 
     return [
         NamedContentFieldPayload(
-            id=obligation.name,
-            label=_named_result_text(obligation, locale, render_value=render_value),
+            id=named_result_location_id(obligation),
+            # The raw leaf spelling: the card's hierarchy and placement
+            # affordance key on identities, never on the display label
+            # (which carries shape prose).
+            name=obligation.name,
+            label=_named_result_text(
+                obligation,
+                locale,
+                render_value=render_value,
+                include_placement=False,
+            ),
+            segments=(
+                list(obligation.placement.segments)
+                if isinstance(obligation.placement, ExactNamedResultPlacement)
+                else []
+            ),
+            unplaced=isinstance(obligation.placement, UnplacedNamedResultPlacement),
+            can_contain_fields=obligation.declared_shape is not None,
             origin=obligation.origin,
         )
         for obligation in session_state.named_result_evidence
@@ -737,24 +756,47 @@ def _named_result_text(
     locale: Locale,
     *,
     render_value: RenderEvidenceValue,
+    include_placement: bool = True,
 ) -> str:
     name = render_value(obligation.name)
+    details: list[str] = []
     match obligation.declared_shape:
         case "array":
-            return (
-                f"{name} (användaren skrev en lista)"
+            details.append(
+                "användaren skrev en lista"
                 if locale == "sv"
-                else f"{name} (the user wrote a list)"
+                else "the user wrote a list"
             )
         case "object":
-            return (
-                f"{name} (användaren skrev ett objekt)"
+            details.append(
+                "användaren skrev ett objekt"
                 if locale == "sv"
-                else f"{name} (the user wrote an object)"
+                else "the user wrote an object"
             )
         case None:
-            return name
-    return assert_never(obligation.declared_shape)
+            pass
+        case _ as unreachable:
+            assert_never(unreachable)
+
+    indentation = ""
+    if include_placement:
+        match obligation.placement:
+            case ExactNamedResultPlacement(segments=segments) if segments:
+                indentation = "\N{NO-BREAK SPACE}\N{NO-BREAK SPACE}" * len(segments)
+                parent_path = " › ".join(render_value(segment) for segment in segments)
+                details.append(f"under {parent_path}")
+                name = f"↳ {name}"
+            case ExactNamedResultPlacement():
+                pass
+            case UnplacedNamedResultPlacement():
+                details.append(
+                    "plats ej angiven" if locale == "sv" else "placement not specified"
+                )
+            case _ as unreachable:
+                assert_never(unreachable)
+
+    suffix = f" ({'; '.join(details)})" if details else ""
+    return f"{indentation}{name}{suffix}"
 
 
 def _output_schema_summary_line(

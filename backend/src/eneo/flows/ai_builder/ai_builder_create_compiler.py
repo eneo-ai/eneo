@@ -32,10 +32,13 @@ from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    AttestedResultField,
     CreateFlowIntent,
     ProposalObligationProjection,
     attested_result_contract_violations,
+    attested_result_fields_from_drafts,
     attested_violation_message,
+    resolve_attested_result_contract,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
@@ -300,16 +303,7 @@ def _canonicalize_attested_output_fields(
     *,
     projection: ProposalObligationProjection | None,
 ) -> CreateFlowIntent:
-    """Deterministic, visible normalization of the attested terminal roots.
-
-    User-named results compile required, and nullable where the type system
-    allows it (primitives only; a declared array or object expresses absence
-    through the empty value plus the runtime degradation convention). They
-    keep the named-results-first order the confirmation showed; every other
-    field keeps its model-declared relative order. Admission has already
-    verified presence, spelling and shape through the same predicate, so
-    this never invents, drops or renames a field.
-    """
+    """Normalize attested siblings in place throughout the terminal tree."""
 
     if projection is None or not intent.steps:
         return intent
@@ -317,29 +311,51 @@ def _canonicalize_attested_output_fields(
     fields = list(terminal.output_fields or ())
     if not fields:
         return intent
-    attested_names = set(projection.ordered_keys)
-    by_name = {field.name: field for field in fields}
-    if not attested_names <= set(by_name):
-        # Admission guarantees presence; a miss here is a server defect the
-        # postcondition below reports on the compiled schema.
+    resolution = resolve_attested_result_contract(
+        attested_result_fields_from_drafts(fields),
+        projection=projection,
+    )
+    if resolution.violations:
         return intent
-    normalized_attested: list[StructuredFieldDraft] = []
-    for name in projection.ordered_keys:
-        field = by_name[name]
-        normalized_attested.append(
-            field.model_copy(
-                update={
-                    "required": True,
-                    "nullable": (
-                        True
-                        if field.field_type not in ("object", "array")
-                        else field.nullable
-                    ),
-                }
-            )
+    attested_paths = {location.path for location in resolution.locations}
+    ordered_names_by_parent: dict[tuple[str, ...], list[str]] = {}
+    for location in resolution.locations:
+        ordered_names_by_parent.setdefault(location.path[:-1], []).append(
+            location.path[-1]
         )
-    rest = [field for field in fields if field.name not in attested_names]
-    reordered = normalized_attested + rest
+
+    def normalize_siblings(
+        siblings: list[StructuredFieldDraft],
+        parent_path: tuple[str, ...],
+    ) -> list[StructuredFieldDraft]:
+        normalized: list[StructuredFieldDraft] = []
+        for field in siblings:
+            path = (*parent_path, field.name)
+            updates: dict[str, object] = {}
+            children = field.fields or field.item_fields
+            if children:
+                normalized_children = normalize_siblings(list(children), path)
+                if field.field_type == "object":
+                    updates["fields"] = normalized_children
+                else:
+                    updates["item_fields"] = normalized_children
+            if path in attested_paths:
+                updates["required"] = True
+                if field.field_type not in ("object", "array"):
+                    updates["nullable"] = True
+            normalized.append(field.model_copy(update=updates) if updates else field)
+
+        attested_names = ordered_names_by_parent.get(parent_path, [])
+        if not attested_names:
+            return normalized
+        by_name = {field.name: field for field in normalized}
+        attested = [by_name[name] for name in attested_names]
+        attested_name_set = set(attested_names)
+        return attested + [
+            field for field in normalized if field.name not in attested_name_set
+        ]
+
+    reordered = normalize_siblings(fields, ())
     new_terminal = terminal.model_copy(update={"output_fields": reordered})
     return intent.model_copy(update={"steps": [*intent.steps[:-1], new_terminal]})
 
@@ -370,12 +386,11 @@ def _spec_satisfying_attested_contract(
         None,
     )
     schema = outcome_contract if isinstance(outcome_contract, dict) else {}
-    roots = tuple(
-        (str(name), str(cast(dict[str, Any], value).get("type", "")))
-        for name, value in resolve_schema_properties(schema).items()
-        if isinstance(value, dict)
+    terminal_fields = _attested_fields_from_schema(schema)
+    violations = attested_result_contract_violations(
+        terminal_fields,
+        projection=projection,
     )
-    violations = attested_result_contract_violations(roots, projection=projection)
     if not violations:
         return spec
     detail = "; ".join(
@@ -390,6 +405,44 @@ def _spec_satisfying_attested_contract(
             "field_names": ",".join(v.key_name for v in violations),
         },
     )
+
+
+def _attested_fields_from_schema(
+    schema: dict[str, Any],
+) -> tuple[AttestedResultField, ...]:
+    fields: list[AttestedResultField] = []
+    for raw_name, raw_value in resolve_schema_properties(schema).items():
+        if not isinstance(raw_value, dict):
+            continue
+        value = cast(dict[str, Any], raw_value)
+        field_type = _schema_field_type(value)
+        child_schema = value
+        if field_type == "array" and isinstance(value.get("items"), dict):
+            child_schema = cast(dict[str, Any], value["items"])
+        fields.append(
+            AttestedResultField(
+                name=str(raw_name),
+                field_type=field_type,
+                children=_attested_fields_from_schema(child_schema),
+            )
+        )
+    return tuple(fields)
+
+
+def _schema_field_type(schema: dict[str, Any]) -> str:
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str):
+        return raw_type
+    if isinstance(raw_type, list):
+        return next(
+            (
+                item
+                for item in cast(list[object], raw_type)
+                if isinstance(item, str) and item != "null"
+            ),
+            "",
+        )
+    return ""
 
 
 def _apply_flow_input_schema(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
@@ -123,7 +123,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     GenerateProposal,
     resolve_turn_control,
 )
-from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.ai_builder.planning_state import BUILDER_SCHEMA_VERSION, PlanningState
 from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
 )
@@ -232,6 +232,12 @@ PreparedTurnOutcome: TypeAlias = ServerOutputPrepared | ProposalPrepared
 async def prepare_planner_request(
     request: PlannerRequestPreparationInput,
 ) -> PreparedTurnOutcome:
+    persisted = request.persisted_planning_state
+    if (
+        persisted is not None
+        and persisted.builder_schema_version != BUILDER_SCHEMA_VERSION
+    ):
+        request = replace(request, persisted_planning_state=None)
     requirements_state = resolve_requirements_state(request.conversation)
     ui_language = _resolve_ui_language(request.conversation)
     if request.prepared_schema_candidates is not None:

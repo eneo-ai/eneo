@@ -37,6 +37,10 @@ from eneo.flows.ai_builder.ai_builder_question_state import (
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
+from eneo.flows.ai_builder.planning_state import (
+    NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
+    is_named_result_location_id,
+)
 from eneo.flows.ai_builder.question_catalog import (
     QUESTION_CATALOG,
     legal_slot_values,
@@ -184,33 +188,70 @@ def _validated_named_content_fields_edit(
     ):
         _raise_invalid_question_payload("requirements_version_stale")
 
-    shown = {
-        fold_result_field_name(field.id) for field in disclosure.named_content_fields
+    shown_by_id = {field.id: field for field in disclosure.named_content_fields}
+    legacy_shown_by_fold = {
+        fold_result_field_name(field.id): field
+        for field in disclosure.named_content_fields
+        if not is_named_result_location_id(field.id)
     }
     field_names: list[str] = []
     added_field_names: list[str] = []
-    seen: set[str] = set()
-    for raw_name in edit.field_names:
-        name = raw_name.strip()
-        folded = fold_result_field_name(name)
-        if not name or not folded:
+    seen: set[tuple[str, str]] = set()
+    for raw_value in edit.field_names:
+        name = raw_value.strip()
+        shown_field = shown_by_id.get(name)
+        if shown_field is None and not is_named_result_location_id(name):
+            shown_field = legacy_shown_by_fold.get(fold_result_field_name(name))
+        if shown_field is not None:
+            field_id = shown_field.id if is_named_result_location_id(name) else name
+            seen_key = (
+                ("id", field_id)
+                if is_named_result_location_id(field_id)
+                else ("name", fold_result_field_name(field_id))
+            )
+            if seen_key in seen:
+                continue
+            seen.add(seen_key)
+            field_names.append(field_id)
+            continue
+        if is_named_result_location_id(name):
             raise AIBuilderBadRequestException(
                 "Structured question answer could not be applied.",
                 code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
-                context={"reason": "invalid_field_name", "field_name": raw_name},
+                context={"reason": "unknown_field_id", "field_id": name},
             )
-        if folded in seen:
+        folded = fold_result_field_name(name)
+        if not name or not folded or len(name) > NAMED_RESULT_FIELD_NAME_MAX_LENGTH:
+            raise AIBuilderBadRequestException(
+                "Structured question answer could not be applied.",
+                code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+                context={"reason": "invalid_field_name", "field_name": raw_value},
+            )
+        seen_key = ("name", folded)
+        if seen_key in seen:
             # Two chips for one field is the same field said twice, not a
             # conflict the user has to resolve.
             continue
-        seen.add(folded)
+        seen.add(seen_key)
         field_names.append(name)
-        if folded not in shown:
-            added_field_names.append(name)
+        added_field_names.append(name)
+    # Deduplication keeps the FIRST spelling of a folded name; the request
+    # validator normalized placement keys independently. Re-key the
+    # placements to the spellings that actually survived, so replay's exact
+    # lookup can never silently miss and drop a placed addition to root.
+    # (Duplicate folded placement keys were already rejected upstream, so
+    # each fold maps to at most one placement.)
+    kept_by_fold = {fold_result_field_name(name): name for name in added_field_names}
+    normalized_placements: dict[str, str] = {}
+    for key, parent in edit.added_field_placements.items():
+        kept = kept_by_fold.get(fold_result_field_name(key))
+        if kept is not None:
+            normalized_placements[kept] = parent
     return edit.model_copy(
         update={
             "field_names": field_names,
             "added_field_names": added_field_names,
+            "added_field_placements": normalized_placements,
         }
     )
 

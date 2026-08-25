@@ -6382,5 +6382,12 @@
   "module_login_invalid_request": "Inloggningsbegäran är ofullständig. Gå tillbaka till modulen och försök igen.",
   "module_login_unavailable": "Modulen är inte tillgänglig för din organisation.",
   "module_login_service_unavailable": "Eneo kunde inte slutföra modulinloggningen just nu. Försök igen senare.",
-  "module_login_back_to_eneo": "Tillbaka till Eneo"
+  "module_login_back_to_eneo": "Tillbaka till Eneo",
+  "ai_builder_requirements_group_inside": "Inuti {parent}",
+  "ai_builder_requirements_group_unplaced": "Plats ej angiven – bekräftas utan bestämd placering",
+  "ai_builder_requirements_group_show_more": "+{count} fält till",
+  "ai_builder_requirements_field_remove_with_children": "Ta bort {field} och {count} underfält",
+  "ai_builder_requirements_field_place": "Placera {field} i en grupp",
+  "ai_builder_requirements_place_label": "Placering för det nya fältet",
+  "ai_builder_requirements_place_top_level": "Toppnivå"
 }

@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.planning_state import (
     AttachmentCoverage,
     CheckpointIntent,
     ConfirmedRuntimeMetadataField,
+    ExactNamedResultPlacement,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
@@ -42,6 +43,7 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
     StepTriple,
+    UnplacedNamedResultPlacement,
     enforce_planning_state_payload_cap,
 )
 from eneo.flows.enums import FlowAuthoringInputType, FlowAuthoringOutputMode
@@ -50,9 +52,9 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_twenty(self) -> None:
-        # v20: a checkpoint intent persists the evidence level that admitted it.
-        assert BUILDER_SCHEMA_VERSION == 20
+    def test_builder_schema_version_is_twenty_one(self) -> None:
+        # v21: named-result placement is explicit in persisted evidence.
+        assert BUILDER_SCHEMA_VERSION == 21
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -685,6 +687,155 @@ class TestResolvedSlotValidation:
 
 
 class TestNamedResultEvidenceValidation:
+    def test_placement_union_round_trips_exact_root_nested_and_unplaced(self) -> None:
+        placements = (
+            ExactNamedResultPlacement(),
+            ExactNamedResultPlacement(segments=("documents", "passages")),
+            UnplacedNamedResultPlacement(),
+        )
+
+        restored = tuple(
+            NamedResultEvidence.model_validate_json(
+                NamedResultEvidence(
+                    name="page_or_section",
+                    placement=placement,
+                    evidence=["quote:user_message:user-1:page_or_section"],
+                    confidence="high",
+                ).model_dump_json()
+            ).placement
+            for placement in placements
+        )
+
+        assert restored == placements
+        assert ExactNamedResultPlacement().segments == ()
+
+    @pytest.mark.parametrize(
+        ("segments", "error"),
+        [
+            (
+                ("one", "two", "three", "four"),
+                "named result placement exceeds structured field depth",
+            ),
+            (
+                ("valid", "123"),
+                "named result placement segments must be compilable identifiers",
+            ),
+        ],
+    )
+    def test_exact_placement_rejects_depth_and_identifier_violations(
+        self,
+        segments: tuple[str, ...],
+        error: str,
+    ) -> None:
+        with pytest.raises(ValidationError, match=error):
+            NamedResultEvidence(
+                name="leaf",
+                placement=ExactNamedResultPlacement(segments=segments),
+                evidence=["quote:user_message:user-1:leaf"],
+                confidence="high",
+            )
+
+    def test_named_result_rejects_a_leaf_that_cannot_compile(self) -> None:
+        with pytest.raises(
+            ValidationError,
+            match="named result evidence name must be non-empty",
+        ):
+            NamedResultEvidence(
+                name="2024_summary",
+                evidence=["quote:user_message:user-1:2024_summary"],
+                confidence="high",
+            )
+
+    def test_state_accepts_same_leaf_at_two_exact_locations(self) -> None:
+        state = PlanningState.empty()
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name="events",
+                placement=ExactNamedResultPlacement(),
+                declared_shape="array",
+                evidence=["quote:user_message:user-1:events[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="alerts",
+                placement=ExactNamedResultPlacement(),
+                declared_shape="array",
+                evidence=["quote:user_message:user-1:alerts[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="timestamp",
+                placement=ExactNamedResultPlacement(segments=("events",)),
+                evidence=["quote:user_message:user-1:events[].timestamp"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="timestamp",
+                placement=ExactNamedResultPlacement(segments=("alerts",)),
+                evidence=["quote:user_message:user-1:alerts[].timestamp"],
+                confidence="high",
+            ),
+        ]
+
+        assert PlanningState.model_validate(
+            state.model_dump()
+        ).named_result_evidence == (state.named_result_evidence)
+
+    def test_state_rejects_unplaced_leaf_that_also_has_exact_placement(self) -> None:
+        with pytest.raises(ValidationError, match="unplaced named result.*timestamp"):
+            PlanningState.model_validate(
+                {
+                    **PlanningState.empty().model_dump(),
+                    "named_result_evidence": [
+                        {
+                            "name": "timestamp",
+                            "placement": {"kind": "unplaced"},
+                            "evidence": ["quote:user_message:user-1:timestamp"],
+                            "confidence": "high",
+                        },
+                        {
+                            "name": "timestamp",
+                            "placement": {
+                                "kind": "exact",
+                                "segments": ["events"],
+                            },
+                            "evidence": [
+                                "quote:user_message:user-1:events[].timestamp"
+                            ],
+                            "confidence": "high",
+                        },
+                    ],
+                }
+            )
+
+    def test_state_rejects_exact_orphan_with_the_full_path(self) -> None:
+        with pytest.raises(ValidationError, match=r"documents\.passages\.page"):
+            PlanningState.model_validate(
+                {
+                    **PlanningState.empty().model_dump(),
+                    "named_result_evidence": [
+                        {
+                            "name": "documents",
+                            "placement": {"kind": "exact", "segments": []},
+                            "declared_shape": "array",
+                            "evidence": ["quote:user_message:user-1:documents[]"],
+                            "confidence": "high",
+                        },
+                        {
+                            "name": "page",
+                            "placement": {
+                                "kind": "exact",
+                                "segments": ["documents", "passages"],
+                            },
+                            "evidence": [
+                                "quote:user_message:user-1:documents[].passages[].page"
+                            ],
+                            "confidence": "high",
+                        },
+                    ],
+                }
+            )
+
     @pytest.mark.parametrize(
         ("confidence", "expected"),
         [("high", True), ("medium", True), ("low", False)],

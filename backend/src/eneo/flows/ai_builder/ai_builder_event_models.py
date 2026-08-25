@@ -202,12 +202,9 @@ def _named_content_fields_are_empty(
 class NamedContentFieldPayload(BaseModel):
     """One content obligation the user named, as an item rather than prose.
 
-    `id` is the obligation name as the user wrote it and as planning state
-    stores it. It is not a promise that a field by that name reaches the
-    compiled result: whether an obligation is projected at all depends on the
-    output mode, the presence of a declared schema, and the confidence the name
-    was admitted with. `label` is a bounded readable rendering for display; the
-    exact `id`, not this label, participates in confirmation identity.
+    `id` is an opaque stable encoding of the full folded location. `label` is
+    the bounded leaf rendering; `segments` and `unplaced` carry placement for
+    the card without asking the client to parse the identifier.
 
     `origin` says how the name got here — read out of the user's own writing,
     or typed into this card. It is display provenance, not a requirement: both
@@ -217,7 +214,22 @@ class NamedContentFieldPayload(BaseModel):
 
     id: str
     label: str
+    name: str
+    segments: list[str]
+    unplaced: bool
+    # True when the obligation's declared shape (array/object) can own
+    # nested fields — the card's placement affordance offers exactly these,
+    # including childless ones.
+    can_contain_fields: bool
     origin: NamedResultOrigin = "described"
+
+    @model_validator(mode="after")
+    def require_unplaced_without_segments(self) -> "NamedContentFieldPayload":
+        # The wire shape is flat for client simplicity, but the placement is
+        # a discriminated union in substance: an unplaced name has no path.
+        if self.unplaced and self.segments:
+            raise ValueError("an unplaced named content field cannot carry segments")
+        return self
 
 
 def _resolved_requirements_are_empty(

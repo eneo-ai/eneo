@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
     BaseModel,
@@ -57,9 +57,20 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.planning_state import NamedResultPlacement
+
 # Safety guard against runaway tool output. This should not be a practical
 # product cap for legitimate advanced flows.
 MAX_PROPOSAL_STEPS = 256
+
+
+def fold_named_result_location(
+    name: str,
+    *,
+    segments: Sequence[str] = (),
+) -> tuple[str, ...]:
+    return tuple(fold_result_field_name(part) for part in (*segments, name))
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +78,17 @@ class ObligatedResultKey:
     """One user-attested result key the proposal is verified against."""
 
     name: str
+    placement: NamedResultPlacement
     declared_shape: Literal["array", "object"] | None = None
+
+    @property
+    def folded_identity(self) -> tuple[str, ...]:
+        return fold_named_result_location(
+            self.name,
+            segments=(
+                self.placement.segments if self.placement.kind == "exact" else ()
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,9 +98,9 @@ class ProposalObligationProjection:
     One instance is built at request preparation, travels with the prepared
     request, and is read again by the prompt rule, admission verification and
     the compiled postcondition, so all three always hold the proposal to the
-    very key set the user attested. It also fixes the canonicalized order of
-    the attested roots in the compiled contract. Which keys are eligible is
-    re-derived from one pure rule; the ORDER is never re-derived.
+    very locations the user attested. It also fixes canonicalized sibling order
+    within each attested parent. Which keys are eligible is re-derived from one
+    pure rule; the order is never re-derived.
     """
 
     keys: tuple[ObligatedResultKey, ...]
@@ -87,95 +108,304 @@ class ProposalObligationProjection:
     def __post_init__(self) -> None:
         if not self.keys:
             raise ValueError("An obligation projection requires at least one key")
-        if len({key.name for key in self.keys}) != len(self.keys):
-            raise ValueError("Obligation projection keys must be unique")
+        identities = [(key.placement.kind, key.folded_identity) for key in self.keys]
+        if len(set(identities)) != len(identities):
+            raise ValueError("Obligation projection locations must be unique")
+        unplaced_leaves = {
+            key.folded_identity[-1]
+            for key in self.keys
+            if key.placement.kind == "unplaced"
+        }
+        exact_leaves = {
+            key.folded_identity[-1]
+            for key in self.keys
+            if key.placement.kind == "exact"
+        }
+        if unplaced_leaves & exact_leaves:
+            raise ValueError(
+                "Unplaced obligation keys cannot also have exact locations"
+            )
 
-    @property
-    def ordered_keys(self) -> tuple[str, ...]:
-        return tuple(key.name for key in self.keys)
+    def render_key_location(self, key: ObligatedResultKey) -> str:
+        if key.placement.kind == "unplaced":
+            return key.name
+        path: tuple[str, ...] = (*key.placement.segments, key.name)
+        shapes_by_path: dict[tuple[str, ...], str | None] = {
+            (*candidate.placement.segments, candidate.name): candidate.declared_shape
+            for candidate in self.keys
+            if candidate.placement.kind == "exact"
+        }
+        return ".".join(
+            part + ("[]" if shapes_by_path.get(path[: index + 1]) == "array" else "")
+            for index, part in enumerate(path)
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class AttestedContractViolation:
-    """One way the terminal root fails the attested result contract."""
+    """One way the terminal tree fails the attested result contract."""
 
-    kind: Literal["missing_root", "rename", "duplicate_roots", "shape_conflict"]
+    kind: Literal[
+        "missing_location",
+        "rename",
+        "duplicate_location",
+        "shape_conflict",
+        "ambiguous_placement",
+    ]
     key_name: str
+    expected_path: tuple[str, ...] | None
     declared_shape: Literal["array", "object"] | None
     matched_names: tuple[str, ...]
+    candidate_paths: tuple[str, ...] = ()
+    expected_display_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AttestedResultField:
+    """One field in a terminal result tree consumed by shared verification."""
+
+    name: str
+    field_type: str
+    children: tuple[AttestedResultField, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedObligationLocation:
+    """An attested key paired with its verified terminal-tree path."""
+
+    key: ObligatedResultKey
+    path: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AttestedResultContractResolution:
+    violations: tuple[AttestedContractViolation, ...]
+    locations: tuple[ResolvedObligationLocation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _FieldOccurrence:
+    field: AttestedResultField
+    path: tuple[str, ...]
+    display_path: tuple[str, ...]
+
+
+_NO_OCCURRENCES: tuple[_FieldOccurrence, ...] = ()
+
+
+def _index_attested_result_fields(
+    fields: Sequence[AttestedResultField],
+) -> tuple[
+    dict[tuple[str, ...], tuple[_FieldOccurrence, ...]],
+    dict[str, tuple[_FieldOccurrence, ...]],
+]:
+    by_folded_path_lists: dict[tuple[str, ...], list[_FieldOccurrence]] = {}
+    by_folded_leaf_lists: dict[str, list[_FieldOccurrence]] = {}
+
+    def visit(
+        siblings: Sequence[AttestedResultField],
+        parent: tuple[str, ...],
+        display_parent: tuple[str, ...],
+    ) -> None:
+        for field in siblings:
+            path = (*parent, field.name)
+            display_name = field.name + ("[]" if field.field_type == "array" else "")
+            display_path = (*display_parent, display_name)
+            occurrence = _FieldOccurrence(
+                field=field,
+                path=path,
+                display_path=display_path,
+            )
+            folded_path = tuple(fold_result_field_name(part) for part in path)
+            by_folded_path_lists.setdefault(folded_path, []).append(occurrence)
+            by_folded_leaf_lists.setdefault(folded_path[-1], []).append(occurrence)
+            visit(field.children, path, display_path)
+
+    visit(fields, (), ())
+    return (
+        {key: tuple(value) for key, value in by_folded_path_lists.items()},
+        {key: tuple(value) for key, value in by_folded_leaf_lists.items()},
+    )
+
+
+def resolve_attested_result_contract(
+    terminal_fields: Sequence[AttestedResultField],
+    *,
+    projection: ProposalObligationProjection,
+) -> AttestedResultContractResolution:
+    """Resolve every attested location from one traversal of the terminal tree."""
+
+    by_folded_path, by_folded_leaf = _index_attested_result_fields(terminal_fields)
+    violations: list[AttestedContractViolation] = []
+    locations: list[ResolvedObligationLocation] = []
+    for key in projection.keys:
+        if key.placement.kind == "exact":
+            expected_path = (*key.placement.segments, key.name)
+            group = by_folded_path.get(key.folded_identity, _NO_OCCURRENCES)
+            exact = tuple(item for item in group if item.path == expected_path)
+            if not group:
+                kind = "missing_location"
+            elif not exact:
+                kind = "rename"
+            elif len(group) > 1:
+                kind = "duplicate_location"
+            elif (
+                key.declared_shape is not None
+                and exact[0].field.field_type != key.declared_shape
+            ):
+                kind = "shape_conflict"
+            else:
+                locations.append(
+                    ResolvedObligationLocation(key=key, path=exact[0].path)
+                )
+                continue
+            violations.append(
+                AttestedContractViolation(
+                    kind=kind,
+                    key_name=key.name,
+                    expected_path=expected_path,
+                    declared_shape=key.declared_shape,
+                    matched_names=tuple(item.field.name for item in group),
+                    candidate_paths=tuple(
+                        _render_occurrence_path(item) for item in group
+                    ),
+                    expected_display_path=projection.render_key_location(key),
+                )
+            )
+            continue
+
+        group = by_folded_leaf.get(key.folded_identity[-1], _NO_OCCURRENCES)
+        # Ambiguity is tested before emptiness so the type checker can
+        # compose the narrowing: after both fail, exactly one occurrence
+        # remains.
+        if len(group) > 1:
+            violations.append(
+                AttestedContractViolation(
+                    kind="ambiguous_placement",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=tuple(item.field.name for item in group),
+                    candidate_paths=tuple(
+                        _render_occurrence_path(item) for item in group[:10]
+                    ),
+                )
+            )
+        elif not group:
+            violations.append(
+                AttestedContractViolation(
+                    kind="missing_location",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=(),
+                )
+            )
+        elif (only := group[0]).field.name != key.name:
+            violations.append(
+                AttestedContractViolation(
+                    kind="rename",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=(only.field.name,),
+                    candidate_paths=(_render_occurrence_path(only),),
+                )
+            )
+        elif (
+            key.declared_shape is not None
+            and only.field.field_type != key.declared_shape
+        ):
+            violations.append(
+                AttestedContractViolation(
+                    kind="shape_conflict",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=(only.field.name,),
+                    candidate_paths=(_render_occurrence_path(only),),
+                )
+            )
+        else:
+            locations.append(ResolvedObligationLocation(key=key, path=only.path))
+    return AttestedResultContractResolution(
+        violations=tuple(violations),
+        locations=tuple(locations),
+    )
+
+
+def _render_occurrence_path(occurrence: _FieldOccurrence) -> str:
+    return ".".join(occurrence.display_path)
 
 
 def attested_result_contract_violations(
-    terminal_root_fields: Sequence[tuple[str, str]],
+    terminal_fields: Sequence[AttestedResultField],
     *,
     projection: ProposalObligationProjection,
 ) -> tuple[AttestedContractViolation, ...]:
-    """The ONE verification predicate for the attested result contract.
+    """The one admission and compiled-postcondition verification predicate."""
 
-    Read by admission over the model's draft fields AND by the compiler over
-    the compiled terminal schema, so the two can never disagree: the model
-    authors its own declaration and the server verifies it against the
-    attested contract.
-
-    The contract per projected key: exactly one terminal-ROOT field whose
-    spelling exactly matches the attested name; folding only locates a
-    rename for an actionable error, it never satisfies the contract; a
-    declared shape constrains the effective type; an undeclared shape
-    accepts any legal structured type. Nested occurrences are invisible
-    here on purpose — a nested-only occurrence IS a missing root.
-    """
-
-    violations: list[AttestedContractViolation] = []
-    for key in projection.keys:
-        folded = fold_result_field_name(key.name)
-        group = [
-            (name, field_type)
-            for name, field_type in terminal_root_fields
-            if fold_result_field_name(name) == folded
-        ]
-        exact = [(n, ft) for n, ft in group if n == key.name]
-        if not group:
-            kind = "missing_root"
-        elif not exact:
-            kind = "rename"
-        elif len(group) > 1:
-            kind = "duplicate_roots"
-        elif key.declared_shape is not None and exact[0][1] != key.declared_shape:
-            kind = "shape_conflict"
-        else:
-            continue
-        violations.append(
-            AttestedContractViolation(
-                kind=kind,
-                key_name=key.name,
-                declared_shape=key.declared_shape,
-                matched_names=tuple(n for n, _ in group),
-            )
-        )
-    return tuple(violations)
+    return resolve_attested_result_contract(
+        terminal_fields,
+        projection=projection,
+    ).violations
 
 
 def attested_violation_message(violation: AttestedContractViolation) -> str:
     """One actionable sentence per violation kind, shared by both callers."""
 
-    if violation.kind == "missing_root":
+    expected_path = violation.expected_path
+    if violation.kind == "missing_location" and expected_path is None:
+        return (
+            f"the user-named result `{violation.key_name}` must exist exactly once "
+            "somewhere in the final step's output_fields"
+        )
+    if violation.kind == "missing_location" and len(expected_path or ()) == 1:
         return (
             f"the user-named result `{violation.key_name}` must exist at the "
             "top level of the final step's output_fields"
         )
+    if violation.kind == "missing_location":
+        parent = ".".join((expected_path or ())[:-1])
+        return (
+            f"the user-named result `{violation.key_name}` must exist directly "
+            f"under `{parent}` in the final step's output_fields"
+        )
     if violation.kind == "rename":
+        if expected_path is not None and len(expected_path) > 1:
+            found_paths = ", ".join(f"`{path}`" for path in violation.candidate_paths)
+            return (
+                f"rename location {found_paths} to exactly "
+                f"`{violation.expected_display_path}` — the user attested to that path"
+            )
         found = ", ".join(f"`{name}`" for name in violation.matched_names)
         return (
             f"rename {found} to exactly `{violation.key_name}` — the user "
             "attested to that spelling"
         )
-    if violation.kind == "duplicate_roots":
+    if violation.kind == "duplicate_location":
+        parent = (expected_path or ())[:-1]
+        location = (
+            "at the top level" if not parent else f"directly under `{'.'.join(parent)}`"
+        )
         return (
-            f"declare `{violation.key_name}` exactly once at the top level of "
+            f"declare `{violation.key_name}` exactly once {location} in "
             "the final step's output_fields"
         )
+    if violation.kind == "ambiguous_placement":
+        candidates = ", ".join(f"`{path}`" for path in violation.candidate_paths)
+        return (
+            f"the user-named result `{violation.key_name}` has ambiguous placement: "
+            f"{candidates} (showing {len(violation.candidate_paths)} of "
+            f"{len(violation.matched_names)})"
+        )
+    location = (
+        violation.expected_display_path or ".".join(expected_path)
+        if expected_path is not None
+        else violation.candidate_paths[0]
+    )
     return (
-        f"`{violation.key_name}` must be of type "
+        f"`{location}` must be of type "
         f"`{violation.declared_shape}` — the user declared that shape"
     )
 
@@ -532,7 +762,7 @@ def _verify_attested_result_contract(
     """Admission arm of the one verification predicate.
 
     The model authors its own output_fields; this verifies the attested
-    contract on the TERMINAL step's roots and rejects with the exact path.
+    contract on the terminal step's complete field tree.
     """
 
     if not intent.steps:
@@ -540,20 +770,29 @@ def _verify_attested_result_contract(
     terminal_index = len(intent.steps) - 1
     terminal = intent.steps[terminal_index]
     fields = list(terminal.output_fields or ())
-    roots = tuple((field.name, str(field.field_type)) for field in fields)
-    violations = attested_result_contract_violations(roots, projection=projection)
+    terminal_fields = attested_result_fields_from_drafts(fields)
+    violations = attested_result_contract_violations(
+        terminal_fields,
+        projection=projection,
+    )
     if not violations:
         return
     prefix = f"steps.{terminal_index}.output_fields"
     index_of = {field.name: i for i, field in enumerate(fields)}
 
     def _path(violation: AttestedContractViolation) -> str:
-        # The exact offending property: a rename points at the misspelled
-        # field's name, a shape conflict at the field's type; a missing or
-        # duplicated root has no single field to point at.
-        if violation.kind == "rename" and violation.matched_names:
+        if (
+            violation.kind == "rename"
+            and violation.matched_names
+            and violation.expected_path is not None
+            and len(violation.expected_path) == 1
+        ):
             return f"{prefix}.{index_of[violation.matched_names[0]]}.name"
-        if violation.kind == "shape_conflict":
+        if (
+            violation.kind == "shape_conflict"
+            and violation.expected_path is not None
+            and len(violation.expected_path) == 1
+        ):
             return f"{prefix}.{index_of[violation.key_name]}.field_type"
         return prefix
 
@@ -562,6 +801,21 @@ def _verify_attested_result_contract(
             f"{_path(v)}: {attested_violation_message(v)} [value_error]"
             for v in violations
         )
+    )
+
+
+def attested_result_fields_from_drafts(
+    fields: Sequence[StructuredFieldDraft],
+) -> tuple[AttestedResultField, ...]:
+    return tuple(
+        AttestedResultField(
+            name=field.name,
+            field_type=str(field.field_type),
+            children=attested_result_fields_from_drafts(
+                field.fields or field.item_fields or ()
+            ),
+        )
+        for field in fields
     )
 
 
@@ -771,10 +1025,14 @@ def build_semantic_step_schema(
 
 
 __all__ = [
+    "AttestedContractViolation",
+    "AttestedResultContractResolution",
+    "AttestedResultField",
     "CreateFlowIntent",
     "ObligatedResultKey",
     "ProposalIntentArgumentError",
     "ProposalObligationProjection",
+    "ResolvedObligationLocation",
     "AddStep",
     "AssistantSpecPatch",
     "FlowInputFieldIntent",
@@ -783,10 +1041,11 @@ __all__ = [
     "OrderedEditStep",
     "SemanticStepIntent",
     "build_create_flow_tool_schema",
+    "attested_result_fields_from_drafts",
     "attested_result_contract_violations",
     "attested_violation_message",
-    "AttestedContractViolation",
     "build_semantic_step_schema",
     "parse_create_flow_intent_arguments",
+    "resolve_attested_result_contract",
     "safe_validation_issues",
 ]

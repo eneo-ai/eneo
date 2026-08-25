@@ -755,8 +755,14 @@ def _build_slot_classification_prompt(
         "unresolved. "
         "For named_result_evidence, return only cited changes to open-vocabulary "
         "names or noun phrases the user explicitly requires the final result to "
-        "contain, for every terminal output type. Use update "
-        "with names for additions and removed_names for removals. Cite "
+        "contain, for every terminal output type. Use update with location-bearing "
+        "upserts for additions and removals for removals. For each leaf, submit either "
+        "ordered outermost-to-immediate-parent segments or unplaced=true without "
+        "segments, plus that leaf's own exact evidence quotes. Empty segments require "
+        "evidence that the user put the leaf at the top level; an unknown or unproven "
+        "parent is unplaced, never root. Nested placement requires evidence for every "
+        "immediate parent-child relationship, not merely a quote containing both "
+        "names; do not combine locations' quotes to manufacture an edge. Cite "
         "current user_message or structured_answer evidence containing every changed "
         f"name using up to {NAMED_RESULT_DELTA_CITATION_MAX_ITEMS} exact evidence "
         "quotes, and use only as many quotes as needed. "
@@ -888,7 +894,7 @@ def _build_slot_classification_prompt(
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"checkpoint_updates": [{"operation": "update"|"clear", "producer_kind": "transcript"|"structured_result"|"report_text", "mode": "view"|"edit"|null, "confidence": "high"|"medium", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
-        '"named_result_evidence": {"operation": "update"|"clear", "names": [str], "removed_names": [str], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
+        '"named_result_evidence": {"operation": "update"|"clear", "upserts": [{"name": str, ("segments": [str] | "unplaced": true), "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "removals": [{"name": str, ("segments": [str] | "unplaced": true), "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"schema_direction": {"input_fingerprint": str|null, "output_fingerprint": str|null, "reference_only": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"secondary_obligations": [str], '

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import Any, Literal, assert_never, cast, get_args
 from uuid import UUID
 
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
-from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
+from eneo.flows.ai_builder.ai_builder_new_step_models import MAX_STRUCTURED_FIELD_DEPTH
+from eneo.flows.ai_builder.ai_builder_proposal_intent import fold_named_result_location
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
@@ -21,11 +24,14 @@ from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     AttachmentCoverage,
     CheckpointProducerKind,
+    ExactNamedResultPlacement,
     ExampleOutputConstraintEvidence,
     ExampleOutputStyleCategory,
     FileRole,
     NamedResultDeclaredShape,
+    NamedResultPlacement,
     SlotEvidenceLevel,
+    UnplacedNamedResultPlacement,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
@@ -54,7 +60,7 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
     {"$", "@", "#", "/", "\\", ":", "[", "]", "{", "}", "."}
 )
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 22
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 24
 _DECLARED_SHAPE_BY_NOTATION: Mapping[str, NamedResultDeclaredShape] = {
     "[]": "array",
     "{}": "object",
@@ -256,40 +262,57 @@ class ClassifiedCheckpointUpdate:
 class ClassifiedNamedResultEvidence:
     name: str
     evidence: tuple[ClassifiedEvidence, ...]
+    placement: NamedResultPlacement = dataclass_field(
+        default_factory=ExactNamedResultPlacement
+    )
     declared_shape: NamedResultDeclaredShape | None = None
+
+    @property
+    def folded_exact_identity(self) -> tuple[str, ...] | None:
+        if not isinstance(self.placement, ExactNamedResultPlacement):
+            return None
+        return fold_named_result_location(
+            self.name,
+            segments=self.placement.segments,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class ClassifiedNamedResultDelta:
     operation: Literal["update", "clear"]
-    names: tuple[str, ...]
+    upserts: tuple[ClassifiedNamedResultEvidence, ...]
     confidence: SlotClassificationConfidence
     reason: str
-    removed_names: tuple[str, ...] = ()
+    removals: tuple[ClassifiedNamedResultEvidence, ...] = ()
     evidence: tuple[ClassifiedEvidence, ...] = ()
-    evidence_by_name: tuple[ClassifiedNamedResultEvidence, ...] = ()
 
     def __post_init__(self) -> None:
-        changed_names = tuple(
-            fold_result_field_name(name) for name in (*self.names, *self.removed_names)
-        )
-        mapped_names = tuple(
-            fold_result_field_name(item.name) for item in self.evidence_by_name
-        )
-        if (
-            any(not name for name in (*changed_names, *mapped_names))
-            or len(changed_names) != len(set(changed_names))
-            or len(mapped_names) != len(set(mapped_names))
-            or set(mapped_names) != set(changed_names)
-        ):
-            raise ValueError("evidence_by_name must exactly cover named-result changes")
+        changed = (*self.upserts, *self.removals)
+        if self.operation == "clear" and changed:
+            raise ValueError("clear named-result delta must not carry locations")
+        identities = tuple(_classified_named_result_identity(item) for item in changed)
+        if len(identities) != len(set(identities)):
+            raise ValueError(
+                "named-result changes must have unique location identities"
+            )
         allowed_evidence = set(self.evidence)
         if any(
             not item.evidence
             or any(citation not in allowed_evidence for citation in item.evidence)
-            for item in self.evidence_by_name
+            for item in changed
         ):
-            raise ValueError("evidence_by_name citations must belong to delta evidence")
+            raise ValueError(
+                "named-result location citations must belong to delta evidence"
+            )
+
+
+def _classified_named_result_identity(
+    item: ClassifiedNamedResultEvidence,
+) -> tuple[str, ...]:
+    identity = item.folded_exact_identity
+    if identity is not None:
+        return ("exact", *identity)
+    return ("unplaced", *fold_named_result_location(item.name))
 
 
 @dataclass(frozen=True, slots=True)
@@ -565,15 +588,15 @@ def _parse_named_result_evidence(
     operation = item.get("operation")
     if operation not in {"update", "clear"}:
         raise _MalformedNamedResultDelta
-    raw_names = item.get("names")
-    raw_removed_names = item.get("removed_names")
-    if not isinstance(raw_names, list) or not isinstance(raw_removed_names, list):
+    raw_upserts = item.get("upserts")
+    raw_removals = item.get("removals")
+    if not isinstance(raw_upserts, list) or not isinstance(raw_removals, list):
         raise _MalformedNamedResultDelta
-    raw_name_items = cast(list[object], raw_names)
-    raw_removed_name_items = cast(list[object], raw_removed_names)
-    if operation == "update" and not (raw_name_items or raw_removed_name_items):
+    raw_upsert_items = cast(list[object], raw_upserts)
+    raw_removal_items = cast(list[object], raw_removals)
+    if operation == "update" and not (raw_upsert_items or raw_removal_items):
         raise _MalformedNamedResultDelta
-    if operation == "clear" and (raw_name_items or raw_removed_name_items):
+    if operation == "clear" and (raw_upsert_items or raw_removal_items):
         raise _MalformedNamedResultDelta
     confidence = item.get("confidence")
     if confidence not in {"high", "medium", "low"}:
@@ -609,40 +632,43 @@ def _parse_named_result_evidence(
     )
     if not user_owned_evidence:
         return None
-    evidence_by_name = _parse_cited_named_result_evidence(
-        raw_name_items,
-        evidence=user_owned_evidence,
+    upserts = _parse_cited_named_result_locations(
+        raw_upsert_items,
+        allowed_evidence=user_owned_evidence,
+        classification_input=classification_input,
         source_texts=source_texts,
     )
-    removed_evidence_by_name = _parse_cited_named_result_evidence(
-        raw_removed_name_items,
-        evidence=user_owned_evidence,
+    removals = _parse_cited_named_result_locations(
+        raw_removal_items,
+        allowed_evidence=user_owned_evidence,
+        classification_input=classification_input,
         source_texts=source_texts,
+        require_placement_evidence=False,
+        require_removal_intent=True,
     )
-    if evidence_by_name is None or removed_evidence_by_name is None:
+    if upserts is None or removals is None:
         return None
-    names = tuple(item.name for item in evidence_by_name)
-    removed_names = tuple(item.name for item in removed_evidence_by_name)
-    folded_names = [fold_result_field_name(name) for name in (*names, *removed_names)]
+    identities = [
+        _classified_named_result_identity(changed) for changed in (*upserts, *removals)
+    ]
     if (
-        any(not name for name in folded_names)
-        or len(folded_names) != len(set(folded_names))
-        or len(folded_names) > NAMED_RESULT_EVIDENCE_MAX_ITEMS
+        any(not identity[-1] for identity in identities)
+        or len(identities) != len(set(identities))
+        or len(identities) > NAMED_RESULT_EVIDENCE_MAX_ITEMS
     ):
         return None
     reason = item.get("reason")
     return ClassifiedNamedResultDelta(
         operation=cast(Literal["update", "clear"], operation),
-        names=names,
+        upserts=upserts,
         confidence=cast(SlotClassificationConfidence, confidence),
         reason=(
             reason.strip()
             if isinstance(reason, str) and reason.strip()
             else "named-result classification"
         ),
-        removed_names=removed_names,
+        removals=removals,
         evidence=user_owned_evidence,
-        evidence_by_name=(*evidence_by_name, *removed_evidence_by_name),
     )
 
 
@@ -723,27 +749,498 @@ def _parse_checkpoint_updates(
     return tuple(updates)
 
 
-def _parse_cited_named_result_evidence(
-    raw_names: list[object],
+def _parse_cited_named_result_locations(
+    raw_locations: list[object],
     *,
-    evidence: tuple[ClassifiedEvidence, ...],
+    allowed_evidence: tuple[ClassifiedEvidence, ...],
+    classification_input: SlotClassificationInput,
     source_texts: Mapping[str, str],
+    require_placement_evidence: bool = True,
+    require_removal_intent: bool = False,
 ) -> tuple[ClassifiedNamedResultEvidence, ...] | None:
-    evidence_by_name: list[ClassifiedNamedResultEvidence] = []
-    for raw_name in raw_names:
+    locations: list[ClassifiedNamedResultEvidence] = []
+    allowed_evidence_set = set(allowed_evidence)
+    for raw_location in raw_locations:
+        if not isinstance(raw_location, dict):
+            return None
+        payload = cast(dict[str, object], raw_location)
+        raw_name = payload.get("name")
+        explicitly_unplaced = payload.get("unplaced") is True
+        has_segments = "segments" in payload
+        raw_segments = payload.get("segments")
         if not isinstance(raw_name, str) or not raw_name:
+            return None
+        if explicitly_unplaced:
+            if has_segments or set(payload) != {"name", "unplaced", "evidence"}:
+                return None
+            segments: list[str] = []
+        elif (
+            payload.get("unplaced") is not None
+            or not has_segments
+            or set(payload) != {"name", "segments", "evidence"}
+            or not isinstance(raw_segments, list)
+            or any(
+                not isinstance(segment, str) or not segment
+                for segment in cast(list[object], raw_segments)
+            )
+        ):
+            return None
+        else:
+            segments = cast(list[str], raw_segments)
+        evidence = _parse_classification_evidence(
+            payload.get("evidence", []),
+            classification_input=classification_input,
+            max_items=NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
+        )
+        if not evidence or any(
+            citation not in allowed_evidence_set for citation in evidence
+        ):
             return None
         named_evidence = _cited_named_result_evidence(
             raw_name,
             evidence=evidence,
             source_texts=source_texts,
         )
-        if named_evidence is None or any(
-            item.name == named_evidence.name for item in evidence_by_name
+        if named_evidence is None:
+            return None
+        if require_removal_intent and not _named_result_removal_has_attestation(
+            name=named_evidence.name,
+            evidence=named_evidence.evidence,
+            source_texts=source_texts,
         ):
             return None
-        evidence_by_name.append(named_evidence)
-    return tuple(evidence_by_name)
+        if explicitly_unplaced:
+            locations.append(
+                ClassifiedNamedResultEvidence(
+                    name=named_evidence.name,
+                    placement=UnplacedNamedResultPlacement(),
+                    evidence=named_evidence.evidence,
+                    declared_shape=named_evidence.declared_shape,
+                )
+            )
+            continue
+        normalized_segments: list[str] = []
+        for segment in segments:
+            segment_evidence = _cited_named_result_evidence(
+                segment,
+                evidence=evidence,
+                source_texts=source_texts,
+            )
+            if segment_evidence is None:
+                normalized_segments = []
+                break
+            normalized_segments.append(segment_evidence.name)
+        requested_components = (*normalized_segments, named_evidence.name)
+        placement: NamedResultPlacement
+        # A removal names an EXISTING location: its full folded identity is
+        # what selects the entry to remove, and the evidence proves the
+        # user asked for the removal — placement was attested when the
+        # entry was admitted, so it is not re-attested here.
+        exact_supported = len(normalized_segments) == len(segments) and (
+            True
+            if not require_placement_evidence
+            else _named_result_root_has_attestation(
+                name=named_evidence.name,
+                evidence=named_evidence.evidence,
+                source_texts=source_texts,
+            )
+            if not normalized_segments
+            else all(
+                _named_result_edge_has_contiguous_evidence(
+                    parent=parent,
+                    child=child,
+                    evidence=evidence,
+                    source_texts=source_texts,
+                )
+                for parent, child in zip(requested_components, requested_components[1:])
+            )
+        )
+        if exact_supported:
+            placement = ExactNamedResultPlacement(segments=tuple(normalized_segments))
+        else:
+            placement = UnplacedNamedResultPlacement()
+        locations.append(
+            ClassifiedNamedResultEvidence(
+                name=named_evidence.name,
+                placement=placement,
+                evidence=named_evidence.evidence,
+                declared_shape=named_evidence.declared_shape,
+            )
+        )
+    return tuple(locations)
+
+
+def _named_result_edge_has_contiguous_evidence(
+    *,
+    parent: str,
+    child: str,
+    evidence: tuple[ClassifiedEvidence, ...],
+    source_texts: Mapping[str, str],
+) -> bool:
+    for cited in evidence:
+        parent_occurrences = _cited_field_occurrences(
+            source_text=source_texts[cited.source_id],
+            quote=cited.quote,
+            field_name=parent,
+        )
+        child_occurrences = _cited_field_occurrences(
+            source_text=source_texts[cited.source_id],
+            quote=cited.quote,
+            field_name=child,
+        )
+        if (
+            parent_occurrences
+            and child_occurrences
+            and _spans_attest_named_result_edge(
+                source_texts[cited.source_id],
+                parent_occurrences=parent_occurrences,
+                child_occurrences=child_occurrences,
+            )
+        ):
+            return True
+    return False
+
+
+_REMOVAL_PREFIX_MARKERS = (
+    "remove",
+    "delete",
+    "drop",
+    "skip",
+    "ta bort",
+    "inte längre",
+    "skippa",
+)
+# Generic, context-free negation vocabulary. Contractions are recognized
+# structurally (any normalized token ending in "n't"), never enumerated.
+# "utan"/"inte längre" have removal-specific meanings handled ONLY inside
+# the removal attestation — the generic owner stays context-free.
+_NEGATION_WORDS = frozenset(
+    {"not", "never", "no", "cannot", "without", "inte", "aldrig", "ej", "utan"}
+)
+_REMOVAL_IDIOM = "inte längre"
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u02bc": "'", "\u2032": "'"})
+
+
+def _negation_tokens(text: str) -> list[str]:
+    normalized = text.translate(_APOSTROPHES)
+    return [part.strip("[]{}.,:;!?()\"'").casefold() for part in normalized.split()]
+
+
+def _token_negates(token: str) -> bool:
+    return token in _NEGATION_WORDS or token.endswith("n't")
+
+
+def _text_has_negation(text: str) -> bool:
+    return any(_token_negates(token) for token in _negation_tokens(text))
+
+
+def _placement_negated(source_text: str, occurrence: _FieldOccurrence) -> bool:
+    """Strictly conservative: ANY negation in the clause demotes.
+
+    Token rules cannot own natural-language scope; the design's safe state
+    is demotion — Unplaced resolves through the card's placement
+    affordance, while a falsely admitted location becomes a wrong
+    obligation. Deliberate cost: "JSON contains timestamp but not status"
+    demotes timestamp too (the user re-places it in one click).
+    """
+
+    clause_start, clause_end = _occurrence_clause_bounds(source_text, occurrence)
+    return _text_has_negation(source_text[clause_start:clause_end])
+
+
+def _named_result_removal_has_attestation(
+    *,
+    name: str,
+    evidence: tuple[ClassifiedEvidence, ...],
+    source_texts: Mapping[str, str],
+) -> bool:
+    for cited in evidence:
+        source_text = source_texts[cited.source_id]
+        occurrences = _cited_field_occurrences(
+            source_text=source_text,
+            quote=cited.quote,
+            field_name=name,
+        )
+        for occurrence in occurrences:
+            clause_start, clause_end = _occurrence_clause_bounds(
+                source_text,
+                occurrence,
+            )
+            after = source_text[occurrence.end_index : clause_end].casefold()
+            # "{name} inte längre" is the one idiom kept: its span is
+            # anchored to the name and unambiguous. Suppress exactly that
+            # matched span, then demand the rest of the clause be
+            # negation-free.
+            idiom = re.match(r"\s+inte\s+längre(?:\W|$)", after)
+            before = source_text[clause_start : occurrence.start_index].casefold()
+            if idiom is not None:
+                remainder = before + after[idiom.end() :]
+                if not _text_has_negation(remainder):
+                    return True
+                continue
+            # Strictly conservative otherwise: any negation in the clause
+            # (prohibitions, "utan att ta bort", modal negatives) rejects;
+            # a missed removal is recoverable on the card, a false removal
+            # deletes user state.
+            if _text_has_negation(source_text[clause_start:clause_end]):
+                continue
+            if _prefix_attests_removal(before):
+                return True
+    return False
+
+
+def _prefix_attests_removal(text: str) -> bool:
+    for marker in _REMOVAL_PREFIX_MARKERS:
+        for marker_match in re.finditer(
+            rf"(?<!\w){re.escape(marker)}(?!\w)",
+            text,
+        ):
+            suffix = text[marker_match.end() :]
+            if re.fullmatch(
+                r"(?:\s+[\w-]+(?:\[\]|\{\})?\.)*\s*",
+                suffix,
+            ):
+                return True
+    return False
+
+
+def _occurrence_clause_bounds(
+    source_text: str,
+    occurrence: _FieldOccurrence,
+) -> tuple[int, int]:
+    clause_start = occurrence.citation_start_index
+    for index in range(occurrence.citation_start_index, occurrence.start_index):
+        if source_text[index] in _CLAUSE_DELIMITERS and not (
+            source_text[index] == "." and _is_direct_path_separator(source_text, index)
+        ):
+            clause_start = index + 1
+    clause_end = occurrence.citation_end_index
+    for index in range(occurrence.end_index, occurrence.citation_end_index):
+        if source_text[index] in _CLAUSE_DELIMITERS and not (
+            source_text[index] == "." and _is_direct_path_separator(source_text, index)
+        ):
+            clause_end = index
+            break
+    return clause_start, clause_end
+
+
+def _is_direct_path_separator(text: str, index: int) -> bool:
+    return (
+        index >= 2
+        and text[index - 2 : index] in {"[]", "{}"}
+        and index + 1 < len(text)
+        and _is_identifier_continuation(text[index + 1])
+    )
+
+
+def _spans_attest_named_result_edge(
+    source_text: str,
+    *,
+    parent_occurrences: frozenset[_FieldOccurrence],
+    child_occurrences: frozenset[_FieldOccurrence],
+) -> bool:
+    for parent_occurrence in parent_occurrences:
+        for child_occurrence in child_occurrences:
+            if not _occurrences_share_citation(
+                parent_occurrence,
+                child_occurrence,
+            ):
+                continue
+            later = (
+                child_occurrence
+                if parent_occurrence.start_index <= child_occurrence.start_index
+                else parent_occurrence
+            )
+            if _placement_negated(source_text, later):
+                continue
+            if parent_occurrence.end_index <= child_occurrence.start_index:
+                between = source_text[
+                    parent_occurrence.end_index : child_occurrence.start_index
+                ]
+                if _is_direct_named_result_path(between) or _has_positive_edge_marker(
+                    between,
+                    markers=_PARENT_BEFORE_CHILD_EDGE_MARKERS,
+                ):
+                    return True
+            elif child_occurrence.end_index <= parent_occurrence.start_index and (
+                _has_positive_edge_marker(
+                    source_text[
+                        child_occurrence.end_index : parent_occurrence.start_index
+                    ],
+                    markers=_CHILD_BEFORE_PARENT_EDGE_MARKERS,
+                )
+            ):
+                return True
+    return False
+
+
+def _occurrences_share_citation(
+    first: _FieldOccurrence,
+    second: _FieldOccurrence,
+) -> bool:
+    return (
+        first.citation_start_index == second.citation_start_index
+        and first.citation_end_index == second.citation_end_index
+    )
+
+
+_ROOT_ARTIFACT_NAMES = (
+    "json output field",
+    "json-resultatet",
+    "json",
+    "output",
+    "report",
+    "response",
+    "result",
+    "rapport",
+    "resultat",
+    "utdata",
+)
+
+
+def _named_result_root_has_attestation(
+    *,
+    name: str,
+    evidence: tuple[ClassifiedEvidence, ...],
+    source_texts: Mapping[str, str],
+) -> bool:
+    for cited in evidence:
+        source_text = source_texts[cited.source_id]
+        name_occurrences = _cited_field_occurrences(
+            source_text=source_text,
+            quote=cited.quote,
+            field_name=name,
+        )
+        if not name_occurrences:
+            continue
+        root_occurrences = frozenset(
+            occurrence
+            for artifact_name in _ROOT_ARTIFACT_NAMES
+            for occurrence in _cited_field_occurrences(
+                source_text=source_text,
+                quote=cited.quote,
+                field_name=artifact_name,
+            )
+        )
+        for root_occurrence in root_occurrences:
+            for name_occurrence in name_occurrences:
+                if (
+                    _occurrences_share_citation(root_occurrence, name_occurrence)
+                    and root_occurrence.end_index <= name_occurrence.start_index
+                    and not _placement_negated(source_text, name_occurrence)
+                    and _has_positive_root_marker(
+                        source_text[
+                            root_occurrence.end_index : name_occurrence.start_index
+                        ]
+                    )
+                ):
+                    return True
+    return False
+
+
+_PARENT_BEFORE_CHILD_EDGE_MARKERS = (
+    "contains",
+    "contain",
+    "includes",
+    "include",
+    "ska innehålla",
+    "innehåller",
+)
+_CHILD_BEFORE_PARENT_EDGE_MARKERS = (
+    "belongs directly to",
+    "belongs directly under",
+    "belongs to",
+    "directly under",
+    "ligger direkt under",
+    "hör direkt till",
+    "tillhör",
+)
+_ROOT_CONNECTORS = (
+    *_PARENT_BEFORE_CHILD_EDGE_MARKERS,
+    "med",
+    "with",
+    "field:",
+    ":",
+)
+_CLAUSE_DELIMITERS = ".;!?"
+_EDGE_DETERMINERS = frozenset({"a", "an", "the", "en", "ett", "den", "det", "de"})
+
+
+def _has_positive_edge_marker(text: str, *, markers: Sequence[str]) -> bool:
+    # The entire span between the two names must be the relationship
+    # statement itself — a bounded positive template, never a sentence
+    # fragment that happens to contain a marker somewhere.
+    span = " ".join(text.strip().split())
+    # A shape token adjacent to a name mention ("candidate_passages[]")
+    # belongs to the mention, not to the relationship statement.
+    for shape_token in ("[]", "{}"):
+        if span.startswith(shape_token):
+            span = span[len(shape_token) :].lstrip()
+        if span.endswith(shape_token):
+            span = span[: -len(shape_token)].rstrip()
+    if any(delimiter in span for delimiter in _CLAUSE_DELIMITERS) or "," in span:
+        return False
+    if _has_relationship_negation(span):
+        return False
+    words = span.split()
+    for marker in markers:
+        marker_words = marker.split()
+        if words == marker_words:
+            return True
+        if (
+            len(words) == len(marker_words) + 1
+            and words[: len(marker_words)] == marker_words
+            and words[-1] in _EDGE_DETERMINERS
+        ):
+            return True
+    return False
+
+
+def _has_positive_root_marker(text: str) -> bool:
+    span = " ".join(text.casefold().strip().split())
+    if any(delimiter in span for delimiter in _CLAUSE_DELIMITERS):
+        return False
+    if _has_relationship_negation(span):
+        return False
+    for marker in _ROOT_CONNECTORS:
+        if span == marker:
+            return True
+        marker_prefix = f"{marker} "
+        if span.startswith(marker_prefix) and _root_list_prefix_is_bounded(
+            span[len(marker_prefix) :]
+        ):
+            return True
+    return False
+
+
+def _root_list_prefix_is_bounded(text: str) -> bool:
+    tokens = text.replace(",", " , ").split()
+    if not tokens:
+        return True
+    index = 0
+    while index < len(tokens):
+        if tokens[index] in _EDGE_DETERMINERS:
+            index += 1
+            if index == len(tokens):
+                return True
+        if (
+            index == len(tokens)
+            or re.fullmatch(r"[\w-]+(?:\[\]|\{\})?", tokens[index]) is None
+        ):
+            return False
+        index += 1
+        if index == len(tokens) or tokens[index] not in {",", "and", "och"}:
+            return False
+        index += 1
+    return True
+
+
+def _has_relationship_negation(text: str) -> bool:
+    return _text_has_negation(text)
+
+
+def _is_direct_named_result_path(text: str) -> bool:
+    return text.strip() in {"[].", "{}."}
 
 
 def _cited_named_result_evidence(
@@ -839,17 +1336,26 @@ def _cited_field_occurrences(
     occurrences: set[_FieldOccurrence] = set()
     quote_start = 0
     while (quote_index := source_text.find(quote, quote_start)) >= 0:
-        field_start = 0
-        while (field_index := quote.find(field_name, field_start)) >= 0:
+        for field_match in re.finditer(re.escape(field_name), quote, re.IGNORECASE):
+            field_index = field_match.start()
             absolute_start = quote_index + field_index
             occurrence = _valid_field_occurrence(
                 source_text,
                 start_index=absolute_start,
                 end_index=absolute_start + len(field_name),
+                citation_start_index=quote_index,
+                citation_end_index=quote_index + len(quote),
             )
             if occurrence is not None:
                 occurrences.add(occurrence)
-            field_start = field_index + 1
+        occurrences.update(
+            _direct_path_field_occurrences(
+                source_text=source_text,
+                quote=quote,
+                quote_index=quote_index,
+                field_name=field_name,
+            )
+        )
         quote_start = quote_index + 1
     return frozenset(occurrences)
 
@@ -860,6 +1366,60 @@ class _FieldOccurrence:
 
     kind: Literal["quoted", "unquoted"]
     declared_shape: NamedResultDeclaredShape | None
+    start_index: int
+    end_index: int
+    citation_start_index: int
+    citation_end_index: int
+
+
+_DIRECT_PATH_PATTERN = re.compile(
+    r"(?<![\w-])(?:[\w-]+(?:\[\]|\{\})\.)+[\w-]+(?:\[\]|\{\})?(?![\w-])"
+)
+_DIRECT_PATH_COMPONENT_PATTERN = re.compile(r"(?P<name>[\w-]+)(?P<shape>\[\]|\{\})?")
+
+
+def _direct_path_field_occurrences(
+    *,
+    source_text: str,
+    quote: str,
+    quote_index: int,
+    field_name: str,
+) -> frozenset[_FieldOccurrence]:
+    occurrences: set[_FieldOccurrence] = set()
+    folded_field_name = field_name.casefold()
+    for path_match in _DIRECT_PATH_PATTERN.finditer(quote):
+        absolute_path_start = quote_index + path_match.start()
+        path_occurrence = _valid_field_occurrence(
+            source_text,
+            start_index=absolute_path_start,
+            end_index=quote_index + path_match.end(),
+            citation_start_index=quote_index,
+            citation_end_index=quote_index + len(quote),
+        )
+        if path_occurrence is None or path_occurrence.kind != "unquoted":
+            continue
+        for component in _DIRECT_PATH_COMPONENT_PATTERN.finditer(path_match.group()):
+            component_name = component.group("name")
+            shape_notation = component.group("shape")
+            if folded_field_name not in {
+                component_name.casefold(),
+                f"{component_name}{shape_notation or ''}".casefold(),
+            }:
+                continue
+            component_start = absolute_path_start + component.start("name")
+            occurrences.add(
+                _FieldOccurrence(
+                    kind="unquoted",
+                    declared_shape=_DECLARED_SHAPE_BY_NOTATION.get(
+                        shape_notation or ""
+                    ),
+                    start_index=component_start,
+                    end_index=component_start + len(component_name),
+                    citation_start_index=quote_index,
+                    citation_end_index=quote_index + len(quote),
+                )
+            )
+    return frozenset(occurrences)
 
 
 def _valid_field_occurrence(
@@ -867,6 +1427,8 @@ def _valid_field_occurrence(
     *,
     start_index: int,
     end_index: int,
+    citation_start_index: int,
+    citation_end_index: int,
 ) -> _FieldOccurrence | None:
     before = text[start_index - 1] if start_index > 0 else None
     # A cited name may carry JSON shape notation in the source
@@ -931,7 +1493,14 @@ def _valid_field_occurrence(
             )
         ):
             return None
-        return _FieldOccurrence(kind="quoted", declared_shape=None)
+        return _FieldOccurrence(
+            kind="quoted",
+            declared_shape=None,
+            start_index=start_index,
+            end_index=end_index,
+            citation_start_index=citation_start_index,
+            citation_end_index=citation_end_index,
+        )
     outside_before_index = _field_outer_boundary_index(
         text,
         start_index=start_index - 1,
@@ -968,7 +1537,14 @@ def _valid_field_occurrence(
         )
     ):
         return None
-    return _FieldOccurrence(kind="unquoted", declared_shape=declared_shape)
+    return _FieldOccurrence(
+        kind="unquoted",
+        declared_shape=declared_shape,
+        start_index=start_index,
+        end_index=end_index,
+        citation_start_index=citation_start_index,
+        citation_end_index=citation_end_index,
+    )
 
 
 def _nearest_non_whitespace_index(
@@ -1522,31 +2098,23 @@ def _classified_named_result_evidence_schema() -> dict[str, object]:
         "additionalProperties": False,
         "required": [
             "operation",
-            "names",
-            "removed_names",
+            "upserts",
+            "removals",
             "confidence",
             "reason",
             "evidence",
         ],
         "properties": {
             "operation": {"type": "string", "enum": ["update", "clear"]},
-            "names": {
+            "upserts": {
                 "type": "array",
                 "maxItems": NAMED_RESULT_EVIDENCE_MAX_ITEMS,
-                "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-                },
+                "items": _classified_named_result_location_schema(),
             },
-            "removed_names": {
+            "removals": {
                 "type": "array",
                 "maxItems": NAMED_RESULT_EVIDENCE_MAX_ITEMS,
-                "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-                },
+                "items": _classified_named_result_location_schema(),
             },
             "confidence": _classification_confidence_schema(),
             "reason": _classification_reason_schema(),
@@ -1554,6 +2122,49 @@ def _classified_named_result_evidence_schema() -> dict[str, object]:
                 max_items=NAMED_RESULT_DELTA_CITATION_MAX_ITEMS
             ),
         },
+    }
+
+
+def _classified_named_result_location_schema() -> dict[str, object]:
+    shared_properties = {
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+        },
+        "evidence": _classification_evidence_array_schema(
+            max_items=NAMED_RESULT_DELTA_CITATION_MAX_ITEMS
+        ),
+    }
+    return {
+        "anyOf": [
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "segments", "evidence"],
+                "properties": {
+                    **shared_properties,
+                    "segments": {
+                        "type": "array",
+                        "maxItems": MAX_STRUCTURED_FIELD_DEPTH - 1,
+                        "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+                        },
+                    },
+                },
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "unplaced", "evidence"],
+                "properties": {
+                    **shared_properties,
+                    "unplaced": {"type": "boolean", "enum": [True]},
+                },
+            },
+        ]
     }
 
 

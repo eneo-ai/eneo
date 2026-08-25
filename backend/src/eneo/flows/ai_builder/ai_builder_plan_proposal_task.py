@@ -110,18 +110,24 @@ def build_plan_proposal_system_prompt(
         (
             "- The user attested to these named results: "
             + ", ".join(
-                f"`{key.name}`"
-                + (f" (type {key.declared_shape})" if key.declared_shape else "")
+                (
+                    f"`{key.name}` (placement not specified)"
+                    if key.placement.kind == "unplaced"
+                    else f"`{obligation_projection.render_key_location(key)}`"
+                    + (f" (type {key.declared_shape})" if key.declared_shape else "")
+                )
                 for key in obligation_projection.keys
             )
             + ". Before submitting, check the FINAL step's output_fields "
-            "against this list: (1) every attested name appears at the top "
-            "level of the final step's output_fields — the final step, not "
-            "an earlier one; (2) the spelling is exactly as written above; "
-            "(3) each name is declared exactly once, with an accurate "
-            "description; (4) attested names of type object or array are "
-            "declared with nullable false. Missing, renamed, duplicated or "
-            "wrongly typed names are rejected."
+            "against this list: (1) every exact result appears at its listed "
+            "location in the final step — not in an earlier step or through "
+            "an extra wrapper; (2) every placement-not-specified result appears "
+            "exactly once anywhere in the final step; (3) spelling is exactly "
+            "as written above; (4) each result is declared exactly once at its "
+            "location, with an accurate description; (5) attested results of "
+            "type object or array are declared with nullable false. Missing, "
+            "renamed, duplicated, ambiguously placed or wrongly typed results "
+            "are rejected."
         )
         if obligation_projection is not None and obligation_projection.keys
         else None

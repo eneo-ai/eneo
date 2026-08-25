@@ -6382,5 +6382,12 @@
   "module_login_invalid_request": "The login request is incomplete. Return to the module and try again.",
   "module_login_unavailable": "This module is not available for your organization.",
   "module_login_service_unavailable": "Eneo could not complete the module login right now. Please try again later.",
-  "module_login_back_to_eneo": "Back to Eneo"
+  "module_login_back_to_eneo": "Back to Eneo",
+  "ai_builder_requirements_group_inside": "Inside {parent}",
+  "ai_builder_requirements_group_unplaced": "Placement not specified – confirmed without a fixed position",
+  "ai_builder_requirements_group_show_more": "+{count} more fields",
+  "ai_builder_requirements_field_remove_with_children": "Remove {field} and {count} child fields",
+  "ai_builder_requirements_field_place": "Place {field} in a group",
+  "ai_builder_requirements_place_label": "Placement for the new field",
+  "ai_builder_requirements_place_top_level": "Top level"
 }

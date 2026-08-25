@@ -45,10 +45,12 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    AttestedResultField,
     ObligatedResultKey,
     ProposalIntentArgumentError,
     ProposalObligationProjection,
     attested_result_contract_violations,
+    attested_violation_message,
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
@@ -75,10 +77,12 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import (
+    ExactNamedResultPlacement,
     NamedResultDeclaredShape,
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
+    UnplacedNamedResultPlacement,
     named_content_fields_edit_evidence_reference,
 )
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
@@ -272,6 +276,579 @@ def _compile_through_the_whole_path(
     return prepared.spec
 
 
+def test_projection_preserves_locations_and_same_leaf_paths() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="events",
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:events"],
+        ),
+        NamedResultEvidence(
+            name="alerts",
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:alerts"],
+        ),
+        NamedResultEvidence(
+            name="timestamp",
+            placement=ExactNamedResultPlacement(segments=("events",)),
+            confidence="high",
+            evidence=["quote:user_message:user-1:events.timestamp"],
+        ),
+        NamedResultEvidence(
+            name="timestamp",
+            placement=ExactNamedResultPlacement(segments=("alerts",)),
+            confidence="high",
+            evidence=["quote:user_message:user-1:alerts.timestamp"],
+        ),
+        NamedResultEvidence(
+            name="owner",
+            placement=UnplacedNamedResultPlacement(),
+            confidence="high",
+            evidence=["quote:user_message:user-1:owner"],
+        ),
+    ]
+
+    projection = named_result_projection(state)
+
+    assert projection is not None
+    assert [(key.name, key.placement) for key in projection.keys] == [
+        ("events", ExactNamedResultPlacement()),
+        ("alerts", ExactNamedResultPlacement()),
+        ("timestamp", ExactNamedResultPlacement(segments=("events",))),
+        ("timestamp", ExactNamedResultPlacement(segments=("alerts",))),
+        ("owner", UnplacedNamedResultPlacement()),
+    ]
+
+
+def test_exact_nested_locations_compile_without_root_duplicates() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="documents",
+            placement=ExactNamedResultPlacement(),
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:documents"],
+        ),
+        NamedResultEvidence(
+            name="candidate_passages",
+            placement=ExactNamedResultPlacement(segments=("documents",)),
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:candidate_passages"],
+        ),
+        NamedResultEvidence(
+            name="page_or_section",
+            placement=ExactNamedResultPlacement(
+                segments=("documents", "candidate_passages")
+            ),
+            confidence="high",
+            evidence=["quote:user_message:user-1:page_or_section"],
+        ),
+    ]
+    model_fields = [
+        {
+            "name": "documents",
+            "field_type": "array",
+            "description": "Handlingarna.",
+            "required": False,
+            "children": [
+                {
+                    "name": "candidate_passages",
+                    "field_type": "array",
+                    "description": "Kandidatpassagerna.",
+                    "required": False,
+                    "children": [
+                        {
+                            "name": "page_or_section",
+                            "field_type": "string",
+                            "description": "Sida eller avsnitt.",
+                            "required": False,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    spec = _compile_through_the_whole_path(
+        state,
+        model_output_fields=model_fields,
+    )
+
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    assert list(contract["properties"]) == ["documents"]
+    documents = contract["properties"]["documents"]
+    passages = documents["items"]["properties"]["candidate_passages"]
+    assert list(passages["items"]["properties"]) == ["page_or_section"]
+
+
+def test_exact_child_inside_an_extra_wrapper_is_rejected_with_its_parent() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="events",
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:events"],
+        ),
+        NamedResultEvidence(
+            name="timestamp",
+            placement=ExactNamedResultPlacement(segments=("events",)),
+            confidence="high",
+            evidence=["quote:user_message:user-1:events.timestamp"],
+        ),
+    ]
+    model_fields = [
+        {
+            "name": "events",
+            "field_type": "array",
+            "description": "Händelserna.",
+            "children": [
+                {
+                    "name": "event",
+                    "field_type": "object",
+                    "description": "Ett extra omslag.",
+                    "children": [
+                        {
+                            "name": "timestamp",
+                            "field_type": "string",
+                            "description": "Tidpunkten.",
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    with pytest.raises(ProposalIntentArgumentError) as rejected:
+        _compile_through_the_whole_path(
+            state,
+            model_output_fields=model_fields,
+        )
+
+    assert list(rejected.value.issues) == [
+        "steps.0.output_fields: the user-named result `timestamp` must exist "
+        "directly under `events` in the final step's output_fields [value_error]"
+    ]
+
+
+def test_exact_path_rename_copy_names_the_respelled_parent_path() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="events",
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:events"],
+        ),
+        NamedResultEvidence(
+            name="timestamp",
+            placement=ExactNamedResultPlacement(segments=("events",)),
+            confidence="high",
+            evidence=["quote:user_message:user-1:events.timestamp"],
+        ),
+    ]
+    projection = named_result_projection(state)
+    assert projection is not None
+    terminal_fields = (
+        AttestedResultField(
+            name="Events",
+            field_type="array",
+            children=(AttestedResultField(name="timestamp", field_type="string"),),
+        ),
+    )
+
+    violations = attested_result_contract_violations(
+        terminal_fields,
+        projection=projection,
+    )
+
+    timestamp_violation = next(
+        violation for violation in violations if violation.key_name == "timestamp"
+    )
+    assert attested_violation_message(timestamp_violation) == (
+        "rename location `Events[].timestamp` to exactly `events[].timestamp` — "
+        "the user attested to that path"
+    )
+
+
+def test_unplaced_result_resolves_at_its_single_occurrence() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="timestamp",
+            placement=UnplacedNamedResultPlacement(),
+            confidence="high",
+            evidence=["quote:user_message:user-1:timestamp"],
+        )
+    ]
+    model_fields = [
+        {
+            "name": "events",
+            "field_type": "array",
+            "description": "Händelserna.",
+            "required": False,
+            "children": [
+                {
+                    "name": "timestamp",
+                    "field_type": "string",
+                    "description": "Tidpunkten.",
+                    "required": False,
+                }
+            ],
+        }
+    ]
+
+    spec = _compile_through_the_whole_path(
+        state,
+        model_output_fields=model_fields,
+    )
+
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    timestamp = contract["properties"]["events"]["items"]["properties"]["timestamp"]
+    assert timestamp["type"] == ["string", "null"]
+    assert "timestamp" in contract["properties"]["events"]["items"]["required"]
+
+
+def test_unplaced_result_rejects_zero_occurrences() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="timestamp",
+            placement=UnplacedNamedResultPlacement(),
+            confidence="high",
+            evidence=["quote:user_message:user-1:timestamp"],
+        )
+    ]
+    projection = named_result_projection(state)
+    assert projection is not None
+
+    violations = attested_result_contract_violations((), projection=projection)
+
+    assert len(violations) == 1
+    assert violations[0].kind == "missing_location"
+    assert "exactly once somewhere" in attested_violation_message(violations[0])
+
+
+@pytest.mark.parametrize(
+    ("declared_shape", "terminal_field", "expected_kind"),
+    [
+        pytest.param(
+            None,
+            AttestedResultField(name="Timestamp", field_type="string"),
+            "rename",
+            id="folded_alias",
+        ),
+        pytest.param(
+            "array",
+            AttestedResultField(name="timestamp", field_type="object"),
+            "shape_conflict",
+            id="declared_shape",
+        ),
+    ],
+)
+def test_unplaced_unique_occurrence_keeps_rename_and_shape_checks(
+    declared_shape: NamedResultDeclaredShape | None,
+    terminal_field: AttestedResultField,
+    expected_kind: str,
+) -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="timestamp",
+            placement=UnplacedNamedResultPlacement(),
+            declared_shape=declared_shape,
+            confidence="high",
+            evidence=["quote:user_message:user-1:timestamp"],
+        )
+    ]
+    projection = named_result_projection(state)
+    assert projection is not None
+
+    violations = attested_result_contract_violations(
+        (terminal_field,),
+        projection=projection,
+    )
+
+    assert len(violations) == 1
+    assert violations[0].kind == expected_kind
+
+
+def test_unplaced_ambiguity_lists_only_the_first_ten_candidate_paths() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="timestamp",
+            placement=UnplacedNamedResultPlacement(),
+            confidence="high",
+            evidence=["quote:user_message:user-1:timestamp"],
+        )
+    ]
+    projection = named_result_projection(state)
+    assert projection is not None
+    terminal_fields = tuple(
+        AttestedResultField(
+            name=f"events_{index:02d}",
+            field_type="array",
+            children=(AttestedResultField(name="timestamp", field_type="string"),),
+        )
+        for index in range(12)
+    )
+
+    violations = attested_result_contract_violations(
+        terminal_fields,
+        projection=projection,
+    )
+
+    assert len(violations) == 1
+    violation = violations[0]
+    assert violation.kind == "ambiguous_placement"
+    assert violation.candidate_paths == tuple(
+        f"events_{index:02d}[].timestamp" for index in range(10)
+    )
+    message = attested_violation_message(violation)
+    assert "events_00[].timestamp" in message
+    assert "events_10[].timestamp" not in message
+    assert "showing 10 of 12" in message
+
+
+def test_nested_canonicalization_moves_complete_attested_groups_in_place() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="documents",
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:documents"],
+        ),
+        NamedResultEvidence(
+            name="candidate_passages",
+            placement=ExactNamedResultPlacement(segments=("documents",)),
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:candidate_passages"],
+        ),
+        NamedResultEvidence(
+            name="page_or_section",
+            placement=ExactNamedResultPlacement(
+                segments=("documents", "candidate_passages")
+            ),
+            confidence="high",
+            evidence=["quote:user_message:user-1:page_or_section"],
+        ),
+        NamedResultEvidence(
+            name="excerpt_reference",
+            placement=ExactNamedResultPlacement(
+                segments=("documents", "candidate_passages")
+            ),
+            confidence="high",
+            evidence=["quote:user_message:user-1:excerpt_reference"],
+        ),
+    ]
+    model_fields = [
+        {
+            "name": "root_before",
+            "field_type": "string",
+            "description": "Första fria roten.",
+            "required": False,
+        },
+        {
+            "name": "documents",
+            "field_type": "array",
+            "description": "Handlingarna.",
+            "required": False,
+            "children": [
+                {
+                    "name": "document_note",
+                    "field_type": "string",
+                    "description": "En fri dokumentnotering.",
+                    "required": False,
+                },
+                {
+                    "name": "candidate_passages",
+                    "field_type": "array",
+                    "description": "Kandidatpassagerna.",
+                    "required": False,
+                    "children": [
+                        {
+                            "name": "ordinary_a",
+                            "field_type": "string",
+                            "description": "Första fria fältet.",
+                            "required": False,
+                        },
+                        {
+                            "name": "excerpt_reference",
+                            "field_type": "string",
+                            "description": "Utdragsreferensen.",
+                            "required": False,
+                        },
+                        {
+                            "name": "page_or_section",
+                            "field_type": "string",
+                            "description": "Sida eller avsnitt.",
+                            "required": False,
+                        },
+                        {
+                            "name": "ordinary_b",
+                            "field_type": "string",
+                            "description": "Andra fria fältet.",
+                            "required": False,
+                        },
+                    ],
+                },
+                {
+                    "name": "document_tail",
+                    "field_type": "string",
+                    "description": "En andra fri dokumentnotering.",
+                    "required": False,
+                },
+            ],
+        },
+        {
+            "name": "unrelated_group",
+            "field_type": "object",
+            "description": "En orelaterad grupp.",
+            "required": False,
+            "children": [
+                {
+                    "name": "untouched_b",
+                    "field_type": "string",
+                    "description": "Förblir sist.",
+                    "required": False,
+                },
+                {
+                    "name": "untouched_a",
+                    "field_type": "string",
+                    "description": "Förblir näst sist.",
+                    "required": False,
+                },
+            ],
+        },
+    ]
+
+    spec = _compile_through_the_whole_path(
+        state,
+        model_output_fields=model_fields,
+    )
+
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    assert list(contract["properties"]) == [
+        "documents",
+        "root_before",
+        "unrelated_group",
+    ]
+    documents = contract["properties"]["documents"]
+    document_names = list(documents["items"]["properties"])
+    assert (
+        document_names.index("candidate_passages")
+        < document_names.index("document_note")
+        < document_names.index("document_tail")
+    )
+    passages = documents["items"]["properties"]["candidate_passages"]
+    assert list(passages["items"]["properties"]) == [
+        "page_or_section",
+        "excerpt_reference",
+        "ordinary_a",
+        "ordinary_b",
+    ]
+    assert set(passages["items"]["required"]) >= {
+        "page_or_section",
+        "excerpt_reference",
+    }
+    assert passages["items"]["properties"]["page_or_section"]["type"] == [
+        "string",
+        "null",
+    ]
+    unrelated = contract["properties"]["unrelated_group"]
+    assert list(unrelated["properties"]) == ["untouched_b", "untouched_a"]
+    assert "required" not in unrelated
+
+
+def test_violations_shape_compiles_three_roots_and_four_nested_children_once() -> None:
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="summary",
+            confidence="high",
+            evidence=["quote:user_message:user-1:summary"],
+        ),
+        NamedResultEvidence(
+            name="violations",
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:violations"],
+        ),
+        NamedResultEvidence(
+            name="metadata",
+            declared_shape="object",
+            confidence="high",
+            evidence=["quote:user_message:user-1:metadata"],
+        ),
+        *[
+            NamedResultEvidence(
+                name=name,
+                placement=ExactNamedResultPlacement(segments=("violations",)),
+                confidence="high",
+                evidence=[f"quote:user_message:user-1:{name}"],
+            )
+            for name in ("code", "message", "severity", "source_reference")
+        ],
+    ]
+    model_fields = [
+        {
+            "name": "metadata",
+            "field_type": "object",
+            "description": "Metadata.",
+            "children": [
+                {
+                    "name": "request_id",
+                    "field_type": "string",
+                    "description": "Begärans id.",
+                }
+            ],
+        },
+        {
+            "name": "violations",
+            "field_type": "array",
+            "description": "Överträdelserna.",
+            "children": [
+                {
+                    "name": name,
+                    "field_type": "string",
+                    "description": f"Innehållet för {name}.",
+                }
+                for name in reversed(
+                    ("code", "message", "severity", "source_reference")
+                )
+            ],
+        },
+        {
+            "name": "summary",
+            "field_type": "string",
+            "description": "Sammanfattningen.",
+        },
+    ]
+
+    spec = _compile_through_the_whole_path(
+        state,
+        model_output_fields=model_fields,
+    )
+
+    contract = _terminal_output_contract(spec)
+    assert contract is not None
+    assert list(contract["properties"]) == ["summary", "violations", "metadata"]
+    children = contract["properties"]["violations"]["items"]["properties"]
+    assert list(children) == ["code", "message", "severity", "source_reference"]
+    assert not set(children) & (set(contract["properties"]) - {"violations"})
+
+
 def test_an_exact_model_declaration_compiles_verified_and_canonicalized() -> None:
     # The model declares every attested name itself; verification passes and
     # the compiled contract carries exact spelling, declared shape, required
@@ -312,7 +889,7 @@ def test_an_exact_model_declaration_compiles_verified_and_canonicalized() -> Non
     assert contract is not None
     properties = contract["properties"]
     names = list(properties)
-    attested = list(projection.ordered_keys)
+    attested = [key.name for key in projection.keys]
     assert names[: len(attested)] == attested
     assert names.index("reading_notes") < names.index("handlaggare_kommentar")
     assert properties["documents"]["type"] == "array"
@@ -386,12 +963,21 @@ def test_duplicate_attested_roots_are_rejected() -> None:
     assert any("unique among siblings" in issue for issue in rejected.value.issues)
     assert (
         attested_result_contract_violations(
-            (("documents", "array"), ("Documents", "array")),
+            (
+                AttestedResultField(name="documents", field_type="array"),
+                AttestedResultField(name="Documents", field_type="array"),
+            ),
             projection=ProposalObligationProjection(
-                keys=(ObligatedResultKey(name="documents", declared_shape="array"),)
+                keys=(
+                    ObligatedResultKey(
+                        name="documents",
+                        placement=ExactNamedResultPlacement(),
+                        declared_shape="array",
+                    ),
+                )
             ),
         )[0].kind
-        == "duplicate_roots"
+        == "duplicate_location"
     )
 
 
@@ -443,7 +1029,7 @@ def test_a_declared_shape_conflict_is_rejected() -> None:
         )
 
     assert list(rejected.value.issues) == [
-        "steps.0.output_fields.0.field_type: `documents` must be of type "
+        "steps.0.output_fields.0.field_type: `documents[]` must be of type "
         "`array` — the user declared that shape [value_error]"
     ]
 
@@ -488,7 +1074,7 @@ def test_attested_primitive_roots_compile_required_and_nullable() -> None:
 
     contract = _terminal_output_contract(spec)
     assert contract is not None
-    assert set(contract["required"]) >= set(projection.ordered_keys)
+    assert set(contract["required"]) >= {key.name for key in projection.keys}
     assert contract["properties"]["source_reference"]["type"] == [
         "string",
         "null",
@@ -604,9 +1190,9 @@ def test_an_edit_confirmation_shows_no_placement_limitation() -> None:
         is_edit_mode=True,
     )
 
-    assert [field.id for field in disclosure.named_content_fields] == [
-        name for name, _shape in PUBLIC_RECORD_OBLIGATIONS
-    ]
+    assert [
+        field.label.split(" (", 1)[0] for field in disclosure.named_content_fields
+    ] == [name for name, _shape in PUBLIC_RECORD_OBLIGATIONS]
     assert "översta nivån" not in disclosure.summary
 
 
@@ -676,7 +1262,7 @@ def test_many_named_results_confirm_without_a_projection_cap() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["åtgärder", "foo[]", "2024_summary"],
+    ["åtgärder", "foo[]"],
 )
 def test_a_name_that_cannot_compile_unchanged_refuses_on_its_stored_spelling(
     name: str,
@@ -698,7 +1284,7 @@ def test_a_compilable_name_is_admitted_verbatim() -> None:
     projection = named_result_projection(state)
 
     assert projection is not None
-    assert projection.ordered_keys == ("case_id",)
+    assert tuple(key.name for key in projection.keys) == ("case_id",)
     assert isinstance(_refusal_or_confirmation(state), ConfirmRequirements)
 
 
@@ -814,9 +1400,9 @@ def test_named_content_is_listed_without_repeating_it_in_the_summary() -> None:
 
     disclosure = build_requirements_disclosure(state, ui_language="sv")
 
-    assert [field.id for field in disclosure.named_content_fields] == [
-        name for name, _ in MEETING_ACTION_OBLIGATIONS
-    ]
+    assert [
+        field.label.split(" (", 1)[0] for field in disclosure.named_content_fields
+    ] == [name for name, _ in MEETING_ACTION_OBLIGATIONS]
     assert disclosure.named_content_fields[0].label == (
         "agenda_items (användaren skrev en lista)"
     )
@@ -862,6 +1448,69 @@ def test_naming_content_differently_is_a_different_disclosure(
     ]
 
 
+def test_named_result_placement_is_visible_and_changes_confirmation_identity() -> None:
+    exact = _state(
+        (
+            ("documents", "array"),
+            ("candidate_passages", "array"),
+            ("page_or_section", None),
+        )
+    )
+    exact.named_result_evidence = [
+        exact.named_result_evidence[0],
+        exact.named_result_evidence[1].model_copy(
+            update={"placement": ExactNamedResultPlacement(segments=("documents",))}
+        ),
+        exact.named_result_evidence[2].model_copy(
+            update={
+                "placement": ExactNamedResultPlacement(
+                    segments=("documents", "candidate_passages")
+                )
+            }
+        ),
+    ]
+    unplaced = exact.model_copy(deep=True)
+    unplaced.named_result_evidence = [
+        *unplaced.named_result_evidence[:2],
+        unplaced.named_result_evidence[2].model_copy(
+            update={"placement": UnplacedNamedResultPlacement()}
+        ),
+    ]
+
+    exact_disclosure = build_requirements_disclosure(exact, ui_language="sv")
+    unplaced_disclosure = build_requirements_disclosure(unplaced, ui_language="sv")
+    labels = [field.label for field in exact_disclosure.named_content_fields]
+
+    assert [field.segments for field in exact_disclosure.named_content_fields] == [
+        [],
+        ["documents"],
+        ["documents", "candidate_passages"],
+    ]
+    assert not any(field.unplaced for field in exact_disclosure.named_content_fields)
+    assert unplaced_disclosure.named_content_fields[2].unplaced
+    assert exact_disclosure.named_content_fields[2].id != "page_or_section"
+    assert labels[1] == "candidate_passages (användaren skrev en lista)"
+    assert labels[2] == "page_or_section"
+    assert unplaced_disclosure.named_content_fields[2].label == "page_or_section"
+    assert exact_disclosure.requirements_version != (
+        unplaced_disclosure.requirements_version
+    )
+
+
+def test_unplaced_marker_is_localized_in_english() -> None:
+    state = _state((("result", None),))
+    state.named_result_evidence = [
+        state.named_result_evidence[0].model_copy(
+            update={"placement": UnplacedNamedResultPlacement()}
+        )
+    ]
+
+    disclosure = build_requirements_disclosure(state, ui_language="en")
+
+    assert disclosure.named_content_fields[0].label == "result"
+    assert disclosure.named_content_fields[0].unplaced
+
+
 def test_a_field_the_user_typed_into_the_card_is_marked_as_theirs() -> None:
     # The list is also an edit surface, so a reader has to be able to tell a
     # name Eneo heard from a name they added themselves.
@@ -877,7 +1526,10 @@ def test_a_field_the_user_typed_into_the_card_is_marked_as_theirs() -> None:
 
     disclosure = build_requirements_disclosure(state, ui_language="sv")
 
-    assert [(field.id, field.origin) for field in disclosure.named_content_fields] == [
+    assert [
+        (field.label.split(" (", 1)[0], field.origin)
+        for field in disclosure.named_content_fields
+    ] == [
         ("agenda_items", "described"),
         ("Beslutsdatum", "card_edit"),
     ]
@@ -1011,7 +1663,7 @@ def test_the_compiled_postcondition_fails_closed_on_a_dropped_name() -> None:
     assert failure.value.log_context["failure_code"] == (
         "attested_result_contract_broken"
     )
-    assert "missing_root:documents" in failure.value.log_context["reason"]
+    assert "missing_location:documents" in failure.value.log_context["reason"]
 
     from eneo.flows.ai_builder.ai_builder_create_proposal import (
         _retryable_architecture_failure_code,
@@ -1072,18 +1724,20 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
     expected_rule = (
         "- The user attested to these named results: "
         + ", ".join(
-            f"`{key.name}`"
+            f"`{projection.render_key_location(key)}`"
             + (f" (type {key.declared_shape})" if key.declared_shape else "")
             for key in projection.keys
         )
         + ". Before submitting, check the FINAL step's output_fields "
-        "against this list: (1) every attested name appears at the top "
-        "level of the final step's output_fields — the final step, not "
-        "an earlier one; (2) the spelling is exactly as written above; "
-        "(3) each name is declared exactly once, with an accurate "
-        "description; (4) attested names of type object or array are "
-        "declared with nullable false. Missing, renamed, duplicated or "
-        "wrongly typed names are rejected."
+        "against this list: (1) every exact result appears at its listed "
+        "location in the final step — not in an earlier step or through "
+        "an extra wrapper; (2) every placement-not-specified result appears "
+        "exactly once anywhere in the final step; (3) spelling is exactly "
+        "as written above; (4) each result is declared exactly once at its "
+        "location, with an accurate description; (5) attested results of "
+        "type object or array are declared with nullable false. Missing, "
+        "renamed, duplicated, ambiguously placed or wrongly typed results "
+        "are rejected."
     )
     assert expected_rule in prompt
     assert prompt.count("The user attested to these named results") == 1
@@ -1109,3 +1763,59 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
     assert "The backend already declares these user-named result fields" not in (
         empty_prompt
     )
+
+
+def test_the_prompt_names_exact_paths_and_marks_unplaced_results() -> None:
+    from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
+        build_plan_proposal_system_prompt,
+    )
+
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="documents",
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:documents"],
+        ),
+        NamedResultEvidence(
+            name="candidate_passages",
+            placement=ExactNamedResultPlacement(segments=("documents",)),
+            declared_shape="array",
+            confidence="high",
+            evidence=["quote:user_message:user-1:candidate_passages"],
+        ),
+        NamedResultEvidence(
+            name="page_or_section",
+            placement=ExactNamedResultPlacement(
+                segments=("documents", "candidate_passages")
+            ),
+            confidence="high",
+            evidence=["quote:user_message:user-1:page_or_section"],
+        ),
+        NamedResultEvidence(
+            name="owner",
+            placement=UnplacedNamedResultPlacement(),
+            confidence="high",
+            evidence=["quote:user_message:user-1:owner"],
+        ),
+    ]
+
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=None,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+    )
+
+    assert "`documents[]` (type array)" in prompt
+    assert "`documents[].candidate_passages[]` (type array)" in prompt
+    assert "`documents[].candidate_passages[].page_or_section`" in prompt
+    assert "`owner` (placement not specified)" in prompt
+    assert "every exact result appears at its listed location" in prompt
+    assert "every placement-not-specified result appears exactly once" in prompt
+    assert "every attested name appears at the top level" not in prompt

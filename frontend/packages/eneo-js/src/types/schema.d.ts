@@ -24213,12 +24213,9 @@ export interface components {
      * NamedContentFieldPayload
      * @description One content obligation the user named, as an item rather than prose.
      *
-     *     `id` is the obligation name as the user wrote it and as planning state
-     *     stores it. It is not a promise that a field by that name reaches the
-     *     compiled result: whether an obligation is projected at all depends on the
-     *     output mode, the presence of a declared schema, and the confidence the name
-     *     was admitted with. `label` is a bounded readable rendering for display; the
-     *     exact `id`, not this label, participates in confirmation identity.
+     *     `id` is an opaque stable encoding of the full folded location. `label` is
+     *     the bounded leaf rendering; `segments` and `unplaced` carry placement for
+     *     the card without asking the client to parse the identifier.
      *
      *     `origin` says how the name got here — read out of the user's own writing,
      *     or typed into this card. It is display provenance, not a requirement: both
@@ -24226,20 +24223,28 @@ export interface components {
      *     stays outside the confirmed disclosure identity.
      */
     NamedContentFieldPayload: {
+      /** Can Contain Fields */
+      can_contain_fields: boolean;
       /** Id */
       id: string;
       /** Label */
       label: string;
+      /** Name */
+      name: string;
       /**
        * Origin
        * @default described
        * @enum {string}
        */
       origin?: "described" | "card_edit";
+      /** Segments */
+      segments: string[];
+      /** Unplaced */
+      unplaced: boolean;
     };
     /**
      * NamedContentFieldsEditRequest
-     * @description The names the user leaves standing on the confirmation card.
+     * @description The field identifiers the user leaves standing on the confirmation card.
      *
      *     The payload is the resulting full set, not a delta: the user is answering
      *     a disclosure they can see in front of them, so what they submit is simply
@@ -24248,9 +24253,10 @@ export interface components {
      *     whose fields these are, and an edit against an older one is refused rather
      *     than merged.
      *
-     *     Names only. The label the card shows is prose the disclosure owner renders
-     *     from the name and the shape the user declared, so a client-supplied label
-     *     could only disagree with it.
+     *     Existing fields return their opaque disclosure identifiers. New names are
+     *     the only raw values: the server marks those in `added_field_names`, and
+     *     replay admits them at the selected parent, or at the root when the client
+     *     supplied no placement.
      *
      *     `added_field_names` is the server's own reading of the same submission, not
      *     something a client states: which of these names the card did not already
@@ -24264,6 +24270,10 @@ export interface components {
     NamedContentFieldsEditRequest: {
       /** Added Field Names */
       added_field_names?: string[];
+      /** Added Field Placements */
+      added_field_placements?: {
+        [key: string]: string;
+      };
       /** Field Names */
       field_names: string[];
       /**
@@ -24273,6 +24283,12 @@ export interface components {
       kind: "named_content_fields_edit";
       /** Requirements Version */
       requirements_version: string;
+      /**
+       * Schema Version
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
       /** Ui Language */
       ui_language?: string | null;
     };

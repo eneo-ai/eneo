@@ -35,6 +35,10 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentSchemaDiscovery,
     build_ai_builder_attachment_context,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    SlotClassificationNamedResultEvidenceMetadata,
+    slot_classification_metadata_from_attempt,
+)
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
     compile_create_intent_to_spec,
 )
@@ -128,7 +132,12 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SLOT_CLASSIFICATION_SCHEMA_VERSION,
+    ClassifiedEvidence,
     SlotClassificationAttempt,
+    SlotClassificationInput,
+    SlotClassificationResult,
+    SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     DECLINE_FLOW_CHANGE_TOOL_NAME,
@@ -152,10 +161,12 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
 )
 from eneo.flows.ai_builder.planning_state import (
+    BUILDER_SCHEMA_VERSION,
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     ArchitectureCommit,
     AttachmentCoverage,
     ConfirmedRuntimeMetadataField,
+    ExactNamedResultPlacement,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
@@ -3622,6 +3633,225 @@ def _confirmation_conversation(
     ]
 
 
+@pytest.mark.asyncio
+async def test_resumed_old_classification_rebuilds_placement_and_rearms_confirmation() -> (
+    None
+):
+    planner = _make_planner()
+    legacy_message_id = "legacy-hierarchy"
+    legacy_quote = (
+        "Return JSON with documents[]. Each candidate_passages[] belongs directly "
+        "under documents, and each page_or_section belongs directly under "
+        "candidate_passages."
+    )
+    legacy_source_id = f"user_message:{legacy_message_id}"
+    legacy_evidence = ClassifiedEvidence(
+        source_id=legacy_source_id,
+        quote=legacy_quote,
+    )
+    legacy_state = PlanningState.empty()
+    legacy_state.builder_schema_version = 20
+    legacy_state.resolved_slots = {
+        "primary_runtime_input": ResolvedSlot(
+            name="primary_runtime_input",
+            value="text",
+            source="requirements_summary",
+            confidence="high",
+        ),
+        "terminal_output": ResolvedSlot(
+            name="terminal_output",
+            value="structured_json",
+            source="requirements_summary",
+            confidence="high",
+        ),
+    }
+    legacy_state.named_result_evidence = [
+        NamedResultEvidence(
+            name="documents",
+            declared_shape="array",
+            confidence="high",
+            evidence=[legacy_evidence.planning_reference()],
+        ),
+        NamedResultEvidence(
+            name="candidate_passages",
+            declared_shape="array",
+            confidence="high",
+            evidence=[legacy_evidence.planning_reference()],
+        ),
+        NamedResultEvidence(
+            name="page_or_section",
+            confidence="high",
+            evidence=[legacy_evidence.planning_reference()],
+        ),
+    ]
+    assert legacy_state.builder_schema_version == 20
+    assert legacy_state.named_result_evidence
+    draft = derive_architecture_commit_draft(legacy_state)
+    assert draft is not None
+    legacy_state.architecture_commit = finalize_architecture_commit(draft)
+    legacy_disclosure = build_requirements_disclosure(
+        legacy_state,
+        ui_language="en",
+    )
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id=legacy_source_id,
+                kind="user_message",
+                text=legacy_quote,
+                message_id=legacy_message_id,
+            ),
+        ),
+        current_user_message_id=legacy_message_id,
+    )
+    snapshot = SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+        operation="replace",
+        named_results=legacy_state.named_result_evidence,
+        confidence="high",
+        reason="The complete legacy named-result snapshot.",
+        evidence=(legacy_evidence,),
+    )
+    current_metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(),
+        ),
+        prompt_hash="c" * 64,
+        classification_input=classification_input,
+        model="openai/gpt-test",
+        provider="openai",
+        named_result_evidence_snapshot=snapshot,
+    )
+    stale_payload = current_metadata.model_dump(mode="json")
+    stale_payload["schema_version"] = SLOT_CLASSIFICATION_SCHEMA_VERSION - 1
+
+    resumed_message_id = "resumed-hierarchy"
+    resumed_source_id = f"user_message:{resumed_message_id}"
+    citation = {"source_id": resumed_source_id, "quote": legacy_quote}
+    classification_payload = {
+        "slots": [],
+        "file_roles": [],
+        "checkpoint_updates": [],
+        "form_intake": None,
+        "named_result_evidence": {
+            "operation": "update",
+            "upserts": [
+                {"name": "documents", "segments": [], "evidence": [citation]},
+                {
+                    "name": "candidate_passages",
+                    "segments": ["documents"],
+                    "evidence": [citation],
+                },
+                {
+                    "name": "page_or_section",
+                    "segments": ["documents", "candidate_passages"],
+                    "evidence": [citation],
+                },
+            ],
+            "removals": [],
+            "confidence": "high",
+            "reason": "The user restated the complete result hierarchy.",
+            "evidence": [citation],
+        },
+        "example_output_constraints": None,
+        "schema_direction": None,
+        "secondary_obligations": [],
+        "assumptions": [],
+        "contradictions": [],
+    }
+    response = MagicMock()
+    response.choices = [
+        SimpleNamespace(
+            message=SimpleNamespace(content=json.dumps(classification_payload))
+        )
+    ]
+    planner.litellm_client.acompletion.return_value = response
+    conversation = [
+        ConversationMessage(
+            message_id=legacy_message_id,
+            role="user",
+            content=legacy_quote,
+            metadata={"slot_classification": stale_payload},
+        ),
+        ConversationMessage(
+            role="assistant",
+            content=legacy_disclosure.summary,
+            metadata={
+                "requirements_summary": legacy_disclosure.model_dump(mode="json"),
+                "requirements_version": legacy_disclosure.requirements_version,
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "requirements_confirmed": True,
+                "requirements_version": legacy_disclosure.requirements_version,
+            },
+        ),
+        ConversationMessage(
+            message_id=resumed_message_id,
+            role="user",
+            content=legacy_quote,
+        ),
+    ]
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+        persisted_planning_state=legacy_state,
+    )
+
+    planner.litellm_client.acompletion.assert_awaited_once()
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, AskCanonicalQuestion)
+    assert prepared.server_decision.slot_name == "primary_runtime_input"
+    assert prepared.slot_classification_metadata is not None
+    assert (
+        prepared.slot_classification_metadata.schema_version
+        == SLOT_CLASSIFICATION_SCHEMA_VERSION
+    )
+    assert [
+        item.placement.segments
+        for item in prepared.planning_state.named_result_evidence
+        if isinstance(item.placement, ExactNamedResultPlacement)
+    ] == [(), ("documents",), ("documents", "candidate_passages")]
+    assert prepared.requirements_confirmation_required is True
+
+
+@pytest.mark.asyncio
+async def test_latest_v20_confirmation_discards_state_and_rearms_confirmation() -> None:
+    planner = _make_planner()
+    legacy_state = _document_architecture_state()
+    legacy_state.builder_schema_version = 20
+    legacy_state.named_result_evidence = [
+        NamedResultEvidence(
+            name="legacy_field",
+            confidence="high",
+            evidence=["quote:user_message:legacy:legacy_field"],
+        )
+    ]
+    legacy_disclosure = build_requirements_disclosure(
+        legacy_state,
+        ui_language="en",
+    )
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=_confirmation_conversation(legacy_disclosure),
+        completion_model_route=_route(),
+        persisted_planning_state=legacy_state,
+    )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, AskCanonicalQuestion)
+    assert prepared.server_decision.slot_name == "post_processing_goal"
+    assert prepared.planning_state.builder_schema_version == BUILDER_SCHEMA_VERSION
+    assert prepared.planning_state.named_result_evidence == []
+    assert prepared.requirements_confirmation_required is True
+
+
 def _text_attachment_role(file: File, coverage: AttachmentCoverage) -> FileRoleEvidence:
     return FileRoleEvidence(
         file_id=file.id,
@@ -4514,6 +4744,7 @@ def _field_edit_conversation(
             content="",
             metadata={
                 "named_content_fields_edit": {
+                    "schema_version": 1,
                     "requirements_version": disclosure.requirements_version,
                     "field_names": list(field_names),
                 }
@@ -4563,8 +4794,35 @@ async def test_editing_the_field_list_makes_no_understanding_call() -> None:
     assert isinstance(prepared, ServerOutputPrepared)
     assert isinstance(prepared.server_decision, ConfirmRequirements)
     assert [
-        field.id for field in prepared.server_decision.payload.named_content_fields
+        field.label for field in prepared.server_decision.payload.named_content_fields
     ] == ["beslut", "Beslutsdatum"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_field_edit_does_not_promote_raw_names_to_root() -> None:
+    planner = _make_planner()
+    state = _named_fields_state()
+    shown = build_requirements_disclosure(state, ui_language="sv")
+    conversation = _field_edit_conversation(shown, "beslut", "legacy_root")
+    edit_metadata = conversation[-1].metadata
+    assert edit_metadata is not None
+    raw_edit = edit_metadata["named_content_fields_edit"]
+    assert isinstance(raw_edit, dict)
+    raw_edit.pop("schema_version")
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+        persisted_planning_state=state,
+    )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert isinstance(prepared.server_decision, ConfirmRequirements)
+    assert all(
+        field.name != "legacy_root"
+        for field in prepared.server_decision.payload.named_content_fields
+    )
 
 
 @pytest.mark.asyncio

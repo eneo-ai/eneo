@@ -6,6 +6,8 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
     AI_BUILDER_MAX_ATTACHMENTS,
@@ -75,6 +77,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     CheckpointProducerKind,
+    NamedResultEvidence,
     PlanningState,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
@@ -89,11 +92,14 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.domain.flow import Flow
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         ResolvedCompletionModelRoute,
     )
+
+logger = get_logger(__name__)
 
 # Parser-shape invariant, fixed pending item-10 platform benchmarks.
 _MAX_CLASSIFICATION_TRANSCRIPT_SOURCES = 120
@@ -721,15 +727,42 @@ async def build_runtime_discovery_context(
         cited_message_ids_by_source=cited_message_ids_by_source,
         classified_at_index=len(conversation),
     )
+    admitted_without_named_results = replace(result, named_result_evidence=None)
     candidate_state = state.model_copy(deep=True)
     merge_llm_resolved_slots(
         candidate_state,
-        result,
+        admitted_without_named_results,
         prompt_hash=prompt_hash,
         freeform_text=text,
         model_blocked_slots=model_blocked_slots,
         settled_by_acceptance=settled_by_acceptance,
     )
+    if result.named_result_evidence is not None:
+        named_result_candidate = candidate_state.model_copy(deep=True)
+        try:
+            merge_llm_resolved_slots(
+                named_result_candidate,
+                SlotClassificationResult(
+                    named_result_evidence=result.named_result_evidence
+                ),
+                prompt_hash=prompt_hash,
+                freeform_text=text,
+                model_blocked_slots=model_blocked_slots,
+                settled_by_acceptance=settled_by_acceptance,
+            )
+        except ValidationError as error:
+            logger.warning(
+                "AI Builder discarded invalid named-result classification delta",
+                extra={
+                    "validation_errors": error.errors(
+                        include_input=False,
+                        include_url=False,
+                    )
+                },
+            )
+            result = admitted_without_named_results
+        else:
+            candidate_state = named_result_candidate
     named_result_evidence_snapshot = _materialized_named_result_snapshot(
         candidate_state,
         classified_evidence=result.named_result_evidence,
@@ -798,12 +831,12 @@ def _named_result_classification_is_relevant(state: PlanningState) -> bool:
     return state.resolved_slots.get("terminal_output") is not None
 
 
-def _current_named_result_names(
+def _current_named_results(
     state: PlanningState,
-) -> tuple[str, ...]:
+) -> tuple[NamedResultEvidence, ...]:
     if not _named_result_classification_is_relevant(state):
         return ()
-    return state.named_result_obligations
+    return tuple(state.named_result_evidence)
 
 
 def _latest_matching_named_result_classification(
@@ -811,8 +844,8 @@ def _latest_matching_named_result_classification(
     *,
     state: PlanningState,
 ) -> SlotClassificationMetadata | None:
-    current_names = _current_named_result_names(state)
-    if not current_names:
+    current_results = _current_named_results(state)
+    if not current_results:
         return None
     for message in reversed(conversation):
         classification = slot_classification_from_metadata(message.metadata)
@@ -823,7 +856,7 @@ def _latest_matching_named_result_classification(
             fields is not None
             and fields.operation == "replace"
             and fields.confidence != "low"
-            and tuple(item.name for item in fields.named_results) == current_names
+            and tuple(fields.named_results) == current_results
         ):
             return classification
     return None

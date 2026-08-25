@@ -1330,12 +1330,16 @@ export class FlowAIBuilderDriver {
    */
   async editNamedContentFields(
     requirementsVersion: string,
-    fieldNames: string[]
+    fieldNames: string[],
+    addedFieldPlacements: Record<string, string> = {}
   ): Promise<AIBuilderSendOutcome> {
     return await this.sendMessage("", {
       kind: "named_content_fields_edit",
       requirements_version: requirementsVersion,
       field_names: fieldNames,
+      ...(Object.keys(addedFieldPlacements).length > 0
+        ? { added_field_placements: addedFieldPlacements }
+        : {}),
       ui_language: getLocale()
     });
   }

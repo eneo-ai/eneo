@@ -74,11 +74,10 @@ def named_result_projection(
     """The user-attested result keys this turn holds the proposal to.
 
     One rule, read by the prompt, admission and the compiled postcondition,
-    so the names the model is told to declare, the verification that admits
-    them and the refusal the user sees before confirming can never disagree
-    about which names are in play. An exact declared output schema is
-    already authoritative, and edit mode has no create contract to verify,
-    so both stand down.
+    so the locations the model is told to declare and both verification arms
+    can never disagree about which result paths are in play. An exact declared
+    output schema is already authoritative, and edit mode has no create contract
+    to verify, so both stand down.
     """
 
     if is_edit_mode:
@@ -89,7 +88,11 @@ def named_result_projection(
     if output_evidence is not None and output_evidence.source == "declared_schema":
         return None
     keys = tuple(
-        ObligatedResultKey(name=item.name, declared_shape=item.declared_shape)
+        ObligatedResultKey(
+            name=item.name,
+            placement=item.placement,
+            declared_shape=item.declared_shape,
+        )
         for item in session_state.named_result_evidence
         if item.is_commit_grade
     )

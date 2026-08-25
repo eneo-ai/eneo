@@ -8,8 +8,10 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import IconInfo from "@lucide/svelte/icons/info";
   import IconX from "@lucide/svelte/icons/x";
+  import IconCornerDownRight from "@lucide/svelte/icons/corner-down-right";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
   import { summaryTerm } from "./aiBuilderSummaryText";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
@@ -86,9 +88,14 @@
     /** A change request in the user's own words, optionally about one row; the
      *  server answers with a new requirements version, which re-arms this card. */
     onchange: (text: string, topic?: string | null) => void;
-    /** The resulting full set of content-field ids; the server answers with a
-     *  new requirements version, which re-arms this card like any change. */
-    oneditcontentfields?: (fieldNames: string[]) => void;
+    /** The resulting full set of content-field ids (plus raw names for
+     *  additions, optionally placed under a kept parent id); the server
+     *  answers with a new requirements version, which re-arms this card
+     *  like any change. */
+    oneditcontentfields?: (
+      fieldNames: string[],
+      addedFieldPlacements?: Record<string, string>
+    ) => void;
     oneditanswer: (questionId: string) => void;
   }
 
@@ -210,6 +217,13 @@
   let runtimeFieldDetails = $state(false);
   let addingContentField = $state(false);
   let newContentField = $state("");
+  /** Where a newly typed name is placed; null = the top level (design default). */
+  let addTargetParentId = $state<string | null>(null);
+  const addTargetLabel = $derived.by(() => {
+    if (addTargetParentId === null) return m.ai_builder_requirements_place_top_level();
+    const target = placementTargets.find((t) => t.parentId === addTargetParentId);
+    return target ? target.path.join(" › ") : m.ai_builder_requirements_place_top_level();
+  });
   let addContentFieldButton = $state<HTMLButtonElement | null>(null);
 
   async function cancelAddingContentField() {
@@ -224,9 +238,115 @@
   const shownRuntimeFields = $derived(
     allRuntimeFieldsShown ? runtimeFields : runtimeFields.slice(0, RUNTIME_FIELD_CHIP_CAP)
   );
-  const shownContentFields = $derived(
-    allContentFieldsShown ? namedContentFields : namedContentFields.slice(0, CONTENT_FIELD_CHIP_CAP)
-  );
+  // Placement groups: what the user confirms IS the structure verification
+  // later enforces, so children render under their parent, never mixed into
+  // the flat list. Groups keep first-appearance order; unplaced names close
+  // the section with their own honest label.
+  type ContentFieldGroup = {
+    key: string;
+    /** Original-spelling parent path; empty means the top level. */
+    path: string[];
+    unplaced: boolean;
+    fields: typeof namedContentFields;
+  };
+  // A payload from an older backend has no placement fields; those names
+  // degrade to the flat top level instead of crashing the card.
+  function placementOf(field: (typeof namedContentFields)[number]) {
+    return { segments: field.segments ?? [], unplaced: field.unplaced ?? false };
+  }
+
+  const contentFieldGroups = $derived.by(() => {
+    const groups = new SvelteMap<string, ContentFieldGroup>();
+    for (const field of namedContentFields) {
+      const { segments, unplaced } = placementOf(field);
+      const key = unplaced ? "::unplaced" : segments.join("\u0000");
+      let group = groups.get(key);
+      if (!group) {
+        group = { key, path: segments, unplaced, fields: [] };
+        groups.set(key, group);
+      }
+      group.fields.push(field);
+    }
+    // Top level first, then nested groups in first-appearance order, unplaced last.
+    return [...groups.values()].sort((a, b) => {
+      const rank = (g: ContentFieldGroup) => (g.unplaced ? 2 : g.path.length === 0 ? 0 : 1);
+      return rank(a) - rank(b);
+    });
+  });
+
+  /** The field's own full path: its parent segments plus its raw name. */
+  function fullPathOf(field: (typeof namedContentFields)[number]): string[] | null {
+    const { segments, unplaced } = placementOf(field);
+    // Without a raw name (older payload) the field cannot act as a parent.
+    if (unplaced || !field.name) return null;
+    return [...segments, field.name];
+  }
+
+  /** Attested descendants at any depth, keyed on raw identities. */
+  function descendantsOf(field: (typeof namedContentFields)[number]) {
+    const prefix = fullPathOf(field);
+    if (prefix === null) return [];
+    return namedContentFields.filter((other) => {
+      const placement = placementOf(other);
+      return (
+        !placement.unplaced &&
+        placement.segments.length >= prefix.length &&
+        prefix.every((segment, index) => placement.segments[index] === segment)
+      );
+    });
+  }
+
+  /**
+   * Grouped truncation: a collapsed card caps each group's chips, but a
+   * container whose children render is never hidden — children must not
+   * appear without their parent.
+   */
+  function visibleGroupFields(group: ContentFieldGroup) {
+    if (allContentFieldsShown) return group.fields;
+    // A container whose children render elsewhere is never truncated out,
+    // at any depth — children must not float without their parent.
+    const containers = group.fields.filter((field) => descendantsOf(field).length > 0);
+    const rest = group.fields.filter((field) => descendantsOf(field).length === 0);
+    return [
+      ...containers,
+      ...rest.slice(0, Math.max(CONTENT_FIELD_CHIP_CAP - containers.length, 0))
+    ];
+  }
+
+  function removeContentField(field: (typeof namedContentFields)[number]) {
+    if (!oneditcontentfields) return;
+    // Removing a container removes its attested descendants with it —
+    // explicitly, so the request states exactly what remains.
+    const removedIds = new Set([field.id, ...descendantsOf(field).map((d) => d.id)]);
+    oneditcontentfields(
+      namedContentFields.filter((other) => !removedIds.has(other.id)).map((other) => other.id)
+    );
+    // The removed chip held focus; hand it to the group's successor.
+    addContentFieldButton?.focus();
+  }
+
+  /** Every exact container a name can be placed under — childless ones
+   *  included (an empty events[] is the central case), scalars never. */
+  const placementTargets = $derived.by(() => {
+    const targets: { parentId: string; path: string[] }[] = [];
+    for (const field of namedContentFields) {
+      const path = fullPathOf(field);
+      if (path === null) continue;
+      if (field.can_contain_fields || descendantsOf(field).length > 0) {
+        targets.push({ parentId: field.id, path });
+      }
+    }
+    return targets;
+  });
+
+  /** Resolve an unplaced name into a group: re-add the raw name at that path. */
+  function placeUnplacedField(field: (typeof namedContentFields)[number], parentId: string) {
+    if (!oneditcontentfields || !field.name) return;
+    const kept = namedContentFields
+      .filter((other) => other.id !== field.id)
+      .map((other) => other.id);
+    oneditcontentfields([...kept, field.name], { [field.name]: parentId });
+  }
   const runtimeFieldsCount = $derived.by(() => {
     const total =
       runtimeFields.length === 1
@@ -641,35 +761,99 @@
             <p class="text-secondary mt-0.5 text-xs text-pretty">
               {m.ai_builder_requirements_named_content_lead()}
             </p>
-            <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
-              {#each shownContentFields as field (field.id)}
-                <li
-                  class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center gap-1 rounded-full border py-0 pr-1 pl-2.5 text-[0.78125rem]"
-                >
-                  {field.label}
-                  {#if field.origin === "card_edit"}
-                    <span class="text-secondary text-[0.6875rem]">
-                      {m.ai_builder_requirements_field_added_by_you()}
-                    </span>
+            {#snippet contentFieldChip(field: (typeof namedContentFields)[number])}
+              {@const cascade = descendantsOf(field).length}
+              <li
+                class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center gap-1 rounded-full border py-0 pr-1 pl-2.5 text-[0.78125rem]"
+              >
+                {field.label}
+                {#if field.origin === "card_edit"}
+                  <span class="text-secondary text-[0.6875rem]">
+                    {m.ai_builder_requirements_field_added_by_you()}
+                  </span>
+                {/if}
+                {#if !readOnly && !confirmed && oneditcontentfields && placementOf(field).unplaced && field.name && placementTargets.length > 0}
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger
+                      class="hover:bg-hover-default text-secondary hover:text-primary inline-flex size-5 items-center justify-center rounded-full transition-colors"
+                      aria-label={m.ai_builder_requirements_field_place({ field: field.label })}
+                      title={m.ai_builder_requirements_field_place({ field: field.label })}
+                      {disabled}
+                    >
+                      <IconCornerDownRight class="size-3" aria-hidden="true" />
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Content align="start">
+                      {#each placementTargets as target (target.parentId)}
+                        <DropdownMenu.Item
+                          onclick={() => placeUnplacedField(field, target.parentId)}
+                        >
+                          {target.path.join(" › ")}
+                        </DropdownMenu.Item>
+                      {/each}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Root>
+                {/if}
+                {#if !readOnly && !confirmed && oneditcontentfields}
+                  <button
+                    type="button"
+                    class="hover:bg-negative-dimmer/40 hover:text-negative-stronger text-secondary inline-flex size-5 items-center justify-center rounded-full transition-colors"
+                    aria-label={cascade > 0
+                      ? m.ai_builder_requirements_field_remove_with_children({
+                          field: field.label,
+                          count: String(cascade)
+                        })
+                      : m.ai_builder_requirements_field_remove({ field: field.label })}
+                    title={cascade > 0
+                      ? m.ai_builder_requirements_field_remove_with_children({
+                          field: field.label,
+                          count: String(cascade)
+                        })
+                      : undefined}
+                    {disabled}
+                    onclick={() => removeContentField(field)}
+                  >
+                    <IconX class="size-3" aria-hidden="true" />
+                  </button>
+                {/if}
+              </li>
+            {/snippet}
+
+            {#each contentFieldGroups as group (group.key)}
+              {#if group.path.length > 0 || group.unplaced}
+                <p class="text-secondary mt-2 mb-1 text-[0.6875rem] font-medium">
+                  {#if group.unplaced}
+                    {m.ai_builder_requirements_group_unplaced()}
+                  {:else}
+                    {m.ai_builder_requirements_group_inside({
+                      parent: group.path.join(" › ")
+                    })}
                   {/if}
-                  {#if !readOnly && !confirmed && oneditcontentfields}
+                </p>
+              {/if}
+              <ul
+                class={group.path.length > 0 || group.unplaced
+                  ? "border-default mt-0 ml-2 flex list-none flex-wrap gap-1.5 border-l pt-0.5 pb-0.5 pl-3"
+                  : "mt-2 flex list-none flex-wrap gap-1.5 p-0"}
+              >
+                {#each visibleGroupFields(group) as field (field.id)}
+                  {@render contentFieldChip(field)}
+                {/each}
+                {#if !allContentFieldsShown && visibleGroupFields(group).length < group.fields.length}
+                  <li>
                     <button
                       type="button"
-                      class="hover:bg-negative-dimmer/40 hover:text-negative-stronger text-secondary inline-flex size-5 items-center justify-center rounded-full transition-colors"
-                      aria-label={m.ai_builder_requirements_field_remove({ field: field.label })}
-                      {disabled}
-                      onclick={() =>
-                        oneditcontentfields(
-                          namedContentFields
-                            .filter((other) => other.id !== field.id)
-                            .map((other) => other.id)
-                        )}
+                      class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
+                      onclick={() => (allContentFieldsShown = true)}
                     >
-                      <IconX class="size-3" aria-hidden="true" />
+                      {m.ai_builder_requirements_group_show_more({
+                        count: String(group.fields.length - visibleGroupFields(group).length)
+                      })}
                     </button>
-                  {/if}
-                </li>
-              {/each}
+                  </li>
+                {/if}
+              </ul>
+            {/each}
+            <ul class="mt-1 flex list-none flex-wrap gap-1.5 p-0">
               {#if !readOnly && !confirmed && oneditcontentfields}
                 <li>
                   {#if addingContentField}
@@ -679,8 +863,12 @@
                         event.preventDefault();
                         const name = newContentField.trim();
                         if (!name) return;
-                        oneditcontentfields([...namedContentFields.map((f) => f.id), name]);
+                        oneditcontentfields(
+                          [...namedContentFields.map((f) => f.id), name],
+                          addTargetParentId !== null ? { [name]: addTargetParentId } : undefined
+                        );
                         newContentField = "";
+                        addTargetParentId = null;
                         addingContentField = false;
                       }}
                     >
@@ -698,6 +886,31 @@
                           void cancelAddingContentField();
                         }}
                       />
+                      {#if placementTargets.length > 0}
+                        <DropdownMenu.Root>
+                          <DropdownMenu.Trigger
+                            class="border-default text-secondary hover:text-primary inline-flex h-[1.625rem] max-w-40 items-center gap-1 truncate rounded-full border px-2.5 text-[0.78125rem]"
+                            aria-label={m.ai_builder_requirements_place_label()}
+                            title={m.ai_builder_requirements_place_label()}
+                            {disabled}
+                          >
+                            <IconCornerDownRight class="size-3 shrink-0" aria-hidden="true" />
+                            <span class="truncate">{addTargetLabel}</span>
+                          </DropdownMenu.Trigger>
+                          <DropdownMenu.Content align="start">
+                            <DropdownMenu.Item onclick={() => (addTargetParentId = null)}>
+                              {m.ai_builder_requirements_place_top_level()}
+                            </DropdownMenu.Item>
+                            {#each placementTargets as target (target.parentId)}
+                              <DropdownMenu.Item
+                                onclick={() => (addTargetParentId = target.parentId)}
+                              >
+                                {target.path.join(" › ")}
+                              </DropdownMenu.Item>
+                            {/each}
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Root>
+                      {/if}
                       <Button
                         type="submit"
                         size="sm"
@@ -728,19 +941,6 @@
                       {m.ai_builder_requirements_field_add()}
                     </button>
                   {/if}
-                </li>
-              {/if}
-              {#if namedContentFields.length > shownContentFields.length}
-                <li>
-                  <button
-                    type="button"
-                    class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
-                    onclick={() => (allContentFieldsShown = true)}
-                  >
-                    {m.ai_builder_requirements_show_all_fields({
-                      count: String(namedContentFields.length)
-                    })}
-                  </button>
                 </li>
               {/if}
             </ul>

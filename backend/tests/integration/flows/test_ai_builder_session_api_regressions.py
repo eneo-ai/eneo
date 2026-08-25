@@ -2335,6 +2335,8 @@ async def test_ai_builder_same_turn_key_replays_without_provider_or_duplicates(
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder Turn Replay",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     session_id = await _create_ai_builder_session(
         client=client,
@@ -2361,7 +2363,9 @@ async def test_ai_builder_same_turn_key_replays_without_provider_or_duplicates(
                 message="Hjälp mig bygga ett flöde.",
                 client_turn_id=client_turn_id,
             )
-            assert any(event["event"] == "text" for event in first_events)
+            assert any(event["event"] == "text" for event in first_events), (
+                _builder_event_outline(first_events)
+            )
             calls_after_commit = completion.await_count
 
             first_session = await client.get(
@@ -2527,6 +2531,8 @@ async def test_ai_builder_disconnect_after_committed_event_replays_without_provi
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder Committed Stream Disconnect",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     session_id = await _create_ai_builder_session(
         client=client,
@@ -2580,15 +2586,17 @@ async def test_ai_builder_disconnect_after_committed_event_replays_without_provi
                     response.body_iterator,
                 )
                 saw_durable_event = False
+                observed_event_types: list[str | None] = []
                 try:
                     async for event in stream:
+                        observed_event_types.append(event.event)
                         if event.event == "text":
                             saw_durable_event = True
                             break
                 finally:
                     await stream.aclose()
 
-            assert saw_durable_event
+            assert saw_durable_event, observed_event_types
             calls_after_disconnect = completion.await_count
 
             persisted = await client.get(
@@ -2628,6 +2636,8 @@ async def test_ai_builder_latest_turn_replay_and_conflict_survive_compaction(
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder Turn Compaction Replay",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     session_id = await _create_ai_builder_session(
         client=client,
@@ -2666,7 +2676,9 @@ async def test_ai_builder_latest_turn_replay_and_conflict_survive_compaction(
                 message="Bygg ett nytt flöde efter den långa historiken.",
                 client_turn_id=client_turn_id,
             )
-            assert any(event["event"] == "text" for event in first_events)
+            assert any(event["event"] == "text" for event in first_events), (
+                _builder_event_outline(first_events)
+            )
             calls_after_commit = completion.await_count
 
             replay_events = await _send_builder_message(
@@ -2714,6 +2726,8 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder Turn Conflict",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
     session_id = await _create_ai_builder_session(
         client=client,
@@ -2740,7 +2754,9 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
                 message="Hjälp mig bygga ett flöde.",
                 client_turn_id=client_turn_id,
             )
-            assert any(event["event"] == "text" for event in first_events)
+            assert any(event["event"] == "text" for event in first_events), (
+                _builder_event_outline(first_events)
+            )
             calls_after_commit = completion.await_count
 
             conflict_response = await client.post(
@@ -8149,6 +8165,8 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
         db_container=db_container,
         completion_model_factory=completion_model_factory,
         space_name="AI Builder API freeform recovery",
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
     )
 
     initial_question = _make_tool_call(
@@ -8232,7 +8250,9 @@ async def test_ai_builder_api_repeated_output_question_after_freeform_label_reco
                 message="PDF-dokument",
             )
 
-    assert any(event["event"] == "question" for event in first_events)
+    assert any(event["event"] == "question" for event in first_events), (
+        _builder_event_outline(first_events)
+    )
     assert not any(event["event"] == "error" for event in second_events)
     assert any(
         event["event"] in {"requirements_summary", "question"}
@@ -10353,6 +10373,7 @@ def _named_fields_classification_message() -> ConversationMessage:
     named_results = tuple(
         NamedResultEvidence(
             name=name,
+            declared_shape="object" if name == "beslut" else None,
             confidence="high",
             evidence=[f"quote:{source_id}:{quote}"],
         )
@@ -10520,10 +10541,20 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
             if event["event"] == "requirements_summary"
         )
         disclosed_data = cast(dict[str, Any], disclosed["data"])
-        assert [field["id"] for field in disclosed_data["named_content_fields"]] == [
-            "beslut",
-            "farhagor",
+        assert [
+            (
+                field["id"],
+                field["name"],
+                field["segments"],
+                field["unplaced"],
+                field["origin"],
+            )
+            for field in disclosed_data["named_content_fields"]
+        ] == [
+            ('["exact",["beslut"]]', "beslut", [], False, "described"),
+            ('["exact",["farhagor"]]', "farhagor", [], False, "described"),
         ]
+        parent_id = disclosed_data["named_content_fields"][0]["id"]
 
         stale_events = await _send_builder_message(
             client=client,
@@ -10533,7 +10564,7 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
             question_answer={
                 "kind": "named_content_fields_edit",
                 "requirements_version": "b" * 64,
-                "field_names": ["beslut"],
+                "field_names": [parent_id],
             },
         )
 
@@ -10545,7 +10576,8 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
             question_answer={
                 "kind": "named_content_fields_edit",
                 "requirements_version": disclosed_data["requirements_version"],
-                "field_names": ["beslut", "Beslutsdatum"],
+                "field_names": [parent_id, "Beslutsdatum"],
+                "added_field_placements": {"Beslutsdatum": parent_id},
             },
         )
 
@@ -10564,6 +10596,22 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
     )
     edited_data = cast(dict[str, Any], edited["data"])
     assert [
-        (field["id"], field["origin"]) for field in edited_data["named_content_fields"]
-    ] == [("beslut", "described"), ("Beslutsdatum", "card_edit")]
+        (
+            field["id"],
+            field["name"],
+            field["segments"],
+            field["unplaced"],
+            field["origin"],
+        )
+        for field in edited_data["named_content_fields"]
+    ] == [
+        ('["exact",["beslut"]]', "beslut", [], False, "described"),
+        (
+            '["exact",["beslut","beslutsdatum"]]',
+            "Beslutsdatum",
+            ["beslut"],
+            False,
+            "card_edit",
+        ),
+    ]
     assert edited_data["requirements_version"] != disclosed_data["requirements_version"]

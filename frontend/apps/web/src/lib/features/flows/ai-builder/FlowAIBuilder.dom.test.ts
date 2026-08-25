@@ -1524,6 +1524,209 @@ describe("FlowAIBuilder confirm, build and review", () => {
     });
   });
 
+  it("groups shaped containers at any depth, cascades removals, and places unplaced names", async () => {
+    // Hierarchy keys on raw identities; labels deliberately carry shape
+    // prose that must not participate in grouping.
+    const summary = {
+      ...SUMMARY,
+      named_content_fields: [
+        {
+          id: "loc-doc",
+          label: "documents (användaren skrev en lista)",
+          name: "documents",
+          segments: [],
+          unplaced: false
+        },
+        {
+          id: "loc-cp",
+          label: "candidate_passages (användaren skrev en lista)",
+          name: "candidate_passages",
+          segments: ["documents"],
+          unplaced: false
+        },
+        {
+          id: "loc-page",
+          label: "page_or_section",
+          name: "page_or_section",
+          segments: ["documents", "candidate_passages"],
+          unplaced: false
+        },
+        {
+          id: "loc-unp",
+          label: "tidsstämpel",
+          name: "tidsstämpel",
+          segments: [],
+          unplaced: true
+        }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+
+    // Two-level grouping renders each parent path, and the unplaced section.
+    expect(
+      screen.getByText(m.ai_builder_requirements_group_inside({ parent: "documents" }))
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        m.ai_builder_requirements_group_inside({ parent: "documents › candidate_passages" })
+      )
+    ).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_requirements_group_unplaced())).toBeTruthy();
+
+    // The unplaced name resolves through the placement affordance into a
+    // group; the request re-adds the raw name placed under that parent id.
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_requirements_field_place({ field: "tidsstämpel" })
+      })
+    );
+    await fireEvent.click(
+      await screen.findByRole("menuitem", { name: "documents › candidate_passages" })
+    );
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      question_answer: {
+        kind: "named_content_fields_edit",
+        field_names: ["loc-doc", "loc-cp", "loc-page", "tidsstämpel"],
+        added_field_placements: { tidsstämpel: "loc-cp" }
+      }
+    });
+
+    // Removing the root container names and removes its whole subtree —
+    // depth-independent, so the two-level descendant counts too.
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_requirements_field_remove_with_children({
+          field: "documents (användaren skrev en lista)",
+          count: "2"
+        })
+      })
+    );
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]!.body).toMatchObject({
+      question_answer: {
+        kind: "named_content_fields_edit",
+        field_names: ["loc-unp"]
+      }
+    });
+  });
+
+  it("offers a childless container as a placement target", async () => {
+    // The central case: an attested empty events[] plus an unplaced
+    // timestamp must offer "place inside events" even though no child
+    // exists yet.
+    const summary = {
+      ...SUMMARY,
+      named_content_fields: [
+        {
+          id: "loc-events",
+          label: "events (användaren skrev en lista)",
+          name: "events",
+          segments: [],
+          unplaced: false,
+          can_contain_fields: true
+        },
+        {
+          id: "loc-ts",
+          label: "timestamp",
+          name: "timestamp",
+          segments: [],
+          unplaced: true,
+          can_contain_fields: false
+        }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_requirements_field_place({ field: "timestamp" })
+      })
+    );
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "events" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      question_answer: {
+        kind: "named_content_fields_edit",
+        field_names: ["loc-events", "timestamp"],
+        added_field_placements: { timestamp: "loc-events" }
+      }
+    });
+  });
+
+  it("never truncates a container out while its children render", async () => {
+    // Eleven plain top-level fields exceed the chip cap; the container must
+    // stay visible ahead of them.
+    const filler = Array.from({ length: 11 }, (_, index) => ({
+      id: `loc-f${index}`,
+      label: `fält_${index}`,
+      name: `falt_${index}`,
+      segments: [],
+      unplaced: false
+    }));
+    const summary = {
+      ...SUMMARY,
+      named_content_fields: [
+        ...filler,
+        {
+          id: "loc-doc",
+          label: "documents (användaren skrev en lista)",
+          name: "documents",
+          segments: [],
+          unplaced: false
+        },
+        {
+          id: "loc-title",
+          label: "titel",
+          name: "titel",
+          segments: ["documents"],
+          unplaced: false
+        }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    expect(screen.getByText("documents (användaren skrev en lista)")).toBeTruthy();
+    expect(screen.getByText("titel")).toBeTruthy();
+  });
+
   it("lets the user cancel adding report content and restores focus", async () => {
     const summary = {
       ...SUMMARY,
