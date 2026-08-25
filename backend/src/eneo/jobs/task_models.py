@@ -96,12 +96,3 @@ class AnalyzeConversationInsightsTask(TaskParams):
     include_followups: bool = False
     assistant_id: UUID | None = None
     group_chat_id: UUID | None = None
-
-
-class RebuildSharePointGroupSiteMapParams(TaskParams):
-    # Runs with with_user=False; no acting user is needed or recorded.
-    user_id: Optional[UUID] = None  # type: ignore[assignment]
-    tenant_id: UUID
-    # Exactly one auth reference: tenant app credentials or a user's OAuth token.
-    tenant_app_id: Optional[UUID] = None
-    user_integration_id: Optional[UUID] = None

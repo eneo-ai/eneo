@@ -1,7 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
-from uuid import UUID
 
 from typing_extensions import override
 
@@ -13,7 +11,6 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
 from eneo.integration.infrastructure.preview_service.base_preview_service import (
     BasePreviewService,
 )
-from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -30,23 +27,19 @@ if TYPE_CHECKING:
         TenantAppAuthService,
     )
     from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
-    from eneo.integration.infrastructure.sharepoint_group_site_cache import (
-        SharePointGroupSiteCache,
-    )
 
 logger = get_logger(__name__)
 
-# Serve a cached map for its whole TTL, but refresh ahead of expiry so the TTL
-# boundary never produces an uncategorized response.
-REFRESH_AHEAD_FRACTION = 0.8
+# Categorization is garnish, not payload: if Graph throttles the team-site
+# lookups, drop it for this request instead of stalling the dialog on
+# Retry-After sleeps.
+CATEGORIZATION_TIMEOUT_SECONDS = 8.0
 
 
 class SharePointPreviewService(BasePreviewService):
     CATEGORY_MY_TEAMS = "my_teams"
-    CATEGORY_PUBLIC_TEAMS_NOT_MEMBER = "public_teams_not_member"
     CATEGORY_OTHER_SITES = "other_sites"
     CATEGORY_ONEDRIVE = "onedrive"
-    CATEGORY_UNKNOWN = "unknown"
 
     def __init__(
         self,
@@ -54,19 +47,16 @@ class SharePointPreviewService(BasePreviewService):
         tenant_app_auth_service: Optional["TenantAppAuthService"] = None,
         service_account_auth_service: Optional["ServiceAccountAuthService"] = None,
         tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
-        group_site_cache: Optional["SharePointGroupSiteCache"] = None,
     ):
         super().__init__(oauth_token_service)
         self.tenant_app_auth_service = tenant_app_auth_service
         self.service_account_auth_service = service_account_auth_service
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
-        self.group_site_cache = group_site_cache
 
     @override
     async def get_preview_info(
         self,
         token: OauthToken,
-        tenant_id: Optional[UUID] = None,
     ) -> List[IntegrationPreview]:
         """Get preview information from SharePoint sites and OneDrive (user OAuth)"""
 
@@ -91,21 +81,20 @@ class SharePointPreviewService(BasePreviewService):
 
             site_previews = self._to_sharepoint_preview_data(data=sites_result)
 
-            member_group_ids: Optional[set[str]] = None
+            member_group_ids: Optional[list[str]] = None
             if isinstance(member_ids_result, BaseException):
                 logger.info(
-                    "Could not load memberOf groups for SharePoint categorization, "
-                    "falling back to visibility-only categorization: %s",
+                    "Could not load memberOf groups; skipping my-teams "
+                    "categorization: %s",
                     member_ids_result,
                 )
             else:
-                member_group_ids = set(member_ids_result)
+                member_group_ids = member_ids_result
 
-            categories = await self._classify_site_categories(
+            categories = await self._categorize_my_team_sites(
+                content_client=content_client,
                 site_previews=site_previews,
-                tenant_id=tenant_id,
                 member_group_ids=member_group_ids,
-                user_integration_id=token.user_integration.id,
             )
             for preview in site_previews:
                 preview.category = categories.get(
@@ -188,7 +177,8 @@ class SharePointPreviewService(BasePreviewService):
                 },
             )
 
-        # Use the token to fetch sites
+        # Use the token to fetch sites. Client-credential auth has no /me, so
+        # my-teams categorization is not possible here; sites are uncategorized.
         data = {}
         async with SharePointContentClient(
             base_url="https://graph.microsoft.com",
@@ -204,17 +194,7 @@ class SharePointPreviewService(BasePreviewService):
                 )
                 raise
 
-        site_previews = self._to_sharepoint_preview_data(data=data)
-        categories = await self._classify_site_categories(
-            site_previews=site_previews,
-            tenant_id=tenant_app.tenant_id,
-            member_group_ids=None,
-            tenant_app_id=tenant_app.id,
-        )
-        for preview in site_previews:
-            preview.category = categories.get(preview.key, self.CATEGORY_OTHER_SITES)
-
-        return site_previews
+        return self._to_sharepoint_preview_data(data=data)
 
     def _to_sharepoint_preview_data(
         self,
@@ -237,55 +217,37 @@ class SharePointPreviewService(BasePreviewService):
             previews.append(item)
         return previews
 
-    async def _classify_site_categories(
+    async def _categorize_my_team_sites(
         self,
         *,
+        content_client: SharePointContentClient,
         site_previews: List[IntegrationPreview],
-        tenant_id: Optional[UUID],
-        member_group_ids: Optional[set[str]],
-        tenant_app_id: Optional[UUID] = None,
-        user_integration_id: Optional[UUID] = None,
+        member_group_ids: Optional[list[str]],
     ) -> Dict[str, str]:
-        """Categorize sites using the cached per-tenant group->site map.
+        """Mark sites backed by the user's own M365 groups as my_teams.
 
-        Never blocks on Microsoft Graph: a missing or stale map schedules a
-        background rebuild and the sites are served uncategorized meanwhile.
+        Only the user's own memberOf groups (typically tens) are resolved, via
+        $batch — never the tenant's full group list.
         """
         categories = {
             preview.key: self.CATEGORY_OTHER_SITES
             for preview in site_previews
             if preview.key
         }
-        if not site_previews or tenant_id is None or self.group_site_cache is None:
-            return categories
-        if not get_settings().sharepoint_site_categorization_enabled:
+        if not site_previews or not member_group_ids:
             return categories
 
         try:
-            cached = await self.group_site_cache.get(tenant_id)
-        except Exception:
+            site_map = await asyncio.wait_for(
+                content_client.get_group_root_sites_batched(member_group_ids),
+                timeout=CATEGORIZATION_TIMEOUT_SECONDS,
+            )
+        except Exception as e:
             logger.warning(
-                "Could not read SharePoint group site map cache",
-                extra={"tenant_id": str(tenant_id)},
-                exc_info=True,
+                "Could not resolve team sites for my-teams categorization: %s",
+                e if str(e) else type(e).__name__,
             )
             return categories
-
-        if cached is None:
-            await self.group_site_cache.schedule_rebuild(
-                tenant_id,
-                tenant_app_id=tenant_app_id,
-                user_integration_id=user_integration_id,
-            )
-            return categories
-
-        entries, built_at = cached
-        if self._is_refresh_due(built_at):
-            await self.group_site_cache.schedule_rebuild(
-                tenant_id,
-                tenant_app_id=tenant_app_id,
-                user_integration_id=user_integration_id,
-            )
 
         by_site_id = {
             preview.key: preview.key for preview in site_previews if preview.key
@@ -296,33 +258,14 @@ class SharePointPreviewService(BasePreviewService):
             if preview.key and preview.url
         }
 
-        for entry in entries:
-            site_key = by_site_id.get(entry.get("site_id") or "") or by_url.get(
-                self._normalize_web_url(entry.get("web_url"))
+        for site in site_map.values():
+            site_key = by_site_id.get(site.get("id") or "") or by_url.get(
+                self._normalize_web_url(site.get("webUrl"))
             )
-            if not site_key:
-                continue
-
-            if (
-                member_group_ids is not None
-                and entry.get("group_id") in member_group_ids
-            ):
+            if site_key:
                 categories[site_key] = self.CATEGORY_MY_TEAMS
-                continue
-
-            if (entry.get("visibility") or "").lower() == "public":
-                categories[site_key] = self.CATEGORY_PUBLIC_TEAMS_NOT_MEMBER
 
         return categories
-
-    @staticmethod
-    def _is_refresh_due(built_at: datetime) -> bool:
-        try:
-            age_seconds = (datetime.now(timezone.utc) - built_at).total_seconds()
-        except TypeError:
-            return True
-        ttl = get_settings().sharepoint_preview_cache_ttl_seconds
-        return age_seconds >= ttl * REFRESH_AHEAD_FRACTION
 
     @staticmethod
     def _normalize_web_url(url: Optional[str]) -> str:

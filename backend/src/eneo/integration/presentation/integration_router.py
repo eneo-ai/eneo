@@ -321,11 +321,9 @@ async def get_integration_preview(
 ):
     service = container.integration_preview_service()
     assembler = container.confluence_content_assembler()
-    user = container.user()
 
     preview_data = await service.get_preview_data(
-        user_integration_id=user_integration_id,
-        tenant_id=user.tenant_id,
+        user_integration_id=user_integration_id
     )
 
     return assembler.to_paginated_response(items=preview_data)

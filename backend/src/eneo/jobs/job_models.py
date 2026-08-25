@@ -30,7 +30,6 @@ class Task(str, Enum):
     PULL_CONFLUENCE_CONTENT = "pull_confluence_content"
     PULL_SHAREPOINT_CONTENT = "pull_sharepoint_content"
     SYNC_SHAREPOINT_DELTA = "sync_sharepoint_delta"
-    REBUILD_SHAREPOINT_GROUP_SITE_MAP = "rebuild_sharepoint_group_site_map"
     UPDATE_MODEL_USAGE_STATS = "update_model_usage_stats"
     ANALYZE_CONVERSATION_INSIGHTS = "analyze_conversation_insights"
     EXPORT_AUDIT_LOGS = "export_audit_logs"

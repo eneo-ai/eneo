@@ -228,46 +228,6 @@ class SharePointContentClient(BaseClient):
                 return [cast(str, g.get("id")) for g in groups if g.get("id")]
             raise
 
-    async def get_m365_groups(self) -> list[SharePointItem]:
-        """List Microsoft 365 (Unified) groups, including Teams-backed groups."""
-        endpoint = (
-            "v1.0/groups?"
-            "$filter=groupTypes/any(c:c eq 'Unified')&"
-            "$select=id,displayName,visibility"
-        )
-        try:
-            return await self._get_all_paged_items(endpoint)
-        except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "SharePoint token expired while listing M365 groups, refreshing..."
-                )
-                await self.refresh_token()
-                return await self._get_all_paged_items(endpoint)
-            raise
-
-    async def get_group_root_site(self, group_id: str) -> Optional[dict[str, Any]]:
-        """Get root SharePoint site for a Microsoft 365 group."""
-        endpoint = f"v1.0/groups/{group_id}/sites/root?$select=id,webUrl"
-        try:
-            return await self.client.get(endpoint, headers=self.headers)
-        except aiohttp.ClientResponseError as e:
-            if e.status == 401 and self.token_refresh_callback and self.token_id:
-                logger.info(
-                    "SharePoint token expired while getting group root site, refreshing..."
-                )
-                await self.refresh_token()
-                return await self.client.get(endpoint, headers=self.headers)
-
-            # Not all groups have an accessible site in all tenants; treat as non-fatal.
-            if e.status in (403, 404):
-                logger.debug(
-                    "Could not fetch group root site",
-                    extra={"group_id": group_id, "status": e.status},
-                )
-                return None
-            raise
-
     async def get_group_root_sites_batched(
         self, group_ids: Sequence[str]
     ) -> dict[str, dict[str, str]]:

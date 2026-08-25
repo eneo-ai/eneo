@@ -13,8 +13,6 @@ from eneo.worker.redis import redis_lease
 from eneo.worker.worker import Worker
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from eneo.integration.domain.entities.integration_knowledge import (
@@ -24,7 +22,6 @@ if TYPE_CHECKING:
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
     )
-    from eneo.jobs.task_models import RebuildSharePointGroupSiteMapParams
     from eneo.main.container.container import Container
 
 worker = Worker()
@@ -162,159 +159,6 @@ async def pull_sharepoint_content(
             exc_info=True,
         )
         raise
-
-
-GRAPH_BASE_URL = "https://graph.microsoft.com"
-
-
-async def _get_rebuild_access_token(
-    container: "Container", params: "RebuildSharePointGroupSiteMapParams"
-) -> tuple[str | None, str]:
-    """Acquire a Graph access token for the map rebuild, via tenant app or user OAuth."""
-    async with container.session_scope():
-        if params.tenant_app_id:
-            repo = container.tenant_sharepoint_app_repo()
-            tenant_app = await repo.one(id=params.tenant_app_id)
-            if not tenant_app.is_active:
-                return None, GRAPH_BASE_URL
-
-            if tenant_app.is_service_account():
-                service_account_auth_service = container.service_account_auth_service()
-                token_data = await service_account_auth_service.refresh_access_token(
-                    tenant_app
-                )
-                new_refresh_token = token_data.get("refresh_token")
-                if (
-                    new_refresh_token
-                    and new_refresh_token != tenant_app.service_account_refresh_token
-                ):
-                    tenant_app.update_refresh_token(new_refresh_token)
-                    await repo.update(tenant_app)
-                return token_data["access_token"], GRAPH_BASE_URL
-
-            tenant_app_auth_service = container.tenant_app_auth_service()
-            access_token = await tenant_app_auth_service.get_access_token(tenant_app)
-            return access_token, GRAPH_BASE_URL
-
-        if params.user_integration_id:
-            from eneo.integration.domain.entities.oauth_token import SharePointToken
-
-            oauth_token_service = container.oauth_token_service()
-            token = await oauth_token_service.get_oauth_token_by_user_integration(
-                user_integration_id=params.user_integration_id
-            )
-            if not token or not token.token_type.is_sharepoint:
-                return None, GRAPH_BASE_URL
-
-            token = await oauth_token_service.refresh_and_update_token(
-                token_id=token.id
-            )
-            if not isinstance(token, SharePointToken):
-                return None, GRAPH_BASE_URL
-            return token.access_token, token.base_url
-
-    return None, GRAPH_BASE_URL
-
-
-@worker.long_running_function(with_user=False, keep_result=0)
-async def rebuild_sharepoint_group_site_map(
-    job_id: "UUID",
-    params: "RebuildSharePointGroupSiteMapParams",
-    container: "Container",
-):
-    """Build the per-tenant group->site map used to categorize preview sites.
-
-    Enumerates all M365 groups, resolves their root sites via Graph $batch and
-    stores the result in Redis (SharePointGroupSiteCache). The freshly refreshed
-    access token (~1h validity) is not refreshed mid-run; a rebuild that somehow
-    outlives it fails and is rescheduled by the next preview request.
-    """
-    from eneo.integration.infrastructure.clients.sharepoint_content_client import (
-        SharePointContentClient,
-    )
-    from eneo.integration.infrastructure.sharepoint_group_site_cache import (
-        GroupSiteEntry,
-    )
-
-    settings = get_settings()
-    if not settings.sharepoint_site_categorization_enabled:
-        return "Skipped: site categorization disabled"
-
-    redis_client = container.redis_client()
-    cache = container.sharepoint_group_site_cache()
-    tenant_id_str = str(params.tenant_id)
-    lock_key = f"sharepoint:group_site_map:lock:{params.tenant_id}"
-
-    try:
-        async with redis_lease(
-            redis_client,
-            lock_key,
-            ttl_seconds=SHAREPOINT_SYNC_LOCK_TTL_SECONDS,
-        ) as acquired:
-            if not acquired:
-                return "Skipped: rebuild already in progress"
-
-            access_token, base_url = await _get_rebuild_access_token(container, params)
-            if not access_token:
-                logger.warning(
-                    "No usable credentials for SharePoint group site map rebuild",
-                    extra={"tenant_id": tenant_id_str},
-                )
-                return "Skipped: no usable credentials"
-
-            async with SharePointContentClient(
-                base_url=base_url,
-                api_token=access_token,
-                token_id=None,
-                token_refresh_callback=None,
-            ) as client:
-                teams = await client.get_m365_groups()
-                group_ids = [
-                    gid
-                    for team in teams
-                    if isinstance(gid := team.get("id"), str) and gid
-                ]
-                site_map = await client.get_group_root_sites_batched(group_ids)
-
-            entries: list[GroupSiteEntry] = []
-            for team in teams:
-                group_id = team.get("id")
-                if not isinstance(group_id, str):
-                    continue
-                site = site_map.get(group_id)
-                if not site:
-                    continue
-                visibility = team.get("visibility")
-                entries.append(
-                    {
-                        "group_id": group_id,
-                        "visibility": (
-                            visibility.lower() if isinstance(visibility, str) else ""
-                        ),
-                        "site_id": site["id"],
-                        "web_url": site["webUrl"],
-                    }
-                )
-
-            await cache.set(params.tenant_id, entries)
-            logger.info(
-                "Rebuilt SharePoint group site map",
-                extra={
-                    "tenant_id": tenant_id_str,
-                    "groups": len(group_ids),
-                    "sites_mapped": len(entries),
-                },
-            )
-            return {"groups": len(group_ids), "sites_mapped": len(entries)}
-    except Exception as exc:
-        logger.error(
-            f"Error rebuilding SharePoint group site map for tenant {tenant_id_str}: {exc}",
-            exc_info=True,
-        )
-        raise
-    finally:
-        # Allow the next preview to reschedule immediately after success or failure.
-        await cache.clear_building_marker(params.tenant_id)
 
 
 @worker.task(channel_type=ChannelType.SYNC_SHAREPOINT_DELTA)
