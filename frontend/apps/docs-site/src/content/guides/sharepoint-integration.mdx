@@ -67,6 +67,7 @@ All communication between Eneo and SharePoint occurs via the Microsoft Graph API
 Go to [Azure Portal](https://portal.azure.com) and navigate to **Microsoft Entra ID** → **App registrations** → **New registration**.
 
 Fill in the following:
+
 - **Name**: Choose a descriptive name, for example "Eneo SharePoint Integration"
 - **Supported account types**: Select "Accounts in this organizational directory only" if the integration should only be used within your organization
 - **Redirect URI**: Select "Web" and enter `https://your-eneo-domain.com/integrations/callback/token/`
@@ -110,6 +111,7 @@ After adding the permissions, click **Grant admin consent for [your tenant]** to
 Navigate to **Certificates & secrets** → **New client secret**. Enter a description and choose a validity period. Copy the value that appears – it will only be shown once.
 
 Note the following values needed for configuration in Eneo:
+
 - **Application (client) ID** – found on the application's overview page
 - **Client secret** – the value you just copied
 - **Directory (tenant) ID** or domain name – for example `contoso.onmicrosoft.com`
@@ -129,17 +131,19 @@ With the service account method, an administrator logs in with a dedicated Micro
 **Why we recommend this:** Unlike the tenant app method, service account authentication only grants access to SharePoint sites that the service account explicitly has permission to access. This follows the principle of least privilege – Eneo cannot access more data than necessary.
 
 **Advantages:**
+
 - Granular access control – Eneo can only read files the service account has access to
 - No person dependency – the integration continues to work even if the person who configured it leaves
 - Clear traceability in SharePoint's access logs
 - Follows security best practices (least privilege)
 
 **Requires:**
+
 - A dedicated service account in Microsoft Entra ID (for example `eneo-service@contoso.com`)
 - The account must have read permission to the SharePoint sites to be imported
 - Delegated permissions in the Microsoft Entra ID application
 
-> **Note:** The Microsoft Entra ID app permissions define what the app *can* do on behalf of the service account, but the service account must also have actual access to the SharePoint sites. Add the service account as a **Member** or **Visitor** on each SharePoint site via **Site settings** → **Site permissions** → **Add members**. Without this, the integration will receive 403 Forbidden errors when trying to read files.
+> **Note:** The Microsoft Entra ID app permissions define what the app _can_ do on behalf of the service account, but the service account must also have actual access to the SharePoint sites. Add the service account as a **Member** or **Visitor** on each SharePoint site via **Site settings** → **Site permissions** → **Add members**. Without this, the integration will receive 403 Forbidden errors when trying to read files.
 
 ### Tenant App
 
@@ -148,17 +152,20 @@ With the tenant app method, Eneo uses application permissions that grant access 
 **When this is appropriate:** Tenant app can be a good choice for smaller organizations or test environments where managing a separate service account adds unnecessary overhead, and where exposing all SharePoint content to Eneo is acceptable. It's also useful when you explicitly want Eneo to have access to all sites.
 
 **Advantages:**
+
 - Simpler setup – no separate login required or service account to manage
 - Immediate access to all content
 - No risk of token expiration due to password changes or account issues
 
 **Disadvantages:**
+
 - **No granular access control** – the application can read all files across all SharePoint sites in the organization
 - Microsoft does not provide any mechanism to restrict which sites an application with application permissions can access – it's all or nothing
 - Requires a Microsoft Entra ID administrator to approve application permissions
 - May not comply with data minimization requirements in some organizations
 
 **Requires:**
+
 - Application permissions in the Microsoft Entra ID application
 - Admin consent for these permissions
 
@@ -268,6 +275,34 @@ To remove a single imported SharePoint folder or site without affecting the rest
 
 ---
 
+## Development Fixture Mode
+
+Developers can validate the SharePoint picker without a Microsoft tenant or any Graph requests. Enable both backend safety guards and restart the backend:
+
+```env
+ENVIRONMENT=development
+SHAREPOINT_FIXTURE_MODE_ENABLED=true
+```
+
+Then append one of these query parameters to the Eneo page URL before opening the SharePoint import dialog:
+
+| Query parameter                      | Purpose                                                                                                  |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `?sharepoint_fixture=representative` | 12 sites with duplicate and long names, Unicode, OneDrive, varied files, empty folders, and deep nesting |
+| `?sharepoint_fixture=large_tenant`   | 152 deterministic results for search, grouping, and rendering validation                                 |
+| `?sharepoint_fixture=empty`          | Empty-result behavior                                                                                    |
+
+Fixture mode is deliberately separate from the real integration:
+
+- The fixture API returns `fixture: true`, uses `fixture-` identifiers, and only uses URLs under the reserved `.invalid` domain.
+- Fixture endpoints are unavailable unless the explicit flag is enabled in a local/development environment.
+- The UI displays a persistent test-data warning and disables import, embedding-model selection, synchronization, and webhooks.
+- An invalid or misspelled fixture scenario remains in fixture mode and never falls back to Microsoft Graph.
+
+The deterministic catalog is owned by `backend/src/eneo/integration/sharepoint_fixture/catalog.py`; fixture behavior and real Graph behavior do not share a service path.
+
+---
+
 ## Webhooks and Real-time Synchronization
 
 To keep imported content up to date, Eneo uses Microsoft Graph's webhook functionality. When a file changes in SharePoint, Microsoft sends a notification to Eneo which then fetches the updated file.
@@ -330,12 +365,14 @@ If connection testing fails, check:
 If administrators can authenticate but regular users receive errors like "AADSTS65001" (consent required) or "AADSTS50105" (user not assigned):
 
 **Check admin consent is granted:**
+
 1. Go to **Azure Portal** → **App registrations** → your app
 2. Navigate to **API permissions**
 3. Verify the Status column shows **"Granted for [tenant name]"** (green checkmark)
 4. If not, click **Grant admin consent for [tenant]**
 
 **Check user assignment settings:**
+
 1. Go to **Azure Portal** → **Enterprise applications** (not App registrations)
 2. Search for and select your application
 3. Navigate to **Properties**
@@ -437,6 +474,7 @@ If you need to switch from service account to tenant app or vice versa, the exis
 Removing the configuration means all imported SharePoint knowledge is also removed. Users will then need to re-import their content after the new configuration is in place.
 
 To switch method:
+
 1. Navigate to **Admin** → **Integrations**
 2. Click **Configure** under SharePoint
 3. Click **Remove integration** and confirm
