@@ -1,3 +1,5 @@
+import { m } from "$lib/paraglide/messages";
+
 import type {
   AIBuilderError,
   AIBuilderErrorCategory,
@@ -193,7 +195,7 @@ function safeJsonRecord(raw: string): Record<string, unknown> | null {
 export function parseAIBuilderError({
   transport,
   payload,
-  fallbackMessage = "AI Builder failed. Please try again."
+  fallbackMessage = m.ai_builder_error_fallback_generic()
 }: ParseAIBuilderErrorInput): AIBuilderError {
   if (transport === "sse") {
     return parseSsePayload(payload, fallbackMessage);
