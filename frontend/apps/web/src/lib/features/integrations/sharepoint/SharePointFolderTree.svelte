@@ -6,9 +6,11 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { IconWeb } from "@eneo/icons/web";
   import { IconUploadCloud } from "@eneo/icons/upload-cloud";
+  import type { components } from "@eneo/eneo-js";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
   import { m } from "$lib/paraglide/messages";
   import { buildSharePointSelectionKey } from "./selectionKey";
+  import { fetchSharePointFixtureTree, type SharePointFixtureScenario } from "./fixtureMode";
 
   type TreeItem = {
     id: string;
@@ -21,6 +23,24 @@
     modified?: string;
   };
 
+  type ApiTreeItem = components["schemas"]["SharePointTreeItem"];
+
+  function normalizeTreeItem(item: ApiTreeItem): TreeItem | null {
+    if (item.type !== "file" && item.type !== "folder" && item.type !== "site_root") {
+      return null;
+    }
+    return {
+      id: item.id,
+      name: item.name,
+      type: item.type,
+      path: item.path,
+      web_url: item.web_url ?? undefined,
+      has_children: item.has_children,
+      size: item.size ?? undefined,
+      modified: item.modified ?? undefined
+    };
+  }
+
   interface Props {
     userIntegrationId: string;
     spaceId: string;
@@ -28,6 +48,7 @@
     driveId?: string;
     siteName: string;
     isOneDrive: boolean;
+    fixtureScenario?: SharePointFixtureScenario;
     selectedItemKeys?: string[];
     onToggleSelect: (item: TreeItem) => void;
   }
@@ -39,6 +60,7 @@
     driveId,
     siteName,
     isOneDrive,
+    fixtureScenario,
     selectedItemKeys,
     onToggleSelect
   }: Props = $props();
@@ -67,7 +89,13 @@
     async (folderId: string | null = null, folderPath: string = "") => {
       const thisRequest = ++requestId;
       try {
-        const queryParams: Record<string, string> = {
+        const queryParams: {
+          space_id: string;
+          site_id?: string;
+          drive_id?: string;
+          folder_id?: string;
+          folder_path?: string;
+        } = {
           space_id: spaceId
         };
 
@@ -86,22 +114,27 @@
           queryParams.folder_path = folderPath;
         }
 
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const response = (await eneo.client.fetch(
-          `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/` as any,
-          {
-            method: "get",
-            params: {
-              query: queryParams
-            }
-          } as any
-        )) as { items?: TreeItem[] };
-        /* eslint-enable @typescript-eslint/no-explicit-any */
+        const response = fixtureScenario
+          ? await fetchSharePointFixtureTree(eneo.client, fixtureScenario, {
+              siteId,
+              driveId,
+              folderId: folderId ?? undefined,
+              folderPath: folderPath || undefined
+            })
+          : await eneo.client.fetch("/api/v1/integrations/{user_integration_id}/sharepoint/tree/", {
+              method: "get",
+              params: {
+                path: { user_integration_id: userIntegrationId },
+                query: queryParams
+              }
+            });
 
         // Ignore stale responses from earlier navigations
         if (thisRequest !== requestId) return;
 
-        currentItems = response.items || [];
+        currentItems = response.items
+          .map(normalizeTreeItem)
+          .filter((item): item is TreeItem => item !== null);
       } catch (error) {
         if (thisRequest !== requestId) return;
         console.error("Error loading folder tree:", error);
