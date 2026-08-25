@@ -13,6 +13,8 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Input } from "$lib/components/ui/input/index.js";
   import CircleAlert from "lucide-svelte/icons/circle-alert";
   import {
@@ -20,7 +22,7 @@
     type OutputModeCompatibilityIssue,
     type SelectableOutputOption
   } from "$lib/features/flows/flowStepTypes";
-  import { getOutputHintText } from "./flowStepEditHelpers";
+  import { getEnkelAwareOutputTypeLabel, getOutputHintText } from "./flowStepEditHelpers";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
@@ -33,6 +35,7 @@
     availableOutputTypes,
     availableOutputModes,
     flowId = "",
+    httpVariableContext = undefined,
     outputHintKind,
     embedded = false,
     onOutputTypeChange,
@@ -48,6 +51,7 @@
     availableOutputTypes: SelectableOutputOption<FlowStep["output_type"]>[];
     availableOutputModes: SelectableOutputOption<FlowStep["output_mode"]>[];
     flowId?: string;
+    httpVariableContext?: import("$lib/features/flows/components/VariablePicker.svelte").VariablePickerContext;
     outputHintKind: FlowOutputHintKind | null;
     embedded?: boolean;
     onOutputTypeChange?: (detail: { value: string }) => void;
@@ -68,8 +72,15 @@
   const supportsCitationMode = $derived(supportsFlowCitationMode(step));
   const compatibilityIssue = $derived(getOutputModeCompatibilityIssue(step));
 
+  function outputTypeDisplayLabel(value: FlowStep["output_type"], label: string): string {
+    return getEnkelAwareOutputTypeLabel(value, label, isAdvancedMode);
+  }
+
   const selectedOutputTypeLabel = $derived(
-    availableOutputTypes.find((t) => t.value === step.output_type)?.label ?? step.output_type
+    outputTypeDisplayLabel(
+      step.output_type,
+      availableOutputTypes.find((t) => t.value === step.output_type)?.label ?? step.output_type
+    )
   );
   const selectedOutputModeLabel = $derived(
     availableOutputModes.find((mode) => mode.value === step.output_mode)?.label ?? step.output_mode
@@ -99,9 +110,20 @@
 <FlowStepSection title={embedded ? undefined : m.flow_step_output_section()}>
   <div class="grid gap-5 lg:grid-cols-2 lg:gap-8">
     <div class="flex flex-col gap-2">
-      <label class="text-primary text-sm font-medium" for="flow-step-output-type">
-        {m.flow_step_output_type()}
-      </label>
+      <span class="flex items-center">
+        <label class="text-primary text-sm font-medium" for="flow-step-output-type">
+          {m.flow_step_output_type()}
+        </label>
+        <Tooltip.Provider delayDuration={150}>
+          <Tooltip.Root>
+            <Tooltip.Trigger aria-label={m.flow_step_output_type_help()} class="ml-1.5">
+              <IconQuestionMark class="text-muted hover:text-primary size-4" aria-hidden="true" />
+            </Tooltip.Trigger>
+            <Tooltip.Content class="max-w-[320px]">{m.flow_step_output_type_help()}</Tooltip.Content
+            >
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      </span>
       <Select.Root
         type="single"
         value={step.output_type}
@@ -119,8 +141,10 @@
         <Select.Content>
           <Select.Group>
             {#each availableOutputTypes as t (t.value)}
-              <Select.Item value={t.value} label={t.label}>
-                {t.label}{t.legacyInvalid ? ` — ${m.flow_output_mode_needs_attention()}` : ""}
+              <Select.Item value={t.value} label={outputTypeDisplayLabel(t.value, t.label)}>
+                {outputTypeDisplayLabel(t.value, t.label)}{t.legacyInvalid
+                  ? ` - ${m.flow_output_mode_needs_attention()}`
+                  : ""}
               </Select.Item>
             {/each}
           </Select.Group>
@@ -138,9 +162,20 @@
     </div>
 
     <div class="flex flex-col gap-2">
-      <label class="text-primary text-sm font-medium" for="flow-step-output-mode">
-        {m.flow_step_output_mode()}
-      </label>
+      <span class="flex items-center">
+        <label class="text-primary text-sm font-medium" for="flow-step-output-mode">
+          {m.flow_step_output_mode()}
+        </label>
+        <Tooltip.Provider delayDuration={150}>
+          <Tooltip.Root>
+            <Tooltip.Trigger aria-label={m.flow_step_output_mode_help()} class="ml-1.5">
+              <IconQuestionMark class="text-muted hover:text-primary size-4" aria-hidden="true" />
+            </Tooltip.Trigger>
+            <Tooltip.Content class="max-w-[320px]">{m.flow_step_output_mode_help()}</Tooltip.Content
+            >
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      </span>
       <Select.Root
         type="single"
         value={step.output_mode}
@@ -206,10 +241,11 @@
     </Alert.Root>
   {/if}
 
-  {#if isAdvancedMode && supportsCitationMode}
+  {#if supportsCitationMode}
     <Settings.Row
       title={m.flow_step_citation_mode()}
       description={m.flow_step_citation_mode_desc()}
+      help={m.flow_step_citation_mode_help()}
       density="compact"
     >
       <div class="flex flex-col gap-2">
@@ -242,9 +278,6 @@
             </Select.Group>
           </Select.Content>
         </Select.Root>
-        <p class="text-muted text-xs leading-relaxed">
-          {m.flow_step_citation_mode_help()}
-        </p>
       </div>
     </Settings.Row>
   {/if}
@@ -271,6 +304,7 @@
     method="POST"
     {isPublished}
     {flowId}
+    variableContext={httpVariableContext}
     onConfigChange={(detail) => onHttpConfigChange?.({ config: detail.config })}
   />
 {/if}

@@ -389,3 +389,16 @@ export function getIssueMessage(
       return null;
   }
 }
+
+/**
+ * Enkel avoids raw contract tokens: "JSON" reads as a fixed-format answer.
+ * One owner for every surface (select, add-step dialog, chapter status) so
+ * the wording cannot drift.
+ */
+export function getEnkelAwareOutputTypeLabel(
+  value: string,
+  label: string,
+  isAdvancedMode: boolean
+): string {
+  return !isAdvancedMode && value === "json" ? m.flow_output_type_simple_structured() : label;
+}

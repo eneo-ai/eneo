@@ -45,6 +45,7 @@
     transcriptionModelConfigured,
     transcriptionModelLabel,
     flowId = "",
+    httpVariableContext = undefined,
     onInputSourceChange,
     onInputTypeChange,
     onRuntimeInputChange,
@@ -73,6 +74,7 @@
     transcriptionModelConfigured: boolean;
     transcriptionModelLabel: string | null;
     flowId?: string;
+    httpVariableContext?: import("$lib/features/flows/components/VariablePicker.svelte").VariablePickerContext;
     onInputSourceChange?: (detail: { value: string }) => void;
     onInputTypeChange?: (detail: { value: string }) => void;
     onRuntimeInputChange?: (detail: { patch: Partial<FlowRuntimeInputConfigValue> }) => void;
@@ -120,6 +122,7 @@
   <Settings.Row
     title={m.flow_step_section_input()}
     description={m.flow_step_standard_input_desc()}
+    help={m.flow_step_source_help()}
     density="compact"
   >
     <div class="flex flex-col gap-2">
@@ -160,6 +163,7 @@
     <Settings.Row
       title={m.flow_step_input_type()}
       description={m.flow_step_input_format_desc()}
+      help={m.flow_step_input_type_help()}
       density="compact"
     >
       <div class="flex flex-col gap-2">
@@ -309,7 +313,7 @@
               />
               {m.flow_runtime_input_more_settings()}
             </Collapsible.Trigger>
-            <Collapsible.Content>
+            <Collapsible.Content class="collapsible-animate">
               <div class="border-default/70 border-t px-3 pt-3 pb-3">
                 <div class="grid gap-3 md:grid-cols-2">
                   <div class="flex flex-col gap-1">
@@ -349,33 +353,49 @@
                     />
                   </div>
 
-                  <div class="flex flex-col gap-2 md:col-span-2">
-                    <span class="text-sm font-medium">
-                      {m.flow_runtime_input_mimetypes_label()}
-                    </span>
-                    <div class="flex flex-wrap gap-1.5">
-                      {#each getMimePresetsForFormat(runtimeInputConfig.input_format) as preset (preset.mime)}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {runtimeInputConfig.accepted_mimetypes_override.includes(
-                            preset.mime
-                          )
-                            ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger'
-                            : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
-                          disabled={isPublished}
-                          aria-pressed={runtimeInputConfig.accepted_mimetypes_override.includes(
-                            preset.mime
-                          )}
-                          onclick={() => toggleMimePreset(preset.mime)}
-                        >
-                          {preset.label}
-                        </Button>
-                      {/each}
-                    </div>
-                    {#if runtimeInputConfig.accepted_mimetypes_override.some((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt))}
-                      <p class="text-muted text-xs">
-                        + {runtimeInputConfig.accepted_mimetypes_override
+                  {#if isAdvancedMode}
+                    <div class="flex flex-col gap-2 md:col-span-2">
+                      <span class="text-sm font-medium">
+                        {m.flow_runtime_input_mimetypes_label()}
+                      </span>
+                      <div class="flex flex-wrap gap-1.5">
+                        {#each getMimePresetsForFormat(runtimeInputConfig.input_format) as preset (preset.mime)}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {runtimeInputConfig.accepted_mimetypes_override.includes(
+                              preset.mime
+                            )
+                              ? 'border-accent-default/60 bg-accent-dimmer/50 text-accent-stronger'
+                              : 'border-default bg-primary text-secondary hover:bg-secondary/10'}"
+                            disabled={isPublished}
+                            aria-pressed={runtimeInputConfig.accepted_mimetypes_override.includes(
+                              preset.mime
+                            )}
+                            onclick={() => toggleMimePreset(preset.mime)}
+                          >
+                            {preset.label}
+                          </Button>
+                        {/each}
+                      </div>
+                      {#if runtimeInputConfig.accepted_mimetypes_override.some((mt) => !getMimePresetsForFormat(runtimeInputConfig.input_format).some((p) => p.mime === mt))}
+                        <p class="text-muted text-xs">
+                          + {runtimeInputConfig.accepted_mimetypes_override
+                            .filter(
+                              (mt) =>
+                                !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
+                                  (p) => p.mime === mt
+                                )
+                            )
+                            .join(", ")}
+                        </p>
+                      {/if}
+                      <Input
+                        id="runtime-input-mimetypes"
+                        class="text-xs"
+                        type="text"
+                        placeholder={m.flow_runtime_input_mimetypes_custom_placeholder()}
+                        value={runtimeInputConfig.accepted_mimetypes_override
                           .filter(
                             (mt) =>
                               !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
@@ -383,39 +403,25 @@
                               )
                           )
                           .join(", ")}
+                        disabled={isPublished}
+                        oninput={(event) => {
+                          const presetMimes = runtimeInputConfig.accepted_mimetypes_override.filter(
+                            (mt) =>
+                              getMimePresetsForFormat(runtimeInputConfig.input_format).some(
+                                (p) => p.mime === mt
+                              )
+                          );
+                          const customMimes = parseMimeOverrideDraft(event.currentTarget.value);
+                          updateRuntimeInputSettings({
+                            accepted_mimetypes_override: [...presetMimes, ...customMimes]
+                          });
+                        }}
+                      />
+                      <p class="text-muted text-xs leading-relaxed">
+                        {m.flow_runtime_input_mimetypes_hint()}
                       </p>
-                    {/if}
-                    <Input
-                      id="runtime-input-mimetypes"
-                      class="text-xs"
-                      type="text"
-                      placeholder={m.flow_runtime_input_mimetypes_custom_placeholder()}
-                      value={runtimeInputConfig.accepted_mimetypes_override
-                        .filter(
-                          (mt) =>
-                            !getMimePresetsForFormat(runtimeInputConfig.input_format).some(
-                              (p) => p.mime === mt
-                            )
-                        )
-                        .join(", ")}
-                      disabled={isPublished}
-                      oninput={(event) => {
-                        const presetMimes = runtimeInputConfig.accepted_mimetypes_override.filter(
-                          (mt) =>
-                            getMimePresetsForFormat(runtimeInputConfig.input_format).some(
-                              (p) => p.mime === mt
-                            )
-                        );
-                        const customMimes = parseMimeOverrideDraft(event.currentTarget.value);
-                        updateRuntimeInputSettings({
-                          accepted_mimetypes_override: [...presetMimes, ...customMimes]
-                        });
-                      }}
-                    />
-                    <p class="text-muted text-xs leading-relaxed">
-                      {m.flow_runtime_input_mimetypes_hint()}
-                    </p>
-                  </div>
+                    </div>
+                  {/if}
                 </div>
               </div>
             </Collapsible.Content>
@@ -433,6 +439,7 @@
     method={httpMethod}
     {isPublished}
     {flowId}
+    variableContext={httpVariableContext}
     onConfigChange={(detail) => onHttpConfigChange?.({ config: detail.config })}
   />
 {/if}
@@ -468,14 +475,14 @@
       </span>
     </div>
     <button
+      type="button"
       class="flex items-center gap-1 text-xs font-medium transition-colors {!transcriptionEnabled ||
       !transcriptionModelConfigured
         ? 'text-warning-stronger/80 hover:text-warning-stronger'
         : 'text-accent-default hover:text-accent-stronger'}"
       onclick={() => onOpenTranscriptionSettings?.()}
     >
-      {m.edit()}
-      {m.flow_stage_transcription()}
+      {m.flow_step_edit_transcription_settings()}
       <IconChevronRight class="size-3.5" />
     </button>
   </Alert.Root>

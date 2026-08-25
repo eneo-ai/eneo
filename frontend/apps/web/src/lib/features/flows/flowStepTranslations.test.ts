@@ -11,7 +11,7 @@ describe("flow step translation copy", () => {
   it("uses Underlag language in Swedish for the editor-facing flow step keys", () => {
     const messages = readMessages("sv");
 
-    expect(messages.flow_step_input_template).toBe("Underlag (avancerat)");
+    expect(messages.flow_step_input_template).toBe("Anpassat underlag");
     expect(messages.flow_step_input_template_user_title).toBe("Underlag till steget");
     expect(messages.flow_step_input_template_user_editor_label).toBe("Underlag till steget");
     expect(messages.flow_step_input_template_cta_title).toBe("Anpassa underlaget (frivilligt)");
@@ -44,7 +44,7 @@ describe("flow step translation copy", () => {
   it("keeps the matching material terminology in English for the same keys", () => {
     const messages = readMessages("en");
 
-    expect(messages.flow_step_input_template).toBe("Material (advanced)");
+    expect(messages.flow_step_input_template).toBe("Custom source material");
     expect(messages.flow_step_input_template_user_title).toBe("Material for the step");
     expect(messages.flow_step_input_template_user_editor_label).toBe("Material for the step");
     expect(messages.flow_step_input_template_cta_title).toBe("Adjust the material (optional)");

@@ -128,16 +128,22 @@ export function getRecommendedDisplayedInputType(params: {
   return ordered.find((option) => !option.disabled)?.value ?? "text";
 }
 
+export type FlowEdgeKind =
+  "flow_input" | "previous_step" | "all_previous_steps" | "flow_output" | "http_get" | "http_post";
+
 export function getEdgePayloadKind(params: {
-  edgeKind: "flow_input" | "previous_step" | "all_previous_steps" | "flow_output";
+  edgeKind: FlowEdgeKind;
   sourceStep?: FlowPresentationStepLike;
   targetStep?: FlowPresentationStepLike | null;
 }): FlowEdgePayloadKind {
   const { edgeKind, sourceStep, targetStep } = params;
 
-  if (edgeKind === "flow_output") return "none";
+  if (edgeKind === "flow_output" || edgeKind === "http_post") return "none";
   if (edgeKind === "flow_input") return "flow_input";
   if (edgeKind === "all_previous_steps") return "text";
+  if (edgeKind === "http_get") {
+    return targetStep?.input_type === "json" ? "structured" : "text";
+  }
 
   if (sourceStep?.output_type === "json" && targetStep?.input_type === "json") {
     return "structured";
@@ -177,4 +183,169 @@ export function getStepSummaryModel(params: {
     hasKnowledge,
     hasAttachments
   };
+}
+
+export type FlowGraphTopologyStepLike = Pick<
+  FlowStep,
+  "id" | "step_order" | "input_source" | "output_mode"
+>;
+
+export type FlowGraphTopologyNode =
+  | { id: "input"; kind: "input" }
+  | { id: "output"; kind: "output" }
+  | { id: "http-source"; kind: "http_source" }
+  | { id: "http-target"; kind: "http_target" }
+  | { id: string; kind: "step"; stepOrder: number };
+
+export type FlowGraphTopologyEdge = {
+  source: string;
+  target: string;
+  kind: FlowEdgeKind;
+  sourceStepOrder: number;
+  targetStepOrder: number | null;
+};
+
+/**
+ * The pure node/edge contract behind Flödesvy. All HTTP endpoints share one
+ * external-source and one external-receiver node: the graph answers "where
+ * does data come from and go", while each step's own summary names its URL,
+ * so per-endpoint nodes would only add clutter.
+ */
+export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
+  nodes: FlowGraphTopologyNode[];
+  edges: FlowGraphTopologyEdge[];
+} {
+  const orderedSteps = [...steps].sort((a, b) => a.step_order - b.step_order);
+  const stepId = (step: FlowGraphTopologyStepLike) => step.id ?? `step-${step.step_order}`;
+  const byOrder = new Map(orderedSteps.map((step) => [step.step_order, step]));
+
+  const nodes: FlowGraphTopologyNode[] = [];
+  const edges: FlowGraphTopologyEdge[] = [];
+
+  // The flow-input node appears only when something actually consumes it
+  // (or the flow is empty), so a flow fed purely by HTTP shows no orphan
+  // input anchor.
+  const needsInputNode =
+    orderedSteps.length === 0 ||
+    orderedSteps.some(
+      (step) =>
+        step.input_source === "flow_input" ||
+        (step.input_source === "previous_step" && !byOrder.has(step.step_order - 1))
+    );
+  if (needsInputNode) {
+    nodes.push({ id: "input", kind: "input" });
+  }
+  for (const step of orderedSteps) {
+    nodes.push({ id: stepId(step), kind: "step", stepOrder: step.step_order });
+  }
+  nodes.push({ id: "output", kind: "output" });
+
+  let hasHttpSource = false;
+  for (const step of orderedSteps) {
+    const id = stepId(step);
+    if (step.input_source === "http_get") {
+      if (!hasHttpSource) {
+        hasHttpSource = true;
+        nodes.push({ id: "http-source", kind: "http_source" });
+      }
+      edges.push({
+        source: "http-source",
+        target: id,
+        kind: "http_get",
+        sourceStepOrder: 0,
+        targetStepOrder: step.step_order
+      });
+      continue;
+    }
+    if (step.input_source === "flow_input") {
+      edges.push({
+        source: "input",
+        target: id,
+        kind: "flow_input",
+        sourceStepOrder: 0,
+        targetStepOrder: step.step_order
+      });
+      continue;
+    }
+    if (step.input_source === "previous_step") {
+      const prevStep = byOrder.get(step.step_order - 1);
+      if (prevStep) {
+        edges.push({
+          source: stepId(prevStep),
+          target: id,
+          kind: "previous_step",
+          sourceStepOrder: prevStep.step_order,
+          targetStepOrder: step.step_order
+        });
+      } else {
+        edges.push({
+          source: "input",
+          target: id,
+          kind: "flow_input",
+          sourceStepOrder: 0,
+          targetStepOrder: step.step_order
+        });
+      }
+      continue;
+    }
+    if (step.input_source === "all_previous_steps") {
+      for (const prevStep of orderedSteps) {
+        if (prevStep.step_order >= step.step_order) continue;
+        edges.push({
+          source: stepId(prevStep),
+          target: id,
+          kind: "all_previous_steps",
+          sourceStepOrder: prevStep.step_order,
+          targetStepOrder: step.step_order
+        });
+      }
+    }
+  }
+
+  if (orderedSteps.length > 0) {
+    const outgoingSteps = new Set<string>();
+    for (const edge of edges) {
+      if (edge.source !== "input" && edge.source !== "http-source" && edge.target !== "output") {
+        outgoingSteps.add(edge.source);
+      }
+    }
+    let hasHttpTarget = false;
+    for (const step of orderedSteps) {
+      const id = stepId(step);
+      if (step.output_mode === "http_post") {
+        // The delivery step still produces the flow result; the HTTP
+        // delivery is an additional external receiver, so both edges are
+        // the truthful picture.
+        if (!hasHttpTarget) {
+          hasHttpTarget = true;
+          nodes.push({ id: "http-target", kind: "http_target" });
+        }
+        edges.push({
+          source: id,
+          target: "http-target",
+          kind: "http_post",
+          sourceStepOrder: step.step_order,
+          targetStepOrder: null
+        });
+      }
+      if (outgoingSteps.has(id)) continue;
+      edges.push({
+        source: id,
+        target: "output",
+        kind: "flow_output",
+        sourceStepOrder: step.step_order,
+        targetStepOrder: null
+      });
+    }
+  } else {
+    edges.push({
+      source: "input",
+      target: "output",
+      kind: "flow_output",
+      sourceStepOrder: 0,
+      targetStepOrder: null
+    });
+  }
+
+  return { nodes, edges };
 }

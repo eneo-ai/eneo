@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import type { FlowStep } from "@eneo/eneo-js";
   import { IconInfo } from "@eneo/icons/info";
   import { fade, slide } from "svelte/transition";
@@ -9,6 +10,8 @@
     parseValidationError,
     type ParsedValidationError
   } from "$lib/features/flows/flowStepValidationMessages";
+
+  const reducedMotion = prefersReducedMotion();
 
   let {
     errors,
@@ -91,7 +94,7 @@
 </script>
 
 {#if hasErrors}
-  <div role="alert" aria-live="polite" transition:fade={{ duration: 200 }}>
+  <div role="alert" aria-live="polite" transition:fade={{ duration: reducedMotion ? 0 : 200 }}>
     <Collapsible.Root bind:open={isExpanded}>
       <div class="border-negative-default/30 bg-negative-dimmer/80 border-b backdrop-blur-sm">
         <Collapsible.Trigger
@@ -130,7 +133,7 @@
           <div
             id="flow-validation-issues"
             class="flex flex-col gap-2 px-4 pb-3"
-            transition:slide={{ duration: 200 }}
+            transition:slide={{ duration: reducedMotion ? 0 : 200 }}
           >
             {#each displayIssues as issue (issue.key)}
               <div

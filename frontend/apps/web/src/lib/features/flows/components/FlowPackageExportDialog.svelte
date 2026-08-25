@@ -129,7 +129,7 @@
   }
 
   function savePackage(response: FlowPackageExportResponse) {
-    downloadFlowPackageFile(response, "flow-package.eneopkg");
+    downloadFlowPackageFile(response, `${trimmedId}-${trimmedVersion}.eneopkg`);
     toast.success(m.flow_package_export_success());
     open = false;
   }

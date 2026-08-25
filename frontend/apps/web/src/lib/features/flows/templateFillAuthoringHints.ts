@@ -3,12 +3,13 @@ import type { FlowStep } from "@eneo/eneo-js";
 export function shouldShowTemplateBodyTextHint(params: {
   steps: FlowStep[];
   activeStep: FlowStep | null | undefined;
-  isAdvancedMode: boolean;
   isTemplateFill: boolean;
   isTranscribeOnly: boolean;
 }): boolean {
-  const { steps, activeStep, isAdvancedMode, isTemplateFill, isTranscribeOnly } = params;
-  if (!isAdvancedMode || !activeStep || isTemplateFill || isTranscribeOnly) {
+  // The template can only bind to a named step, so the hint shows in both
+  // modes whenever a later template step depends on this one.
+  const { steps, activeStep, isTemplateFill, isTranscribeOnly } = params;
+  if (!activeStep || isTemplateFill || isTranscribeOnly) {
     return false;
   }
 
@@ -17,9 +18,8 @@ export function shouldShowTemplateBodyTextHint(params: {
   );
 }
 
-export function shouldShowTemplateAccessibilityHint(params: {
-  isAdvancedMode: boolean;
-  isTemplateFill: boolean;
-}): boolean {
-  return params.isAdvancedMode && params.isTemplateFill;
+export function shouldShowTemplateAccessibilityHint(params: { isTemplateFill: boolean }): boolean {
+  // Accessible templates are a legal requirement for public-sector output,
+  // so the warning shows in both modes.
+  return params.isTemplateFill;
 }

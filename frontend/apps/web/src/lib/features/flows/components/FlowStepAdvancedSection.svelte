@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import FlowStepSection from "$lib/features/flows/components/FlowStepSection.svelte";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -15,6 +16,8 @@
     AdvancedJsonField
   } from "./advancedJsonDrafts";
   import FlowStepAdvancedJsonField from "./FlowStepAdvancedJsonField.svelte";
+
+  const reducedMotion = prefersReducedMotion();
 
   let {
     step,
@@ -60,11 +63,12 @@
   });
 </script>
 
-<div transition:slide={{ duration: 200 }}>
+<div transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
   <FlowStepSection title={embedded ? undefined : m.flow_step_advanced()}>
     <Settings.Row
       title={m.flow_step_input_contract()}
       description={m.flow_step_input_contract_desc()}
+      density="compact"
     >
       <svelte:fragment slot="title">
         <Tooltip.Provider delayDuration={150}>
@@ -122,6 +126,7 @@
     <Settings.Row
       title={m.flow_step_output_contract()}
       description={m.flow_step_output_contract_desc()}
+      density="compact"
     >
       <svelte:fragment slot="title">
         <Tooltip.Provider delayDuration={150}>
@@ -180,6 +185,8 @@
       <Settings.Row
         title={m.flow_step_input_config()}
         description={m.flow_step_input_config_desc()}
+        help={m.flow_step_input_config_http_note()}
+        density="compact"
       >
         <FlowStepAdvancedJsonField
           field="input_config"
@@ -198,6 +205,8 @@
       <Settings.Row
         title={m.flow_step_output_config()}
         description={m.flow_step_output_config_desc()}
+        help={m.flow_step_output_config_http_note()}
+        density="compact"
       >
         <FlowStepAdvancedJsonField
           field="output_config"

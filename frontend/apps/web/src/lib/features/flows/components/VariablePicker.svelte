@@ -1,6 +1,19 @@
+<script module lang="ts">
+  import type { FlowStep } from "@eneo/eneo-js";
+  import type { FlowFormSchemaMetadata } from "$lib/features/flows/flowFormSchema";
+
+  /** Everything a caller needs to offer flow variables through the picker. */
+  export type VariablePickerContext = {
+    steps: FlowStep[];
+    currentStepOrder: number;
+    formSchema: FlowFormSchemaMetadata | undefined;
+    isAdvancedMode: boolean;
+    transcriptionEnabled: boolean;
+  };
+</script>
+
 <script lang="ts">
   import { tick } from "svelte";
-  import type { FlowStep } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -19,11 +32,9 @@
     transcriptionEnabled = false,
     onInsert
   }: {
-    steps: FlowStep[];
-    currentStepOrder: number;
-    formSchema:
-      | { fields: { name: string; label?: string | null; type: string; required?: boolean }[] }
-      | undefined;
+    steps: VariablePickerContext["steps"];
+    currentStepOrder: VariablePickerContext["currentStepOrder"];
+    formSchema: VariablePickerContext["formSchema"];
     isAdvancedMode?: boolean;
     transcriptionEnabled?: boolean;
     onInsert?: (variable: string) => void;

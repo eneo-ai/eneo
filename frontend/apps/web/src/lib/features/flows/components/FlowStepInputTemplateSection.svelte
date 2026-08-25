@@ -306,7 +306,9 @@
     <Alert.Description class="text-warning-stronger flex items-start gap-3 text-xs">
       <span class="flex-1">
         {m.flow_template_source_conflict_warning({
-          steps: templateSourceConflict.map((n) => `Step ${n}`).join(", "),
+          steps: templateSourceConflict
+            .map((n) => m.flow_step_fallback_label({ order: n }))
+            .join(", "),
           source: INPUT_SOURCE_LABELS[step.input_source]?.() ?? step.input_source
         })}
       </span>

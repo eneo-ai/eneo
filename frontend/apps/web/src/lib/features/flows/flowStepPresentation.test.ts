@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildFlowGraphTopology,
+  type FlowGraphTopologyStepLike,
   getDownstreamKindForOutput,
   getEdgePayloadKind,
   getRecommendedDisplayedInputType,
@@ -195,6 +197,122 @@ describe("getStepSummaryModel", () => {
       usesInputTemplate: true,
       hasKnowledge: true,
       hasAttachments: false
+    });
+  });
+});
+
+describe("buildFlowGraphTopology", () => {
+  const step = (
+    order: number,
+    inputSource: FlowGraphTopologyStepLike["input_source"],
+    outputMode: FlowGraphTopologyStepLike["output_mode"] = "pass_through",
+    id?: string
+  ): FlowGraphTopologyStepLike => ({
+    id: id ?? `s${order}`,
+    step_order: order,
+    input_source: inputSource,
+    output_mode: outputMode
+  });
+
+  const ids = (topology: { nodes: { id: string }[] }) => topology.nodes.map((n) => n.id);
+
+  it("renders an empty flow as input connected to output", () => {
+    const t = buildFlowGraphTopology([]);
+    expect(ids(t)).toEqual(["input", "output"]);
+    expect(t.edges).toEqual([
+      {
+        source: "input",
+        target: "output",
+        kind: "flow_output",
+        sourceStepOrder: 0,
+        targetStepOrder: null
+      }
+    ]);
+  });
+
+  it("gives an HTTP-only flow an external source and no orphan input node", () => {
+    const t = buildFlowGraphTopology([step(1, "http_get"), step(2, "previous_step")]);
+    expect(ids(t)).toEqual(["s1", "s2", "output", "http-source"]);
+    expect(t.edges).toEqual([
+      {
+        source: "http-source",
+        target: "s1",
+        kind: "http_get",
+        sourceStepOrder: 0,
+        targetStepOrder: 1
+      },
+      { source: "s1", target: "s2", kind: "previous_step", sourceStepOrder: 1, targetStepOrder: 2 },
+      {
+        source: "s2",
+        target: "output",
+        kind: "flow_output",
+        sourceStepOrder: 2,
+        targetStepOrder: null
+      }
+    ]);
+  });
+
+  it("keeps the input node when any step consumes flow input", () => {
+    const t = buildFlowGraphTopology([step(1, "flow_input"), step(2, "http_get")]);
+    expect(ids(t)).toContain("input");
+    expect(ids(t)).toContain("http-source");
+    expect(t.edges.filter((e) => e.source === "input").map((e) => e.target)).toEqual(["s1"]);
+  });
+
+  it("collapses several HTTP deliveries into one shared receiver node", () => {
+    const t = buildFlowGraphTopology([
+      step(1, "flow_input", "http_post"),
+      step(2, "flow_input", "http_post")
+    ]);
+    expect(ids(t).filter((id) => id === "http-target")).toHaveLength(1);
+    expect(
+      t.edges
+        .filter((e) => e.kind === "http_post")
+        .map((e) => ({ source: e.source, target: e.target, kind: e.kind }))
+    ).toEqual([
+      { source: "s1", target: "http-target", kind: "http_post" },
+      { source: "s2", target: "http-target", kind: "http_post" }
+    ]);
+  });
+
+  it("collapses several HTTP endpoints into one shared source node", () => {
+    const t = buildFlowGraphTopology([step(1, "http_get"), step(2, "http_get")]);
+    expect(ids(t).filter((id) => id === "http-source")).toHaveLength(1);
+    expect(t.edges.filter((e) => e.kind === "http_get").map((e) => e.target)).toEqual(["s1", "s2"]);
+  });
+
+  it("routes an HTTP delivery step to both the receiver and the flow output", () => {
+    const t = buildFlowGraphTopology([step(1, "flow_input", "http_post")]);
+    expect(ids(t)).toContain("http-target");
+    const fromStep = t.edges.filter((e) => e.source === "s1").map((e) => [e.target, e.kind]);
+    expect(fromStep).toEqual([
+      ["http-target", "http_post"],
+      ["output", "flow_output"]
+    ]);
+  });
+
+  it("fans in all previous steps and still ends at the output", () => {
+    const t = buildFlowGraphTopology([
+      step(1, "flow_input"),
+      step(2, "flow_input"),
+      step(3, "all_previous_steps")
+    ]);
+    expect(t.edges.filter((e) => e.kind === "all_previous_steps").map((e) => e.source)).toEqual([
+      "s1",
+      "s2"
+    ]);
+    expect(t.edges.filter((e) => e.target === "output").map((e) => e.source)).toEqual(["s3"]);
+  });
+
+  it("falls back to flow input when a previous-step reference has no predecessor", () => {
+    const t = buildFlowGraphTopology([step(1, "previous_step")]);
+    expect(ids(t)).toContain("input");
+    expect(t.edges[0]).toEqual({
+      source: "input",
+      target: "s1",
+      kind: "flow_input",
+      sourceStepOrder: 0,
+      targetStepOrder: 1
     });
   });
 });

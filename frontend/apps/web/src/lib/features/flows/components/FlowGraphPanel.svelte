@@ -71,7 +71,7 @@
       </span>
     </Collapsible.Trigger>
 
-    <Collapsible.Content>
+    <Collapsible.Content class="collapsible-animate">
       <div
         id="flow-graph-panel"
         class="border-default bg-primary/40 h-[200px] border-t lg:h-[320px]"

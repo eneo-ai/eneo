@@ -158,7 +158,7 @@
         </p>
       </div>
       <div class="flex flex-col gap-3">
-        {#if shouldShowTemplateAccessibilityHint({ isAdvancedMode, isTemplateFill: true })}
+        {#if shouldShowTemplateAccessibilityHint({ isTemplateFill: true })}
           <Alert.Root class="border-accent-default/15 bg-accent-default/5">
             <IconInfo />
             <Alert.Title>{m.flow_template_fill_accessibility_title()}</Alert.Title>

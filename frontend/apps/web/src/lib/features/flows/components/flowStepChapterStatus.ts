@@ -1,7 +1,11 @@
 import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { OUTPUT_MODES } from "$lib/features/flows/flowStepTypes";
-import { getOutputTypeLabel, getSecurityClassificationLabel } from "./flowStepEditHelpers";
+import {
+  getEnkelAwareOutputTypeLabel,
+  getOutputTypeLabel,
+  getSecurityClassificationLabel
+} from "./flowStepEditHelpers";
 
 /**
  * Short status labels shown on the collapsed chapter headers of the step
@@ -9,11 +13,12 @@ import { getOutputTypeLabel, getSecurityClassificationLabel } from "./flowStepEd
  * the expanded controls read from one source and cannot drift.
  */
 
-// Enkel avoids raw contract tokens: "JSON" reads as a fixed-format answer.
 function getOutputTypeDisplay(step: FlowStep, isAdvancedMode: boolean): string {
-  return !isAdvancedMode && step.output_type === "json"
-    ? m.flow_output_type_simple_structured()
-    : getOutputTypeLabel(step.output_type);
+  return getEnkelAwareOutputTypeLabel(
+    step.output_type,
+    getOutputTypeLabel(step.output_type),
+    isAdvancedMode
+  );
 }
 
 export function getChapterOutputStatus(step: FlowStep, isAdvancedMode = true): string {
@@ -89,7 +94,10 @@ export function getTechnicalSettingsCount(step: FlowStep): number {
     step.input_contract,
     step.output_contract,
     step.input_source === "http_get" ? step.input_config : null,
-    step.output_mode === "http_post" ? step.output_config : null
+    step.output_mode === "http_post" ? step.output_config : null,
+    // Template binding lives in the advanced chapter; without counting it,
+    // an AI-built template flow is a dead end in Enkel (no bridge appears).
+    step.output_mode === "template_fill" ? step : null
   ].filter((value) => value != null).length;
 }
 

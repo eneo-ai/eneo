@@ -18,6 +18,7 @@
         | "output_type"
         | "output_mode"
         | "output_classification_override"
+        | "review_policy"
       >;
       isActive: boolean;
       mode: "user" | "power_user";
@@ -33,6 +34,7 @@
 
   const isPowerUser = $derived(data.mode === "power_user");
   const isAssembly = $derived(data.step.output_mode === "template_fill");
+  const hasHumanReview = $derived(data.step.review_policy != null);
   const nextChannelLabel = $derived(
     isAssembly
       ? m.flow_template_fill_card_badge()
@@ -111,6 +113,11 @@
             {m.flow_node_assembly_format_badge()}
           </Badge>
         {/if}
+        {#if hasHumanReview}
+          <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-xs">
+            {m.flow_graph_review_badge()}
+          </Badge>
+        {/if}
       </div>
       <div class="flex items-center gap-1">
         {#if data.assistantClassLevel != null}
@@ -178,6 +185,15 @@
       {data.step.step_order}
     </span>
     <span class="truncate text-xs font-medium">{data.label}</span>
+    {#if hasHumanReview}
+      <Badge
+        variant="secondary"
+        class="bg-accent-dimmer text-accent-stronger shrink-0 px-1.5 text-[10px]"
+        title={m.flow_graph_review_badge()}
+      >
+        {m.flow_graph_review_badge_short()}
+      </Badge>
+    {/if}
   </Card.Root>
 {/if}
 

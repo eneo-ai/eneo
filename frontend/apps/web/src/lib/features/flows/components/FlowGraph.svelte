@@ -20,7 +20,10 @@
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
-  import { getEdgePayloadKind } from "$lib/features/flows/flowStepPresentation";
+  import {
+    buildFlowGraphTopology,
+    getEdgePayloadKind
+  } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@eneo/icons/download";
   import { onMount, tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
@@ -48,7 +51,9 @@
     llm: FlowNodeLlm,
     assembly: FlowNodeLlm,
     input: FlowNodeIO,
-    output: FlowNodeIO
+    output: FlowNodeIO,
+    http_source: FlowNodeIO,
+    http_target: FlowNodeIO
   };
   const edgeTypes = {
     interactive: FlowEdgeInteractive
@@ -255,140 +260,61 @@
       marginy: 16
     });
 
-    g.setNode("input", inputNodeSize);
-    const resultNodes: Node[] = [
-      {
-        id: "input",
-        type: "input",
-        sourcePosition: Position.Right,
-        position: { x: 0, y: 0 },
-        data: { label: m.flow_graph_node_input(), nodeType: "input", mode: userMode }
-      }
-    ];
-
-    for (const step of orderedSteps) {
-      const id = step.id ?? `step-${step.step_order}`;
-      g.setNode(id, { width: nodeWidth, height: nodeHeight });
-      resultNodes.push({
-        id,
-        type: step.output_mode === "template_fill" ? "assembly" : "llm",
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        position: { x: 0, y: 0 },
-        data: {
-          label: step.user_description ?? `Step ${step.step_order}`,
-          step,
-          isActive: id === activeId,
-          mode: userMode,
-          modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
-          assistantClassLevel:
-            assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
-          classLevel: getClassificationLevel(step)
-        }
-      });
-    }
-
-    g.setNode("output", outputNodeSize);
-    resultNodes.push({
-      id: "output",
-      type: "output",
-      targetPosition: Position.Left,
-      position: { x: 0, y: 0 },
-      data: { label: m.flow_graph_node_output(), nodeType: "output", mode: userMode }
-    });
-
-    type EdgeSpec = {
-      source: string;
-      target: string;
-      kind: "flow_input" | "previous_step" | "all_previous_steps" | "flow_output";
-      sourceStepOrder: number;
-      targetStepOrder: number | null;
-    };
-    const edgeSpecs: EdgeSpec[] = [];
+    // Topology (which nodes and edges exist) is owned by
+    // buildFlowGraphTopology in flowStepPresentation; this component only
+    // renders it.
+    const topology = buildFlowGraphTopology(orderedSteps);
     const stepByOrder = new SvelteMap<number, FlowStep>();
-    const stepIdByOrder = new SvelteMap<number, string>();
-    orderedSteps.forEach((step) => {
-      stepByOrder.set(step.step_order, step);
-      stepIdByOrder.set(step.step_order, step.id ?? `step-${step.step_order}`);
-    });
+    orderedSteps.forEach((step) => stepByOrder.set(step.step_order, step));
+    const stepById = new SvelteMap<string, FlowStep>();
+    orderedSteps.forEach((step) => stepById.set(step.id ?? `step-${step.step_order}`, step));
 
-    for (const step of orderedSteps) {
-      const stepId = stepIdByOrder.get(step.step_order) ?? `step-${step.step_order}`;
-      if (step.input_source === "flow_input") {
-        edgeSpecs.push({
-          source: "input",
-          target: stepId,
-          kind: "flow_input",
-          sourceStepOrder: 0,
-          targetStepOrder: step.step_order
+    const resultNodes: Node[] = [];
+    for (const node of topology.nodes) {
+      if (node.kind === "step") {
+        const step = stepById.get(node.id);
+        if (!step) continue;
+        g.setNode(node.id, { width: nodeWidth, height: nodeHeight });
+        resultNodes.push({
+          id: node.id,
+          type: step.output_mode === "template_fill" ? "assembly" : "llm",
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+          position: { x: 0, y: 0 },
+          data: {
+            label: step.user_description ?? m.flow_step_fallback_label({ order: step.step_order }),
+            step,
+            isActive: node.id === activeId,
+            mode: userMode,
+            modelName: assistantMetaById.get(step.assistant_id)?.modelName ?? null,
+            assistantClassLevel:
+              assistantMetaById.get(step.assistant_id)?.assistantClassificationLevel ?? null,
+            classLevel: getClassificationLevel(step)
+          }
         });
         continue;
       }
-
-      if (step.input_source === "previous_step") {
-        const prevStep = stepByOrder.get(step.step_order - 1);
-        if (prevStep) {
-          edgeSpecs.push({
-            source: stepIdByOrder.get(prevStep.step_order) ?? `step-${prevStep.step_order}`,
-            target: stepId,
-            kind: "previous_step",
-            sourceStepOrder: prevStep.step_order,
-            targetStepOrder: step.step_order
-          });
-        } else {
-          edgeSpecs.push({
-            source: "input",
-            target: stepId,
-            kind: "flow_input",
-            sourceStepOrder: 0,
-            targetStepOrder: step.step_order
-          });
-        }
-        continue;
-      }
-
-      if (step.input_source === "all_previous_steps") {
-        for (const prevStep of orderedSteps) {
-          if (prevStep.step_order >= step.step_order) continue;
-          edgeSpecs.push({
-            source: stepIdByOrder.get(prevStep.step_order) ?? `step-${prevStep.step_order}`,
-            target: stepId,
-            kind: "all_previous_steps",
-            sourceStepOrder: prevStep.step_order,
-            targetStepOrder: step.step_order
-          });
-        }
-      }
-    }
-
-    if (orderedSteps.length > 0) {
-      const outgoingSteps = new SvelteSet<string>();
-      for (const edge of edgeSpecs) {
-        if (edge.source !== "input" && edge.target !== "output") {
-          outgoingSteps.add(edge.source);
-        }
-      }
-      for (const step of orderedSteps) {
-        const stepId = stepIdByOrder.get(step.step_order) ?? `step-${step.step_order}`;
-        if (outgoingSteps.has(stepId)) continue;
-        edgeSpecs.push({
-          source: stepId,
-          target: "output",
-          kind: "flow_output",
-          sourceStepOrder: step.step_order,
-          targetStepOrder: null
-        });
-      }
-    } else {
-      edgeSpecs.push({
-        source: "input",
-        target: "output",
-        kind: "flow_output",
-        sourceStepOrder: 0,
-        targetStepOrder: null
+      const ioLabel =
+        node.kind === "input"
+          ? m.flow_graph_node_input()
+          : node.kind === "output"
+            ? m.flow_graph_node_output()
+            : node.kind === "http_source"
+              ? m.flow_graph_node_http_source()
+              : m.flow_graph_node_http_target();
+      g.setNode(node.id, node.kind === "input" ? inputNodeSize : outputNodeSize);
+      resultNodes.push({
+        id: node.id,
+        type: node.kind,
+        ...(node.kind === "input" || node.kind === "http_source"
+          ? { sourcePosition: Position.Right }
+          : { targetPosition: Position.Left }),
+        position: { x: 0, y: 0 },
+        data: { label: ioLabel, nodeType: node.kind, mode: userMode }
       });
     }
 
+    const edgeSpecs = topology.edges;
     for (const edge of edgeSpecs) {
       g.setEdge(edge.source, edge.target);
     }
@@ -428,18 +354,28 @@
       const sourceLabel =
         edge.source === "input"
           ? m.flow_graph_node_input()
-          : (sourceStep?.user_description ?? `Step ${edge.sourceStepOrder}`);
+          : edge.source === "http-source"
+            ? m.flow_graph_node_http_source()
+            : (sourceStep?.user_description ??
+              m.flow_step_fallback_label({ order: edge.sourceStepOrder }));
       const targetLabel =
         edge.target === "output"
           ? m.flow_graph_node_output()
-          : (targetStep?.user_description ?? `Step ${edge.targetStepOrder ?? "?"}`);
+          : edge.target === "http-target"
+            ? m.flow_graph_node_http_target()
+            : (targetStep?.user_description ??
+              m.flow_step_fallback_label({ order: edge.targetStepOrder ?? "?" }));
       const payloadKind = getEdgePayloadKind({
         edgeKind: edge.kind,
         sourceStep,
         targetStep
       });
       const payload = buildPayloadPreview(sourceStep, targetStep, sourceLevel, targetLevel);
-      const allowInsert = edge.kind !== "all_previous_steps" && edge.target !== "output";
+      const allowInsert =
+        edge.kind !== "all_previous_steps" &&
+        edge.kind !== "http_get" &&
+        edge.kind !== "http_post" &&
+        edge.target !== "output";
 
       const markerColor = isViolation
         ? "var(--negative-default)"
@@ -545,10 +481,10 @@
     zoomOnScroll={true}
     onnodeclick={handleNodeClick}
   >
+    <Controls position="top-left" showLock={false} />
     {#if $mode === "power_user"}
       <Background variant={BackgroundVariant.Dots} />
       <MiniMap width={140} height={90} nodeColor={minimapNodeColor} />
-      <Controls position="top-left" />
       <Panel position="top-right">
         <button
           class="bg-primary/90 text-secondary hover:bg-hover-dimmer flex items-center gap-1.5 rounded px-2 py-1 text-xs backdrop-blur-sm transition-colors"
@@ -599,10 +535,11 @@
       <div class="border-default flex items-center justify-between border-b px-3 py-2">
         <p class="text-sm font-semibold">{m.flow_graph_preview()} · {inspectedEdge.title}</p>
         <button
+          type="button"
           class="hover:bg-hover-dimmer rounded px-2 py-1 text-xs"
           onclick={() => (inspectedEdge = null)}
         >
-          {m.cancel()}
+          {m.close()}
         </button>
       </div>
       <div class="max-h-[240px] overflow-auto p-3">
