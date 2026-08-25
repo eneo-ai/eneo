@@ -57,6 +57,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     with op.get_context().autocommit_block():
         op.execute(
-            "DROP INDEX CONCURRENTLY IF EXISTS "
-            "ix_info_blobs_integration_knowledge_id;"
+            "DROP INDEX CONCURRENTLY IF EXISTS ix_info_blobs_integration_knowledge_id;"
         )
