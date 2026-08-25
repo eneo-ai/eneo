@@ -19,8 +19,7 @@
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
 
-  type PreviewCategory =
-    "my_teams" | "public_teams_not_member" | "other_sites" | "onedrive" | "unknown";
+  type PreviewCategory = "my_teams" | "other_sites" | "onedrive";
 
   type CategorizedIntegrationKnowledgePreview = IntegrationKnowledgePreview & {
     category?: PreviewCategory;
@@ -54,20 +53,14 @@
     refreshCurrentSpace
   } = getSpacesManager();
   const { addJob, startFastUpdatePolling } = getJobManager();
-  const CATEGORY_ORDER: PreviewCategory[] = [
-    "my_teams",
-    "public_teams_not_member",
-    "other_sites",
-    "onedrive",
-    "unknown"
-  ];
+  const CATEGORY_ORDER: PreviewCategory[] = ["my_teams", "other_sites", "onedrive"];
 
   let availableResources = $state<PreviewOption[] | null>(null);
-  let showPublicTeamsNotMember = $state(true);
 
   function getPreviewCategory(site: CategorizedIntegrationKnowledgePreview): PreviewCategory {
     if (site.type === "onedrive") return "onedrive";
-    return site.category ?? "other_sites";
+    // Coerce unknown/legacy category values so no site is dropped from grouping.
+    return site.category === "my_teams" ? "my_teams" : "other_sites";
   }
 
   function getCategoryRank(category: PreviewCategory): number {
@@ -79,30 +72,17 @@
     switch (category) {
       case "my_teams":
         return m.sharepoint_category_my_teams();
-      case "public_teams_not_member":
-        return m.sharepoint_category_public_teams_not_member();
       case "other_sites":
         return m.sharepoint_category_other_sites();
       case "onedrive":
         return "OneDrive";
-      case "unknown":
-        return m.sharepoint_category_unknown();
     }
   }
 
   let filteredResources = $derived.by(() => {
     const search = $inputValue.toLowerCase();
-    return (availableResources ?? [])
-      .filter((resource) => resource.value.name.toLowerCase().includes(search))
-      .filter((resource) => {
-        if (showPublicTeamsNotMember) return true;
-        return getPreviewCategory(resource.value) !== "public_teams_not_member";
-      });
-  });
-
-  let hasPublicTeamsNotMember = $derived.by(() => {
-    return (availableResources ?? []).some(
-      (resource) => getPreviewCategory(resource.value) === "public_teams_not_member"
+    return (availableResources ?? []).filter((resource) =>
+      resource.value.name.toLowerCase().includes(search)
     );
   });
 
@@ -138,22 +118,26 @@
       return;
     }
 
-    const preview = (await eneo.integrations.knowledge.preview({
-      id
-    })) as CategorizedIntegrationKnowledgePreview[];
+    try {
+      const preview = (await eneo.integrations.knowledge.preview({
+        id
+      })) as CategorizedIntegrationKnowledgePreview[];
 
-    availableResources = preview
-      .map((site) => ({
-        label: site.name,
-        value: site
-      }))
-      .sort((a, b) => {
-        const categoryDiff =
-          getCategoryRank(getPreviewCategory(a.value)) -
-          getCategoryRank(getPreviewCategory(b.value));
-        if (categoryDiff !== 0) return categoryDiff;
-        return a.label.localeCompare(b.label);
-      });
+      availableResources = preview
+        .map((site) => ({
+          label: site.name,
+          value: site
+        }))
+        .sort((a, b) => {
+          const categoryDiff =
+            getCategoryRank(getPreviewCategory(a.value)) -
+            getCategoryRank(getPreviewCategory(b.value));
+          if (categoryDiff !== 0) return categoryDiff;
+          return a.label.localeCompare(b.label);
+        });
+    } catch (error) {
+      toastError(error);
+    }
   });
 
   const {
@@ -413,20 +397,6 @@
               <IconSearch class="absolute top-2 right-4" />
             </button>
           </div>
-          {#if hasPublicTeamsNotMember}
-            <label class="text-secondary flex items-center gap-2 px-2 py-1 text-sm">
-              <input
-                type="checkbox"
-                class="accent-accent-default h-4 w-4"
-                checked={showPublicTeamsNotMember}
-                onchange={(event) => {
-                  const target = event.currentTarget as HTMLInputElement;
-                  showPublicTeamsNotMember = target.checked;
-                }}
-              />
-              <span>{m.sharepoint_toggle_public_non_member_teams()}</span>
-            </label>
-          {/if}
           <ul
             class="shadow-bg-secondary border-stronger bg-primary relative z-10 flex flex-col gap-1 overflow-y-auto rounded-lg border p-1 shadow-md focus:!ring-0"
             {...$menu}
