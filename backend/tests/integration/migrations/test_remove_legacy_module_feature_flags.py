@@ -48,10 +48,11 @@ def migration_db(test_settings):
         password=test_settings.postgres_password,
     )
     connection.autocommit = True
-    command.upgrade(config, CLEANUP_REVISION)
+    command.upgrade(config, "head")
     try:
         yield connection, config
     finally:
+        command.upgrade(config, "head")
         connection.close()
 
 
