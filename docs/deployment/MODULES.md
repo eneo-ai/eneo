@@ -21,10 +21,11 @@ An installed module consists of three values:
 - **Callback URLs:** the exact HTTPS endpoints to which Eneo may return a
   one-time login ticket. Wildcards are not supported. Register production and
   test callbacks separately.
-- **Service key:** an active `sk_` key owned by a service with `write` or
-  `admin` permission and the narrowest resource scope the module needs. The
+- **Service key:** normally an active `sk_` key owned by a service with `write`
+  or `admin` permission and the narrowest resource scope the module needs. The
   module BFF stores its secret; Eneo stores only the key ID used to bind ticket
-  exchange to that module.
+  exchange to that module. Administrators may explicitly leave the module
+  unbound when ticket exchange must remain disabled.
 
 Eneo keeps tenant IDs internally as data-partition keys. This is deliberate:
 the current product flow configures modules for the organization of the signed
@@ -51,7 +52,8 @@ or resource authorization works.
    environment.
 4. Open **Administration → Modules**.
 5. Enter the module key, one exact callback URL per line and select the service
-   key. Choose **Install module**.
+   key. To install without allowing ticket exchange, explicitly select **No
+   service key**. Choose **Install module**.
 6. Configure the same module key and service-key secret in the module runtime,
    then start or recreate its container.
 
@@ -106,11 +108,12 @@ The API exposes only these lifecycle operations:
   that is not installed for the organization answers 404, whether or not the
   key exists elsewhere.
 
-During incident response, a `PUT` with `"service_key_id": null` severs ticket
-exchange immediately while keeping the module installed and its callbacks
-intact — no key can trade the module's login tickets until an administrator
-binds one again. This avoids revoking a key that may still be in rotation
-grace for other duties.
+During incident response, choose **Edit → No service key** in the admin
+interface. Automation can send a `PUT` with `"service_key_id": null`. Both
+sever ticket exchange immediately while keeping the module installed and its
+callbacks intact — no key can trade the module's login tickets until an
+administrator binds one again. This avoids revoking a key that may still be in
+rotation grace for other duties.
 
 ## Module login and request authorization
 

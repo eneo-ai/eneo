@@ -1,7 +1,7 @@
-"""grant modules permission to existing Owner roles and merge develop heads
+"""grant modules permission to existing Owner roles
 
-Revision ID: 202608201500
-Revises: 202608041200, 202608181000
+Revision ID: 202608251100
+Revises: 202608251000
 Create Date: 2026-08-20 15:00:00.000000
 
 Module installation becomes a session-backed organization permission. New
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202608201500"
-down_revision: tuple[str, str] = ("202608041200", "202608181000")
+revision: str = "202608251100"
+down_revision: str = "202608251000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

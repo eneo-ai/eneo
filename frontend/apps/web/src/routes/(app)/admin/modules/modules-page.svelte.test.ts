@@ -156,6 +156,32 @@ describe("module administration page", () => {
     expect(installModule).not.toHaveBeenCalled();
   });
 
+  test("explicitly unbinds ticket exchange without uninstalling", async () => {
+    render(ModulesPage);
+
+    await expect.element(page.getByText("reports", { exact: true })).toBeVisible();
+    clickElement(page.getByRole("button", { name: /edit/ }).element());
+    const serviceKeySelect = page.getByLabelText("module_admin_service_key").element();
+    if (!(serviceKeySelect instanceof HTMLElement)) {
+      throw new TypeError("Expected the service key select to be an HTML element");
+    }
+    serviceKeySelect.focus();
+    await userEvent.keyboard("{Enter}");
+    await page.getByRole("option", { name: "module_admin_service_key_unbound" }).click();
+    clickElement(page.getByRole("button", { name: "module_admin_update" }).element());
+
+    await vi.waitFor(() =>
+      expect(installModule).toHaveBeenCalledWith({
+        moduleKey: "reports",
+        config: {
+          redirect_uris: installation.redirect_uris,
+          service_key_id: null
+        }
+      })
+    );
+    expect(uninstallModule).not.toHaveBeenCalled();
+  });
+
   test("keeps uninstall errors in the open confirmation dialog", async () => {
     uninstallModule.mockRejectedValueOnce(new Error("uninstall failed"));
     render(ModulesPage);

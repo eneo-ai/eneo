@@ -20,6 +20,7 @@
   import { toast } from "svelte-sonner";
 
   const eneo = getEneo();
+  const UNBOUND_SERVICE_KEY = "__unbound__";
 
   let installations = $state<ModuleInstallation[]>([]);
   let serviceKeys = $state<ApiKeyV2[]>([]);
@@ -129,7 +130,7 @@
     const boundKeyUsable = boundKeyId !== "" && serviceKeys.some((key) => key.id === boundKeyId);
     // A bound key that fell out of the eligible list (revoked, expired,
     // rotated) must not ride along silently into the next save.
-    serviceKeyId = boundKeyUsable ? boundKeyId : "";
+    serviceKeyId = boundKeyId === "" ? UNBOUND_SERVICE_KEY : boundKeyUsable ? boundKeyId : "";
     boundKeyMissing = boundKeyId !== "" && !boundKeyUsable;
     editingModuleKey = installation.module_key;
     errorMessage = null;
@@ -150,7 +151,10 @@
     try {
       await eneo.modules.install({
         moduleKey: normalizedModuleKey,
-        config: { redirect_uris: redirectUris, service_key_id: serviceKeyId }
+        config: {
+          redirect_uris: redirectUris,
+          service_key_id: serviceKeyId === UNBOUND_SERVICE_KEY ? null : serviceKeyId
+        }
       });
       toast.success(m.module_admin_saved());
       resetForm();
@@ -342,12 +346,17 @@
                 aria-label={m.module_admin_service_key()}
               >
                 <span class="truncate">
-                  {selectedServiceKey
-                    ? serviceKeyLabel(selectedServiceKey)
-                    : m.module_admin_service_key_placeholder()}
+                  {serviceKeyId === UNBOUND_SERVICE_KEY
+                    ? m.module_admin_service_key_unbound()
+                    : selectedServiceKey
+                      ? serviceKeyLabel(selectedServiceKey)
+                      : m.module_admin_service_key_placeholder()}
                 </span>
               </Select.Trigger>
               <Select.Content>
+                <Select.Item value={UNBOUND_SERVICE_KEY}>
+                  {m.module_admin_service_key_unbound()}
+                </Select.Item>
                 {#each serviceKeys as key (key.id)}
                   <Select.Item value={key.id}>{serviceKeyLabel(key)}</Select.Item>
                 {/each}
