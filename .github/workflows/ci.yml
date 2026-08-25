@@ -228,26 +228,15 @@ jobs:
         run: uv sync --python 3.11 --frozen --all-groups
 
       - name: Run unit tests
-        run: uv run pytest -v -n 2 -m "not integration" --cov=src/eneo --cov-report=term:skip-covered tests/
+        run: uv run pytest -v -n 4 -m "not integration" tests/
 
       - name: Run integration tests
-        # --cov-append: add integration coverage on top of the unit run, then
-        # emit the combined xml (for diff-cover) + html (human artifact).
-        run: uv run pytest -v -n 2 -m integration --cov=src/eneo --cov-append --cov-report=xml --cov-report=html --cov-report=term:skip-covered tests/integration/
+        # -n 4: public-repo ubuntu-latest runners have 4 vCPUs, and each xdist
+        # worker gets its own session-scoped Postgres testcontainer.
+        run: uv run pytest -v -n 4 -m integration tests/integration/
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
-
-      - name: Upload backend coverage
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: |
-            backend/coverage.xml
-            backend/htmlcov
-          retention-days: 14
-          if-no-files-found: warn
 
   script-tests:
     name: Script tests
@@ -267,7 +256,6 @@ jobs:
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
           node .github/scripts/ci-change-scope.mjs --self-test
-          node .github/scripts/render-diff-coverage.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
 
   route-metadata:
@@ -345,17 +333,8 @@ jobs:
       - name: Install Playwright Chromium
         run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
 
-      - name: Run web unit & component tests (with coverage)
-        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test:coverage
-
-      - name: Upload frontend coverage
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-coverage
-          path: frontend/apps/web/coverage
-          retention-days: 14
-          if-no-files-found: warn
+      - name: Run web unit & component tests
+        run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
       - name: Build frontend
         run: bun run build
@@ -545,84 +524,6 @@ jobs:
           git diff -- "$SCHEMA"
           echo "::endgroup::"
           exit 1
-
-  # Reports how well the tests cover the lines THIS PR changed (patch coverage),
-  # for frontend and backend separately. Report-only: never fails the PR and is
-  # not part of the aggregate `CI` gate below. Writes a compact report to the
-  # job summary and uploads the same markdown as an artifact.
-  coverage-diff:
-    name: Coverage diff
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.frontend.result == 'success' || needs.backend-tests.result == 'success') }}
-    runs-on: ubuntu-latest
-    needs:
-      - frontend
-      - backend-tests
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # diff-cover needs history back to the merge base
-
-      - name: Download frontend coverage
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: frontend-coverage
-          path: frontend/apps/web/coverage
-
-      - name: Download backend coverage
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: backend-coverage
-          path: backend
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install diff-cover
-        run: pip install diff-cover
-
-      - name: Compute diff coverage
-        continue-on-error: true # report-only; never block the PR
-        env:
-          BASE: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags origin "$BASE"
-
-          # diff-cover matches the git diff (repo-root-relative paths) against each
-          # coverage report. The reports use package-relative paths, so rewrite them
-          # to repo-root-relative, then emit JSON for the comment step to render.
-          if [ -f frontend/apps/web/coverage/lcov.info ]; then
-            sed 's|^SF:|SF:frontend/apps/web/|' frontend/apps/web/coverage/lcov.info > fe.lcov
-            diff-cover fe.lcov --compare-branch "origin/$BASE" --fail-under 0 --format json:fe.json || true
-          fi
-
-          if [ -f backend/coverage.xml ]; then
-            sed -e 's|<source>.*</source>|<source>.</source>|' \
-                -e 's|filename="|filename="backend/src/eneo/|g' \
-                backend/coverage.xml > be.xml
-            diff-cover be.xml --compare-branch "origin/$BASE" --fail-under 0 --format json:be.json || true
-          fi
-
-      - name: Write diff coverage summary
-        if: ${{ !cancelled() }}
-        run: node .github/scripts/render-diff-coverage.mjs --frontend fe.json --backend be.json --output diff-coverage.md --summary "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload diff-coverage report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: diff-coverage
-          path: |
-            diff-coverage.md
-            fe.json
-            be.json
-          if-no-files-found: ignore
 
   docker-builds:
     name: Docker builds (${{ matrix.image }})
