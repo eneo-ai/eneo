@@ -108,6 +108,22 @@ Evidence and files preserve their tenant, run, step, and attempt provenance.
 Raw evidence export is exceptional, audited before response, and fails closed
 when its protection preconditions are not met.
 
+### AI Builder failure telemetry
+
+The AI Builder failure summary reads `builder_sessions`, `flow_runs`, and
+`builder_client_errors`. Each section returns at most 20 failure families and
+five sample identifiers per family, with `truncated` and `total_families`
+exposing omitted families. The Builder section is a current-state snapshot, not
+history: it includes sessions updated since the cutoff whose latest turn still
+represents a failure. A later successful turn removes a session from this
+section, while a later update to a session with a standing failure can make it
+appear in a recent window.
+
+Client error reports persist the stable `code`, `category`, and `phase`, plus
+`request_id` when available, but never display text. They are deleted when their
+session or tenant is deleted, and the daily data-retention worker removes rows
+older than 90 days.
+
 ## Retention and deletion
 
 Retention is a single effective number of days resolved from Flow, then Space,
