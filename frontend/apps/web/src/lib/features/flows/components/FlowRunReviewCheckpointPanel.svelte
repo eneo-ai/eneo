@@ -5,6 +5,8 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import FlowCitationSummary from "./FlowCitationSummary.svelte";
+  import { readAttachedCitationSummary } from "./flowCitationSummary";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -49,6 +51,9 @@
   const canEdit = $derived(canDecide && checkpoint?.review_mode === "edit");
   const canApprove = $derived(canDecide);
   const canReject = $derived(canDecide);
+  // Attached by every checkpoint response (active read and mutations), so
+  // an edit flips staleness in the same response without a second fetch.
+  const citationSummary = $derived(readAttachedCitationSummary(checkpoint));
   const canResume = $derived(checkpoint?.state === "approved");
   const checkpointStateLabel = $derived(
     checkpoint ? getCheckpointStateLabel(checkpoint.state) : null
@@ -340,6 +345,15 @@
         <Alert.Title>{m.flow_run_review_deadline()}</Alert.Title>
         <Alert.Description>{m.flow_run_review_deadline_approved()}</Alert.Description>
       </Alert.Root>
+    {/if}
+
+    {#if citationSummary}
+      <div class="border-default bg-primary rounded-lg border p-3">
+        <FlowCitationSummary
+          summary={citationSummary}
+          title={m.flow_citation_summary_review_title()}
+        />
+      </div>
     {/if}
 
     <Field.Group class="grid gap-4 lg:grid-cols-2">

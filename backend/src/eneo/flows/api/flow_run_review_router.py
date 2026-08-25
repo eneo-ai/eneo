@@ -35,6 +35,7 @@ from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointResumeRequest,
     FlowRunReviewCheckpointResumeResponse,
 )
+from eneo.flows.api.flow_run_contract_models import FlowCitationSummaryPublic
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_REVIEW_ACTIVE_PATH,
     FLOW_REVIEW_APPROVE_PATH,
@@ -45,12 +46,17 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
+from eneo.flows.application.citation_summary_projection import (
+    build_citation_summary,
+    citation_grounded_step_orders,
+)
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
 from eneo.flows.domain.flow import FlowRunReviewCheckpoint, FlowRunStatus
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.published_runtime import load_published_definition
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
 from eneo.server.dependencies.container import (
@@ -845,7 +851,65 @@ async def _present_review_checkpoint(
         api_key_repo=container.api_key_v2_repo(),
         tenant_id=container.user().tenant_id,
     )
-    return await presenter.present_review_checkpoint(checkpoint)
+    public_checkpoint = await presenter.present_review_checkpoint(checkpoint)
+    citation_summary = await _citation_summary_for_checkpoint(
+        container=container,
+        checkpoint=checkpoint,
+    )
+    return public_checkpoint.model_copy(update={"citation_summary": citation_summary})
+
+
+async def _citation_summary_for_checkpoint(
+    *,
+    container: Container,
+    checkpoint: FlowRunReviewCheckpoint,
+) -> FlowCitationSummaryPublic | None:
+    tenant_id = container.user().tenant_id
+    run_repo = container.flow_run_repo()
+    run = await run_repo.get(
+        run_id=checkpoint.flow_run_id,
+        tenant_id=tenant_id,
+        flow_id=checkpoint.flow_id,
+    )
+    definition = await load_published_definition(
+        flow_version_repo=container.flow_version_repo(),
+        flow_id=run.flow_id,
+        version=run.flow_version,
+        tenant_id=tenant_id,
+    )
+    step = next(
+        runtime_step
+        for runtime_step in definition.runtime_steps()
+        if runtime_step.step_id == checkpoint.step_id
+    )
+    step_result = await run_repo.get_step_result(
+        run_id=checkpoint.flow_run_id,
+        step_id=checkpoint.step_id,
+        tenant_id=tenant_id,
+    )
+    current_attempt = await run_repo.get_step_attempt(
+        run_id=checkpoint.flow_run_id,
+        step_id=checkpoint.step_id,
+        attempt_no=checkpoint.attempt_no,
+        tenant_id=tenant_id,
+    )
+    grounded_orders = citation_grounded_step_orders(current_attempt)
+    upstream_step_results = (
+        await run_repo.list_step_results_by_orders(
+            run_id=checkpoint.flow_run_id,
+            tenant_id=tenant_id,
+            step_orders=grounded_orders,
+        )
+        if grounded_orders
+        else []
+    )
+    return build_citation_summary(
+        output_config=step.output_config,
+        current_attempt=current_attempt,
+        step_result=step_result,
+        upstream_step_results=upstream_step_results,
+        edited_at=checkpoint.edited_at,
+    )
 
 
 __all__ = ["router"]

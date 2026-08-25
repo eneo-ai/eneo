@@ -51,4 +51,43 @@ describe("FlowRunEvidenceStepCard", () => {
   it("omits the notice when the current attempt's evidence was loaded", () => {
     expect(renderCard(false)).not.toContain('data-testid="current-evidence-not-loaded"');
   });
+
+  it("renders the attached citation summary for the step result", () => {
+    const body = render(FlowRunEvidenceStepCard, {
+      props: {
+        result: {
+          ...result,
+          citation_summary: {
+            status: "observed",
+            sources: [
+              { identity_resolved: true, display_name: "Riktlinjer.pdf", container_label: null }
+            ],
+            matched_cited_source_count: 1,
+            sources_truncated: false,
+            stale_after_edit: false
+          }
+        } as FlowRunStep,
+        currentEvidenceNotLoaded: false,
+        stepDef: undefined,
+        duration: null,
+        transcription: null,
+        runtimeInput: null,
+        templateProvenance: null,
+        stepRag: null,
+        stepAttempts: [],
+        copiedKey: null,
+        expanded: true,
+        panelId: "step-1-panel",
+        isPowerUser: false,
+        eneo: {} as Eneo,
+        onToggle: () => undefined,
+        onCopyPayload: async () => undefined,
+        onDownloadArtifact: async () => undefined,
+        getRuntimeInputSummaryLabel: () => "",
+        formatElapsedMs: () => "",
+        formatBytes: () => ""
+      }
+    }).body;
+    expect(body).toContain("Riktlinjer.pdf");
+  });
 });

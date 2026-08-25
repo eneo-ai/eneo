@@ -9,6 +9,8 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
+  import FlowCitationSummary from "./FlowCitationSummary.svelte";
+  import { readAttachedCitationSummary } from "./flowCitationSummary";
   import FlowJsonViewer from "./FlowJsonViewer.svelte";
   import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
@@ -80,6 +82,12 @@
     formatElapsedMs: (value: number | undefined) => string;
     formatBytes: (value: number | undefined) => string;
   } = $props();
+
+  // The backend attaches the citation summary to the step result when the
+  // step had citation mode on; a malformed payload parses to null and the
+  // section simply does not render (server owns the off-vs-unavailable
+  // distinction).
+  const citationSummary = $derived(readAttachedCitationSummary(result));
 
   const stepReviewPolicy = $derived(stepDef?.review_policy ?? null);
   const shouldShowStepError = $derived(
@@ -306,6 +314,11 @@
           <p class="text-secondary text-xs italic" data-testid="current-evidence-not-loaded">
             {m.flow_run_step_current_evidence_not_loaded()}
           </p>
+        {/if}
+        {#if citationSummary}
+          <div class="border-default bg-primary rounded-lg border p-3">
+            <FlowCitationSummary summary={citationSummary} />
+          </div>
         {/if}
         {#if stepRag}
           <FlowRunKnowledgeTrace rag={stepRag} stepOrder={result.step_order} {eneo} />

@@ -32,6 +32,9 @@ from eneo.flows.api.flow_run_contract_models import (
     FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
 )
 from eneo.flows.api.flow_run_contract_models import (
+    FlowCitationSummaryPublic as FlowCitationSummaryPublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic as FlowFinalOutputContractPublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
@@ -1215,6 +1218,7 @@ class FlowRunReviewCheckpointPublic(BaseModel):
             "the step had no output contract."
         ),
     )
+    citation_summary: FlowCitationSummaryPublic | None = None
     next_step_ids: list[UUID] | None = None
     requester_user_id: UUID | None = None
     requester_service_principal: FlowServicePrincipalActorPublic | None = None
@@ -1420,6 +1424,7 @@ class FlowRunStepPublic(BaseModel):
     )
     output_payload_json: dict[str, Any] | None = None
     current_attempt_no: int | None = None
+    citation_summary: FlowCitationSummaryPublic | None = None
     result_files: list[FlowRunStepResultFile] = Field(
         default_factory=lambda: cast(list[FlowRunStepResultFile], [])
     )

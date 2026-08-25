@@ -22,6 +22,33 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.json_types import JsonObject, JsonValue
 
+FlowCitationSummaryStatus: TypeAlias = Literal[
+    "unavailable",
+    "citations_on_without_sources",
+    "observed",
+    "missing_required_citations",
+    "unknown_citation_ids_present",
+]
+
+
+class FlowCitationSourcePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    identity_resolved: bool
+    display_name: str | None
+    container_label: str | None
+
+
+class FlowCitationSummaryPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: FlowCitationSummaryStatus
+    sources: list[FlowCitationSourcePublic]
+    matched_cited_source_count: int = Field(ge=0)
+    sources_truncated: bool
+    stale_after_edit: bool
+
+
 FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "published_flow_version": 3,

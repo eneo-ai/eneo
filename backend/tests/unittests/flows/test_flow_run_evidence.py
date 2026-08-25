@@ -168,6 +168,68 @@ def test_evidence_marks_canonical_snapshot_verified() -> None:
     }
 
 
+def test_evidence_step_result_includes_current_attempt_citation_summary() -> None:
+    run, version = _evidence_run_and_version()
+    raw_step = version.definition_json["steps"][0]
+    assert isinstance(raw_step, dict)
+    step_id = UUID(str(raw_step["step_id"]))
+    definition_json = {
+        **version.definition_json,
+        "steps": [
+            {
+                **raw_step,
+                "output_config": {"citation_mode": "inline_inref_sidecar"},
+            }
+        ],
+    }
+    version = version.model_copy(
+        update={
+            "definition_json": definition_json,
+            "definition_checksum": published_definition_checksum(definition_json),
+        }
+    )
+    source_id = "11111111-1111-1111-1111-111111111111"
+    result = _step_result_for_run(run, step_id=step_id).model_copy(
+        update={
+            "input_payload_json": {
+                "rag": {
+                    "citation_sources": [
+                        {
+                            "id": source_id,
+                            "title": "Run source",
+                            "source_container_name_raw": "Run docs",
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    attempt = _attempt_with_provenance(
+        run,
+        {
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "citations": {
+                "citation_compliance": "observed",
+                "cited_source_ids": [source_id],
+                "unknown_citation_ids": [],
+                "upstream_grounded_step_orders": [],
+            },
+        },
+    ).model_copy(update={"step_id": step_id})
+
+    evidence = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[attempt],
+    ).to_dict()
+
+    summary = evidence["step_results"][0]["citation_summary"]
+    assert summary["status"] == "observed"
+    assert summary["sources"][0]["display_name"] == "Run source"
+    assert summary["stale_after_edit"] is False
+
+
 def test_evidence_integrity_uses_raw_snapshot_before_redaction() -> None:
     run, version = _evidence_run_and_version()
     definition_json: dict[str, object] = {

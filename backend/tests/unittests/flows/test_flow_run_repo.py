@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -78,6 +78,58 @@ async def test_get_raises_flow_run_not_found_error() -> None:
     assert exc_info.value.run_id == run_id
     assert exc_info.value.tenant_id == tenant_id
     assert exc_info.value.flow_id is None
+
+
+@pytest.mark.asyncio
+async def test_get_step_attempt_is_scoped_to_tenant_run_step_and_attempt() -> None:
+    session = AsyncMock()
+    session.scalar.return_value = None
+    repo = FlowRunRepository(session=session)
+    run_id = uuid4()
+    tenant_id = uuid4()
+    step_id = uuid4()
+
+    attempt = await repo.get_step_attempt(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        step_id=step_id,
+        attempt_no=3,
+    )
+
+    assert attempt is None
+    statement = session.scalar.await_args.args[0]
+    sql = " ".join(str(statement.compile(dialect=postgresql.dialect())).split())
+    assert "FROM flow_step_attempts" in sql
+    assert "flow_step_attempts.flow_run_id =" in sql
+    assert "flow_step_attempts.tenant_id =" in sql
+    assert "flow_step_attempts.step_id =" in sql
+    assert "flow_step_attempts.attempt_no =" in sql
+
+
+@pytest.mark.asyncio
+async def test_list_step_results_by_orders_reads_only_named_upstream_steps() -> None:
+    session = AsyncMock()
+    query_result = MagicMock()
+    query_result.scalars.return_value.all.return_value = []
+    session.execute.return_value = query_result
+    repo = FlowRunRepository(session=session)
+    run_id = uuid4()
+    tenant_id = uuid4()
+
+    results = await repo.list_step_results_by_orders(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        step_orders=(4, 2, 4),
+    )
+
+    assert results == []
+    statement = session.execute.await_args.args[0]
+    sql = " ".join(str(statement.compile(dialect=postgresql.dialect())).split())
+    assert "FROM flow_step_results" in sql
+    assert "flow_step_results.flow_run_id =" in sql
+    assert "flow_step_results.tenant_id =" in sql
+    assert "flow_step_results.step_order IN" in sql
+    assert "ORDER BY flow_step_results.step_order ASC" in sql
 
 
 @pytest.mark.asyncio

@@ -6454,5 +6454,15 @@
   "flow_run_knowledge_hidden_matched_explainer": "Ytterligare {count} avsnitt hämtades vid körningen men sparades inte som underlag. Organisationens bevisinställningar, bland annat ”Textavsnitt per källa”, styr hur mycket som sparas.",
   "flow_run_knowledge_best_match": "Bäst träff",
   "flow_run_knowledge_source_relevance_tooltip": "Källans bästa avsnitt hade {percent} % semantisk likhet med sökfrågan som användes vid körningen. Nivåerna är visningsetiketter, inte kalibrerade trösklar.",
-  "flow_run_knowledge_chunks_shown_of_matched": "Visar {displayed} av {matched} matchade segment"
+  "flow_run_knowledge_chunks_shown_of_matched": "Visar {displayed} av {matched} matchade segment",
+  "flow_citation_summary_title": "Källor",
+  "flow_citation_summary_review_title": "Källor för detta resultat",
+  "flow_citation_status_observed": "Källor citerade ({count})",
+  "flow_citation_status_missing": "Källmärkning begärdes men saknas",
+  "flow_citation_status_unknown": "Okänd källa citerad – innehållet hänvisar till källor som inte fanns i underlaget",
+  "flow_citation_status_no_sources": "Inga källor fanns att hänvisa till",
+  "flow_citation_status_unavailable": "Källinformation kunde inte visas",
+  "flow_citation_stale_after_edit": "Källorna gäller AI:ns ursprungliga förslag – resultatet har redigerats.",
+  "flow_citation_source_unidentified": "Källa kunde inte identifieras",
+  "flow_citation_sources_truncated": "Visar {shown} av {count} källor"
 }

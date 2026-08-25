@@ -15730,6 +15730,36 @@ export interface components {
       plan_rationale?: string | null;
       spec: components["schemas"]["FlowDraftSpecCore"];
     };
+    /** FlowCitationSourcePublic */
+    FlowCitationSourcePublic: {
+      /** Container Label */
+      container_label: string | null;
+      /** Display Name */
+      display_name: string | null;
+      /** Identity Resolved */
+      identity_resolved: boolean;
+    };
+    /** FlowCitationSummaryPublic */
+    FlowCitationSummaryPublic: {
+      /** Matched Cited Source Count */
+      matched_cited_source_count: number;
+      /** Sources */
+      sources: components["schemas"]["FlowCitationSourcePublic"][];
+      /** Sources Truncated */
+      sources_truncated: boolean;
+      /** Stale After Edit */
+      stale_after_edit: boolean;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | "unavailable"
+        | "citations_on_without_sources"
+        | "observed"
+        | "missing_required_citations"
+        | "unknown_citation_ids_present";
+    };
     /**
      * FlowCreateRequest
      * @example {
@@ -16919,7 +16949,7 @@ export interface components {
      *       "max_recorded_passage_bytes": 4096,
      *       "max_recorded_passage_bytes_per_run_view": 2097152,
      *       "max_recorded_passage_bytes_per_step": 131072,
-     *       "max_recorded_passages_per_source": 5,
+     *       "max_recorded_passages_per_source": 30,
      *       "max_sources_with_recorded_passages": 25,
      *       "version": 1
      *     }
@@ -19872,6 +19902,7 @@ export interface components {
       attempt_no: number;
       /** Cancelled At */
       cancelled_at?: string | null;
+      citation_summary?: components["schemas"]["FlowCitationSummaryPublic"] | null;
       /**
        * Created At
        * Format: date-time
@@ -20253,6 +20284,7 @@ export interface components {
     FlowRunStepPublic: {
       /** Assistant Id */
       assistant_id?: string | null;
+      citation_summary?: components["schemas"]["FlowCitationSummaryPublic"] | null;
       /**
        * Created At
        * Format: date-time

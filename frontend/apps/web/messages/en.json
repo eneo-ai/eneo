@@ -6454,5 +6454,15 @@
   "flow_run_knowledge_hidden_matched_explainer": "Another {count} segments were retrieved during the run but not saved as evidence. The organization's evidence settings, including “Passages per source”, control how much is saved.",
   "flow_run_knowledge_best_match": "Best match",
   "flow_run_knowledge_source_relevance_tooltip": "The source's best segment had {percent}% semantic similarity with the retrieval query used during the run. The levels are display labels, not calibrated thresholds.",
-  "flow_run_knowledge_chunks_shown_of_matched": "Showing {displayed} of {matched} matched segments"
+  "flow_run_knowledge_chunks_shown_of_matched": "Showing {displayed} of {matched} matched segments",
+  "flow_citation_summary_title": "Sources",
+  "flow_citation_summary_review_title": "Sources for this result",
+  "flow_citation_status_observed": "Sources cited ({count})",
+  "flow_citation_status_missing": "Citations were requested but are missing",
+  "flow_citation_status_unknown": "Unknown source cited – the content references sources that were not in the material",
+  "flow_citation_status_no_sources": "There were no sources to cite",
+  "flow_citation_status_unavailable": "Source information could not be shown",
+  "flow_citation_stale_after_edit": "The sources apply to the AI's original proposal – the result has been edited.",
+  "flow_citation_source_unidentified": "Source could not be identified",
+  "flow_citation_sources_truncated": "Showing {shown} of {count} sources"
 }

@@ -71,7 +71,7 @@ export function createClient(args) {
   ) {
     throw new TypeError("token must be a non-empty string.");
   }
-  const version = "DEV-20260825T074219Z"; // # Client version auto-updates when running the updater, do not edit this line.
+  const version = "DEV-20260825T144400Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
   const apiKeyHeaderName = args.apiKeyHeaderName?.trim() || "X-API-Key";

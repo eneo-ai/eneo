@@ -5,7 +5,14 @@ from dataclasses import dataclass
 from typing import Any, Sequence, cast
 from uuid import UUID
 
-from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
+from eneo.flows.api.flow_run_contract_models import (
+    FlowCitationSummaryPublic,
+    FlowFinalOutputContractPublic,
+)
+from eneo.flows.application.citation_summary_projection import (
+    build_citation_summary,
+    citation_grounded_step_orders,
+)
 from eneo.flows.application.flow_run_evidence import (
     RunViewEvidenceOmission,
     RunViewPassageOmission,
@@ -22,6 +29,7 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_provenance import (
@@ -81,6 +89,7 @@ class EvidenceBundle:
     runtime_input_file_metadata_by_step_result_id: Mapping[
         UUID, Sequence[FlowRunStepInputFileMetadata]
     ]
+    citation_summaries_by_step_id: Mapping[UUID, FlowCitationSummaryPublic | None]
     debug_export: dict[str, Any]
 
     def to_export_payload(self) -> EvidenceBundlePayload:
@@ -110,6 +119,9 @@ class EvidenceBundle:
                                 item,
                                 self.runtime_input_file_metadata_by_step_result_id,
                             )
+                        ),
+                        citation_summary=self.citation_summaries_by_step_id.get(
+                            item.step_id
                         ),
                     )
                     for item in self.step_results
@@ -222,6 +234,7 @@ def build_evidence_bundle(
         flow_version=version.version,
     )
     final_output = None
+    definition = None
     if definition_integrity.status is PublishedDefinitionIntegrityStatus.VERIFIED:
         definition = parse_verified_published_definition(
             version.definition_json,
@@ -230,6 +243,13 @@ def build_evidence_bundle(
             flow_version=version.version,
         )
         final_output = build_final_output_contract(definition.runtime_steps())
+    citation_summaries_by_step_id = _citation_summaries_by_step_id(
+        definition_steps=definition.runtime_steps() if definition is not None else (),
+        config_known=definition is not None,
+        step_results=step_results,
+        step_attempts=step_attempts,
+        review_checkpoints=review_checkpoints,
+    )
     return EvidenceBundle(
         run=run,
         version=version,
@@ -255,6 +275,7 @@ def build_evidence_bundle(
         runtime_input_file_metadata_by_step_result_id=(
             resolved_runtime_input_file_metadata_by_step_result_id
         ),
+        citation_summaries_by_step_id=citation_summaries_by_step_id,
         debug_export=build_debug_export(
             run=run,
             version=version,
@@ -292,6 +313,9 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
                 runtime_input_file_metadata=_runtime_input_file_metadata_for_result(
                     result,
                     bundle.runtime_input_file_metadata_by_step_result_id,
+                ),
+                citation_summary=bundle.citation_summaries_by_step_id.get(
+                    result.step_id
                 ),
             )
             for result in bundle.step_results
@@ -430,8 +454,14 @@ def _dump_result_record(
     *,
     runtime_input_file_ids: Sequence[UUID] = (),
     runtime_input_file_metadata: Sequence[FlowRunStepInputFileMetadata] = (),
+    citation_summary: FlowCitationSummaryPublic | None = None,
 ) -> dict[str, Any]:
     dumped = item.model_dump(mode="json")
+    dumped["citation_summary"] = (
+        citation_summary.model_dump(mode="json")
+        if citation_summary is not None
+        else None
+    )
     runtime_input_file_id_strings = [str(file_id) for file_id in runtime_input_file_ids]
     dumped["runtime_input_file_ids"] = runtime_input_file_id_strings
     _normalize_dumped_runtime_input_files(
@@ -440,6 +470,59 @@ def _dump_result_record(
         runtime_input_file_metadata=runtime_input_file_metadata,
     )
     return dumped
+
+
+def _citation_summaries_by_step_id(
+    *,
+    definition_steps: Sequence[RuntimeStep],
+    config_known: bool,
+    step_results: Sequence[FlowStepResult],
+    step_attempts: Sequence[FlowStepAttempt],
+    review_checkpoints: Sequence[FlowRunReviewCheckpoint],
+) -> dict[UUID, FlowCitationSummaryPublic | None]:
+    output_config_by_step_id = {
+        step.step_id: step.output_config for step in definition_steps
+    }
+    result_by_step_order = {result.step_order: result for result in step_results}
+    attempt_by_step_attempt = {
+        (attempt.step_id, attempt.attempt_no): attempt for attempt in step_attempts
+    }
+    current_attempt_by_step_id = {
+        result.step_id: (
+            attempt_by_step_attempt.get((result.step_id, result.current_attempt_no))
+            if result.current_attempt_no is not None
+            else None
+        )
+        for result in step_results
+    }
+    checkpoint_by_step_attempt = {
+        (checkpoint.step_id, checkpoint.attempt_no): checkpoint
+        for checkpoint in review_checkpoints
+    }
+    summaries: dict[UUID, FlowCitationSummaryPublic | None] = {}
+    for result in step_results:
+        checkpoint = (
+            checkpoint_by_step_attempt.get((result.step_id, result.current_attempt_no))
+            if result.current_attempt_no is not None
+            else None
+        )
+        current_attempt = current_attempt_by_step_id[result.step_id]
+        # The projection's input bound: only the upstream results the
+        # sidecar's grounded step orders name, never the whole run.
+        grounded_upstream = [
+            result_by_step_order[order]
+            for order in citation_grounded_step_orders(current_attempt)
+            if order in result_by_step_order
+        ]
+        summaries[result.step_id] = build_citation_summary(
+            output_config=output_config_by_step_id.get(result.step_id),
+            config_known=config_known,
+            current_attempt=current_attempt,
+            step_result=result,
+            upstream_step_results=grounded_upstream,
+            edited_at=checkpoint.edited_at if checkpoint is not None else None,
+        )
+    return summaries
 
 
 def _normalize_dumped_runtime_input_files(

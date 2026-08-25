@@ -1017,6 +1017,31 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowStepResult.model_validate(row) for row in rows]
 
+    async def list_step_results_by_orders(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_orders: Sequence[int],
+    ) -> list[FlowStepResult]:
+        named_orders = tuple(sorted(set(step_orders)))
+        if not named_orders:
+            return []
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowStepResults)
+                    .where(FlowStepResults.flow_run_id == run_id)
+                    .where(FlowStepResults.tenant_id == tenant_id)
+                    .where(FlowStepResults.step_order.in_(named_orders))
+                    .order_by(FlowStepResults.step_order.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [FlowStepResult.model_validate(row) for row in rows]
+
     async def measure_evidence_row_counts(
         self,
         *,
@@ -2026,6 +2051,25 @@ class FlowRunRepository:
         if row is None:
             return None
         return FlowStepResult.model_validate(row)
+
+    async def get_step_attempt(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+    ) -> FlowStepAttempt | None:
+        row = await self.session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if row is None:
+            return None
+        return FlowStepAttempt.model_validate(row)
 
     async def save_step_result(
         self,

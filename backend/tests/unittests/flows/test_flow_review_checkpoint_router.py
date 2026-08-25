@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import (
     AsyncMock,
@@ -22,13 +23,19 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.api.flow_run_review_router import (
     approve_flow_run_review_checkpoint,
     edit_flow_run_review_checkpoint,
+    get_active_flow_run_review_checkpoint,
     reject_flow_run_review_checkpoint,
     resume_flow_run_review_checkpoint,
 )
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
-from eneo.flows.domain.flow import FlowRunStatus
+from eneo.flows.domain.flow import FlowRunStatus, FlowStepAttempt, FlowStepResult
+from eneo.flows.enums import (
+    FlowRunReviewCheckpointState,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+)
 from tests.unittests.flows.test_flow_router import (
     _disable_flow_scope_filter,
     _enable_explicit_transaction,
@@ -57,6 +64,149 @@ def _record_review_checkpoint_public(monkeypatch, events: list[str]):
         "_present_review_checkpoint",
         _present_review_checkpoint,
     )
+
+
+def _enable_citation_presentation(monkeypatch, container, *, ctx, edited_at=None):
+    source_id = "11111111-1111-1111-1111-111111111111"
+    now = datetime.now(timezone.utc)
+    step_result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=ctx.run.id,
+        flow_id=ctx.flow_id,
+        tenant_id=ctx.run.tenant_id,
+        step_id=ctx.checkpoint.step_id,
+        step_order=ctx.checkpoint.step_order,
+        current_attempt_no=ctx.checkpoint.attempt_no,
+        input_payload_json={
+            "rag": {
+                "citation_sources": [
+                    {
+                        "id": source_id,
+                        "title": "Review source",
+                        "source_container_name_raw": "Review docs",
+                    }
+                ]
+            }
+        },
+        status=FlowStepResultStatus.COMPLETED,
+        created_at=now,
+        updated_at=now,
+    )
+    attempt = FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=ctx.run.id,
+        flow_id=ctx.flow_id,
+        tenant_id=ctx.run.tenant_id,
+        step_id=ctx.checkpoint.step_id,
+        step_order=ctx.checkpoint.step_order,
+        attempt_no=ctx.checkpoint.attempt_no,
+        status=FlowStepAttemptStatus.COMPLETED,
+        provenance_json={
+            "schema_version": "flow-attempt-provenance.v3",
+            "citations": {
+                "citation_compliance": "observed",
+                "cited_source_ids": [source_id],
+                "unknown_citation_ids": [],
+                "upstream_grounded_step_orders": [],
+            },
+        },
+        started_at=now,
+        finished_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    run_repo = AsyncMock()
+    run_repo.get.return_value = ctx.run
+    run_repo.get_step_result.return_value = step_result
+    run_repo.get_step_attempt.return_value = attempt
+    container.flow_run_repo.return_value = run_repo
+    container.flow_version_repo.return_value = AsyncMock()
+    definition = SimpleNamespace(
+        runtime_steps=lambda: [
+            SimpleNamespace(
+                step_id=ctx.checkpoint.step_id,
+                step_order=ctx.checkpoint.step_order,
+                output_config={"citation_mode": "inline_inref_sidecar"},
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        router_module,
+        "load_published_definition",
+        AsyncMock(return_value=definition),
+    )
+    checkpoint = ctx.checkpoint.model_copy(
+        update={
+            "state": (
+                FlowRunReviewCheckpointState.EDITED
+                if edited_at is not None
+                else FlowRunReviewCheckpointState.AWAITING_REVIEW
+            ),
+            "requester_user_id": uuid4(),
+            "decided_by_user_id": uuid4() if edited_at is not None else None,
+            "decided_by_principal_type": (
+                ctx.checkpoint.decided_by_principal_type
+                if edited_at is not None
+                else None
+            ),
+            "edited_at": edited_at,
+        }
+    )
+    return checkpoint
+
+
+@pytest.mark.asyncio
+async def test_active_review_checkpoint_includes_current_citation_summary(monkeypatch):
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    checkpoint = _enable_citation_presentation(
+        monkeypatch,
+        container,
+        ctx=ctx,
+    )
+    ctx.review_service.get_active_review_checkpoint.return_value = checkpoint
+    _disable_flow_scope_filter(monkeypatch)
+
+    response = await get_active_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response is not None
+    assert response.citation_summary is not None
+    assert response.citation_summary.status == "observed"
+    assert response.citation_summary.stale_after_edit is False
+
+
+@pytest.mark.asyncio
+async def test_edit_response_marks_citation_summary_stale_without_refetch(monkeypatch):
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    checkpoint = _enable_citation_presentation(
+        monkeypatch,
+        container,
+        ctx=ctx,
+        edited_at=datetime.now(timezone.utc),
+    )
+    ctx.review_service.edit_review_checkpoint.return_value = checkpoint
+    _disable_flow_scope_filter(monkeypatch)
+
+    response = await edit_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointEditRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision,
+            edited_value="reviewed",
+        ),
+        container=container,
+    )
+
+    assert response.citation_summary is not None
+    assert response.citation_summary.stale_after_edit is True
 
 
 @pytest.mark.asyncio

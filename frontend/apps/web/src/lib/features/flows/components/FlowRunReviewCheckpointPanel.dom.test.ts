@@ -124,6 +124,28 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await screen.findByText(m.flow_run_review_no_active_checkpoint());
   });
 
+  it("renders the citation summary attached to the active checkpoint", async () => {
+    const checkpoint = {
+      ...buildCheckpoint("awaiting_review", 1),
+      citation_summary: {
+        status: "observed",
+        sources: [
+          { identity_resolved: true, display_name: "Riktlinjer.pdf", container_label: null }
+        ],
+        matched_cited_source_count: 1,
+        sources_truncated: false,
+        stale_after_edit: false
+      }
+    } as FlowRunReviewCheckpoint;
+    const eneo = buildEneo({ activeCheckpoint: checkpoint });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByText("Riktlinjer.pdf");
+  });
+
   it("can retry a failed checkpoint load", async () => {
     const active = vi
       .fn()

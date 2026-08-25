@@ -303,6 +303,8 @@ export type FlowRunRerunOperation = components["schemas"]["FlowRunRerunOperation
 export type FlowRunInputRevision = FlowRunRerunOperation["input_revision"];
 export type FlowRunRerunInvalidatedStep =
   components["schemas"]["FlowRunRerunInvalidatedStepPublic"];
+export type FlowCitationSummary = components["schemas"]["FlowCitationSummaryPublic"];
+export type FlowCitationSource = components["schemas"]["FlowCitationSourcePublic"];
 export type FlowRunReviewCheckpoint = components["schemas"]["FlowRunReviewCheckpointPublic"];
 export type FlowRunReviewCheckpointState = components["schemas"]["FlowRunReviewCheckpointState"];
 export type FlowRunReviewCheckpointResumeResponse =
