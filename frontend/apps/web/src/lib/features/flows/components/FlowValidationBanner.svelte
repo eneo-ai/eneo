@@ -34,6 +34,8 @@
     stepName: string;
     stepId: string | undefined;
     message: string;
+    /** Raw technical sentence, kept for debugging when it adds anything. */
+    detail?: string;
   };
 
   const displayIssues = $derived.by(() => {
@@ -50,6 +52,8 @@
     switch (parsed.kind) {
       case "step": {
         const step = steps.find((s) => s.step_order === parsed.stepOrder);
+        const translated = getValidationIssueMessage(parsed.code);
+        const raw = parsed.detail;
         return {
           key,
           stepOrder: parsed.stepOrder,
@@ -57,7 +61,10 @@
             step?.user_description ||
             m.flow_step_fallback_label({ order: String(parsed.stepOrder) }),
           stepId: step?.id ?? undefined,
-          message: getValidationIssueMessage(parsed.code)
+          // An untranslated code falls back to the raw server sentence
+          // rather than showing the bare code.
+          message: translated !== parsed.code ? translated : (raw ?? parsed.code),
+          detail: raw && translated !== parsed.code && raw !== translated ? raw : undefined
         };
       }
       case "assistant": {
@@ -75,12 +82,14 @@
       }
       case "flow": {
         const translated = getValidationIssueMessage(parsed.code);
+        const raw = parsed.detail;
         return {
           key,
           stepOrder: null,
           stepName: "",
           stepId: undefined,
-          message: translated !== parsed.code ? translated : parsed.message
+          message: translated !== parsed.code ? translated : (raw ?? parsed.message),
+          detail: raw && translated !== parsed.code && raw !== translated ? raw : undefined
         };
       }
     }
@@ -151,6 +160,14 @@
                     <span class="text-sm font-semibold tracking-[-0.01em]">{issue.stepName}</span>
                   {/if}
                   <span class="text-secondary text-[13px] leading-relaxed">{issue.message}</span>
+                  {#if issue.detail}
+                    <details class="text-muted mt-0.5 text-xs">
+                      <summary class="cursor-pointer select-none">
+                        {m.flow_validation_technical_details()}
+                      </summary>
+                      <span class="mt-1 block leading-relaxed break-words">{issue.detail}</span>
+                    </details>
+                  {/if}
                 </div>
                 {#if issue.stepId && onNavigateToStep}
                   <button

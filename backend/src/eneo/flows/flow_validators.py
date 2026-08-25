@@ -475,17 +475,25 @@ def collect_step_graph_issues(
 
 
 def _to_exception(issue: FlowStepGraphIssue) -> BadRequestException:
+    # The HTTP payload must carry the canonical issue identity so clients can
+    # translate and point at the offending step instead of showing raw text.
+    code = issue.exception_code or issue.code.value
+    context: dict[str, object] = dict(issue.context or {})
+    # The canonical identity always wins over issue-provided context keys.
+    context["issue_code"] = issue.code.value
+    if issue.step_order is not None:
+        context["step_order"] = issue.step_order
     if issue.exception_kind == "flow_step" and issue.step_order is not None:
         return FlowStepValidationError(
             issue.message,
             step_order=issue.step_order,
-            code=issue.exception_code,
-            context=issue.context,
+            code=code,
+            context=context,
         )
     return BadRequestException(
         issue.message,
-        code=issue.exception_code,
-        context=issue.context,
+        code=code,
+        context=context,
     )
 
 
@@ -1411,6 +1419,7 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
             raise FlowStepValidationError(
                 f"Step {step.step_order}: explicit question bindings must reference step_input.* when runtime input is enabled.",
                 step_order=step.step_order,
+                code=FlowGraphIssueCode.FLOW_INPUT_BINDING_RUNTIME_INPUT_UNUSED.value,
             )
 
 

@@ -22,6 +22,31 @@ import {
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues } from "./flowStepTypes";
 import { m } from "$lib/paraglide/messages";
+import { parseServerValidationIdentity } from "$lib/features/flows/flowStepValidationMessages";
+
+/**
+ * Thrown by flush/save paths when the server rejected the draft and the
+ * rejection was already routed into the validation banner — callers show a
+ * short pointer, never the raw sentence.
+ */
+export class FlowSaveRejectedError extends Error {
+  constructor() {
+    super("flow_save_rejected");
+    this.name = "FlowSaveRejectedError";
+  }
+}
+
+/**
+ * Thrown by flush/save paths when the save failed for a non-validation
+ * reason. The raw failure toast has already fired at the ResourceEditor
+ * seam — callers must not present a second toast for the same failure.
+ */
+export class FlowSaveFailedError extends Error {
+  constructor() {
+    super("Flow changes could not be saved before continuing.");
+    this.name = "FlowSaveFailedError";
+  }
+}
 import {
   getFlowWizardMetadata,
   getUnifiedFlowSaveStatus,
@@ -70,6 +95,10 @@ function createFlowEditor(data: FlowEditorInitData) {
   const editor = createResourceEditor({
     eneo: data.eneo,
     resource: data.flow,
+    // A server-side validation rejection surfaces in the banner instead of
+    // the raw-message toast; other failures keep the default toast. Each
+    // save's result carries whether its own failure was routed here.
+    onSaveError: (error) => reportServerValidationError(error),
     defaults: {},
     updateResource: async (resource, changes) => {
       const cleanChanges = { ...changes } as Record<string, unknown>;
@@ -145,6 +174,34 @@ function createFlowEditor(data: FlowEditorInitData) {
   const flowErrorPrefix = "flow:";
   const typedIOValidationPrefix = `${flowErrorPrefix}typed-io:`;
   const stepConfigValidationPrefix = `${flowErrorPrefix}step-config:`;
+  const serverValidationPrefix = `${flowErrorPrefix}server:`;
+
+  /**
+   * Routes a structured server-side validation failure into the banner the
+   * builder already owns, so the user sees a translated message with a
+   * "go to step" action instead of a raw technical toast. Returns true when
+   * the error carried a recognizable identity.
+   */
+  function reportServerValidationError(error: unknown): boolean {
+    if (!(error instanceof EneoError)) return false;
+    const identity = parseServerValidationIdentity(error);
+    if (!identity) return false;
+    const rawMessage = error.getReadableMessage();
+    // The server raises only the FIRST failing issue, so the namespace is
+    // replaced atomically: the banner always shows the latest rejection,
+    // never an accumulation of superseded ones. Flow-scoped issues share
+    // the same clearable namespace (no step suffix).
+    const key =
+      identity.stepOrder !== null
+        ? `${serverValidationPrefix}${identity.code}:${identity.stepOrder}`
+        : `${serverValidationPrefix}${identity.code}`;
+    replaceFlowValidationErrors(serverValidationPrefix, new Map([[key, [rawMessage]]]));
+    return true;
+  }
+
+  function clearServerValidationErrors() {
+    replaceFlowValidationErrors(serverValidationPrefix, new Map());
+  }
   function setAssistantValidationError(assistantId: string, message: string | null) {
     validationErrors.update((current) => {
       const next = new Map(current);
@@ -310,13 +367,20 @@ function createFlowEditor(data: FlowEditorInitData) {
     }
 
     saveStatus.set("saving");
-    await editor.saveChanges();
+    const result = await editor.saveChanges();
 
-    const stillUnsaved = get(editor.state.currentChanges).hasUnsavedChanges;
-    saveStatus.set(stillUnsaved ? "unsaved" : "saved");
-    if (stillUnsaved) {
-      throw new Error("Flow changes could not be saved before continuing.");
+    if (!result.saved) {
+      saveStatus.set("unsaved");
+      if (result.handled) {
+        // This save's structured rejection already lives in the banner.
+        throw new FlowSaveRejectedError();
+      }
+      throw new FlowSaveFailedError();
     }
+    saveStatus.set("saved");
+    // The server accepted the current state: earlier server-side
+    // rejections no longer describe it.
+    clearServerValidationErrors();
   }
 
   async function flushSaves(): Promise<void> {
@@ -478,10 +542,16 @@ function createFlowEditor(data: FlowEditorInitData) {
       if (steps.some((s: FlowStep) => !s.assistant_id || s.assistant_id === "")) return;
 
       saveStatus.set("saving");
-      try {
-        await editor.saveChanges();
+      // A failed save resolves unsaved (onSaveError has already routed a
+      // structured rejection into the banner or the default toast fired).
+      const result = await editor.saveChanges();
+      if (result.saved) {
         saveStatus.set("saved");
-      } catch {
+        // The server accepted this state: earlier server-side rejections no
+        // longer describe it. Without this, a fixed draft that autosaves
+        // cleanly would keep publish disabled forever.
+        clearServerValidationErrors();
+      } else {
         saveStatus.set("unsaved");
       }
     }, 500);
@@ -883,6 +953,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     flushFlowSaves,
     flushAssistantSaves,
     flushSaves,
+    reportServerValidationError,
     scheduleAutoSave,
     destroy
   });

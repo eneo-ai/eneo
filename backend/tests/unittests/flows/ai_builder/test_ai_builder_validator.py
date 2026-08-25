@@ -983,7 +983,8 @@ class TestProductionParityValidation:
 
         assert not result.valid
         assert any(
-            e.code == "flow_step_invalid" and "step_input" in e.message
+            e.code == "flow_input_binding_runtime_input_unused"
+            and "step_input" in e.message
             for e in result.errors
         )
 

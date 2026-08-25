@@ -61,6 +61,17 @@ def _form_metadata(*field_names: str) -> dict:
     }
 
 
+def _expected_boundary_context(
+    exc: BadRequestException, facts: dict[str, object]
+) -> dict[str, object]:
+    """The exact context the boundary emits: case facts + canonical identity."""
+    expected: dict[str, object] = dict(facts)
+    expected["issue_code"] = exc.code
+    if isinstance(exc, FlowStepValidationError):
+        expected["step_order"] = exc.step_order
+    return expected
+
+
 def _assert_validate_steps_rejects(
     steps: list[FlowStep],
     *,
@@ -80,7 +91,16 @@ def _assert_validate_steps_rejects(
 
     exc = exc_info.value
     assert type(exc) is expected_type
-    assert exc.code == code
+    if code is not None:
+        assert exc.code == code
+    else:
+        # The boundary contract now always carries the canonical issue code
+        # so clients can translate; the identity also rides in context.
+        assert isinstance(exc.code, str) and exc.code
+        context = getattr(exc, "context", None)
+        assert isinstance(context, dict) and context.get("issue_code") == exc.code
+        if isinstance(exc, FlowStepValidationError):
+            assert context.get("step_order") == exc.step_order
     if step_order is not None:
         assert isinstance(exc, FlowStepValidationError)
         assert exc.step_order == step_order
@@ -532,7 +552,8 @@ def test_validate_steps_publish_rejects_unknown_input_names_with_precise_context
         require_complete_template_fill_config=True,
     )
 
-    assert exc.context == context
+    _expected_context = context
+    assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
 def test_validate_steps_projects_publish_binding_error_to_exact_issue() -> None:
@@ -670,10 +691,11 @@ def test_validate_steps_publish_rejects_invalid_numeric_label_and_authored_quest
         require_complete_template_fill_config=True,
     )
 
-    assert exc.context == {
+    _expected_context = {
         "field": "input_bindings.question",
         "reference": question.strip("{} "),
     }
+    assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
 @pytest.mark.parametrize(
@@ -873,7 +895,7 @@ def test_validate_steps_source_refs_do_not_satisfy_runtime_input_consumption() -
     with pytest.raises(
         BadRequestException,
         match="explicit question bindings must reference step_input",
-    ):
+    ) as exc_info:
         validate_steps(
             [
                 _step(1),
@@ -892,6 +914,17 @@ def test_validate_steps_source_refs_do_not_satisfy_runtime_input_consumption() -
             ]
         )
 
+    # The motivating raw sentence now carries an exact boundary identity the
+    # client translates and navigates by.
+    exc = exc_info.value
+    assert exc.code == "flow_input_binding_runtime_input_unused"
+    assert isinstance(exc, FlowStepValidationError)
+    assert exc.step_order == 2
+    assert exc.context == {
+        "issue_code": "flow_input_binding_runtime_input_unused",
+        "step_order": 2,
+    }
+
 
 def test_validate_steps_rejects_unsupported_binding_keys_only_when_publish_strict():
     step = _step(input_bindings={"text": "{{ flow_input.text }}"})
@@ -902,10 +935,13 @@ def test_validate_steps_rejects_unsupported_binding_keys_only_when_publish_stric
         validate_steps([step], require_complete_template_fill_config=True)
 
     assert exc_info.value.code == "flow_input_binding_unsupported_key"
-    assert exc_info.value.context == {
+    _expected_context = {
         "field": "input_bindings",
         "key": "text",
     }
+    assert exc_info.value.context == _expected_boundary_context(
+        exc_info.value, _expected_context
+    )
 
 
 def test_validate_steps_rejects_question_binding_with_input_contract():
@@ -1299,10 +1335,11 @@ def test_validate_steps_publish_rejects_source_refs_with_indexed_context(
         require_complete_template_fill_config=True,
     )
 
-    assert exc.context == {
+    _expected_context = {
         "field": "input_bindings.source_refs[1].step_ref",
         "reference": step_ref,
     }
+    assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
 @pytest.mark.parametrize(
@@ -1362,10 +1399,11 @@ def test_validate_steps_publish_rejects_unproven_structured_question_paths(
         require_complete_template_fill_config=True,
     )
 
-    assert exc.context == {
+    _expected_context = {
         "field": "input_bindings.question",
         "key": key,
     }
+    assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
 def test_validate_steps_preserves_source_ref_schema_error_context() -> None:
@@ -1399,7 +1437,8 @@ def test_validate_steps_preserves_source_ref_schema_error_context() -> None:
         require_complete_template_fill_config=True,
     )
 
-    assert exc.context == {"field": "input_bindings", "key": "source_refs"}
+    _expected_context = {"field": "input_bindings", "key": "source_refs"}
+    assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
 def test_validate_steps_accepts_compose_item_template_source_refs() -> None:

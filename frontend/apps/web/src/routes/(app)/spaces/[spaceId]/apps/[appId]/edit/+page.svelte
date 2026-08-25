@@ -177,7 +177,7 @@
               $update.completion_model_kwargs,
               $update.completion_model
             );
-            if (!(await saveChanges())) return;
+            if (!(await saveChanges()).saved) return;
             showSavesChangedNotice = true;
             setTimeout(() => {
               showSavesChangedNotice = false;

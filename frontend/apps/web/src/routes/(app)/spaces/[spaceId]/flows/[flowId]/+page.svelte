@@ -37,6 +37,7 @@
   import { EneoError, type FlowRun, type FlowStep, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { FlowSaveFailedError, FlowSaveRejectedError } from "$lib/features/flows/FlowEditor";
   import { tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { slide } from "svelte/transition";
@@ -63,6 +64,24 @@
   // path to editing; "service" is the deliberate take-out-of-service action.
   let unpublishIntent = $state<"edit" | "service">("edit");
   let validationBannerExpanded = $state(false);
+
+  /**
+   * A rejected save that was routed into the validation banner gets one
+   * consistent presentation: expand the banner and show the short pointer
+   * toast. Returns false when the failure was not a routed rejection so the
+   * caller can fall back to its own message.
+   */
+  function surfaceRoutedSaveRejection(error: unknown): boolean {
+    if (error instanceof FlowSaveRejectedError || flowEditor.reportServerValidationError(error)) {
+      validationBannerExpanded = true;
+      toast.error(m.flow_validation_save_rejected());
+      return true;
+    }
+    // A generic save failure already fired its raw toast at the
+    // ResourceEditor seam; a second operation-specific toast would present
+    // the same failure twice.
+    return error instanceof FlowSaveFailedError;
+  }
   let showRunDialog = $state(false);
   let runsReloadTrigger = $state(0);
   let optimisticHistoryRuns = $state<FlowRun[]>([]);
@@ -108,11 +127,13 @@
     try {
       await flowEditor.flushSaves();
     } catch (error) {
-      const message =
-        error instanceof EneoError
-          ? error.getReadableMessage()
-          : m.flow_ai_builder_save_before_edit_failed();
-      toast.error(message);
+      if (!surfaceRoutedSaveRejection(error)) {
+        toast.error(
+          error instanceof EneoError
+            ? error.getReadableMessage()
+            : m.flow_ai_builder_save_before_edit_failed()
+        );
+      }
       return;
     }
     if ($saveStatus !== "saved") {
@@ -150,9 +171,11 @@
     try {
       await flowEditor.flushSaves();
     } catch (error) {
-      const message =
-        error instanceof EneoError ? error.getReadableMessage() : m.flow_step_save_failed();
-      toast.error(message);
+      if (!surfaceRoutedSaveRejection(error)) {
+        toast.error(
+          error instanceof EneoError ? error.getReadableMessage() : m.flow_step_save_failed()
+        );
+      }
     }
     if (stepId) {
       flowEditor.selectStep(stepId);
@@ -164,9 +187,11 @@
     try {
       await flowEditor.moveStepAtIndex(index, direction);
     } catch (error) {
-      const message =
-        error instanceof EneoError ? error.getReadableMessage() : m.flow_step_reorder_failed();
-      toast.error(message);
+      if (!surfaceRoutedSaveRejection(error)) {
+        toast.error(
+          error instanceof EneoError ? error.getReadableMessage() : m.flow_step_reorder_failed()
+        );
+      }
     }
   }
 
@@ -174,9 +199,11 @@
     try {
       await flowEditor.removeStepAtIndex(index);
     } catch (error) {
-      const message =
-        error instanceof EneoError ? error.getReadableMessage() : m.flow_step_remove_failed();
-      toast.error(message);
+      if (!surfaceRoutedSaveRejection(error)) {
+        toast.error(
+          error instanceof EneoError ? error.getReadableMessage() : m.flow_step_remove_failed()
+        );
+      }
     }
   }
 
@@ -359,8 +386,9 @@
       await flowEditor.flushSaves();
       builderStage = stage;
     } catch (e) {
-      const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
-      toast.error(msg);
+      if (!surfaceRoutedSaveRejection(e)) {
+        toast.error(e instanceof EneoError ? e.getReadableMessage() : String(e));
+      }
     } finally {
       stageNavigating = false;
     }
@@ -427,7 +455,22 @@
       <FlowPackageExportDialog
         flow={$resource}
         eneo={data.eneo}
-        beforeExport={async () => flowEditor.flushSaves()}
+        beforeExport={async () => {
+          try {
+            await flowEditor.flushSaves();
+          } catch (error) {
+            if (
+              error instanceof FlowSaveRejectedError ||
+              flowEditor.reportServerValidationError(error)
+            ) {
+              validationBannerExpanded = true;
+              // The dialog shows this short line; the banner carries the
+              // translated issue and step link.
+              throw new Error(m.flow_validation_save_rejected());
+            }
+            throw error;
+          }
+        }}
       />
       {#if $isPublished}
         <!-- While a change is being prepared, the only primary on screen
@@ -479,6 +522,9 @@
               const published = await data.eneo.flows.publish({ id: $resource.id });
               flowEditor.setResource(published);
             } catch (e) {
+              if (surfaceRoutedSaveRejection(e)) {
+                return;
+              }
               const msg = e instanceof EneoError ? e.getReadableMessage() : String(e);
               console.error("Publish failed:", msg);
               toast.error(m.flow_publish_failed({ message: msg }));

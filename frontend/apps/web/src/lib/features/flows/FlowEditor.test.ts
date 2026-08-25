@@ -2,11 +2,17 @@ import { readFileSync } from "node:fs";
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { EneoError } from "@eneo/eneo-js";
 import type { Flow, FlowStep, Eneo } from "@eneo/eneo-js";
 
 import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
-import { createFlowEditor, getUnifiedFlowSaveStatus } from "./FlowEditor";
+import {
+  createFlowEditor,
+  FlowSaveFailedError,
+  FlowSaveRejectedError,
+  getUnifiedFlowSaveStatus
+} from "./FlowEditor";
 
 vi.mock("$lib/components/toast", () => ({
   toast: {
@@ -1332,5 +1338,164 @@ describe("FlowEditor drafting chain starter", () => {
     } finally {
       editor.destroy();
     }
+  });
+});
+
+describe("FlowEditor server validation routing", () => {
+  function makeValidationError(): EneoError {
+    return new EneoError(
+      "Step 1: output_mode 'http_post' is only supported on the last step.",
+      "RESPONSE",
+      400,
+      0,
+      {
+        message: "Step 1: output_mode 'http_post' is only supported on the last step.",
+        eneo_error_code: 0,
+        code: "flow_http_post_output_must_be_terminal",
+        context: { issue_code: "flow_http_post_output_must_be_terminal", step_order: 1 }
+      },
+      { endpoint: "/api/v1/flows/x" }
+    );
+  }
+
+  it("routes a rejected save through the REAL seam and clears on autosave success", async () => {
+    vi.useFakeTimers();
+    try {
+      const flow = makeFlow();
+      // The persistence layer itself rejects: onSaveError must route the
+      // structured identity into the banner, the save must report failure,
+      // and the flow must stay unsaved.
+      let failSave = true;
+      const flowUpdate = vi.fn(async () => {
+        if (failSave) throw makeValidationError();
+        return flow;
+      });
+      const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+
+      editor.setName("Rejected name");
+      await vi.advanceTimersByTimeAsync(600);
+      const errors = get(editor.state.validationErrors);
+      expect([...errors.keys()]).toContain("flow:server:flow_http_post_output_must_be_terminal:1");
+      expect(get(editor.state.saveStatus)).toBe("unsaved");
+
+      // The user fixes the draft; a successful AUTOSAVE clears the
+      // namespace, or publish stays disabled forever.
+      failSave = false;
+      editor.setName("Fixed name");
+      await vi.advanceTimersByTimeAsync(600);
+      const afterSave = get(editor.state.validationErrors);
+      expect([...afterSave.keys()].filter((key) => key.startsWith("flow:server:"))).toEqual([]);
+      expect(get(editor.state.saveStatus)).toBe("saved");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("types the flush rejection precisely and suppresses the raw toast", async () => {
+    const flow = makeFlow();
+    let failMode: "validation" | "generic" | null = "validation";
+    const flowUpdate = vi.fn(async () => {
+      if (failMode === "validation") throw makeValidationError();
+      if (failMode === "generic") throw new Error("db exploded");
+      return flow;
+    });
+    const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+
+    // Structured rejection: typed error, banner populated, raw toast suppressed.
+    editor.setName("Rejected");
+    await expect(editor.flushSaves()).rejects.toBeInstanceOf(FlowSaveRejectedError);
+    expect([...get(editor.state.validationErrors).keys()]).toContain(
+      "flow:server:flow_http_post_output_must_be_terminal:1"
+    );
+    expect(toast.error).not.toHaveBeenCalled();
+
+    // Generic persistence failure: NOT the typed rejection, default toast fires.
+    failMode = "generic";
+    // The typed failure marks the raw toast as already fired at the
+    // ResourceEditor seam, so page handlers do not toast a second time.
+    await expect(editor.flushSaves()).rejects.toBeInstanceOf(FlowSaveFailedError);
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("classifies each overlapping save by its own outcome, in both completion orders", async () => {
+    // The regression this guards: a shared classification flag let a flush
+    // inherit a CONCURRENT autosave's outcome. The classification must be
+    // invocation-local — the flush observes only its own request's failure,
+    // whichever request completes first.
+    vi.useFakeTimers();
+    try {
+      const cases = [
+        // Old-bug case: the autosave's routed validation rejection must not
+        // make the generic flush failure look typed…
+        { flushError: () => new Error("db exploded"), typed: false, order: "autosave-first" },
+        { flushError: () => new Error("db exploded"), typed: false, order: "flush-first" },
+        // …and a generic autosave failure must not strip the flush's typing.
+        { flushError: makeValidationError, typed: true, order: "autosave-first" }
+      ] as const;
+
+      for (const { flushError, typed, order } of cases) {
+        const flow = makeFlow();
+        const autosaveError = typed ? new Error("db exploded") : makeValidationError();
+        const pending: Array<(reason: unknown) => void> = [];
+        const flowUpdate = vi.fn(
+          () =>
+            new Promise<never>((_, reject) => {
+              pending.push(reject);
+            })
+        );
+        const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+
+        editor.setName(`Overlap ${order}`);
+        await vi.advanceTimersByTimeAsync(600);
+        expect(flowUpdate).toHaveBeenCalledTimes(1);
+
+        const flush = editor.flushSaves();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(flowUpdate).toHaveBeenCalledTimes(2);
+        const flushOutcome = typed
+          ? expect(flush).rejects.toBeInstanceOf(FlowSaveRejectedError)
+          : expect(flush).rejects.toBeInstanceOf(FlowSaveFailedError);
+
+        if (order === "autosave-first") {
+          pending[0](autosaveError);
+          await vi.advanceTimersByTimeAsync(0);
+          pending[1](flushError());
+        } else {
+          pending[1](flushError());
+          await vi.advanceTimersByTimeAsync(0);
+          pending[0](autosaveError);
+        }
+        await flushOutcome;
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replaces the namespace atomically across successive rejections", () => {
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo() });
+    expect(editor.reportServerValidationError(makeValidationError())).toBe(true);
+    const second = new EneoError("boom", "RESPONSE", 400, 0, {
+      message: "boom",
+      eneo_error_code: 0,
+      code: "duplicate_step_name",
+      context: { issue_code: "duplicate_step_name", step_order: 2 }
+    });
+    expect(editor.reportServerValidationError(second)).toBe(true);
+    const replaced = get(editor.state.validationErrors);
+    expect([...replaced.keys()]).toContain("flow:server:duplicate_step_name:2");
+    expect([...replaced.keys()]).not.toContain(
+      "flow:server:flow_http_post_output_must_be_terminal:1"
+    );
+  });
+
+  it("ignores errors without a structured validation identity", () => {
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo() });
+    const plain = new EneoError("boom", "RESPONSE", 500, 0, {
+      message: "boom",
+      eneo_error_code: 0
+    });
+    expect(editor.reportServerValidationError(plain)).toBe(false);
+    expect(get(editor.state.validationErrors).size).toBe(0);
   });
 });

@@ -8,6 +8,14 @@ import { toastError } from "$lib/core/errors";
 type Resource = Record<string, unknown> & { id: string };
 
 /**
+ * Per-invocation outcome of saveChanges. `handled` is true when onSaveError
+ * owned the failure (e.g. routed it into a validation banner), so the caller
+ * can classify this exact request without shared mutable state.
+ */
+export type ResourceSaveResult =
+  { saved: true } | { saved: false; error: unknown; handled: boolean };
+
+/**
  * Create a resource editor for the specified resource. It will create stores for the original data,
  * a bindable updatable value, and an automatically generated diff that can be sent to the PATCH endpoints
  * to save the resource.
@@ -29,6 +37,13 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   ) => Promise<T>;
   /** Provide a key if attachements should also be managed, e.g. deleted when the attachment field is reverted */
   manageAttachements: Extract<keyof T, string> | false;
+  /**
+   * Owns a failed save before the default toast fires. Return true when the
+   * error was surfaced elsewhere (e.g. a validation banner) to suppress the
+   * raw-message toast; the save still resolves unsaved, carrying the error
+   * and this handled flag in its result.
+   */
+  onSaveError?: (error: unknown) => boolean;
   eneo: Eneo;
 }) {
   const { eneo, updateResource } = data;
@@ -50,7 +65,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   const isSaving = writable(false);
 
   /** Will save the current changes to this resource and delete removed files */
-  async function saveChanges(field: keyof T | undefined = undefined): Promise<boolean> {
+  async function saveChanges(field: keyof T | undefined = undefined): Promise<ResourceSaveResult> {
     isSaving.set(true);
     try {
       // Get changes to this resource
@@ -86,10 +101,13 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
           }
         });
       }
-      return true;
+      return { saved: true };
     } catch (e) {
-      toastError(e);
-      return false;
+      const handled = data.onSaveError?.(e) === true;
+      if (!handled) {
+        toastError(e);
+      }
+      return { saved: false, error: e, handled };
     } finally {
       isSaving.set(false);
     }

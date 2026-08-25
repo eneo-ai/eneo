@@ -130,7 +130,7 @@
           variant="positive"
           class="w-32"
           on:click={async () => {
-            if (!(await saveChanges())) return;
+            if (!(await saveChanges()).saved) return;
             showSavesChangedNotice = true;
             setTimeout(() => {
               showSavesChangedNotice = false;

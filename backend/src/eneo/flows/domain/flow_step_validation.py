@@ -45,6 +45,7 @@ class FlowGraphIssueCode(StrEnum):
         "flow_input_binding_invalid_step_reference"
     )
     FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER = "flow_input_binding_unknown_step_order"
+    FLOW_INPUT_BINDING_RUNTIME_INPUT_UNUSED = "flow_input_binding_runtime_input_unused"
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY = "flow_input_binding_unsupported_key"
     FLOW_INPUT_CONTRACT_INAPPLICABLE = "flow_input_contract_inapplicable"
     FLOW_REVIEW_POLICY_INVALID = "flow_review_policy_invalid"

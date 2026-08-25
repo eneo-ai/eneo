@@ -35,7 +35,7 @@ describe("createResourceEditor save result", () => {
 
     const failedSave = editor.saveChanges();
     expect(get(editor.state.isSaving)).toBe(true);
-    await expect(failedSave).resolves.toBe(false);
+    await expect(failedSave).resolves.toEqual({ saved: false, error: saveError, handled: false });
 
     expect(toastError).toHaveBeenCalledWith(saveError);
     expect(get(editor.state.isSaving)).toBe(false);
@@ -45,7 +45,7 @@ describe("createResourceEditor save result", () => {
 
     const retriedSave = editor.saveChanges();
     expect(get(editor.state.isSaving)).toBe(true);
-    await expect(retriedSave).resolves.toBe(true);
+    await expect(retriedSave).resolves.toEqual({ saved: true });
 
     expect(updateResource).toHaveBeenCalledTimes(2);
     expect(get(editor.state.isSaving)).toBe(false);
