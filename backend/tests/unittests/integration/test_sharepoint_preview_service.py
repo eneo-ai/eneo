@@ -1,4 +1,6 @@
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -7,35 +9,45 @@ from eneo.integration.infrastructure.preview_service.sharepoint_preview_service 
     SharePointPreviewService,
 )
 
+TENANT_ID = uuid4()
 
-@pytest.mark.asyncio
-async def test_classifies_my_teams_and_public_non_member_teams():
-    service = SharePointPreviewService(oauth_token_service=MagicMock())
-    content_client = MagicMock()
-    content_client.get_m365_groups = AsyncMock(
-        return_value=[
-            {"id": "group-my", "visibility": "Private"},
-            {"id": "group-public", "visibility": "Public"},
-        ]
+SETTINGS_PATCH = (
+    "eneo.integration.infrastructure.preview_service."
+    "sharepoint_preview_service.get_settings"
+)
+
+
+def _settings(enabled: bool = True, ttl: int = 21600) -> MagicMock:
+    return MagicMock(
+        sharepoint_site_categorization_enabled=enabled,
+        sharepoint_preview_cache_ttl_seconds=ttl,
     )
-    content_client.get_my_member_group_ids = AsyncMock(return_value=["group-my"])
 
-    async def get_group_root_site(group_id: str):
-        if group_id == "group-my":
-            return {
-                "id": "site-my",
-                "webUrl": "https://contoso.sharepoint.com/sites/my-team",
-            }
-        if group_id == "group-public":
-            return {
-                "id": "site-public",
-                "webUrl": "https://contoso.sharepoint.com/sites/public-team",
-            }
-        return None
 
-    content_client.get_group_root_site = AsyncMock(side_effect=get_group_root_site)
+def _make_service(cache: MagicMock | None) -> SharePointPreviewService:
+    return SharePointPreviewService(
+        oauth_token_service=MagicMock(),
+        group_site_cache=cache,
+    )
 
-    site_previews = [
+
+def _make_cache(
+    entries: list[dict] | None,
+    built_at: datetime | None = None,
+) -> MagicMock:
+    cache = MagicMock()
+    if entries is None:
+        cache.get = AsyncMock(return_value=None)
+    else:
+        cache.get = AsyncMock(
+            return_value=(entries, built_at or datetime.now(timezone.utc))
+        )
+    cache.schedule_rebuild = AsyncMock(return_value=True)
+    return cache
+
+
+def _site_previews() -> list[IntegrationPreview]:
+    return [
         IntegrationPreview(
             name="My Team Site",
             key="site-my",
@@ -56,95 +68,187 @@ async def test_classifies_my_teams_and_public_non_member_teams():
         ),
     ]
 
-    categories = await service._classify_site_categories(
-        content_client=content_client,
-        site_previews=site_previews,
+
+@pytest.mark.asyncio
+async def test_classifies_my_teams_and_public_non_member_teams_from_cache():
+    cache = _make_cache(
+        [
+            {
+                "group_id": "group-my",
+                "visibility": "private",
+                "site_id": "site-my",
+                "web_url": "https://contoso.sharepoint.com/sites/my-team",
+            },
+            {
+                "group_id": "group-public",
+                "visibility": "public",
+                "site_id": "site-public",
+                "web_url": "https://contoso.sharepoint.com/sites/public-team",
+            },
+        ]
     )
+    service = _make_service(cache)
+
+    with patch(SETTINGS_PATCH, return_value=_settings()):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=TENANT_ID,
+            member_group_ids={"group-my"},
+        )
 
     assert categories["site-my"] == service.CATEGORY_MY_TEAMS
     assert categories["site-public"] == service.CATEGORY_PUBLIC_TEAMS_NOT_MEMBER
     assert categories["site-other"] == service.CATEGORY_OTHER_SITES
+    cache.schedule_rebuild.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_classification_falls_back_to_unknown_when_graph_membership_fails():
-    service = SharePointPreviewService(oauth_token_service=MagicMock())
-    content_client = MagicMock()
-    content_client.get_m365_groups = AsyncMock(side_effect=RuntimeError("Forbidden"))
-    content_client.get_my_member_group_ids = AsyncMock(return_value=[])
+async def test_cache_miss_returns_other_sites_and_schedules_rebuild():
+    cache = _make_cache(None)
+    service = _make_service(cache)
+    user_integration_id = uuid4()
 
-    site_previews = [
-        IntegrationPreview(
-            name="Site A",
-            key="site-a",
-            url="https://contoso.sharepoint.com/sites/a",
-            type="site",
-        ),
-        IntegrationPreview(
-            name="Site B",
-            key="site-b",
-            url="https://contoso.sharepoint.com/sites/b",
-            type="site",
-        ),
-    ]
+    with patch(SETTINGS_PATCH, return_value=_settings()):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=TENANT_ID,
+            member_group_ids={"group-my"},
+            user_integration_id=user_integration_id,
+        )
 
-    categories = await service._classify_site_categories(
-        content_client=content_client,
-        site_previews=site_previews,
+    assert all(c == service.CATEGORY_OTHER_SITES for c in categories.values())
+    cache.schedule_rebuild.assert_awaited_once_with(
+        TENANT_ID,
+        tenant_app_id=None,
+        user_integration_id=user_integration_id,
     )
 
-    assert categories["site-a"] == service.CATEGORY_UNKNOWN
-    assert categories["site-b"] == service.CATEGORY_UNKNOWN
-
 
 @pytest.mark.asyncio
-async def test_classification_falls_back_to_visibility_only_when_memberof_unavailable():
-    service = SharePointPreviewService(oauth_token_service=MagicMock())
-    content_client = MagicMock()
-    content_client.get_m365_groups = AsyncMock(
-        return_value=[
-            {"id": "group-public", "visibility": "Public"},
-            {"id": "group-private", "visibility": "Private"},
+async def test_visibility_only_classification_when_memberof_unavailable():
+    cache = _make_cache(
+        [
+            {
+                "group_id": "group-public",
+                "visibility": "public",
+                "site_id": "site-public",
+                "web_url": "https://contoso.sharepoint.com/sites/public-team",
+            },
+            {
+                "group_id": "group-my",
+                "visibility": "private",
+                "site_id": "site-my",
+                "web_url": "https://contoso.sharepoint.com/sites/my-team",
+            },
         ]
     )
-    content_client.get_my_member_group_ids = AsyncMock(
-        side_effect=RuntimeError("memberOf not available")
-    )
+    service = _make_service(cache)
 
-    async def get_group_root_site(group_id: str):
-        if group_id == "group-public":
-            return {
-                "id": "site-public",
-                "webUrl": "https://contoso.sharepoint.com/sites/public-team",
-            }
-        if group_id == "group-private":
-            return {
-                "id": "site-private",
-                "webUrl": "https://contoso.sharepoint.com/sites/private-team",
-            }
-        return None
-
-    content_client.get_group_root_site = AsyncMock(side_effect=get_group_root_site)
-
-    site_previews = [
-        IntegrationPreview(
-            name="Public Team Site",
-            key="site-public",
-            url="https://contoso.sharepoint.com/sites/public-team",
-            type="site",
-        ),
-        IntegrationPreview(
-            name="Private Team Site",
-            key="site-private",
-            url="https://contoso.sharepoint.com/sites/private-team",
-            type="site",
-        ),
-    ]
-
-    categories = await service._classify_site_categories(
-        content_client=content_client,
-        site_previews=site_previews,
-    )
+    with patch(SETTINGS_PATCH, return_value=_settings()):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=TENANT_ID,
+            member_group_ids=None,
+        )
 
     assert categories["site-public"] == service.CATEGORY_PUBLIC_TEAMS_NOT_MEMBER
-    assert categories["site-private"] == service.CATEGORY_OTHER_SITES
+    assert categories["site-my"] == service.CATEGORY_OTHER_SITES
+
+
+@pytest.mark.asyncio
+async def test_matches_sites_by_normalized_url_when_site_id_differs():
+    cache = _make_cache(
+        [
+            {
+                "group_id": "group-my",
+                "visibility": "private",
+                "site_id": "some-other-id",
+                "web_url": "https://contoso.sharepoint.com/sites/My-Team/",
+            },
+        ]
+    )
+    service = _make_service(cache)
+
+    with patch(SETTINGS_PATCH, return_value=_settings()):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=TENANT_ID,
+            member_group_ids={"group-my"},
+        )
+
+    assert categories["site-my"] == service.CATEGORY_MY_TEAMS
+
+
+@pytest.mark.asyncio
+async def test_stale_cache_hit_still_classifies_but_schedules_refresh():
+    stale_built_at = datetime.now(timezone.utc) - timedelta(hours=5)
+    cache = _make_cache(
+        [
+            {
+                "group_id": "group-public",
+                "visibility": "public",
+                "site_id": "site-public",
+                "web_url": "https://contoso.sharepoint.com/sites/public-team",
+            },
+        ],
+        built_at=stale_built_at,
+    )
+    service = _make_service(cache)
+
+    with patch(SETTINGS_PATCH, return_value=_settings(ttl=21600)):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=TENANT_ID,
+            member_group_ids=None,
+        )
+
+    assert categories["site-public"] == service.CATEGORY_PUBLIC_TEAMS_NOT_MEMBER
+    cache.schedule_rebuild.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_categorization_disabled_skips_cache_entirely():
+    cache = _make_cache([])
+    service = _make_service(cache)
+
+    with patch(SETTINGS_PATCH, return_value=_settings(enabled=False)):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=TENANT_ID,
+            member_group_ids={"group-my"},
+        )
+
+    assert all(c == service.CATEGORY_OTHER_SITES for c in categories.values())
+    cache.get.assert_not_awaited()
+    cache.schedule_rebuild.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cache_read_failure_degrades_to_uncategorized():
+    cache = _make_cache([])
+    cache.get = AsyncMock(side_effect=ConnectionError("redis down"))
+    service = _make_service(cache)
+
+    with patch(SETTINGS_PATCH, return_value=_settings()):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=TENANT_ID,
+            member_group_ids={"group-my"},
+        )
+
+    assert all(c == service.CATEGORY_OTHER_SITES for c in categories.values())
+    cache.schedule_rebuild.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_tenant_or_cache_returns_default_without_error():
+    service = _make_service(None)
+
+    with patch(SETTINGS_PATCH, return_value=_settings()):
+        categories = await service._classify_site_categories(
+            site_previews=_site_previews(),
+            tenant_id=None,
+            member_group_ids=None,
+        )
+
+    assert all(c == service.CATEGORY_OTHER_SITES for c in categories.values())

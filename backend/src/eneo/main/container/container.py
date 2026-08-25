@@ -221,6 +221,9 @@ from eneo.integration.infrastructure.repo_impl.tenant_integration_repo_impl impo
 from eneo.integration.infrastructure.repo_impl.user_integration_repo_impl import (
     UserIntegrationRepoImpl,
 )
+from eneo.integration.infrastructure.sharepoint_group_site_cache import (
+    SharePointGroupSiteCache,
+)
 from eneo.integration.infrastructure.sharepoint_subscription_repo_impl import (
     SharePointSubscriptionRepositoryImpl,
 )
@@ -1482,6 +1485,10 @@ class Container(containers.DeclarativeContainer):
         OfficeChangeKeyService,
         redis_client=redis_client,
     )
+    sharepoint_group_site_cache = providers.Factory(
+        SharePointGroupSiteCache,
+        redis_client=redis_client,
+    )
     sharepoint_content_service = providers.Factory(
         SharePointContentService,
         oauth_token_repo=oauth_token_repo,
@@ -1517,6 +1524,7 @@ class Container(containers.DeclarativeContainer):
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        group_site_cache=sharepoint_group_site_cache,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,

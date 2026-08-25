@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
 
 from eneo.integration.domain.entities.integration_preview import IntegrationPreview
@@ -18,6 +18,7 @@ class BasePreviewService(ABC):
     async def get_preview_info(
         self,
         token: OauthToken,
+        tenant_id: Optional[UUID] = None,
     ) -> List[IntegrationPreview]:
         pass
 

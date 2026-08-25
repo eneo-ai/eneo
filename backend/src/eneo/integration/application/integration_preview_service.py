@@ -45,6 +45,7 @@ class IntegrationPreviewService:
     async def get_preview_data(
         self,
         user_integration_id: UUID,
+        tenant_id: Optional[UUID] = None,
     ) -> List[IntegrationPreview]:
         user_integration = await self.user_integration_repo.one_or_none(
             id=user_integration_id
@@ -103,7 +104,8 @@ class IntegrationPreviewService:
                 )
             elif token.token_type.is_sharepoint:
                 return await self.sharepoint_preview_service.get_preview_info(
-                    token=token
+                    token=token,
+                    tenant_id=tenant_id,
                 )
             else:
                 raise BadRequestException(

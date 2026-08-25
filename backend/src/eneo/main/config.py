@@ -505,6 +505,11 @@ class Settings(BaseSettings):
     # Max SharePoint/OneDrive file size to download and process (bytes)
     # Default: 50 MB
     sharepoint_max_download_bytes: int = 50 * 1024 * 1024
+    # TTL for the per-tenant group->site map used to categorize sites in the
+    # import dialog. Default: 6 hours.
+    sharepoint_preview_cache_ttl_seconds: int = 21600
+    # Escape hatch: disables site categorization and the background map rebuild.
+    sharepoint_site_categorization_enabled: bool = True
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
     # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_ENABLED=true
@@ -534,6 +539,15 @@ class Settings(BaseSettings):
     def validate_sharepoint_max_download_bytes(cls, v: int):
         if v <= 0:
             raise ValueError("sharepoint_max_download_bytes must be greater than 0")
+        return v
+
+    @field_validator("sharepoint_preview_cache_ttl_seconds")
+    @classmethod
+    def validate_sharepoint_preview_cache_ttl_seconds(cls, v: int):
+        if v <= 0:
+            raise ValueError(
+                "sharepoint_preview_cache_ttl_seconds must be greater than 0"
+            )
         return v
 
     @model_validator(mode="after")

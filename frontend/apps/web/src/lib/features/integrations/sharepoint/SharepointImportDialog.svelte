@@ -138,22 +138,26 @@
       return;
     }
 
-    const preview = (await eneo.integrations.knowledge.preview({
-      id
-    })) as CategorizedIntegrationKnowledgePreview[];
+    try {
+      const preview = (await eneo.integrations.knowledge.preview({
+        id
+      })) as CategorizedIntegrationKnowledgePreview[];
 
-    availableResources = preview
-      .map((site) => ({
-        label: site.name,
-        value: site
-      }))
-      .sort((a, b) => {
-        const categoryDiff =
-          getCategoryRank(getPreviewCategory(a.value)) -
-          getCategoryRank(getPreviewCategory(b.value));
-        if (categoryDiff !== 0) return categoryDiff;
-        return a.label.localeCompare(b.label);
-      });
+      availableResources = preview
+        .map((site) => ({
+          label: site.name,
+          value: site
+        }))
+        .sort((a, b) => {
+          const categoryDiff =
+            getCategoryRank(getPreviewCategory(a.value)) -
+            getCategoryRank(getPreviewCategory(b.value));
+          if (categoryDiff !== 0) return categoryDiff;
+          return a.label.localeCompare(b.label);
+        });
+    } catch (error) {
+      toastError(error);
+    }
   });
 
   const {

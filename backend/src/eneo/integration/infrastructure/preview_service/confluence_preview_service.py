@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, List, cast
+from typing import TYPE_CHECKING, List, Optional, cast
+from uuid import UUID
 
 import aiohttp
 from typing_extensions import override
@@ -27,6 +28,7 @@ class ConfluencePreviewService(BasePreviewService):
     async def get_preview_info(
         self,
         token: OauthToken,
+        tenant_id: Optional[UUID] = None,
     ) -> List[IntegrationPreview]:
         confluence_token = self._require_confluence_token(token)
 
