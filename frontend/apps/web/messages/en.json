@@ -4820,7 +4820,7 @@
   "flow_history": "History",
   "flow_history_load_failed_desc": "The run history could not be fetched right now. Try again in a moment.",
   "flow_history_load_failed_title": "Could not load history",
-  "flow_history_power_user_mode_desc": "Advanced mode shows filters, sorting and more technical run details.",
+  "flow_history_power_user_mode_desc": "Advanced mode shows more technical run details, such as token usage.",
   "flow_history_user_mode_desc": "Simple mode shows runs with status, results and evidence.",
   "flow_retention_title": "Flow data retention",
   "flow_retention_organization_group": "Organization policy",
@@ -6418,5 +6418,15 @@
   "module_login_invalid_request": "The login request is incomplete. Return to the module and try again.",
   "module_login_unavailable": "This module is not available for your organization.",
   "module_login_service_unavailable": "Eneo could not complete the module login right now. Please try again later.",
-  "module_login_back_to_eneo": "Back to Eneo"
+  "module_login_back_to_eneo": "Back to Eneo",
+  "flow_history_search_placeholder": "Search by run id, date, result file or form answers…",
+  "flow_history_search_scope_hint": "Searching the {count} loaded runs: run id, date, status, the first result file names and the first form answers. Very long values are shortened.",
+  "flow_history_showing_count": "Showing {count} runs",
+  "flow_history_showing_count_one": "Showing 1 run",
+  "flow_history_load_more": "Load more runs",
+  "flow_history_no_search_matches": "No runs match the search.",
+  "flow_history_load_more_failed": "Could not load more runs.",
+  "flow_history_window_full": "Older runs are not shown here – at most {count} runs can be loaded.",
+  "flow_history_search_scope_hint_window_full": "Searching the {count} loaded runs – older runs cannot be loaded here. The search covers run id, date, status, the first result file names and the first form answers; very long values are shortened.",
+  "flow_history_showing_count_of": "Showing {shown} of {count} runs"
 }

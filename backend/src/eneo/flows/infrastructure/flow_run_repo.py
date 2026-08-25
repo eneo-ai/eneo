@@ -524,7 +524,7 @@ class FlowRunRepository:
         stmt = (
             sa.select(FlowRuns)
             .where(FlowRuns.tenant_id == tenant_id)
-            .order_by(FlowRuns.created_at.desc())
+            .order_by(FlowRuns.created_at.desc(), FlowRuns.id.desc())
         )
         if flow_id is not None:
             stmt = stmt.where(FlowRuns.flow_id == flow_id)

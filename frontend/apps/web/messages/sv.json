@@ -4820,7 +4820,7 @@
   "flow_history": "Historik",
   "flow_history_load_failed_desc": "Historiken kunde inte hämtas just nu. Försök igen om en stund.",
   "flow_history_load_failed_title": "Kunde inte ladda historiken",
-  "flow_history_power_user_mode_desc": "Avancerat läge visar filter, sortering och fler tekniska körningsdetaljer.",
+  "flow_history_power_user_mode_desc": "Avancerat läge visar fler tekniska körningsdetaljer, till exempel tokenanvändning.",
   "flow_history_user_mode_desc": "Enkelt läge visar körningarna med status, resultat och bevisunderlag.",
   "flow_retention_title": "Gallring av flödesdata",
   "flow_retention_organization_group": "Organisationspolicy",
@@ -6418,5 +6418,15 @@
   "module_login_invalid_request": "Inloggningsbegäran är ofullständig. Gå tillbaka till modulen och försök igen.",
   "module_login_unavailable": "Modulen är inte tillgänglig för din organisation.",
   "module_login_service_unavailable": "Eneo kunde inte slutföra modulinloggningen just nu. Försök igen senare.",
-  "module_login_back_to_eneo": "Tillbaka till Eneo"
+  "module_login_back_to_eneo": "Tillbaka till Eneo",
+  "flow_history_search_placeholder": "Sök på körnings-id, datum, resultatfil eller formulärsvar…",
+  "flow_history_search_scope_hint": "Söker i de {count} inlästa körningarna: körnings-id, datum, status, de första resultatfilnamnen och de första formulärsvaren. Mycket långa värden förkortas.",
+  "flow_history_showing_count": "Visar {count} körningar",
+  "flow_history_showing_count_one": "Visar 1 körning",
+  "flow_history_load_more": "Hämta fler körningar",
+  "flow_history_no_search_matches": "Inga körningar matchar sökningen.",
+  "flow_history_load_more_failed": "Det gick inte att hämta fler körningar.",
+  "flow_history_window_full": "Äldre körningar visas inte här – som mest läses {count} körningar in.",
+  "flow_history_search_scope_hint_window_full": "Söker i de {count} inlästa körningarna – äldre körningar kan inte läsas in här. Sökningen täcker körnings-id, datum, status, de första resultatfilnamnen och de första formulärsvaren; mycket långa värden förkortas.",
+  "flow_history_showing_count_of": "Visar {shown} av {count} körningar"
 }
