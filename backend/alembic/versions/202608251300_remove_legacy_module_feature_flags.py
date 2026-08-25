@@ -1,8 +1,8 @@
 """remove legacy module feature-flag state
 
-Revision ID: 202608251000
-Revises: 202608211300
-Create Date: 2026-08-25 10:00:00.000000
+Revision ID: 202608251300
+Revises: 202608251200
+Create Date: 2026-08-25 13:00:00.000000
 
 The module registry is now owned exclusively by the module-auth installation
 lifecycle. Tenant assignments with no auth-client configuration are remnants
@@ -21,8 +21,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202608251000"
-down_revision: str = "202608211300"
+revision: str = "202608251300"
+down_revision: str = "202608251200"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
