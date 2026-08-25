@@ -6464,5 +6464,7 @@
   "flow_citation_status_unavailable": "Källinformation kunde inte visas",
   "flow_citation_stale_after_edit": "Källorna gäller AI:ns ursprungliga förslag – resultatet har redigerats.",
   "flow_citation_source_unidentified": "Källa kunde inte identifieras",
-  "flow_citation_sources_truncated": "Visar {shown} av {count} källor"
+  "flow_citation_sources_truncated": "Visar {shown} av {count} källor",
+  "ai_builder_node_mode_compose_text": "Sammanfogar text automatiskt",
+  "ai_builder_node_mode_render_verbatim": "Skapar dokumentet automatiskt"
 }

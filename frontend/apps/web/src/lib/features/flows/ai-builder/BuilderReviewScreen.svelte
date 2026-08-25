@@ -264,6 +264,17 @@
     return ref.startsWith("model.") ? ref.slice("model.".length) : ref;
   }
 
+  /**
+   * The diagram chip's label. A mechanical step is a feature, not an
+   * omission: the node says what the step does. The Details view keeps
+   * modelLabel, whose value sits under a "Model" heading.
+   */
+  function nodeModelLabel(step: StepSpec): string {
+    if (step.output_mode === "compose_text") return m.ai_builder_node_mode_compose_text();
+    if (step.output_mode === "render_verbatim") return m.ai_builder_node_mode_render_verbatim();
+    return modelLabel(step);
+  }
+
   function artifactLabel(step: StepSpec): string | null {
     if (step.output_type === "pdf") return m.flow_output_type_pdf();
     if (step.output_type === "docx") return m.flow_output_type_docx();
@@ -1046,7 +1057,7 @@
                       stepNumber={index + 1}
                       name={step.name}
                       ioLabel={ioLabel(step)}
-                      modelLabel={modelLabel(step)}
+                      modelLabel={nodeModelLabel(step)}
                       artifactLabel={artifactLabel(step)}
                       pausesForReview={pausesForReview(step)}
                       perFile={perFileStepRefs.has(step.plan_step_ref)}

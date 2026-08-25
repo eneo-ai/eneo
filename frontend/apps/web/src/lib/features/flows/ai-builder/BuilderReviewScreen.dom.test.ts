@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import type { Space } from "@eneo/eneo-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -176,7 +176,7 @@ describe("BuilderReviewScreen plan document", () => {
     expect(screen.getByText(m.ai_builder_review_checkpoint_note({ count: 1 }))).toBeTruthy();
   });
 
-  it("distinguishes the space default model from deterministic steps", () => {
+  it("distinguishes the space default model from deterministic steps", async () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
       state: {
@@ -205,7 +205,19 @@ describe("BuilderReviewScreen plan document", () => {
     });
 
     expect(screen.getAllByText(m.ai_builder_node_model_space_default()).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(m.ai_builder_node_model_none()).length).toBeGreaterThan(0);
+    // The DIAGRAM chip describes what the mechanical step does…
+    expect(screen.getAllByText(m.ai_builder_node_mode_render_verbatim()).length).toBeGreaterThan(0);
+    // …while the Details view keeps the model-scoped wording under its
+    // "Model" heading — the action text must not leak there. Both views stay
+    // mounted, so the negative check is scoped to the details panel.
+    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
+    const detailsPanel = screen
+      .getAllByRole("tabpanel")
+      .find((panel) => within(panel).queryAllByText(m.ai_builder_node_model_none()).length > 0);
+    expect(detailsPanel).toBeTruthy();
+    expect(
+      within(detailsPanel as HTMLElement).queryByText(m.ai_builder_node_mode_render_verbatim())
+    ).toBeNull();
   });
 
   it("keeps an expanded step expanded across Diagram↔Detaljer switches", async () => {

@@ -6464,5 +6464,7 @@
   "flow_citation_status_unavailable": "Source information could not be shown",
   "flow_citation_stale_after_edit": "The sources apply to the AI's original proposal – the result has been edited.",
   "flow_citation_source_unidentified": "Source could not be identified",
-  "flow_citation_sources_truncated": "Showing {shown} of {count} sources"
+  "flow_citation_sources_truncated": "Showing {shown} of {count} sources",
+  "ai_builder_node_mode_compose_text": "Joins text automatically",
+  "ai_builder_node_mode_render_verbatim": "Generates the document automatically"
 }
