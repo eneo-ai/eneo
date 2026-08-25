@@ -24,7 +24,7 @@
 
 <header class="border-default bg-primary sticky top-0 z-[60] ml-6 border-b">
   <!-- Row 1: Back + Title + Actions -->
-  <div class="flex items-center gap-3 px-4 py-2.5 sm:px-5">
+  <div class="flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
     <!-- Back arrow + flow name. The min width keeps the flow name readable
          instead of letting the action buttons squeeze it out at narrow widths. -->
     <div class="flex min-w-32 flex-1 items-center gap-2">
@@ -54,7 +54,7 @@
 
     <!-- Actions: badges + buttons -->
     {#if actions}
-      <div class="flex shrink-0 items-center gap-2">
+      <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
         {@render actions()}
       </div>
     {/if}
@@ -66,7 +66,12 @@
       <Tabs.List variant="line" class="h-10">
         {#each tabs as tab (tab.value)}
           {#if tab.visible !== false}
-            <Tabs.Trigger id={`${tabIdPrefix}-${tab.value}`} value={tab.value} class="text-sm">
+            <Tabs.Trigger
+              id={`${tabIdPrefix}-${tab.value}`}
+              value={tab.value}
+              aria-controls={`panel-${tab.value}`}
+              class="text-sm"
+            >
               {tab.label}
             </Tabs.Trigger>
           {/if}

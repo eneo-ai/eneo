@@ -16,6 +16,7 @@
   import { writable } from "svelte/store";
   import { tick } from "svelte";
   import { IconWorkflow } from "@eneo/icons/workflow";
+  import { IconChevronRight } from "@eneo/icons/chevron-right";
   import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Separator } from "$lib/components/ui/separator/index.js";
@@ -228,6 +229,30 @@
     activeStep?.id ?? (activeStep ? `draft:${activeStep.step_order}` : "no-step")
   );
   const isAdvancedMode = $derived($mode === "power_user");
+  const orderedStepsForNav = $derived([...steps].sort((a, b) => a.step_order - b.step_order));
+  const activeStepNavIndex = $derived(
+    activeStep ? orderedStepsForNav.findIndex((step) => step.id === activeStep.id) : -1
+  );
+  const previousStepForNav = $derived(
+    activeStepNavIndex > 0 ? orderedStepsForNav[activeStepNavIndex - 1] : null
+  );
+  const nextStepForNav = $derived(
+    activeStepNavIndex >= 0 && activeStepNavIndex < orderedStepsForNav.length - 1
+      ? orderedStepsForNav[activeStepNavIndex + 1]
+      : null
+  );
+
+  const httpVariableContext = $derived(
+    activeStep
+      ? {
+          steps,
+          currentStepOrder: activeStep.step_order,
+          formSchema,
+          isAdvancedMode,
+          transcriptionEnabled
+        }
+      : undefined
+  );
   const locale = (getLocale() === "en" ? "en" : "sv") as "sv" | "en";
   const hasAudioInputSteps = $derived(steps.some((step) => step.input_type === "audio"));
 
@@ -404,7 +429,7 @@
       const message =
         error instanceof EneoError
           ? error.getReadableMessage()
-          : "Failed to rewrite downstream variable references.";
+          : m.flow_step_rename_rewrite_failed();
       toast.error(message);
     }
   }
@@ -571,7 +596,8 @@
       ? getSelectableInputSourceOptions({
           steps,
           stepOrder: activeStep.step_order,
-          currentInputSource: activeStep.input_source
+          currentInputSource: activeStep.input_source,
+          isAdvancedMode
         })
       : []
   );
@@ -848,22 +874,18 @@
             <Button onclick={() => flowEditor.addStep()}>
               {m.flow_empty_add_step()}
             </Button>
-            {#if isAdvancedMode}
-              <Button variant="outline" onclick={() => flowEditor.createDraftingChainStarter()}>
-                {m.flow_starter_drafting_action()}
-              </Button>
-            {/if}
+            <Button variant="outline" onclick={() => flowEditor.createDraftingChainStarter()}>
+              {m.flow_starter_drafting_action()}
+            </Button>
             {#if onBuildFlowWithAI}
               <Button variant="outline" onclick={onBuildFlowWithAI}>
                 {m.ai_builder_empty_state_cta()}
               </Button>
             {/if}
           </div>
-          {#if isAdvancedMode}
-            <p class="text-muted max-w-lg text-xs leading-relaxed">
-              {m.flow_starter_drafting_body()}
-            </p>
-          {/if}
+          <p class="text-muted max-w-lg text-xs leading-relaxed">
+            {m.flow_starter_drafting_body()}
+          </p>
         </div>
       {/if}
     </div>
@@ -877,20 +899,41 @@
     </div>
   {/if}
 {:else}
-  <div
-    class="p-4 pb-8 sm:p-5 sm:pb-8 lg:p-6 lg:pb-10"
-    class:pointer-events-none={isPublished}
-    class:opacity-60={isPublished}
-  >
+  <div class="p-4 pb-8 sm:p-5 sm:pb-8 lg:p-6 lg:pb-10">
     <div class="flow-step-editor">
       <div class="flow-step-editor-content mx-auto w-full max-w-[1000px]">
         <div class="mb-4 flex min-w-0 items-start justify-between gap-4">
           <div class="min-w-0">
-            <span class="text-secondary block text-xs font-medium tracking-[0.02em]">
-              {m.flow_step_position({
-                index: String(activeStep.step_order),
-                total: String(steps.length)
-              })}
+            <span class="flex items-center gap-1">
+              <span class="text-secondary block text-xs font-medium tracking-[0.02em]">
+                {m.flow_step_position({
+                  index: String(activeStep.step_order),
+                  total: String(steps.length)
+                })}
+              </span>
+              {#if steps.length > 1}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="size-6"
+                  disabled={!previousStepForNav}
+                  aria-label={m.flow_step_go_previous()}
+                  onclick={() =>
+                    previousStepForNav?.id && flowEditor.selectStep(previousStepForNav.id)}
+                >
+                  <IconChevronRight class="size-3.5 rotate-180" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="size-6"
+                  disabled={!nextStepForNav}
+                  aria-label={m.flow_step_go_next()}
+                  onclick={() => nextStepForNav?.id && flowEditor.selectStep(nextStepForNav.id)}
+                >
+                  <IconChevronRight class="size-3.5" />
+                </Button>
+              {/if}
             </span>
             {#if activeStep.user_description}
               <h2 class="text-primary mt-1 truncate text-lg font-semibold tracking-[-0.02em]">
@@ -927,7 +970,13 @@
           requestOpen={taskRequestOpen}
         >
           <FlowStepSection>
-            <Settings.Row title={m.flow_step_name()} description="" density="compact" let:aria>
+            <Settings.Row
+              title={m.flow_step_name()}
+              description=""
+              help={m.flow_step_name_help()}
+              density="compact"
+              let:aria
+            >
               <div class="flex flex-col gap-2">
                 <Input
                   {...aria}
@@ -940,7 +989,7 @@
                   oninput={(e) => updateStep("user_description", e.currentTarget.value || null)}
                   onchange={() => void handleCommittedStepRename()}
                 />
-                {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isAdvancedMode, isTemplateFill, isTranscribeOnly } )}
+                {#if shouldShowTemplateBodyTextHint( { steps, activeStep, isTemplateFill, isTranscribeOnly } )}
                   <p
                     class="bg-accent-dimmer/30 text-accent-stronger rounded-lg px-3 py-2 text-xs leading-relaxed"
                   >
@@ -996,6 +1045,7 @@
             step={activeStep}
             {isPublished}
             {isAdvancedMode}
+            {httpVariableContext}
             {selectableInputSourceOptions}
             {displayedInputTypeOptions}
             {runtimeInputConfig}
@@ -1056,6 +1106,7 @@
           {#if !isTranscribeOnly && !isTemplateFill}
             <FlowStepContextSection
               resetKey={activeStepStateKey}
+              {isPublished}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
               runningUploads={assistantState.runningUploads}
@@ -1150,6 +1201,7 @@
               step={activeStep}
               {isPublished}
               {isAdvancedMode}
+              {httpVariableContext}
               {availableOutputTypes}
               {availableOutputModes}
               {outputHintKind}

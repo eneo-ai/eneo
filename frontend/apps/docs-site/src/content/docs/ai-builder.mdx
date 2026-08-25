@@ -174,6 +174,14 @@ request and must not be retried. A `session_turn_provider_outcome_unknown`
 response requires a session reload and the explicit acknowledgement flow above;
 never turn it into an automatic transport retry.
 
+## Failure triage
+
+When an operation fails in the AI Builder UI, the frontend automatically reports
+the error's stable identity. Operators can group recent failures for triage with
+`GET /api/v1/sysadmin/ai-builder/failure-summary/?days=7` and the super API key,
+or run `uv run python scripts/ai_builder_failure_summary.py --days 7` from
+`backend`. Choose a `days` value from 1 to 90.
+
 ## Plan proposal contract
 
 AI Builder plan endpoints return one proposal object. Treat `proposal.spec` as the draft Flow that will be applied after approval. Supporting fields such as `assumptions`, `lint_warnings`, and `plan_rationale` explain why that draft was proposed.

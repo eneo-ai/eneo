@@ -2982,7 +2982,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 167 actions with their enabled status for the modal UI.
+     * @description Retrieve all 168 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -3897,6 +3897,26 @@ export interface paths {
      * @description Create a new draft flow definition, including its initial ordered steps, inside a space. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     post: operations["create_flow"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/ai-builder/client-errors": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Report AI Builder Client Error
+     * @description Persist one client-observed Builder failure using the stable error identity the UI parsed (code, category, phase, request_id) — no display text — so operators can join the user-visible symptom to the stored session. Replaying a client_event_id is a no-op (best-effort deduplication).
+     */
+    post: operations["report_ai_builder_client_error"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8152,6 +8172,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/sysadmin/ai-builder/failure-summary/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Ai Builder Failure Summary
+     * @description Group persisted AI Builder failures (the current latest-turn failure snapshot by session update time, failed flow runs, client-reported errors) by family with sample ids, for triage and root-cause work. Read-only over data the product already stores.
+     */
+    get: operations["get_ai_builder_failure_summary_api_v1_sysadmin_ai_builder_failure_summary__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/sysadmin/allowed-origins/": {
     parameters: {
       query?: never;
@@ -10311,6 +10351,7 @@ export interface components {
       | "ai_builder_plan_revised"
       | "ai_builder_flow_applied"
       | "ai_builder_attachment_detached"
+      | "ai_builder_client_error_reported"
       | "ai_builder_session_cancelled"
       | "security_classification_created"
       | "security_classification_updated"
@@ -14499,6 +14540,7 @@ export interface components {
       | "flow_run"
       | "flow_run_review_checkpoint"
       | "ai_builder_session"
+      | "ai_builder_client_error"
       | "user_group";
     /**
      * ErrorCodes
@@ -15140,6 +15182,47 @@ export interface components {
        * @description Total records to export
        */
       total_records: number;
+    };
+    /**
+     * FailureFamily
+     * @description One failure family: a label pair, its size, and a few entry points.
+     */
+    FailureFamily: {
+      /** Detail */
+      detail: string;
+      /** Group */
+      group: string;
+      /** Occurrences */
+      occurrences: number;
+      /** Sample Ids */
+      sample_ids: string[];
+    };
+    /**
+     * FailureSection
+     * @description One grouping with explicit truncation accounting.
+     */
+    FailureSection: {
+      /** Families */
+      families: components["schemas"]["FailureFamily"][];
+      /** Total Families */
+      total_families: number;
+      /** Truncated */
+      readonly truncated: boolean;
+    };
+    /**
+     * FailureSummary
+     * @description The whole triage report, shared by the script and the sysadmin API.
+     */
+    FailureSummary: {
+      /** @description Current latest-turn failures on sessions UPDATED since the cutoff — sessions carry no failure-occurrence timestamp, so this is a present-state snapshot, not failure history. */
+      builder_turn_failure_snapshot: components["schemas"]["FailureSection"];
+      client_errors: components["schemas"]["FailureSection"];
+      flow_run_failures: components["schemas"]["FailureSection"];
+      /**
+       * Since
+       * Format: date-time
+       */
+      since: string;
     };
     /**
      * FavoriteProvidersUpdate
@@ -22428,6 +22511,8 @@ export interface components {
       | "HTTP_TIMEOUT_OUT_OF_RANGE"
       | "HTTP_TIMEOUT"
       | "HTTP_CONNECTION_REFUSED"
+      | "HTTP_BLOCKED_URL"
+      | "HTTP_RESPONSE_TOO_LARGE"
       | "HTTP_STATUS_ERROR";
     /** IconPublic */
     IconPublic: {
@@ -26596,6 +26681,42 @@ export interface components {
       configured: boolean;
       /** Default Effort */
       default_effort: string | null;
+    };
+    /**
+     * ReportClientErrorRequest
+     * @description One client-observed Builder failure, in the UI's own error identity.
+     *
+     *     The fields mirror the stable part of the parsed `AIBuilderError` the
+     *     frontend renders — code, category, phase, request_id — the part clients
+     *     are told to branch on. No display text is accepted: the session and the
+     *     request id resolve the details server-side. `client_event_id` is minted
+     *     by the client per observed error; replaying the same report is a no-op
+     *     (best-effort deduplication).
+     * @example {
+     *       "category": "upstream",
+     *       "client_event_id": "3f6ad7a6-1d5f-4b70-9df7-6a4a4de4d7e1",
+     *       "code": "planner_upstream_error",
+     *       "phase": "planner",
+     *       "request_id": "9ffea2154b4dacfa7728a7d5c1d977b8",
+     *       "session_id": "00000000-0000-0000-0000-000000000001"
+     *     }
+     */
+    ReportClientErrorRequest: {
+      /** Category */
+      category: components["schemas"]["AIBuilderErrorCategory"] | "network";
+      /**
+       * Client Event Id
+       * Format: uuid
+       */
+      client_event_id: string;
+      /** Code */
+      code: string;
+      /** Phase */
+      phase: components["schemas"]["AIBuilderErrorPhase"] | "client";
+      /** Request Id */
+      request_id?: string | null;
+      /** Session Id */
+      session_id?: string | null;
     };
     /** RequirementsConfirmationMetadata */
     RequirementsConfirmationMetadata: {
@@ -46476,6 +46597,63 @@ export interface operations {
       };
     };
   };
+  report_ai_builder_client_error: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReportClientErrorRequest"];
+      };
+    };
+    responses: {
+      /** @description The client error report is stored (or was already stored). */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Caller lacks the Flow AI Builder permission. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "unauthorized",
+           *       "code": "insufficient_scope",
+           *       "diagnostic_context": {
+           *         "error_category": "unauthorized",
+           *         "error_code": "insufficient_scope",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to use Flow AI Builder.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_ai_builder_plan: {
     parameters: {
       query?: never;
@@ -61018,6 +61196,46 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["StorageInfoModel"];
+        };
+      };
+    };
+  };
+  get_ai_builder_failure_summary_api_v1_sysadmin_ai_builder_failure_summary__get: {
+    parameters: {
+      query?: {
+        days?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FailureSummary"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

@@ -91,13 +91,13 @@
             continue;
           }
           console.error("Failed to load live run progress", error);
-          loadError = error instanceof Error ? error.message : "Failed to load run progress";
+          loadError = error instanceof Error ? error.message : m.flow_run_progress_load_failed();
           return;
         }
       }
     } catch (error) {
       console.error("Failed to load live run progress", error);
-      loadError = error instanceof Error ? error.message : "Failed to load run progress";
+      loadError = error instanceof Error ? error.message : m.flow_run_progress_load_failed();
     } finally {
       loading = false;
     }

@@ -324,7 +324,7 @@
       const message =
         error instanceof EneoError
           ? error.getReadableMessage()
-          : "Failed to rewrite variable references after field rename.";
+          : m.flow_step_rename_rewrite_failed();
       toast.error(message);
     } finally {
       fieldRenameRewriteInFlight = false;

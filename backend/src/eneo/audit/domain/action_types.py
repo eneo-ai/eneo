@@ -139,6 +139,7 @@ class ActionType(str, Enum):
     AI_BUILDER_PLAN_REVISED = "ai_builder_plan_revised"
     AI_BUILDER_FLOW_APPLIED = "ai_builder_flow_applied"
     AI_BUILDER_ATTACHMENT_DETACHED = "ai_builder_attachment_detached"
+    AI_BUILDER_CLIENT_ERROR_REPORTED = "ai_builder_client_error_reported"
     AI_BUILDER_SESSION_CANCELLED = "ai_builder_session_cancelled"
 
     # Security Classification Actions

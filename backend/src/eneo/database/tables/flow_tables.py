@@ -2185,6 +2185,51 @@ class BuilderSessions(BasePublic):
     )
 
 
+class BuilderClientErrors(BasePublic):
+    """Stores client-observed Flow AI Builder failures. Writer: AI Builder router. Purpose: one row per frontend-observed error, carrying the stable identity the UI parsed (`AIBuilderError` code/category/phase/request_id — no display text), so operators and agents can join a user-visible symptom to the persisted session without inventing a second error vocabulary."""
+
+    # No standalone tenant index: the unique (tenant_id, client_event_id)
+    # constraint's index leads on tenant_id.
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    session_id: Mapped[Optional[UUID]] = mapped_column(
+        nullable=True,
+        index=True,
+    )
+    # Client-minted dedup key: replaying a report is a no-op (best-effort
+    # deduplication, not a compare-and-reject idempotency contract).
+    client_event_id: Mapped[UUID] = mapped_column(nullable=False)
+    # The parsed AIBuilderError identity the user actually saw — the stable
+    # code/category/phase triple clients are told to branch on, plus the
+    # request id that joins to server logs. No free-form display text.
+    phase: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    category: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    code: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    request_id: Mapped[Optional[str]] = mapped_column(sa.String(64), nullable=True)
+
+    # Referential cleanup is the schema (session, then tenant cascade);
+    # time-based retention is the daily data-retention worker's TTL step.
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["session_id", "tenant_id"],
+            ["builder_sessions.id", "builder_sessions.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_builder_client_errors_session_tenant",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "client_event_id",
+            name="uq_builder_client_errors_tenant_event",
+        ),
+    )
+
+
 class BuilderSessionFiles(BaseCrossReference):
     """Stores files attached to Flow AI Builder sessions. Writer: Flow AI Builder session service. Purpose: keep uploaded builder context files tenant-scoped."""
 

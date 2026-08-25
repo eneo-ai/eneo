@@ -97,6 +97,10 @@ describe("getTechnicalSettingsCount", () => {
       )
     ).toBe(3);
   });
+
+  it("counts a template-fill binding so Enkel gets the advanced bridge", () => {
+    expect(getTechnicalSettingsCount(step({ output_mode: "template_fill" }))).toBe(1);
+  });
 });
 
 describe("getChapterAdvancedStatus", () => {

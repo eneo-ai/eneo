@@ -121,7 +121,9 @@ describe("HttpTestConnection", () => {
     await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
 
     expect(fetchMock).not.toHaveBeenCalled();
-    await screen.findByText(m.http_test_variables_invalid());
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain(m.http_test_variables_invalid());
+    });
   });
 
   it("renders request previews from failed transport responses", async () => {
@@ -143,7 +145,7 @@ describe("HttpTestConnection", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
 
-    await screen.findByText("Invalid URL format");
+    await screen.findByText(/Invalid URL format/);
     await screen.findByText(m.http_test_request_preview());
     await screen.findByText("POST");
     await screen.findByText("not-a-url/hook");
@@ -157,6 +159,38 @@ describe("HttpTestConnection", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
 
-    await screen.findByText("403: Not allowed");
+    await screen.findByText(/403: Not allowed/);
+  });
+
+  it("announces the result in a live status region", async () => {
+    stubFetch({ success: true, status_code: 200, duration_ms: 42 });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+
+    const status = screen.getByRole("status");
+    expect(status.textContent?.trim()).toBe("");
+
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+
+    await waitFor(() => {
+      expect(status.textContent).toContain(m.http_test_success());
+      expect(status.textContent).toContain("200");
+    });
+  });
+
+  it("announces failures with the failed prefix, never color alone", async () => {
+    stubFetch({ success: false, error_message: "boom" });
+    renderHttpTestConnection(
+      makeConfig({ url: "https://api.example.com/hook", body: { mode: "none" } })
+    );
+
+    await fireEvent.click(screen.getByRole("button", { name: m.http_test_button() }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain(
+        `${m.http_test_failed_prefix()}: boom`
+      );
+    });
   });
 });

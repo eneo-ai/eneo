@@ -328,3 +328,17 @@ body.print-mode > .printable-document {
   }
 }
 /* ------------------------------------------ */
+
+/* Honor OS-level reduced-motion across the app. Route components must not
+   redefine this; component-level transitions still gate themselves via
+   prefersReducedMotion() for zero-duration correctness. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

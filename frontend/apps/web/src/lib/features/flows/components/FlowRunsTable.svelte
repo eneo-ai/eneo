@@ -1,13 +1,14 @@
 <script lang="ts">
   import {
     EneoError,
+    type Eneo,
     type Flow,
     type FlowRun,
-    type FlowRunResultFile,
-    type Eneo
+    type FlowRunResultFile
   } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
@@ -43,12 +44,14 @@
   } from "./flowRunStatusSets";
   import { getActiveFlowRunId, shouldAutoFocusFlowRun } from "./flowRunsFocus";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
+  import { IsMobile } from "$lib/hooks/is-mobile.svelte";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
   import {
     createFlowRunHistoryState,
     destroyFlowRunHistoryPolling,
+    MAX_LOADED_FLOW_RUNS,
     loadFlowRunHistory,
     syncFlowRunHistoryFlow,
     syncFlowRunHistoryPolling,
@@ -57,9 +60,11 @@
   import {
     DEFAULT_FLOW_RUN_HISTORY_SORT,
     createFlowRunStatusCounts,
+    filterFlowRuns,
+    primeFlowRunInputSearchText,
     getFlowRunHistoryAriaSort,
-    getVisibleFlowRuns,
     nextFlowRunHistorySortState,
+    sortFlowRuns,
     type FlowRunHistorySortKey,
     type FlowRunHistorySortState
   } from "./flowRunHistoryPresentation";
@@ -88,6 +93,34 @@
   let selectedRunId: string | null = $state(null);
 
   let statusFilter: FlowRunStatusFilter = $state(null);
+  let searchQuery = $state("");
+  const uid = $props.id();
+  const searchScopeHintId = `${uid}-history-search-scope`;
+
+  // The expanded detail module mounts exactly once per run: a double mount
+  // duplicates ids, aria-controls targets, and the evidence request. The
+  // existing IsMobile owner decides which tree carries it.
+  const mobileViewport = new IsMobile();
+
+  const windowFull = $derived(history.runs.length >= MAX_LOADED_FLOW_RUNS);
+  const canLoadMore = $derived(history.hasMore && !windowFull);
+
+  // DOM budget: at most RENDERED_RUNS_PAGE_SIZE rows mount per expansion —
+  // reconciliation of a thousand-row tree is what makes keystrokes slow,
+  // not the filter itself. Any projection change resets the budget.
+  const RENDERED_RUNS_PAGE_SIZE = 100;
+  let renderLimit = $state(RENDERED_RUNS_PAGE_SIZE);
+  $effect(() => {
+    void searchQuery;
+    void statusFilter;
+    void sortState;
+    void flow?.id;
+    renderLimit = RENDERED_RUNS_PAGE_SIZE;
+  });
+
+  async function loadMoreRuns() {
+    await loadRuns("more");
+  }
   let sortState: FlowRunHistorySortState = $state(DEFAULT_FLOW_RUN_HISTORY_SORT);
 
   const userMode = getFlowUserMode();
@@ -98,7 +131,13 @@
     showAdvancedControls ? m.flow_history_power_user_mode_desc() : m.flow_history_user_mode_desc()
   );
 
-  const statusCounts = $derived(createFlowRunStatusCounts(history.runs));
+  // Optimistic rows are a DERIVED display overlay — they are never written
+  // into history.runs, so the pagination state only ever sees
+  // backend-confirmed ids (a fake id would otherwise anchor refresh
+  // contiguity and hide real rows).
+  const displayRuns = $derived(mergeOptimisticFlowRuns(history.runs, optimisticRuns));
+
+  const statusCounts = $derived(createFlowRunStatusCounts(displayRuns));
 
   const statusTranslations = {
     completed: m.flow_run_status_completed,
@@ -117,20 +156,23 @@
     return `v${run.flow_version}`;
   }
 
+  // Sorting is derived separately so a search keystroke only re-filters.
+  const sortedRuns = $derived(sortFlowRuns(displayRuns, sortState));
   const visibleRuns = $derived(
-    getVisibleFlowRuns(history.runs, {
+    filterFlowRuns(sortedRuns, {
       statusFilter,
-      sortState
+      searchQuery,
+      labels: {
+        labelsKey: getLocale(),
+        getStatusLabel: getRunStatusLabel,
+        getDateLabel: (run) => new Date(run.created_at).toLocaleString(getLocale())
+      }
     })
   );
+  const renderedRuns = $derived(visibleRuns.slice(0, renderLimit));
+  const hasHiddenMatches = $derived(visibleRuns.length > renderLimit);
 
-  // mergeOptimisticFlowRuns returns the original array when no merge is needed, which keeps
-  // this self-writing effect from looping after the backend list catches up.
   $effect(() => {
-    const nextRuns = mergeOptimisticFlowRuns(history.runs, optimisticRuns);
-    if (nextRuns === history.runs) return;
-
-    history.runs = nextRuns;
     const newestOptimisticRun = optimisticRuns[0];
     if (shouldAutoFocusOptimisticFlowRun(newestOptimisticRun, lastOptimisticAutoFocusedRunId)) {
       selectedRunId = newestOptimisticRun.id;
@@ -154,10 +196,16 @@
   let lastAutoFocusedRunId: string | null = $state(null);
   let lastOptimisticAutoFocusedRunId: string | null = $state(null);
 
-  async function loadRuns() {
+  async function loadRuns(mode: "refresh" | "more" = "refresh") {
     const result = await loadFlowRunHistory(history, {
       flowId: flow?.id,
-      listRuns: async (flowId) => eneo.flows.runs.list({ flowId }),
+      mode,
+      listRuns: async (flowId, page) =>
+        eneo.flows.runs.list({ flowId, limit: page.limit, offset: page.offset }),
+      pollableRefresh: {
+        getRun: async (flowId, runId) => eneo.flows.runs.get({ id: runId, flowId }),
+        shouldPollRun: (run) => shouldPollFlowRunStatus(run.status)
+      },
       getErrorMessage: (error) =>
         error instanceof EneoError
           ? getFlowRuntimeErrorMessage(error, error.getReadableMessage())
@@ -167,6 +215,18 @@
     });
 
     if (result.kind === "loaded") {
+      // Hostile input payloads pay their enumeration cost off the keystroke
+      // path, batched through the task queue so page load never blocks on
+      // it either. Priming is an optimization only: the search cache also
+      // fills lazily on a miss.
+      const toPrime = [...result.runs];
+      const primeBatch = () => {
+        for (const loadedRun of toPrime.splice(0, 25)) {
+          primeFlowRunInputSearchText(loadedRun);
+        }
+        if (toPrime.length > 0) setTimeout(primeBatch, 0);
+      };
+      setTimeout(primeBatch, 0);
       const nextRuns = result.runs;
       const confirmedOptimisticRunIds = getConfirmedOptimisticFlowRunIds(nextRuns, optimisticRuns);
       if (confirmedOptimisticRunIds.length > 0) {
@@ -194,6 +254,10 @@
 
   $effect(() => {
     if (syncFlowRunHistoryFlow(history, flow?.id)) {
+      // The window reset is atomic: the filters belong to the old flow's
+      // rows, so they clear together with the loaded runs.
+      searchQuery = "";
+      statusFilter = null;
       void loadRuns();
     }
   });
@@ -206,7 +270,7 @@
     }
   });
 
-  let hasRunsToPoll = $derived(history.runs.some((r) => shouldPollFlowRunStatus(r.status)));
+  let hasRunsToPoll = $derived(displayRuns.some((r) => shouldPollFlowRunStatus(r.status)));
 
   $effect(() => {
     syncFlowRunHistoryPolling(history, {
@@ -317,6 +381,36 @@
   }
 </script>
 
+{#snippet stepRunDetail(run: FlowRun)}
+  {#if isFlowRunActive(run.status)}
+    <FlowRunProgressPanel
+      runId={run.id}
+      flowId={flow.id}
+      {eneo}
+      runStatus={run.status}
+      runStartedAt={run.started_at ?? run.created_at}
+      initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+      onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
+    />
+  {:else if isFlowRunAwaitingReview(run.status)}
+    <FlowRunReviewCheckpointPanel
+      runId={run.id}
+      flowId={flow.id}
+      {eneo}
+      onChanged={handleReviewCheckpointChanged}
+    />
+  {:else}
+    <FlowRunEvidence
+      runId={run.id}
+      flowId={flow.id}
+      sensitiveCareDataFlow={careDataPolicy?.sensitive === true}
+      {eneo}
+      runStatus={run.status}
+      fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+    />
+  {/if}
+{/snippet}
+
 {#snippet failedRunAlert(run: FlowRun)}
   {@const errorMessage = getRunErrorMessage(run)}
   {#if errorMessage}
@@ -349,12 +443,12 @@
         <span class="mt-1 block text-xs break-words opacity-80">{history.loadError}</span>
       </Alert.Description>
       <Alert.Action>
-        <Button variant="outline" size="sm" onclick={loadRuns}>
+        <Button variant="outline" size="sm" onclick={() => void loadRuns()}>
           {m.flow_retry()}
         </Button>
       </Alert.Action>
     </Alert.Root>
-  {:else if history.runs.length === 0}
+  {:else if displayRuns.length === 0}
     <div
       class="border-default bg-primary rounded-xl border py-14 text-center"
       aria-label={m.flow_no_runs_yet()}
@@ -362,49 +456,98 @@
       <p class="text-muted text-sm">{m.flow_no_runs_yet()}</p>
     </div>
   {:else}
-    {#if showAdvancedControls}
-      <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label={m.filter()}>
-        <button
-          type="button"
-          class="border-default focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none {statusFilter ===
-          null
-            ? 'bg-accent-default/10 border-accent-default/30 text-accent-stronger'
-            : 'text-secondary hover:bg-hover-dimmer hover:text-primary'}"
-          aria-pressed={statusFilter === null}
-          onclick={() => (statusFilter = null)}
-        >
-          {m.all_categories()}
-          <span class="text-muted tabular-nums">{history.runs.length}</span>
-        </button>
-        {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
-          {@const count = statusCounts[status] ?? 0}
-          {#if count > 0}
-            <button
-              type="button"
-              class="border-default focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none {statusFilter ===
-              status
-                ? 'bg-accent-default/10 border-accent-default/30 text-accent-stronger'
-                : 'text-secondary hover:bg-hover-dimmer hover:text-primary'}"
-              aria-pressed={statusFilter === status}
-              onclick={() => (statusFilter = statusFilter === status ? null : status)}
-            >
-              {getRunStatusLabel(status)}
-              <span class="text-muted tabular-nums">{count}</span>
-            </button>
-          {/if}
-        {/each}
-      </div>
-    {/if}
+    <div class="relative mb-2 max-w-md">
+      <Input
+        type="search"
+        bind:value={searchQuery}
+        placeholder={m.flow_history_search_placeholder()}
+        aria-label={m.flow_history_search_placeholder()}
+        aria-describedby={searchQuery ? searchScopeHintId : undefined}
+        class="h-9"
+      />
+      {#if searchQuery}
+        <p id={searchScopeHintId} class="text-muted mt-1 text-xs leading-relaxed">
+          {windowFull
+            ? m.flow_history_search_scope_hint_window_full({
+                count: String(history.runs.length)
+              })
+            : m.flow_history_search_scope_hint({ count: String(history.runs.length) })}
+        </p>
+      {/if}
+    </div>
+    <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label={m.filter()}>
+      <button
+        type="button"
+        class="border-default focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none {statusFilter ===
+        null
+          ? 'bg-accent-default/10 border-accent-default/30 text-accent-stronger'
+          : 'text-secondary hover:bg-hover-dimmer hover:text-primary'}"
+        aria-pressed={statusFilter === null}
+        onclick={() => (statusFilter = null)}
+      >
+        {m.all_categories()}
+        <span class="text-muted tabular-nums">{displayRuns.length}</span>
+      </button>
+      {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
+        {@const count = statusCounts[status] ?? 0}
+        {#if count > 0}
+          <button
+            type="button"
+            class="border-default focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none {statusFilter ===
+            status
+              ? 'bg-accent-default/10 border-accent-default/30 text-accent-stronger'
+              : 'text-secondary hover:bg-hover-dimmer hover:text-primary'}"
+            aria-pressed={statusFilter === status}
+            onclick={() => (statusFilter = statusFilter === status ? null : status)}
+          >
+            {getRunStatusLabel(status)}
+            <span class="text-muted tabular-nums">{count}</span>
+          </button>
+        {/if}
+      {/each}
+    </div>
 
     {#if visibleRuns.length === 0}
       <div
-        class="border-default bg-primary flex flex-col items-center gap-3 rounded-xl border py-14 text-center"
+        class="border-default bg-primary flex flex-col gap-3 rounded-xl border px-4 py-8 sm:px-6"
         role="status"
       >
-        <p class="text-muted text-sm">{m.flow_no_runs_yet()}</p>
-        <Button variant="outline" size="sm" onclick={() => (statusFilter = null)}>
-          {m.clear()}
-        </Button>
+        <p class="text-secondary text-sm">
+          {searchQuery ? m.flow_history_no_search_matches() : m.flow_no_runs_yet()}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => {
+              statusFilter = null;
+              searchQuery = "";
+            }}
+          >
+            {m.clear()}
+          </Button>
+          {#if canLoadMore}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={history.inFlightGeneration !== null}
+              onclick={() => void loadMoreRuns()}
+            >
+              {history.loadMoreError ? m.flow_retry() : m.flow_history_load_more()}
+            </Button>
+          {:else if history.hasMore}
+            <span class="text-muted text-xs"
+              >{m.flow_history_window_full({
+                count: MAX_LOADED_FLOW_RUNS.toLocaleString(getLocale())
+              })}</span
+            >
+          {/if}
+          {#if history.loadMoreError}
+            <span class="text-negative-default text-xs" role="alert">
+              {m.flow_history_load_more_failed()}
+            </span>
+          {/if}
+        </div>
       </div>
     {:else}
       <!-- Desktop: Table -->
@@ -506,7 +649,7 @@
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {#each visibleRuns as run (run.id)}
+            {#each renderedRuns as run (run.id)}
               {@const isExpanded = selectedRunId === run.id}
               <Table.Row
                 class="border-default hover:bg-muted/40 cursor-pointer transition-colors {isExpanded
@@ -623,40 +766,14 @@
                   </Table.Cell>
                 </Table.Row>
               {/if}
-              {#if isExpanded}
+              {#if isExpanded && !mobileViewport.current}
                 <Table.Row class="border-default hover:bg-transparent">
                   <Table.Cell
                     id={getEvidenceRowId(run.id)}
                     colspan={historyTableColumnCount}
                     class="bg-muted/30 px-3 py-4"
                   >
-                    {#if isFlowRunActive(run.status)}
-                      <FlowRunProgressPanel
-                        runId={run.id}
-                        flowId={flow.id}
-                        {eneo}
-                        runStatus={run.status}
-                        runStartedAt={run.started_at ?? run.created_at}
-                        initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
-                        onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
-                      />
-                    {:else if isFlowRunAwaitingReview(run.status)}
-                      <FlowRunReviewCheckpointPanel
-                        runId={run.id}
-                        flowId={flow.id}
-                        {eneo}
-                        onChanged={handleReviewCheckpointChanged}
-                      />
-                    {:else}
-                      <FlowRunEvidence
-                        runId={run.id}
-                        flowId={flow.id}
-                        sensitiveCareDataFlow={careDataPolicy?.sensitive === true}
-                        {eneo}
-                        runStatus={run.status}
-                        fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
-                      />
-                    {/if}
+                    {@render stepRunDetail(run)}
                   </Table.Cell>
                 </Table.Row>
               {/if}
@@ -667,7 +784,7 @@
 
       <!-- Mobile: stacked card list -->
       <ul class="flex flex-col gap-2 md:hidden" aria-label={m.flow_history()}>
-        {#each visibleRuns as run (run.id)}
+        {#each renderedRuns as run (run.id)}
           {@const isExpanded = selectedRunId === run.id}
           <li class="border-default bg-primary rounded-xl border">
             <button
@@ -735,42 +852,66 @@
                 </Button>
               </div>
             {/if}
-            {#if isExpanded}
+            {#if isExpanded && mobileViewport.current}
               <div
                 id={getEvidenceRowId(run.id)}
                 class="border-default bg-muted/30 border-t px-3 py-3"
               >
-                {#if isFlowRunActive(run.status)}
-                  <FlowRunProgressPanel
-                    runId={run.id}
-                    flowId={flow.id}
-                    {eneo}
-                    runStatus={run.status}
-                    runStartedAt={run.started_at ?? run.created_at}
-                    initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
-                    onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
-                  />
-                {:else if isFlowRunAwaitingReview(run.status)}
-                  <FlowRunReviewCheckpointPanel
-                    runId={run.id}
-                    flowId={flow.id}
-                    {eneo}
-                    onChanged={handleReviewCheckpointChanged}
-                  />
-                {:else}
-                  <FlowRunEvidence
-                    runId={run.id}
-                    flowId={flow.id}
-                    {eneo}
-                    runStatus={run.status}
-                    fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
-                  />
-                {/if}
+                {@render stepRunDetail(run)}
               </div>
             {/if}
           </li>
         {/each}
       </ul>
+
+      <footer class="text-muted flex flex-wrap items-center justify-between gap-3 text-xs">
+        <span role="status">
+          {#if hasHiddenMatches}
+            {m.flow_history_showing_count_of({
+              shown: String(renderedRuns.length),
+              count: String(visibleRuns.length)
+            })}
+          {:else}
+            {visibleRuns.length === 1
+              ? m.flow_history_showing_count_one()
+              : m.flow_history_showing_count({ count: String(visibleRuns.length) })}
+          {/if}
+        </span>
+        <span class="flex items-center gap-2">
+          {#if history.loadMoreError}
+            <span class="text-negative-default" role="alert">
+              {m.flow_history_load_more_failed()}
+            </span>
+          {/if}
+          {#if hasHiddenMatches || canLoadMore}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!hasHiddenMatches && history.inFlightGeneration !== null}
+              onclick={() => {
+                if (hasHiddenMatches) {
+                  renderLimit += RENDERED_RUNS_PAGE_SIZE;
+                } else {
+                  // Reveal the fetched rows in the same action — the fetch
+                  // must not require a second click to become visible.
+                  renderLimit += RENDERED_RUNS_PAGE_SIZE;
+                  void loadMoreRuns();
+                }
+              }}
+            >
+              {history.loadMoreError && !hasHiddenMatches
+                ? m.flow_retry()
+                : m.flow_history_load_more()}
+            </Button>
+          {:else if history.hasMore && windowFull}
+            <span
+              >{m.flow_history_window_full({
+                count: MAX_LOADED_FLOW_RUNS.toLocaleString(getLocale())
+              })}</span
+            >
+          {/if}
+        </span>
+      </footer>
     {/if}
   {/if}
 </section>

@@ -22,29 +22,10 @@ describe("templateFillAuthoringHints", () => {
           } as never
         ],
         activeStep: baseStep,
-        isAdvancedMode: true,
         isTemplateFill: false,
         isTranscribeOnly: false
       })
     ).toBe(true);
-  });
-
-  it("hides the hint outside advanced mode", () => {
-    expect(
-      shouldShowTemplateBodyTextHint({
-        steps: [
-          baseStep,
-          {
-            step_order: 2,
-            output_mode: "template_fill"
-          } as never
-        ],
-        activeStep: baseStep,
-        isAdvancedMode: false,
-        isTemplateFill: false,
-        isTranscribeOnly: false
-      })
-    ).toBe(false);
   });
 
   it("hides the hint for template_fill and transcription steps themselves", () => {
@@ -60,7 +41,6 @@ describe("templateFillAuthoringHints", () => {
           step_order: 1,
           output_mode: "template_fill"
         } as never,
-        isAdvancedMode: true,
         isTemplateFill: true,
         isTranscribeOnly: false
       })
@@ -82,33 +62,14 @@ describe("templateFillAuthoringHints", () => {
           step_order: 1,
           output_mode: "transcribe_only"
         } as never,
-        isAdvancedMode: true,
         isTemplateFill: false,
         isTranscribeOnly: true
       })
     ).toBe(false);
   });
 
-  it("shows docx accessibility guidance only for advanced template-fill authoring", () => {
-    expect(
-      shouldShowTemplateAccessibilityHint({
-        isAdvancedMode: true,
-        isTemplateFill: true
-      })
-    ).toBe(true);
-
-    expect(
-      shouldShowTemplateAccessibilityHint({
-        isAdvancedMode: false,
-        isTemplateFill: true
-      })
-    ).toBe(false);
-
-    expect(
-      shouldShowTemplateAccessibilityHint({
-        isAdvancedMode: true,
-        isTemplateFill: false
-      })
-    ).toBe(false);
+  it("shows docx accessibility guidance for template-fill authoring", () => {
+    expect(shouldShowTemplateAccessibilityHint({ isTemplateFill: true })).toBe(true);
+    expect(shouldShowTemplateAccessibilityHint({ isTemplateFill: false })).toBe(false);
   });
 });

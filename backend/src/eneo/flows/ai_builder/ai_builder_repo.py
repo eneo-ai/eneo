@@ -22,6 +22,7 @@ from eneo.actors.actors.space_actor import (
     SpaceRole,
 )
 from eneo.database.tables.flow_tables import (
+    BuilderClientErrors,
     BuilderPlans,
     BuilderSessionFiles,
     BuilderSessions,
@@ -255,6 +256,61 @@ class AIBuilderRepository:
             )
             row = (await self.session.execute(stmt)).scalar_one()
             return _session_from_row(row)
+
+    async def record_client_error(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        client_event_id: UUID,
+        session_id: UUID | None,
+        phase: str,
+        category: str,
+        code: str,
+        request_id: str | None,
+    ) -> tuple[UUID | None, UUID | None]:
+        """Persist one client-observed failure with best-effort deduplication.
+
+        Returns ``(error_id, resolved_session_id)``; ``error_id`` is None when
+        the (tenant, client_event_id) pair was already stored — a replayed
+        report is a no-op, so callers write no second audit row.
+
+        A session id that does not exist (or belongs to another tenant) is
+        stored as NULL rather than rejected: the failure report must never fail
+        because the thing that failed is gone. The resolved session id is
+        returned so callers audit what was stored, never the raw claim.
+        """
+
+        async with self._transaction():
+            resolved_session_id: UUID | None = None
+            if session_id is not None:
+                resolved_session_id = (
+                    await self.session.execute(
+                        select(BuilderSessions.id).where(
+                            BuilderSessions.id == session_id,
+                            BuilderSessions.tenant_id == tenant_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+            stmt = (
+                pg_insert(BuilderClientErrors)
+                .values(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    client_event_id=client_event_id,
+                    session_id=resolved_session_id,
+                    phase=phase,
+                    category=category,
+                    code=code,
+                    request_id=request_id,
+                )
+                .on_conflict_do_nothing(
+                    constraint="uq_builder_client_errors_tenant_event"
+                )
+                .returning(BuilderClientErrors.id)
+            )
+            error_id = (await self.session.execute(stmt)).scalar_one_or_none()
+            return error_id, resolved_session_id
 
     async def find_latest_resumable_session(
         self,

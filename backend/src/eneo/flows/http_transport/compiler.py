@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
     merge_resolved_input_edges,
@@ -20,6 +21,7 @@ from eneo.flows.http_transport.authored_config import (
     SecretValue,
 )
 from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableInterpolation
+from eneo.main.exceptions import TypedIOValidationException
 
 
 class InterpolateWithEvidenceFn(Protocol):
@@ -147,7 +149,10 @@ def compile_http_config(
 def _secret_text(value: SecretValue) -> str:
     if isinstance(value, str):
         return value
-    return ""
+    raise TypedIOValidationException(
+        "HTTP credential unavailable due to a server-side HTTP secret resolution defect.",
+        code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+    )
 
 
 def _compile_body(

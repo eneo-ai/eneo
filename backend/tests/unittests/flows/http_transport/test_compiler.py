@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import base64
 
+import pytest
+
 from eneo.flows.http_transport.authored_config import (
+    SECRET_SENTINEL,
     CustomHeader,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
@@ -14,6 +17,7 @@ from eneo.flows.http_transport.authored_config import (
 )
 from eneo.flows.http_transport.compiler import compile_http_config
 from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import TypedIOValidationException
 
 
 def _config(
@@ -41,6 +45,18 @@ def test_bearer_auth_produces_authorization_header() -> None:
     result = compile_http_config(cfg, direction="output", method="POST")
 
     assert result.headers["Authorization"] == "Bearer tok-123"
+
+
+def test_secret_sentinel_fails_closed_during_compilation() -> None:
+    cfg = _config(auth=HttpAuthBearer(token=SECRET_SENTINEL))
+
+    with pytest.raises(
+        TypedIOValidationException,
+        match="server-side HTTP secret resolution defect",
+    ) as exc:
+        compile_http_config(cfg, direction="output", method="POST")
+
+    assert exc.value.code == "typed_io_http_invalid_config"
 
 
 def test_api_key_auth_produces_custom_header() -> None:

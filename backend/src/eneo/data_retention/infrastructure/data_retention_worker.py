@@ -30,6 +30,7 @@ class DeletedCounts(TypedDict):
     app_runs: int
     sessions: int
     builder_sessions: int
+    builder_client_errors: int
     flow_debug_rows: int
     flow_attempt_provenance: int
     flow_provider_calls: int
@@ -164,6 +165,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "app_runs": 0,
             "sessions": 0,
             "builder_sessions": 0,
+            "builder_client_errors": 0,
             "flow_debug_rows": 0,
             "flow_attempt_provenance": 0,
             "flow_provider_calls": 0,
@@ -256,6 +258,21 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                         "Deleted %s expired Builder sessions based on retention policies",
                         builder_sessions_count,
                     )
+
+            while True:
+                client_errors_batch = await _run_cleanup_step(
+                    session=session,
+                    results=results,
+                    error_prefix="Failed to delete expired Builder client errors",
+                    action=(
+                        lambda: retention_service.delete_expired_builder_client_errors_batch(
+                            now=start_time,
+                        )
+                    ),
+                )
+                if not client_errors_batch:
+                    break
+                results["deleted"]["builder_client_errors"] += client_errors_batch
 
             flow_runtime_now = start_time
             flow_purge_drained = True
@@ -381,6 +398,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["app_runs"]
         + results["deleted"]["sessions"]
         + results["deleted"]["builder_sessions"]
+        + results["deleted"]["builder_client_errors"]
         + results["deleted"]["flow_debug_rows"]
         + results["deleted"]["flow_attempt_provenance"]
         + results["deleted"]["flow_provider_calls"]
@@ -405,6 +423,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"app_runs: {results['deleted']['app_runs']}, "
             f"sessions: {results['deleted']['sessions']}, "
             f"builder_sessions: {results['deleted']['builder_sessions']}, "
+            f"builder_client_errors: {results['deleted']['builder_client_errors']}, "
             f"flow_debug_rows: {results['deleted']['flow_debug_rows']}, "
             f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
             f"flow_provider_calls: {results['deleted']['flow_provider_calls']}, "

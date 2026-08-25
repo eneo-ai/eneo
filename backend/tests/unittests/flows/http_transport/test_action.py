@@ -17,7 +17,7 @@ from eneo.flows.http_transport.authored_config import (
 from eneo.flows.http_transport.errors import HttpTransportError
 from eneo.flows.http_transport.test_action import execute_http_test
 from eneo.flows.variable_resolver import FlowVariableResolver
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 
 def _config(
@@ -177,3 +177,70 @@ async def test_execute_http_test_validates_effective_url_after_interpolation() -
         "headers": {},
         "body_preview": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_returns_typed_failure_for_blocked_url() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise TypedIOValidationException(
+            "HTTP URL blocked by SSRF policy.",
+            code="typed_io_http_ssrf_blocked",
+        )
+
+    result = await execute_http_test(
+        config=_config(),
+        direction="output",
+        method="POST",
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.BLOCKED_URL
+    assert result.error_message == "HTTP URL blocked by SSRF policy."
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_returns_typed_failure_for_oversized_response() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise TypedIOValidationException(
+            "HTTP response exceeded max inline text bytes.",
+            code="typed_io_http_response_too_large",
+        )
+
+    result = await execute_http_test(
+        config=_config(),
+        direction="output",
+        method="POST",
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.RESPONSE_TOO_LARGE
+    assert result.error_message == "HTTP response exceeded max inline text bytes."
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_reraises_unknown_typed_codes() -> None:
+    """An unmapped typed failure is a server defect; it must escape rather
+    than masquerade as a connection problem."""
+
+    async def _raise_unknown(**_kwargs):
+        raise TypedIOValidationException(
+            "internal invariant broke",
+            code="typed_io_http_something_new",
+        )
+
+    with pytest.raises(TypedIOValidationException):
+        await execute_http_test(
+            config=_config(url="https://example.org/data"),
+            direction="input",
+            method="GET",
+            test_variables={},
+            stored_config=None,
+            encryption_service=None,
+            interpolate=_transport_interpolate,
+            send_http_request=_raise_unknown,
+            max_timeout=120.0,
+        )

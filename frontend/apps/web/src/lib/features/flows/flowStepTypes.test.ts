@@ -92,7 +92,7 @@ describe("getSelectableInputTypeOptions", () => {
     expect(options.map((option) => option.value)).toEqual(["text", "json", "document", "audio"]);
   });
 
-  it("shows disabled image and advanced-only types in advanced mode", () => {
+  it("shows advanced-only types in advanced mode without the unusable image teaser", () => {
     const options = getSelectableInputTypeOptions({
       inputSource: "flow_input",
       previousOutputType: undefined,
@@ -105,11 +105,10 @@ describe("getSelectableInputTypeOptions", () => {
       "json",
       "document",
       "file",
-      "image",
       "audio",
       "any"
     ]);
-    expect(options.find((option) => option.value === "image")?.disabled).toBe(true);
+    expect(options.every((option) => !option.disabled)).toBe(true);
   });
 
   it("preserves an invalid saved value as legacy instead of auto-correcting", () => {

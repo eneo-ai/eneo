@@ -1,6 +1,8 @@
 <script lang="ts">
   import { cva } from "class-variance-authority";
   import RotateCcw from "lucide-svelte/icons/rotate-ccw";
+  import { IconQuestionMark } from "@eneo/icons/question-mark";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getContext } from "svelte";
   import { uid } from "uid";
   import { m } from "$lib/paraglide/messages";
@@ -8,6 +10,8 @@
 
   export let title: string;
   export let description: string = "";
+  /** Deeper explanation behind a (?) icon: meaning, range, default, effect. */
+  export let help: string = "";
   export let fullWidth = false;
   export let density: SettingsDensity =
     getContext<SettingsDensity>(settingsDensityContext) ?? "default";
@@ -82,6 +86,19 @@
         id={labelId}
       >
         <span class={changeIndicator({ hasChanges })}></span>{title}<slot name="title"></slot>
+        {#if help}
+          <Tooltip.Provider delayDuration={150}>
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                aria-label={help}
+                class="ml-1.5 inline-flex items-center align-middle"
+              >
+                <IconQuestionMark class="text-muted hover:text-primary size-4" aria-hidden="true" />
+              </Tooltip.Trigger>
+              <Tooltip.Content class="max-w-[320px]">{help}</Tooltip.Content>
+            </Tooltip.Root>
+          </Tooltip.Provider>
+        {/if}
         {#if revertFn}
           <button
             class="border-default hover:bg-hover-dimmer ml-2 inline-flex -translate-y-[1px] items-center gap-1.5 self-end rounded-lg border px-2 py-0.5 text-sm font-normal transition-all hover:shadow disabled:opacity-0"
@@ -106,9 +123,11 @@
       {/if}
       <slot name="description" />
     </div>
-    <div class="p-4 pr-3">
-      <slot name="toolbar" />
-    </div>
+    {#if $$slots.toolbar}
+      <div class="p-4 pr-3">
+        <slot name="toolbar" />
+      </div>
+    {/if}
   </div>
 
   <div class={inputSection({ fullWidth, density })}>

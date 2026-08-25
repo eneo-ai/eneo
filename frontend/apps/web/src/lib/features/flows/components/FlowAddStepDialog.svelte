@@ -12,7 +12,12 @@
     type FlowStepTemplate
   } from "$lib/features/flows/flowStepTemplates";
   import type { FlowStepCreationSeed } from "$lib/features/flows/FlowEditor";
-  import { getInputTypeLabel, getOutputTypeLabel } from "./flowStepEditHelpers";
+  import {
+    getEnkelAwareOutputTypeLabel,
+    getInputTypeLabel,
+    getOutputTypeLabel
+  } from "./flowStepEditHelpers";
+  import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { cn } from "$lib/utils.js";
 
   let {
@@ -45,11 +50,19 @@
     documentFormatOverride ?? (/\bpdf\b/i.test(query) ? "pdf" : "docx")
   );
 
+  const mode = getFlowUserMode();
+  const isAdvancedMode = $derived($mode === "power_user");
+
   function ioLabel(template: FlowStepTemplate): string {
     if (template.id === "document") {
       return `${getInputTypeLabel(template.displayInputType)} → ${documentFormat === "pdf" ? "PDF" : "Word"}`;
     }
-    return `${getInputTypeLabel(template.displayInputType)} → ${getOutputTypeLabel(template.outputType)}`;
+    const outputLabel = getEnkelAwareOutputTypeLabel(
+      template.outputType,
+      getOutputTypeLabel(template.outputType),
+      isAdvancedMode
+    );
+    return `${getInputTypeLabel(template.displayInputType)} → ${outputLabel}`;
   }
 
   function confirmTemplate(template: FlowStepTemplate) {
@@ -57,11 +70,20 @@
     open = false;
   }
 
-  // Keyboard flow: Enter selects the only visible result, or confirms the
-  // current selection (command-palette style).
+  // Keyboard flow (command-palette style): arrows move the selection through
+  // the visible rows, Enter confirms the selection or the only result.
   function handleSearchKeydown(event: KeyboardEvent) {
-    if (event.key !== "Enter") return;
     const visible = [...recommended, ...more];
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (visible.length === 0) return;
+      event.preventDefault();
+      const index = visible.findIndex((t) => t.id === selectedId);
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const next = visible[(index + delta + visible.length) % visible.length] ?? visible[0];
+      selectedId = next.id;
+      return;
+    }
+    if (event.key !== "Enter") return;
     if (selectedTemplate) {
       event.preventDefault();
       confirmTemplate(selectedTemplate);
@@ -132,6 +154,9 @@
         autocomplete="off"
         onkeydown={handleSearchKeydown}
       />
+    </div>
+    <div class="sr-only" role="status" aria-live="polite">
+      {selectedTemplate ? selectedTemplate.name() : ""}
     </div>
 
     <div class="flex flex-col gap-4 overflow-y-auto py-1" style="max-height: 52vh">

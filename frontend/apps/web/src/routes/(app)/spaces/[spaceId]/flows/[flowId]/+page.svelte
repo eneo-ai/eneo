@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Page } from "$lib/components/layout";
   import { browser } from "$app/environment";
   import { replaceState } from "$app/navigation";
@@ -52,6 +53,8 @@
     getFlowFormSchemaFields,
     getFlowFormSchemaMetadata
   } from "$lib/features/flows/flowFormSchema";
+
+  const reducedMotion = prefersReducedMotion();
 
   let { data } = $props();
   let publishLoading = $state(false);
@@ -148,9 +151,7 @@
       await flowEditor.flushSaves();
     } catch (error) {
       const message =
-        error instanceof EneoError
-          ? error.getReadableMessage()
-          : "Kunde inte spara stegets ändringar.";
+        error instanceof EneoError ? error.getReadableMessage() : m.flow_step_save_failed();
       toast.error(message);
     }
     if (stepId) {
@@ -164,9 +165,7 @@
       await flowEditor.moveStepAtIndex(index, direction);
     } catch (error) {
       const message =
-        error instanceof EneoError
-          ? error.getReadableMessage()
-          : "Kunde inte uppdatera stegordning.";
+        error instanceof EneoError ? error.getReadableMessage() : m.flow_step_reorder_failed();
       toast.error(message);
     }
   }
@@ -176,7 +175,7 @@
       await flowEditor.removeStepAtIndex(index);
     } catch (error) {
       const message =
-        error instanceof EneoError ? error.getReadableMessage() : "Kunde inte ta bort steget.";
+        error instanceof EneoError ? error.getReadableMessage() : m.flow_step_remove_failed();
       toast.error(message);
     }
   }
@@ -466,6 +465,11 @@
           <FlowUserModeToggle />
         {/if}
       </div>
+      <FlowPackageExportDialog
+        flow={$resource}
+        eneo={data.eneo}
+        beforeExport={async () => flowEditor.flushSaves()}
+      />
       {#if $isPublished}
         <!-- While a change is being prepared, the only primary on screen
              belongs to the change: running the published version is a
@@ -504,11 +508,6 @@
           {m.flow_unpublish_confirm_action()}
         </Button>
       {:else}
-        <FlowPackageExportDialog
-          flow={$resource}
-          eneo={data.eneo}
-          beforeExport={async () => flowEditor.flushSaves()}
-        />
         <Button
           variant={builderStage === 5 ? "default" : "outline"}
           disabled={!canPublish || publishLoading}
@@ -552,6 +551,7 @@
     <div
       id="panel-builder"
       role="tabpanel"
+      tabindex="0"
       aria-labelledby="flow-detail-tab-builder"
       hidden={activeTab !== "builder"}
       class="flex flex-1 flex-col overflow-hidden"
@@ -698,6 +698,12 @@
               variant="ghost"
               size="sm"
               disabled={!previousStage || stageNavigating}
+              aria-label={previousStage
+                ? `${m.flow_stage_previous()}: ${previousStage.labelKey()}`
+                : m.flow_stage_previous()}
+              title={previousStage
+                ? `${m.flow_stage_previous()}: ${previousStage.labelKey()}`
+                : undefined}
               onclick={goToPreviousStage}
             >
               &larr; <span class="hidden lg:inline">{m.flow_stage_previous()}</span>
@@ -707,6 +713,8 @@
                 variant="default"
                 size="sm"
                 disabled={stageNavigating}
+                aria-label={`${m.flow_stage_next()}: ${nextStage.labelKey()}`}
+                title={`${m.flow_stage_next()}: ${nextStage.labelKey()}`}
                 onclick={goToNextStage}
               >
                 <span class="hidden lg:inline">{m.flow_stage_next()}</span> &rarr;
@@ -766,7 +774,7 @@
                       {#if $userMode === "power_user"}
                         <div
                           class="border-default -mt-1 border-t pt-5"
-                          transition:slide={{ duration: 200 }}
+                          transition:slide={{ duration: reducedMotion ? 0 : 200 }}
                         >
                           <Field.Field>
                             <Field.Label for="flow-retention-input">
@@ -1020,7 +1028,7 @@
                 {#if transcriptionEnabled}
                   <div
                     class="border-default border-t px-5 py-5"
-                    transition:slide={{ duration: 200 }}
+                    transition:slide={{ duration: reducedMotion ? 0 : 200 }}
                   >
                     <Field.Group class="gap-4">
                       <div
@@ -1409,6 +1417,7 @@
       <div
         id="panel-ai-builder"
         role="tabpanel"
+        tabindex="0"
         aria-labelledby="flow-detail-tab-ai-builder"
         hidden={activeTab !== "ai-builder"}
         class="flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -1447,6 +1456,7 @@
     <div
       id="panel-history"
       role="tabpanel"
+      tabindex="0"
       aria-labelledby="flow-detail-tab-history"
       hidden={activeTab !== "history"}
       class="flex-1 overflow-y-auto"
@@ -1534,15 +1544,6 @@
 
     .flow-processing-step-editor {
       max-width: 1440px;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    :global(*),
-    :global(*::before),
-    :global(*::after) {
-      animation-duration: 0.01ms !important;
-      transition-duration: 0.01ms !important;
     }
   }
 </style>

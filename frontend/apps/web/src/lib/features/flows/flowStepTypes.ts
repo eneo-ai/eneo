@@ -177,13 +177,16 @@ export function getSelectableInputSourceOptions(params: {
   steps: FlowStepLike[];
   stepOrder: number;
   currentInputSource?: InputSource;
+  isAdvancedMode: boolean;
 }): SelectableInputSourceOption[] {
-  const { steps, stepOrder, currentInputSource } = params;
+  const { steps, stepOrder, currentInputSource, isAdvancedMode } = params;
   const visible = getValidInputSources({ steps, stepOrder });
-  let options = INPUT_SOURCE_ORDER.filter((value) => visible.includes(value)).map((value) => ({
-    value,
-    legacyInvalid: false
-  }));
+  let options = INPUT_SOURCE_ORDER.filter((value) => visible.includes(value))
+    .filter((value) => isAdvancedMode || value !== "http_get" || value === currentInputSource)
+    .map((value) => ({
+      value,
+      legacyInvalid: false
+    }));
 
   if (currentInputSource && !options.some((option) => option.value === currentInputSource)) {
     options = [{ value: currentInputSource, legacyInvalid: true }, ...options];
@@ -206,20 +209,16 @@ export function getSelectableInputTypeOptions(params: {
 }): SelectableInputTypeOption[] {
   const { inputSource, previousOutputType, currentInputType, isAdvancedMode } = params;
   const valid = getValidInputTypes(inputSource, previousOutputType);
-  let visible = INPUT_TYPE_ORDER.filter((value) => {
+  const visible = INPUT_TYPE_ORDER.filter((value) => {
     if (value === "image") return false;
     if (!valid.includes(value)) return false;
     if (!isAdvancedMode && ADVANCED_ONLY_INPUT_TYPES.has(value)) return false;
     return true;
   });
 
-  if (isAdvancedMode && inputSource === "flow_input") {
-    visible = insertInCanonicalOrder(visible, "image");
-  }
-
   let options = visible.map((value) => ({
     value,
-    disabled: value === "image",
+    disabled: false,
     legacyInvalid: false
   }));
 
@@ -232,7 +231,7 @@ export function getSelectableInputTypeOptions(params: {
       );
       options = merged.map((value) => ({
         value,
-        disabled: value === "image",
+        disabled: false,
         legacyInvalid: false
       }));
     } else {

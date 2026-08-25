@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport.authored_config import (
     HttpAuthoredConfig,
     HttpMethod,
@@ -29,6 +30,7 @@ from eneo.flows.http_transport.validator import (
     validate_authored_config,
     validate_http_url,
 )
+from eneo.main.exceptions import TypedIOValidationException
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,26 @@ async def execute_http_test(
             error_message=f"Connection timed out after {config.timeout_seconds} seconds",
             request_preview=request_preview,
         )
+    except TypedIOValidationException as exc:
+        duration_ms = (time.monotonic() - start) * 1000
+        typed_error_codes = {
+            FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL.value: HttpTransportError.INVALID_URL,
+            FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED.value: HttpTransportError.BLOCKED_URL,
+            FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value: HttpTransportError.RESPONSE_TOO_LARGE,
+            FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value: HttpTransportError.CONNECTION_REFUSED,
+        }
+        error_code = typed_error_codes.get(exc.code or "")
+        if error_code is None:
+            # An unmapped typed failure is a server-side defect; hiding it as
+            # a connection problem would bury the signal.
+            raise
+        return HttpTestResult(
+            success=False,
+            duration_ms=duration_ms,
+            error_code=error_code,
+            error_message=str(exc) or _error_message(error_code),
+            request_preview=request_preview,
+        )
     except httpx.HTTPError as exc:
         duration_ms = (time.monotonic() - start) * 1000
         return HttpTestResult(
@@ -203,6 +225,8 @@ def _error_message(error: HttpTransportError) -> str:
         HttpTransportError.TIMEOUT_OUT_OF_RANGE: "Timeout must be between 1 and 120 seconds",
         HttpTransportError.TIMEOUT: "Connection timed out",
         HttpTransportError.CONNECTION_REFUSED: "Could not connect to server",
+        HttpTransportError.BLOCKED_URL: "URL blocked by network policy",
+        HttpTransportError.RESPONSE_TOO_LARGE: "HTTP response is too large to preview",
         HttpTransportError.STATUS_ERROR: "Server responded with error",
     }
     return messages.get(error, error.value)

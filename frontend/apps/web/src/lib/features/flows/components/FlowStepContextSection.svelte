@@ -17,12 +17,14 @@
   import UploadedFileIcon from "$lib/features/attachments/components/UploadedFileIcon.svelte";
   import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
+  import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import { formatFileType } from "$lib/core/formatting/formatFileType";
 
   let {
     assistant,
     assistantLoading,
     runningUploads,
+    isPublished = false,
     onKnowledgeChange,
     onRemoveAttachment,
     collapsible = false,
@@ -30,6 +32,7 @@
   }: {
     collapsible?: boolean;
     resetKey?: string | number;
+    isPublished?: boolean;
     assistant: {
       id?: string;
       websites?: WebsiteSparse[];
@@ -116,6 +119,7 @@
 
     lastEmittedSignature = signature;
     lastSourceSignature = signature;
+    if (isPublished) return;
     onKnowledgeChange?.({
       websites: selectedWebsites,
       groups: selectedGroups,
@@ -141,18 +145,38 @@
       description={m.flow_step_knowledge_desc()}
       density="compact"
     >
-      <SelectKnowledge
-        originMode="personal"
-        bind:selectedWebsites
-        bind:selectedCollections={selectedGroups}
-        bind:selectedIntegrationKnowledge
-      />
-      <SelectKnowledge
-        originMode="organization"
-        bind:selectedWebsites
-        bind:selectedCollections={selectedGroups}
-        bind:selectedIntegrationKnowledge
-      />
+      {#if isPublished}
+        <!-- Published flows are read-only: the selected knowledge stays
+             visible, the pickers (mutators) do not render. -->
+        {#if selectedWebsites.length + selectedGroups.length + selectedIntegrationKnowledge.length > 0}
+          <ul class="text-secondary flex flex-col gap-1 text-sm">
+            {#each selectedGroups as item (item.id)}
+              <li class="line-clamp-1">{item.name}</li>
+            {/each}
+            {#each selectedWebsites as item (item.id)}
+              <li class="line-clamp-1">{formatWebsiteName(item)}</li>
+            {/each}
+            {#each selectedIntegrationKnowledge as item (item.id)}
+              <li class="line-clamp-1">{item.name}</li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="text-muted text-sm">{m.flow_section_status_knowledge_none()}</p>
+        {/if}
+      {:else}
+        <SelectKnowledge
+          originMode="personal"
+          bind:selectedWebsites
+          bind:selectedCollections={selectedGroups}
+          bind:selectedIntegrationKnowledge
+        />
+        <SelectKnowledge
+          originMode="organization"
+          bind:selectedWebsites
+          bind:selectedCollections={selectedGroups}
+          bind:selectedIntegrationKnowledge
+        />
+      {/if}
     </Settings.Row>
     <Settings.Row
       title={m.attachments()}
@@ -183,16 +207,18 @@
                 {formatFileType(file.mimetype)} · {formatBytes(file.size)}
               </span>
             </div>
-            <div class="min-w-8">
-              <Button
-                variant="destructive"
-                size="icon"
-                aria-label={m.remove()}
-                onclick={() => onRemoveAttachment?.({ file })}
-              >
-                <IconTrash></IconTrash>
-              </Button>
-            </div>
+            {#if !isPublished}
+              <div class="min-w-8">
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  aria-label={m.remove()}
+                  onclick={() => onRemoveAttachment?.({ file })}
+                >
+                  <IconTrash></IconTrash>
+                </Button>
+              </div>
+            {/if}
           </div>
         {/each}
 
@@ -215,21 +241,25 @@
                 ></div>
               </div>
             </div>
-            <div class="min-w-8">
-              <Button
-                variant="destructive"
-                size="icon"
-                aria-label={m.cancel()}
-                onclick={() => upload.remove()}
-              >
-                <IconCancel />
-              </Button>
-            </div>
+            {#if !isPublished}
+              <div class="min-w-8">
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  aria-label={m.cancel()}
+                  onclick={() => upload.remove()}
+                >
+                  <IconCancel />
+                </Button>
+              </div>
+            {/if}
           </div>
         {/each}
-        <div class="mt-2">
-          <AttachmentUploadTextButton multiple></AttachmentUploadTextButton>
-        </div>
+        {#if !isPublished}
+          <div class="mt-2">
+            <AttachmentUploadTextButton multiple></AttachmentUploadTextButton>
+          </div>
+        {/if}
       </div>
     </Settings.Row>
   {/if}

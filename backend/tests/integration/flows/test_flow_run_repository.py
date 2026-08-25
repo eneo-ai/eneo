@@ -2351,6 +2351,32 @@ async def test_list_runs_supports_limit_and_offset(
         assert len(second_page) == 1
         assert first_page[0].id != second_page[0].id
 
+        # Equal creation timestamps must not float across offset boundaries:
+        # the (created_at DESC, id DESC) total order keeps page windows
+        # stable for a static data set.
+        all_runs = await run_repo.list_runs(
+            tenant_id=admin_user.tenant_id,
+            flow_id=flow.id,
+        )
+        shared_created_at = all_runs[0].created_at
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.flow_id == flow.id)
+            .values(created_at=shared_created_at)
+        )
+        expected_order = sorted((run.id for run in all_runs), reverse=True)
+        paged: list[UUID] = []
+        for offset in range(len(all_runs)):
+            page = await run_repo.list_runs(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                limit=1,
+                offset=offset,
+            )
+            assert len(page) == 1
+            paged.append(page[0].id)
+        assert paged == expected_order
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration

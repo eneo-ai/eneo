@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -54,6 +54,10 @@ from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.spaces_table import SpacesEmbeddingModels
 from eneo.database.tables.websites_table import Websites
+from eneo.flows.ai_builder.ai_builder_failure_ledger import (
+    MAX_WINDOW_DAYS,
+    FailureSummary,
+)
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
 from eneo.main.exceptions import (
@@ -1690,3 +1694,27 @@ async def delete_scim_token(
     async with session.begin():
         await container.scim_token_service().revoke_token(tenant_id)
     logger.info("scim.token.revoked", extra={"tenant_id": str(tenant_id)})
+
+
+@router.get(
+    "/ai-builder/failure-summary/",
+    response_model=FailureSummary,
+    description=(
+        "Group persisted AI Builder failures (the current latest-turn "
+        "failure snapshot by session update time, failed flow runs, "
+        "client-reported errors) by family with sample ids, for triage and "
+        "root-cause work. Read-only over data the product already stores."
+    ),
+    responses=responses.get_responses([]),
+)
+async def get_ai_builder_failure_summary(
+    container: Annotated[Container, Depends(get_container())],
+    days: Annotated[int, Query(ge=1, le=MAX_WINDOW_DAYS)] = 7,
+) -> "FailureSummary":
+    from eneo.flows.ai_builder.ai_builder_failure_ledger import (
+        collect_failure_summary,
+    )
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    session = cast(AsyncSession, container.session())
+    return await collect_failure_summary(session, since=since)

@@ -1,4 +1,7 @@
 <script lang="ts">
+  import type { FlowEdgeKind } from "$lib/features/flows/flowStepPresentation";
+  import { IconLockClosed } from "@eneo/icons/lock-closed";
+  import { IconXMark } from "@eneo/icons/x-mark";
   import { BaseEdge, EdgeLabel, getBezierPath, type Position } from "@xyflow/svelte";
   import { IconPlus } from "@eneo/icons/plus";
   import { m } from "$lib/paraglide/messages";
@@ -29,7 +32,7 @@
           mode?: "user" | "power_user";
           readOnly?: boolean;
           dataType?: string;
-          edgeKind?: "flow_input" | "previous_step" | "all_previous_steps" | "flow_output";
+          edgeKind?: FlowEdgeKind;
           animate?: boolean;
           allowInsert?: boolean;
           labelOffsetY?: number;
@@ -128,11 +131,19 @@
     <EdgeLabel x={labelX} y={labelY + labelOffsetY - 14}>
       <span
         class="edge-actions text-xs"
+        role="img"
+        aria-label={isViolation
+          ? m.flow_graph_classification_violation()
+          : m.flow_graph_classification_escalation()}
         title={isViolation
           ? m.flow_graph_classification_violation()
           : m.flow_graph_classification_escalation()}
       >
-        {#if isViolation}⛔{:else}🔒{/if}
+        {#if isViolation}
+          <IconXMark class="text-negative-stronger size-3.5" />
+        {:else}
+          <IconLockClosed class="text-warning-stronger size-3.5" />
+        {/if}
       </span>
     </EdgeLabel>
   {/if}
@@ -175,25 +186,35 @@
     transform: translate(-50%, -50%);
   }
 
+  /* Hidden via opacity (not visibility) so the buttons stay keyboard
+     focusable; focus-within then reveals them. */
   :global(.edge-label-actions) {
-    visibility: hidden;
     opacity: 0;
-    transition:
-      opacity 150ms ease,
-      visibility 150ms ease;
+    transition: opacity 150ms ease;
     pointer-events: none;
   }
 
-  :global(.svelte-flow__edge:hover) :global(.edge-label-actions) {
-    visibility: visible;
+  /* EdgeLabel portals its wrapper into the shared edge-labels layer, so the
+     reveal must key off the portalled wrapper itself — an edge-scoped
+     descendant selector never matches the real DOM. */
+  :global(.svelte-flow__edge-label:hover) :global(.edge-label-actions),
+  :global(.svelte-flow__edge-label:focus-within) :global(.edge-label-actions) {
     opacity: 1;
     pointer-events: auto;
     background: var(--background-color-primary);
     backdrop-filter: blur(4px);
   }
 
+  /* The travelling dot is feedback, not decoration: it appears only while
+     the pointer or keyboard focus is on the edge, so the graph stays calm. */
   :global(.flow-dot) {
     fill: var(--border-stronger);
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  :global(.svelte-flow__edge:hover) :global(.flow-dot),
+  :global(.svelte-flow__edge:focus-within) :global(.flow-dot) {
     opacity: 0.8;
   }
 

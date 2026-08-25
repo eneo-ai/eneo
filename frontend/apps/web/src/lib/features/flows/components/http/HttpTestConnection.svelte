@@ -1,5 +1,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { IconCheck } from "@eneo/icons/check";
+  import { IconXMark } from "@eneo/icons/x-mark";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -66,7 +68,7 @@
       const payload: FlowHttpTestResponse = await response.json();
       result = payload;
     } catch (err) {
-      result = localError(err instanceof Error ? err.message : "Unknown error");
+      result = localError(err instanceof Error ? err.message : m.http_test_unknown_error());
     } finally {
       testing = false;
     }
@@ -108,14 +110,14 @@
         aria-label={m.http_test_variables_label()}
         value={testVariablesText}
         disabled={isPublished || testing}
-        placeholder={m.http_test_variables_placeholder()}
+        placeholder={'{ "base_url": "https://api.example.com" }'}
         oninput={(e) => (testVariablesText = e.currentTarget.value)}
       />
       <span class="text-muted text-xs leading-relaxed">{m.http_test_variables_help()}</span>
     </label>
   {/if}
 
-  <div class="flex items-center gap-3">
+  <div class="flex flex-wrap items-center gap-3">
     <Button
       variant="outline"
       size="sm"
@@ -128,20 +130,32 @@
         {m.http_test_button()}
       {/if}
     </Button>
-    {#if result}
-      <span
-        class="text-xs font-medium {result.success ? 'text-accent-default' : 'text-danger-default'}"
-      >
-        {#if result.success}
-          {result.status_code}
-          {#if result.duration_ms}
-            &middot; {Math.round(result.duration_ms)}ms
-          {/if}
-        {:else}
-          {result.error_message ?? result.error_code ?? "Error"}
-        {/if}
-      </span>
+    {#if !isPublished && !config.url.trim()}
+      <span class="text-muted text-xs">{m.http_test_needs_url()}</span>
     {/if}
+    <div role="status" aria-live="polite" class="min-w-0">
+      {#if result}
+        <span
+          class="flex items-center gap-1.5 text-xs font-medium {result.success
+            ? 'text-accent-default'
+            : 'text-negative-stronger'}"
+        >
+          {#if result.success}
+            <IconCheck class="size-3.5 shrink-0" />
+            {m.http_test_success()}
+            ({result.status_code}{#if result.duration_ms},
+              {Math.round(result.duration_ms)}&nbsp;ms{/if})
+          {:else}
+            <IconXMark class="size-3.5 shrink-0" />
+            <span class="min-w-0 break-words">
+              {m.http_test_failed_prefix()}: {result.error_message ??
+                result.error_code ??
+                m.http_test_unknown_error()}
+            </span>
+          {/if}
+        </span>
+      {/if}
+    </div>
   </div>
   {#if result?.request_preview}
     <Card.Root>
