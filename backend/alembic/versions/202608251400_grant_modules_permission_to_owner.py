@@ -1,8 +1,8 @@
 """grant modules permission to existing Owner roles
 
-Revision ID: 202608251100
-Revises: 202608251000
-Create Date: 2026-08-20 15:00:00.000000
+Revision ID: 202608251400
+Revises: 202608251300
+Create Date: 2026-08-25 14:00:00.000000
 
 Module installation becomes a session-backed organization permission. New
 organizations receive it from the predefined Owner template; this migration
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202608251100"
-down_revision: str = "202608251000"
+revision: str = "202608251400"
+down_revision: str = "202608251300"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
