@@ -32,6 +32,7 @@ dependencies = [
     "dependency-injector>=4.41.0,<5",
     "docx2python>=3.5.0,<4",
     "scrapy>=2.14.2,<3",
+    "service-identity>=24.2,<25",  # pyOpenSSL 26 removed certificate extension APIs used by 24.1
     "html2text>=2024.2.26,<2025",
     "beautifulsoup4>=4.12.3,<5",
     "crochet>=2.1.1,<3",
