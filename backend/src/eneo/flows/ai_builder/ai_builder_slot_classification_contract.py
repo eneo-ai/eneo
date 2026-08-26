@@ -773,11 +773,18 @@ def _parse_cited_named_result_locations(
         raw_name = payload.get("name")
         explicitly_unplaced = payload.get("unplaced") is True
         has_segments = "segments" in payload
+        placement_omitted = not has_segments and "unplaced" not in payload
+        is_unplaced = explicitly_unplaced or placement_omitted
         raw_segments = payload.get("segments")
         if not isinstance(raw_name, str) or not raw_name:
             return None
-        if explicitly_unplaced:
-            if has_segments or set(payload) != {"name", "unplaced", "evidence"}:
+        if is_unplaced:
+            expected_fields = (
+                {"name", "evidence"}
+                if placement_omitted
+                else {"name", "unplaced", "evidence"}
+            )
+            if has_segments or set(payload) != expected_fields:
                 return None
             segments: list[str] = []
         elif (
@@ -815,7 +822,7 @@ def _parse_cited_named_result_locations(
             source_texts=source_texts,
         ):
             return None
-        if explicitly_unplaced:
+        if is_unplaced:
             placement: NamedResultPlacement = UnplacedNamedResultPlacement()
             if require_placement_evidence and _named_result_root_has_attestation(
                 name=raw_name,
@@ -2176,6 +2183,12 @@ def _classified_named_result_location_schema() -> dict[str, object]:
                     **shared_properties,
                     "unplaced": {"type": "boolean", "enum": [True]},
                 },
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "evidence"],
+                "properties": shared_properties,
             },
         ]
     }
