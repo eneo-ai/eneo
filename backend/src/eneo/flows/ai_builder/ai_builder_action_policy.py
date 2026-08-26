@@ -339,13 +339,27 @@ def _ordered_ask_targets(
     ordered = missing_core + [
         target for target in selected if target not in missing_core
     ]
-    # Purpose-first: when discovery selected the vague processing goal as its
-    # top question it outranks every core gap except the primary runtime
-    # input — asking for an output format before the purpose is backwards.
-    if selected and selected[0] == "post_processing_goal":
-        ordered.remove("post_processing_goal")
-        insert_at = 1 if ordered and ordered[0] == "primary_runtime_input" else 0
-        ordered.insert(insert_at, "post_processing_goal")
+    # Purpose-first applies only across the input/output questions whose answer
+    # depends on that purpose. Other earlier discovery questions keep their
+    # position, including blockers ranked ahead of purpose upstream.
+    if "post_processing_goal" in ordered:
+        purpose_index = ordered.index("post_processing_goal")
+        purpose_dependent_before = [
+            target
+            for target in ordered[:purpose_index]
+            if target
+            in {
+                "primary_runtime_input",
+                "terminal_output",
+                "structured_io_contract",
+            }
+        ]
+        if purpose_dependent_before:
+            ordered = [
+                target for target in ordered if target not in purpose_dependent_before
+            ]
+            purpose_index = ordered.index("post_processing_goal")
+            ordered[purpose_index + 1 : purpose_index + 1] = purpose_dependent_before
     return tuple(ordered)
 
 

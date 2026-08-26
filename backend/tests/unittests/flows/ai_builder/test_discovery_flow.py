@@ -3720,7 +3720,7 @@ class TestPlannerDiscoveryQuestionDispatch:
         repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_audio_docx_extraction_requires_core_input_evidence_before_proposal(
+    async def test_audio_docx_extraction_asks_purpose_before_core_input(
         self,
     ) -> None:
         repo = AsyncMock()
@@ -3777,7 +3777,7 @@ class TestPlannerDiscoveryQuestionDispatch:
             events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
-        assert json.loads(events[1]["data"])["question_id"] == ("primary_runtime_input")
+        assert json.loads(events[1]["data"])["question_id"] == ("post_processing_goal")
         repo.commit_turn.assert_awaited_once()
 
 
