@@ -2958,6 +2958,104 @@ class TestModelSlotMerge:
             segments=("events",)
         )
 
+    def test_parsed_relocation_replaces_unplaced_with_exact(self) -> None:
+        state = _state()
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name="events",
+                declared_shape="array",
+                evidence=["quote:user_message:user-0:events[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="timestamp",
+                placement=UnplacedNamedResultPlacement(),
+                evidence=["quote:user_message:user-0:timestamp"],
+                confidence="high",
+            ),
+        ]
+        removal_quote = "Remove timestamp."
+        placement_quote = "Events contains timestamp."
+        source_text = f"{placement_quote} {removal_quote}"
+        source_id = "user_message:user-1"
+        parsed = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "named_result_evidence": {
+                        "operation": "update",
+                        "upserts": [
+                            {
+                                "name": "timestamp",
+                                "segments": ["events"],
+                                "evidence": [
+                                    {
+                                        "source_id": source_id,
+                                        "quote": placement_quote,
+                                    }
+                                ],
+                            }
+                        ],
+                        "removals": [
+                            {
+                                "name": "timestamp",
+                                "unplaced": True,
+                                "evidence": [
+                                    {
+                                        "source_id": source_id,
+                                        "quote": removal_quote,
+                                    }
+                                ],
+                            }
+                        ],
+                        "confidence": "high",
+                        "reason": "Move timestamp under events.",
+                        "evidence": [
+                            {"source_id": source_id, "quote": placement_quote},
+                            {"source_id": source_id, "quote": removal_quote},
+                        ],
+                    },
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id=source_id,
+                        kind="user_message",
+                        text=source_text,
+                        message_id="user-1",
+                    ),
+                ),
+                current_user_message_id="user-1",
+            ),
+        )
+        assert parsed is not None
+        assert parsed.named_result_evidence is not None
+
+        merge_llm_resolved_slots(
+            state,
+            parsed,
+            prompt_hash="a" * 64,
+            freeform_text=source_text,
+        )
+
+        timestamps = [
+            item for item in state.named_result_evidence if item.name == "timestamp"
+        ]
+        assert len(timestamps) == 1
+        assert timestamps[0].placement == ExactNamedResultPlacement(
+            segments=("events",)
+        )
+
     def test_weak_recitation_matching_multiple_exact_locations_mutates_none(
         self,
     ) -> None:

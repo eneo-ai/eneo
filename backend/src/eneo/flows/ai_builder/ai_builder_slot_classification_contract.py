@@ -516,11 +516,9 @@ def parse_slot_classification_response(
             classification_input=classification_input,
         )
     except _MalformedNamedResultDelta:
-        # A structurally malformed present delta fails the attempt visibly
-        # (parse_failed retries); resolving without the fields was the
-        # silent schema loss the raw capture attributed. Citation-level
-        # refusals keep the established refuse-fields semantics.
-        return None
+        # Drop the malformed delta so the attempt still resolves. No structured
+        # signal distinguishes it from absence; forensics use raw-response capture.
+        named_result_evidence = None
     example_output_constraints = _parse_example_output_constraints(
         raw_dict.get("example_output_constraints"),
         classification_input=classification_input,
@@ -651,9 +649,17 @@ def _parse_named_result_evidence(
     identities = [
         _classified_named_result_identity(changed) for changed in (*upserts, *removals)
     ]
+    upsert_identities = identities[: len(upserts)]
+    exact_leaves = {
+        identity[-1] for identity in upsert_identities if identity[0] == "exact"
+    }
+    unplaced_leaves = {
+        identity[-1] for identity in upsert_identities if identity[0] == "unplaced"
+    }
     if (
         any(not identity[-1] for identity in identities)
         or len(identities) != len(set(identities))
+        or bool(exact_leaves & unplaced_leaves)
         or len(identities) > NAMED_RESULT_EVIDENCE_MAX_ITEMS
     ):
         return None
@@ -804,16 +810,23 @@ def _parse_cited_named_result_locations(
         if named_evidence is None:
             return None
         if require_removal_intent and not _named_result_removal_has_attestation(
-            name=named_evidence.name,
+            name=raw_name,
             evidence=named_evidence.evidence,
             source_texts=source_texts,
         ):
             return None
         if explicitly_unplaced:
+            placement: NamedResultPlacement = UnplacedNamedResultPlacement()
+            if require_placement_evidence and _named_result_root_has_attestation(
+                name=raw_name,
+                evidence=named_evidence.evidence,
+                source_texts=source_texts,
+            ):
+                placement = ExactNamedResultPlacement()
             locations.append(
                 ClassifiedNamedResultEvidence(
                     name=named_evidence.name,
-                    placement=UnplacedNamedResultPlacement(),
+                    placement=placement,
                     evidence=named_evidence.evidence,
                     declared_shape=named_evidence.declared_shape,
                 )
@@ -830,7 +843,7 @@ def _parse_cited_named_result_locations(
                 normalized_segments = []
                 break
             normalized_segments.append(segment_evidence.name)
-        requested_components = (*normalized_segments, named_evidence.name)
+        requested_components = (*segments, raw_name)
         placement: NamedResultPlacement
         # A removal names an EXISTING location: its full folded identity is
         # what selects the entry to remove, and the evidence proves the
@@ -840,7 +853,7 @@ def _parse_cited_named_result_locations(
             True
             if not require_placement_evidence
             else _named_result_root_has_attestation(
-                name=named_evidence.name,
+                name=raw_name,
                 evidence=named_evidence.evidence,
                 source_texts=source_texts,
             )

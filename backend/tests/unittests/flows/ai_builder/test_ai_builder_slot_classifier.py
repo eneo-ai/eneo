@@ -1081,6 +1081,104 @@ def test_parser_accepts_explicit_unplaced_variant_and_forbids_segments() -> None
     assert rejected.named_result_evidence is None
 
 
+def test_parser_promotes_attested_explicit_unplaced_field_to_root() -> None:
+    quote = (
+        "Returnera JSON med validation_status, violations[] och normalized_payload{}"
+    )
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "validation_status",
+                    "unplaced": True,
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        ExactNamedResultPlacement()
+    )
+
+
+def test_parser_promotes_a_raw_swedish_name_and_stores_its_folded_key() -> None:
+    quote = "returnera JSON med bedömning, berörda verksamheter och nästa steg"
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "bedömning",
+                    "unplaced": True,
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    named_result = result.named_result_evidence.upserts[0]
+    assert named_result.name == "bedomning"
+    assert named_result.placement == ExactNamedResultPlacement()
+
+
+def test_parser_attests_a_swedish_edge_and_stores_folded_components() -> None:
+    quote = "JSON ska innehålla källor, och källor innehåller källnamn"
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "källnamn",
+                    "segments": ["källor"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    named_result = result.named_result_evidence.upserts[0]
+    assert named_result.name == "kallnamn"
+    assert named_result.placement == ExactNamedResultPlacement(segments=("kallor",))
+
+
+def test_parser_keeps_unattested_explicit_unplaced_field_unplaced() -> None:
+    quote = "Under kallor[] ska varje kalla ha kallnamn, dokumenttyp och sakuppgifter"
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "kallnamn",
+                    "unplaced": True,
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
 def test_parser_rejects_the_delta_when_one_name_is_cited_with_two_shapes() -> None:
     # One name, two literal declarations. Picking either shape would invent a
     # contract, so the atomic delta is rejected rather than committing its
@@ -1142,9 +1240,8 @@ def test_parser_rejects_delta_citing_more_quotes_than_the_contract_allows() -> N
         classification_input=_classification_input(text),
     )
 
-    # Overflow is a malformed delta: the whole classification is a visible
-    # parse failure, never a silently truncated citation list.
-    assert result is None
+    assert result is not None
+    assert result.named_result_evidence is None
 
 
 @pytest.mark.parametrize(
@@ -1301,6 +1398,84 @@ def test_parser_accepts_only_cited_output_field_deltas(
         assert result.named_result_evidence is None
 
 
+def test_parser_accepts_relocation_from_unplaced_to_exact() -> None:
+    removal_quote = "Remove timestamp."
+    placement_quote = "Events contains timestamp."
+    source_text = f"{placement_quote} {removal_quote}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [
+                        {
+                            "name": "timestamp",
+                            "segments": ["events"],
+                            "evidence": [_evidence(placement_quote)],
+                        }
+                    ],
+                    "removals": [
+                        {
+                            "name": "timestamp",
+                            "unplaced": True,
+                            "evidence": [_evidence(removal_quote)],
+                        }
+                    ],
+                    "confidence": "high",
+                    "reason": "Move timestamp under events.",
+                    "evidence": [
+                        _evidence(removal_quote),
+                        _evidence(placement_quote),
+                    ],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(source_text),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert len(result.named_result_evidence.removals) == 1
+    assert len(result.named_result_evidence.upserts) == 1
+
+
+def test_parser_rejects_contradictory_exact_and_unplaced_upserts() -> None:
+    quote = "Events contains timestamp and timestamp is required."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [
+                        {
+                            "name": "timestamp",
+                            "segments": ["events"],
+                            "evidence": [_evidence(quote)],
+                        },
+                        {
+                            "name": "timestamp",
+                            "unplaced": True,
+                            "evidence": [_evidence(quote)],
+                        },
+                    ],
+                    "removals": [],
+                    "confidence": "high",
+                    "reason": "Contradictory timestamp placements.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is None
+
+
 @pytest.mark.parametrize(
     ("quote", "admitted"),
     [
@@ -1363,6 +1538,36 @@ def test_parser_requires_explicit_removal_intent(
         )
     else:
         assert result.named_result_evidence is None
+
+
+def test_parser_attests_an_accented_removal_and_stores_its_folded_key() -> None:
+    quote = "Ta bort bedömning."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [],
+                    "removals": _named_result_locations(
+                        ("bedömning",),
+                        [_evidence(quote)],
+                    ),
+                    "confidence": "high",
+                    "reason": "Remove the named result.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert tuple(item.name for item in result.named_result_evidence.removals) == (
+        "bedomning",
+    )
 
 
 def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
@@ -3746,18 +3951,25 @@ def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
     )
 
 
-def test_parser_fails_the_attempt_for_a_malformed_present_delta() -> None:
-    # A present-but-unparseable delta must fail the whole attempt visibly
-    # (parse_failed retries) instead of resolving without the fields — the
-    # silent collapse is what made live schema loss unattributable.
-    quote = "Utdata ska innehålla service_reference."
+def test_parser_drops_a_malformed_named_result_delta_but_keeps_slots() -> None:
+    quote = "Return a PDF report."
     result = parse_slot_classification_response(
         json.dumps(
             {
                 **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "The user explicitly requested a PDF.",
+                        "evidence": [_evidence(quote)],
+                        "evidence_level": "explicit",
+                    }
+                ],
                 "named_result_evidence": {
                     "operation": "update",
-                    "upserts": 42,
+                    "upserts": [],
                     "removals": [],
                     "confidence": "high",
                     "reason": "Trasig delta.",
@@ -3765,11 +3977,13 @@ def test_parser_fails_the_attempt_for_a_malformed_present_delta() -> None:
                 },
             }
         ),
-        allowed_slot_values={},
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
         classification_input=_classification_input(quote),
     )
 
-    assert result is None
+    assert result is not None
+    assert tuple(slot.value for slot in result.slots) == ("pdf_document",)
+    assert result.named_result_evidence is None
 
 
 @pytest.mark.parametrize(
