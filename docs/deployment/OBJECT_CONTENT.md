@@ -694,6 +694,64 @@ the work no longer blocks `db-init`. Choosing object storage avoids that second
 payload copy in PostgreSQL; from the first authoritative remote payload onward,
 backup and restore must include both PostgreSQL and the paired bucket.
 
+The worker adopts inline legacy variants in resumable batches after startup.
+Each item is leased, captured, and hashed once per processing attempt, then
+committed with its content row, inline payload, exact File/Icon reference, and
+completed ledger state in one short transaction. Crash recovery can read and
+hash an item again after its lease expires. Owner deletion cancels only that
+item; an invalid or oversized payload halts the campaign after other leased
+items finish and leaves the frozen legacy source untouched for operator
+recovery.
+
+An inline campaign starts automatically when its remaining stored-byte estimate
+is at most 5 GiB. Above that size, calculate PostgreSQL payload, WAL, backup,
+replica, and safety headroom first, then set
+`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` to at least the reported estimate. The
+acknowledgement does not reserve disk and the estimate is not peak allocation;
+it records that the operator has accepted the capacity plan. When the current
+Admin storage policy selects object storage, this inline worker does not start
+or silently redirect the campaign. Remote adoption requires the verified
+object-store adapter and changes the coordinated backup contract.
+Set `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` when every non-empty inline
+campaign must require explicit operator acknowledgement.
+Waiting for capacity is non-fatal: the upgrade is complete, the application
+continues serving frozen legacy File/Icon content, and the worker emits a
+structured warning with the estimate and required acknowledgement on startup
+and every scheduled tick.
+
+Large installations can tune bounded throughput without changing application
+or tenant policy:
+
+| Variable                                      | Default | Meaning |
+| --------------------------------------------- | ------: | ------- |
+| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES`    |   5 GiB | Largest estimate that may start inline without an explicit capacity acknowledgement |
+| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`      |       0 | Accepted inline estimate in bytes; must cover the current remaining estimate |
+| `FILE_ICON_BACKFILL_BATCH_ROWS`               |     100 | Maximum ledger rows leased by one worker run |
+| `FILE_ICON_BACKFILL_BATCH_BYTES`              |  32 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded |
+| `FILE_ICON_BACKFILL_LEASE_SECONDS`            |     300 | Crash-recovery lease duration |
+| `FILE_ICON_BACKFILL_RESUME_REVISION`          |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value requeues failed items once |
+| `FILE_ICON_BACKFILL_MAX_ATTEMPTS`              |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure |
+
+Keep one item within `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the batch byte bound
+does not override that per-content ceiling. The worker logs structured batch
+counts after every non-empty run and logs the estimate and required action while
+a campaign waits for capacity or is halted. Completion runs `ANALYZE` once on
+the new content, payload, and reference tables before the campaign is marked
+done.
+Only one worker replica may run a batch at a time. A PostgreSQL advisory lock
+prevents minute jobs from overlapping and multiplying the configured byte and
+memory bounds. Plan worst-case worker memory at roughly three times
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`, plus an equally large temporary-file
+allowance; measure the exact peak on the deployment's Python, asyncpg, and
+PostgreSQL versions before raising that ceiling.
+After correcting a halted campaign's stated cause, increase
+`FILE_ICON_BACKFILL_RESUME_REVISION` and restart the worker configuration. Do
+not reuse or lower a previous value. The worker records the accepted revision
+in PostgreSQL, requeues failed items once, and still refuses to resume if the
+Admin storage target differs from the campaign's frozen destination.
+Completion is terminal and cached by each worker process; manual campaign
+edits are unsupported and require a worker restart even during diagnosis.
+
 This unreleased expand revision reuses Alembic revision ID `202607231700` and
 replaces the former destructive normalization at that position. The inventory
 revision `202607231745` was also corrected in place before release so capacity
@@ -710,10 +768,11 @@ stamp past the revision, attempt `alembic downgrade`, drop the trigger, edit
 ledger state manually, or run an old File/Icon writer against the expanded
 schema.
 
-The Tier 1 operator status contract is this payload-free preflight query. It
+The operator status contract starts with this payload-free preflight query. It
 excludes owners that were deleted and variants that already gained a durable
-reference after the inventory snapshot. The later campaign worker owns state
-transitions and any administrative progress surface:
+reference after the inventory snapshot. During the campaign, use ledger state
+and structured worker logs for completed, failed, cancelled, and remaining
+estimated work:
 
 ```sql
 WITH actionable_pending AS (
@@ -725,9 +784,11 @@ WITH actionable_pending AS (
       AND NOT EXISTS (
           SELECT 1
           FROM file_content_references AS reference
+          JOIN object_contents AS content ON content.id = reference.content_id
           WHERE reference.file_id = item.owner_id
             AND reference.variant = item.variant
             AND reference.ordinal = item.ordinal
+            AND content.state = 'available'
       )
 
     UNION ALL
@@ -740,14 +801,61 @@ WITH actionable_pending AS (
       AND NOT EXISTS (
           SELECT 1
           FROM icon_content_references AS reference
+          JOIN object_contents AS content ON content.id = reference.content_id
           WHERE reference.icon_id = item.owner_id
             AND reference.variant = item.variant
+            AND content.state = 'available'
       )
 )
 SELECT count(*) AS pending_items,
        pg_size_pretty(coalesce(sum(payload_size_estimate), 0)::bigint)
            AS estimated_payload_bytes
 FROM actionable_pending;
+```
+
+After the campaign starts, this query reports its frozen destination, recovery
+state, and remaining ledger work without reading payloads. It scans the ledger,
+so run it on demand for operator diagnosis rather than polling it from the
+minute worker or a frequent monitor:
+
+```sql
+SELECT campaign.target_kind,
+       campaign.state AS campaign_state,
+       campaign.halt_reason,
+       campaign.resume_revision,
+       count(*) FILTER (WHERE item.state = 'pending') AS pending_items,
+       count(*) FILTER (WHERE item.state = 'leased') AS leased_items,
+       count(*) FILTER (WHERE item.state = 'failed') AS failed_items,
+       count(*) FILTER (WHERE item.state = 'done') AS done_items,
+       count(*) FILTER (WHERE item.state = 'cancelled') AS cancelled_items,
+       pg_size_pretty(
+           coalesce(sum(item.payload_size_estimate) FILTER (
+               WHERE item.state NOT IN ('done', 'cancelled')
+           ), 0)::bigint
+       ) AS estimated_remaining_bytes
+FROM file_icon_backfill_items AS item
+LEFT JOIN file_icon_backfill_campaign AS campaign ON true
+GROUP BY campaign.target_kind,
+         campaign.state,
+         campaign.halt_reason,
+         campaign.resume_revision;
+```
+
+For a halted campaign, inspect at most the first 100 failed items before raising
+the resume revision:
+
+```sql
+SELECT owner_kind,
+       owner_id,
+       variant,
+       ordinal,
+       attempts,
+       last_error_code,
+       last_error_detail
+FROM file_icon_backfill_items
+WHERE state = 'failed'
+ORDER BY id
+LIMIT 100;
 ```
 
 The later range-verification revision uses the same maintenance window. It
