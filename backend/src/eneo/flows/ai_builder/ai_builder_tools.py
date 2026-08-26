@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Callable, Literal, NotRequired, TypedDict, cast
 
 import jsonschema
 from jsonschema.validators import validator_for
@@ -41,6 +41,19 @@ class ProposalToolFunction(TypedDict):
 class ProposalToolSchema(TypedDict):
     type: Literal["function"]
     function: ProposalToolFunction
+
+
+AdmissionNormalizerFamily = Literal[
+    "_discard_punctuation_serialization_artifacts",
+    "_normalize_structured_field_children",
+    "_rehome_misplaced_create_children",
+]
+ADMISSION_NORMALIZER_FAMILIES: tuple[AdmissionNormalizerFamily, ...] = (
+    "_discard_punctuation_serialization_artifacts",
+    "_normalize_structured_field_children",
+    "_rehome_misplaced_create_children",
+)
+AdmissionNormalizerHitRecorder = Callable[[AdmissionNormalizerFamily], None]
 
 
 def build_propose_flow_tool_schema(
@@ -285,6 +298,7 @@ def admit_propose_flow_tool_arguments(
     *,
     arguments: dict[str, Any],
     tool_schema: ProposalToolSchema,
+    on_normalizer_hit: AdmissionNormalizerHitRecorder | None = None,
 ) -> dict[str, Any]:
     """Admit one proposal payload after deterministic schema-guided normalization.
 
@@ -300,19 +314,50 @@ def admit_propose_flow_tool_arguments(
         arguments=arguments,
         tool_schema=tool_schema,
     )
+    _record_admission_normalizer_hit(
+        before=arguments,
+        after=admitted,
+        family="_discard_punctuation_serialization_artifacts",
+        recorder=on_normalizer_hit,
+    )
+    before_rehome = admitted
     admitted = _rehome_misplaced_create_children(
         arguments=admitted,
         tool_schema=tool_schema,
     )
+    _record_admission_normalizer_hit(
+        before=before_rehome,
+        after=admitted,
+        family="_rehome_misplaced_create_children",
+        recorder=on_normalizer_hit,
+    )
+    before_structured_children = admitted
     admitted = _normalize_structured_field_children(
         arguments=admitted,
         tool_schema=tool_schema,
+    )
+    _record_admission_normalizer_hit(
+        before=before_structured_children,
+        after=admitted,
+        family="_normalize_structured_field_children",
+        recorder=on_normalizer_hit,
     )
     validate_propose_flow_tool_arguments(
         arguments=admitted,
         tool_schema=tool_schema,
     )
     return admitted
+
+
+def _record_admission_normalizer_hit(
+    *,
+    before: dict[str, Any],
+    after: dict[str, Any],
+    family: AdmissionNormalizerFamily,
+    recorder: AdmissionNormalizerHitRecorder | None,
+) -> None:
+    if recorder is not None and after is not before:
+        recorder(family)
 
 
 def _discard_punctuation_serialization_artifacts(
@@ -691,6 +736,9 @@ def _matching_discriminator_branch_index(
 
 
 __all__ = [
+    "ADMISSION_NORMALIZER_FAMILIES",
+    "AdmissionNormalizerFamily",
+    "AdmissionNormalizerHitRecorder",
     "admit_propose_flow_tool_arguments",
     "build_propose_flow_tool_schema",
     "ProposalToolArgumentsError",

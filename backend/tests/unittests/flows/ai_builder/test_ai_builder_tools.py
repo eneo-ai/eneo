@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -43,6 +46,49 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
         available_models=[],
         available_kbs=[],
     )
+
+
+def _normalizer_hit_arguments() -> dict[str, dict[str, Any]]:
+    base = {
+        "flow_name": "Case assessment",
+        "plan_rationale": "Assess the submitted case.",
+        "steps": [
+            {
+                "name": "Assess case",
+                "instructions": "Assess the submitted case material.",
+            }
+        ],
+    }
+    return {
+        "_discard_punctuation_serialization_artifacts": {
+            **deepcopy(base),
+            "},{": ":",
+        },
+        "_rehome_misplaced_create_children": {
+            **deepcopy(base),
+            "model_ref": "model.default",
+        },
+        "_normalize_structured_field_children": {
+            **deepcopy(base),
+            "steps": [
+                {
+                    **base["steps"][0],
+                    "output_fields": [
+                        {
+                            "name": "details",
+                            "field_type": "object",
+                            "description": "Case details.",
+                            "children": {
+                                "name": "summary",
+                                "field_type": "string",
+                                "description": "Case summary.",
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    }
 
 
 class TestBuildToolSchema:
@@ -146,6 +192,66 @@ class TestBuildToolSchema:
                 arguments=arguments,
                 tool_schema=schema,
             )
+
+    @pytest.mark.parametrize(
+        ("family", "arguments"),
+        list(_normalizer_hit_arguments().items()),
+    )
+    def test_create_admission_records_only_normalizers_that_rewrite_payload(
+        self,
+        family: str,
+        arguments: dict[str, Any],
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        hits: list[str] = []
+
+        admitted = admit_propose_flow_tool_arguments(
+            arguments=arguments,
+            tool_schema=schema,
+            on_normalizer_hit=hits.append,
+        )
+
+        assert hits == [family]
+
+        clean_hits: list[str] = []
+        assert (
+            admit_propose_flow_tool_arguments(
+                arguments=admitted,
+                tool_schema=schema,
+                on_normalizer_hit=clean_hits.append,
+            )
+            is admitted
+        )
+        assert clean_hits == []
+
+    def test_create_admission_telemetry_does_not_change_normalized_bytes(
+        self,
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = _normalizer_hit_arguments()["_normalize_structured_field_children"]
+        arguments["},{"] = ":"
+        arguments["model_ref"] = "model.default"
+
+        without_telemetry = admit_propose_flow_tool_arguments(
+            arguments=deepcopy(arguments),
+            tool_schema=schema,
+        )
+        hits: list[str] = []
+        with_telemetry = admit_propose_flow_tool_arguments(
+            arguments=deepcopy(arguments),
+            tool_schema=schema,
+            on_normalizer_hit=hits.append,
+        )
+
+        assert json.dumps(with_telemetry, separators=(",", ":")) == json.dumps(
+            without_telemetry,
+            separators=(",", ":"),
+        )
+        assert hits == [
+            "_discard_punctuation_serialization_artifacts",
+            "_rehome_misplaced_create_children",
+            "_normalize_structured_field_children",
+        ]
 
     def test_create_admission_discards_only_punctuation_serialization_artifacts(
         self,

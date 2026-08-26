@@ -1181,6 +1181,11 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
         resource_catalog=resource_catalog,
         arguments=arguments,
     )
+    tracker = ProposalTurnTelemetry(
+        request_id="req-field-shaped-step",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
     config = submission._proposal_retry_config(
         target_kind=TargetKind.CREATE,
         assistant_snapshots=None,
@@ -1188,15 +1193,20 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
         planning_state=planning_state,
         plan_edit_context=None,
         prior_spec_for_revision=None,
-        usage_tracker=None,
+        usage_tracker=tracker,
         proposal_tool_schema=schema,
         compile_context=create_compile_context_from_planning_state(planning_state),
     )
 
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_proposal_submission."
-        "process_create_intent_arguments",
-        new=process_create,
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission."
+            "process_create_intent_arguments",
+            new=process_create,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_submission.logger"
+        ) as event_logger,
     ):
         result = await config.process_tool_invocation(invocation)
 
@@ -1213,6 +1223,14 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
     assert [field["name"] for field in admitted["steps"][1]["output_fields"]] == [
         "data_quality_notes"
     ]
+    assert tracker.admission_normalization_hits == {
+        "_rehome_misplaced_create_children": 1
+    }
+    event_logger.info.assert_called_once_with(
+        "ai_builder_proposal_arguments_normalized session_id=%s family=%s",
+        invocation.turn.session_id,
+        "_rehome_misplaced_create_children",
+    )
     assert len(arguments["steps"]) == 2
 
 

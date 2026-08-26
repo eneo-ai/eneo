@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
     TokenUsageSource,
     combine_token_usage,
 )
+from eneo.flows.ai_builder.ai_builder_tools import AdmissionNormalizerFamily
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -158,6 +159,10 @@ def _empty_attempts() -> list[ProposalAttemptTelemetryPayload]:
     return []
 
 
+def _empty_admission_normalization_hits() -> dict[AdmissionNormalizerFamily, int]:
+    return {}
+
+
 class ProposalAttemptTelemetryPayload(BaseModel):
     """Bounded, content-free facts for one proposal provider attempt."""
 
@@ -206,6 +211,9 @@ class ProposalTurnTelemetry:
     )
     proposal_attempts: list[ProposalAttemptTelemetryPayload] = field(
         default_factory=_empty_attempts
+    )
+    admission_normalization_hits: dict[AdmissionNormalizerFamily, int] = field(
+        default_factory=_empty_admission_normalization_hits
     )
     _turn_started_ns: int = field(default_factory=monotonic_ns, repr=False)
     _attempt_started_ns: int | None = field(default=None, init=False, repr=False)
@@ -376,6 +384,14 @@ class ProposalTurnTelemetry:
     def record_repair_invocation(self, *, reason: ProposalRepairReason) -> None:
         self.proposal_repair_reasons.append(reason)
 
+    def record_admission_normalization_hit(
+        self,
+        family: AdmissionNormalizerFamily,
+    ) -> None:
+        self.admission_normalization_hits[family] = (
+            self.admission_normalization_hits.get(family, 0) + 1
+        )
+
     def build_planner_telemetry(self, *, tool_call_count: int = 0) -> dict[str, Any]:
         if self._attempt_started_ns is not None:
             self._complete_attempt(usage=None)
@@ -424,6 +440,10 @@ class ProposalTurnTelemetry:
             attempt.model_dump(mode="json", exclude_none=True)
             for attempt in self.proposal_attempts
         ]
+        if self.admission_normalization_hits:
+            telemetry["admission_normalization_hits"] = dict(
+                self.admission_normalization_hits
+            )
         telemetry["call_records"] = [
             {
                 "call_kind": record.call_kind,

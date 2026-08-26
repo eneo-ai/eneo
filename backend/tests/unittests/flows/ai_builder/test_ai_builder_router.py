@@ -1122,6 +1122,10 @@ class TestGetSessionEndpoint:
                         "repair_attempts": 2,
                         "parse_repair_attempts": 0,
                         "total_tokens": 24240,
+                        "admission_normalization_hits": {
+                            "_discard_punctuation_serialization_artifacts": 1,
+                            "_normalize_structured_field_children": 2,
+                        },
                         "proposal_attempts": [
                             {
                                 "attempt": 1,
@@ -1192,6 +1196,10 @@ class TestGetSessionEndpoint:
                 "repair_attempts": 2,
                 "parse_repair_attempts": 0,
                 "total_tokens": 24240,
+                "admission_normalization_hits": {
+                    "_discard_punctuation_serialization_artifacts": 1,
+                    "_normalize_structured_field_children": 2,
+                },
                 "attempts": [
                     {
                         "attempt": 1,

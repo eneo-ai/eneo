@@ -112,6 +112,10 @@ from eneo.flows.ai_builder.ai_builder_telemetry import (
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ADMISSION_NORMALIZER_FAMILIES,
+    AdmissionNormalizerFamily,
+)
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
@@ -498,10 +502,28 @@ def _proposal_turn_diagnostics(
                     telemetry.get("parse_repair_attempts")
                 ),
                 total_tokens=_optional_int(telemetry.get("total_tokens")),
+                admission_normalization_hits=_admission_normalization_hits(
+                    telemetry.get("admission_normalization_hits")
+                ),
                 attempts=attempts,
             )
         )
     return turns
+
+
+def _admission_normalization_hits(
+    value: object,
+) -> dict[AdmissionNormalizerFamily, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    hits = cast(Mapping[object, object], value)
+    return {
+        family: count
+        for family in ADMISSION_NORMALIZER_FAMILIES
+        if isinstance((count := hits.get(family)), int)
+        and not isinstance(count, bool)
+        and count > 0
+    }
 
 
 def _optional_int(value: object) -> int | None:

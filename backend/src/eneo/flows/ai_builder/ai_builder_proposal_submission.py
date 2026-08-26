@@ -103,6 +103,7 @@ from eneo.flows.ai_builder.ai_builder_tool_parsing import (
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
     PROPOSE_FLOW_TOOL_NAME,
+    AdmissionNormalizerFamily,
     ProposalToolArgumentsError,
     ProposalToolSchema,
     admit_propose_flow_tool_arguments,
@@ -428,10 +429,22 @@ class ProposalSubmissionOwner:
         obligation_projection: "ProposalObligationProjection | None" = None,
         metadata_tool_call: RuntimeToolCall | None = None,
     ) -> ToolProcessingResult:
+        def record_admission_normalizer_hit(
+            family: AdmissionNormalizerFamily,
+        ) -> None:
+            if usage_tracker is not None:
+                usage_tracker.record_admission_normalization_hit(family)
+            logger.info(
+                "ai_builder_proposal_arguments_normalized session_id=%s family=%s",
+                invocation.turn.session_id,
+                family,
+            )
+
         try:
             admitted_arguments = admit_propose_flow_tool_arguments(
                 arguments=invocation.arguments,
                 tool_schema=proposal_tool_schema,
+                on_normalizer_hit=record_admission_normalizer_hit,
             )
         except ProposalToolArgumentsError as error:
             logger.info(
@@ -450,14 +463,6 @@ class ProposalSubmissionOwner:
                 failure_codes=frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE}),
             )
         if admitted_arguments is not invocation.arguments:
-            logger.info(
-                "ai_builder_proposal_arguments_normalized "
-                "session_id=%s reason=schema_guided_create_normalization "
-                "step_count_before=%s step_count_after=%s",
-                invocation.turn.session_id,
-                len(invocation.arguments.get("steps", ())),
-                len(admitted_arguments.get("steps", ())),
-            )
             invocation = replace(invocation, arguments=admitted_arguments)
         if target_kind == TargetKind.CREATE:
             if planning_state.architecture_commit is None:

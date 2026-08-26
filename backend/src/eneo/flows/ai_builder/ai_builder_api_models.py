@@ -48,6 +48,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
+from eneo.flows.ai_builder.ai_builder_tools import AdmissionNormalizerFamily
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
@@ -256,6 +257,10 @@ def _default_conversation() -> list["AIBuilderConversationMessage"]:
     return []
 
 
+def _default_admission_normalization_hits() -> dict[AdmissionNormalizerFamily, int]:
+    return {}
+
+
 class AIBuilderConversationMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -294,6 +299,9 @@ class AIBuilderProposalTurnDiagnostic(BaseModel):
     repair_attempts: int | None = None
     parse_repair_attempts: int | None = None
     total_tokens: int | None = None
+    admission_normalization_hits: dict[AdmissionNormalizerFamily, int] = Field(
+        default_factory=_default_admission_normalization_hits
+    )
     attempts: list[AIBuilderProposalAttemptDiagnostic] = Field(
         default_factory=lambda: cast(list[AIBuilderProposalAttemptDiagnostic], [])
     )

@@ -138,6 +138,27 @@ def test_proposal_turn_telemetry_extends_canonical_planner_payload() -> None:
     assert payload["proposal_repair_invocation_reasons"] == ["validation"]
 
 
+def test_proposal_turn_telemetry_counts_admission_normalizer_hits() -> None:
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-normalizer-hits",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+
+    telemetry.record_admission_normalization_hit(
+        "_discard_punctuation_serialization_artifacts"
+    )
+    telemetry.record_admission_normalization_hit("_normalize_structured_field_children")
+    telemetry.record_admission_normalization_hit("_normalize_structured_field_children")
+
+    payload = telemetry.build_planner_telemetry()
+
+    assert payload["admission_normalization_hits"] == {
+        "_discard_punctuation_serialization_artifacts": 1,
+        "_normalize_structured_field_children": 2,
+    }
+
+
 def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
     telemetry = ProposalTurnTelemetry(
         request_id="req-call-family",
