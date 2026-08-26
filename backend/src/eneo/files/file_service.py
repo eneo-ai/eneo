@@ -30,8 +30,14 @@ from eneo.files.file_protocol import (
 from eneo.files.file_repo import (
     FileContentReferenceRecord,
     FileRepository,
+    LegacyAudioSlice,
+    LegacyFileContentRecord,
+    LegacyFileInfoRecord,
+    legacy_primary_file_variant,
+    primary_file_variants,
     project_file_info,
-    select_primary_file_reference,
+    select_file_content_variant,
+    select_primary_file_content,
 )
 from eneo.files.file_usage import FileUsageRepository
 from eneo.main.exceptions import (
@@ -510,8 +516,17 @@ class FileService:
         references = await self.repo.get_content_references(
             [file.id for file in metadata]
         )
+        legacy_infos = await self.repo.get_legacy_infos([file.id for file in metadata])
         by_file = self._references_by_file(references)
-        return [project_file_info(file, by_file[file.id]) for file in metadata]
+        legacy_by_file = self._legacy_infos_by_file(legacy_infos)
+        return [
+            project_file_info(
+                file,
+                by_file[file.id],
+                legacy_by_file[file.id],
+            )
+            for file in metadata
+        ]
 
     async def get_deletion_preview(self, file_id: UUID) -> FileDeletionPreview:
         user = self._authenticated_user()
@@ -649,7 +664,29 @@ class FileService:
             metadata = await self.repo.get_by_id(file_id=file_id)
             self._require_token_tenant(metadata, expected_tenant_id)
             references = await self.repo.get_content_references([file_id])
-            reference = self._primary_reference(metadata, references)
+            if (
+                metadata.file_type is FileType.AUDIO
+                and self._first_reference(references, FileContentVariant.ORIGINAL)
+                is None
+            ):
+                legacy_audio_info = await self._legacy_audio_info(metadata.id)
+                if legacy_audio_info is not None:
+                    return await self._open_legacy_audio_download(
+                        metadata,
+                        range_header=range_header,
+                        info=legacy_audio_info,
+                    )
+                legacy_content = []
+            else:
+                legacy_content = await self._legacy_primary_content(
+                    metadata,
+                    references,
+                )
+            reference = self._primary_content(
+                metadata,
+                references,
+                legacy_content,
+            )
         return await self._open_download(
             metadata,
             reference,
@@ -660,7 +697,22 @@ class FileService:
         metadata = await self.repo.get_by_id(file_id=file_id)
         self._require_owner(metadata, action="read")
         references = await self.repo.get_content_references([file_id])
-        self._original_reference(references)
+        if (
+            metadata.file_type is FileType.AUDIO
+            and self._first_reference(references, FileContentVariant.ORIGINAL) is None
+        ):
+            if not await self._legacy_audio_info(metadata.id):
+                raise FileOriginalNotFoundError()
+            return metadata
+        legacy_content = (
+            []
+            if self._first_reference(references, FileContentVariant.ORIGINAL)
+            is not None
+            else await self.repo.get_legacy_content(
+                {file_id: {FileContentVariant.ORIGINAL}}
+            )
+        )
+        self._original_content(references, legacy_content)
         return metadata
 
     async def get_original_download_no_auth(
@@ -677,7 +729,24 @@ class FileService:
             metadata = await self.repo.get_by_id(file_id=file_id)
             self._require_token_tenant(metadata, expected_tenant_id)
             references = await self.repo.get_content_references([file_id])
-            reference = self._original_reference(references)
+            if (
+                metadata.file_type is FileType.AUDIO
+                and self._first_reference(references, FileContentVariant.ORIGINAL)
+                is None
+            ):
+                return await self._open_legacy_audio_download(
+                    metadata,
+                    range_header=range_header,
+                )
+            legacy_content = (
+                []
+                if self._first_reference(references, FileContentVariant.ORIGINAL)
+                is not None
+                else await self.repo.get_legacy_content(
+                    {file_id: {FileContentVariant.ORIGINAL}}
+                )
+            )
+            reference = self._original_content(references, legacy_content)
         return await self._open_download(
             metadata,
             reference,
@@ -696,21 +765,18 @@ class FileService:
     async def _open_download(
         self,
         metadata: FileMetadata,
-        reference: FileContentReferenceRecord,
+        reference: FileContentReferenceRecord | LegacyFileContentRecord,
         *,
         range_header: str | None,
     ) -> FileDownload:
         if range_header is not None and metadata.file_type is not FileType.AUDIO:
             raise BadRequestException("Range is only supported for audio files")
 
-        if range_header is not None:
-            try:
-                ByteRange.parse(range_header, size_bytes=reference.size_bytes)
-            except InvalidContentRangeError as exc:
-                raise FileContentRangeError(
-                    str(exc),
-                    total_size=reference.size_bytes,
-                ) from exc
+        if isinstance(reference, LegacyFileContentRecord):
+            assert range_header is None
+            return self._open_legacy_download(metadata, reference)
+
+        self._parse_requested_range(range_header, size_bytes=reference.size_bytes)
         grant = ContentReadGrant(
             content_id=reference.content_id,
             tenant_id=metadata.tenant_id,
@@ -767,6 +833,113 @@ class FileService:
             _close=close,
         )
 
+    def _open_legacy_download(
+        self,
+        metadata: FileMetadata,
+        content: LegacyFileContentRecord,
+    ) -> FileDownload:
+        async def stream() -> AsyncGenerator[bytes]:
+            yield content.payload
+
+        async def close() -> None:
+            return None
+
+        return FileDownload(
+            chunks=stream(),
+            content_length=content.size_bytes,
+            media_type=content.media_type,
+            filename=(
+                self._legacy_text_filename(metadata.name)
+                if content.variant is FileContentVariant.EXTRACTED_TEXT
+                else metadata.name
+            ),
+            sha256=content.sha256,
+            content_range=None,
+            range_supported=metadata.file_type is FileType.AUDIO,
+            _close=close,
+        )
+
+    async def _open_legacy_audio_download(
+        self,
+        metadata: FileMetadata,
+        *,
+        range_header: str | None,
+        info: LegacyFileInfoRecord | None = None,
+    ) -> FileDownload:
+        if info is None:
+            info = await self._legacy_audio_info(metadata.id)
+        if info is None:
+            raise NotFoundException(f"File {metadata.id} has no durable content")
+        selected_range = self._parse_requested_range(
+            range_header,
+            size_bytes=info.size_bytes,
+        )
+        content = await self.repo.get_legacy_audio_slice(
+            metadata.id,
+            selected_range,
+        )
+        if content is None:
+            raise NotFoundException(f"File {metadata.id} has no durable content")
+        return self._legacy_audio_file_download(
+            metadata,
+            content,
+            sha256=info.sha256,
+            selected_range=selected_range,
+        )
+
+    @staticmethod
+    def _legacy_audio_file_download(
+        metadata: FileMetadata,
+        content: LegacyAudioSlice,
+        *,
+        sha256: bytes,
+        selected_range: ByteRange | None,
+    ) -> FileDownload:
+        async def stream() -> AsyncGenerator[bytes]:
+            yield content.payload
+
+        async def close() -> None:
+            return None
+
+        return FileDownload(
+            chunks=stream(),
+            content_length=len(content.payload),
+            media_type=content.media_type,
+            filename=metadata.name,
+            sha256=sha256,
+            content_range=(
+                None if selected_range is None else selected_range.response_header
+            ),
+            range_supported=True,
+            _close=close,
+        )
+
+    async def _legacy_audio_info(self, file_id: UUID) -> LegacyFileInfoRecord | None:
+        return next(
+            (
+                info
+                for info in await self.repo.get_legacy_infos([file_id])
+                if info.variant is FileContentVariant.ORIGINAL
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _parse_requested_range(
+        range_header: str | None,
+        *,
+        size_bytes: int,
+    ) -> ByteRange | None:
+        if range_header is None:
+            return None
+        try:
+            return ByteRange.parse(range_header, size_bytes=size_bytes)
+        except InvalidContentRangeError as exc:
+            raise FileContentRangeError(
+                str(exc),
+                total_size=size_bytes,
+            ) from exc
+
     @staticmethod
     def _legacy_text_filename(filename: str) -> str:
         stem, separator, _extension = filename.rpartition(".")
@@ -774,7 +947,8 @@ class FileService:
 
     async def _file_info(self, metadata: FileMetadata) -> FileInfo:
         references = await self.repo.get_content_references([metadata.id])
-        return project_file_info(metadata, references)
+        legacy_infos = await self.repo.get_legacy_infos([metadata.id])
+        return project_file_info(metadata, references, legacy_infos)
 
     async def _project_public_files(
         self,
@@ -784,34 +958,61 @@ class FileService:
             [file.id for file in metadata]
         )
         by_file = self._references_by_file(references)
-        transcription_by_file: dict[UUID, FileContentReferenceRecord] = {}
+        legacy_infos = await self.repo.get_legacy_infos([file.id for file in metadata])
+        legacy_info_by_file = {info.file_id: info for info in legacy_infos}
+        transcription_requests = {
+            file.id: {FileContentVariant.TRANSCRIPTION}
+            for file in metadata
+            if self._first_reference(
+                by_file[file.id],
+                FileContentVariant.TRANSCRIPTION,
+            )
+            is None
+        }
+        legacy_content = await self.repo.get_legacy_content(transcription_requests)
+        legacy_by_file = self._legacy_content_by_file(legacy_content)
+        transcription_by_file: dict[
+            UUID,
+            FileContentReferenceRecord | LegacyFileContentRecord,
+        ] = {}
         grants: list[ContentReadGrant] = []
         for file in metadata:
-            transcription_reference = self._first_reference(
+            transcription_reference = select_file_content_variant(
                 by_file[file.id],
+                legacy_by_file[file.id],
                 FileContentVariant.TRANSCRIPTION,
             )
             if transcription_reference is None:
                 continue
             transcription_by_file[file.id] = transcription_reference
-            grants.append(
-                ContentReadGrant(
-                    content_id=transcription_reference.content_id,
-                    tenant_id=file.tenant_id,
-                    access_class=transcription_reference.access_class,
+            if isinstance(transcription_reference, FileContentReferenceRecord):
+                grants.append(
+                    ContentReadGrant(
+                        content_id=transcription_reference.content_id,
+                        tenant_id=file.tenant_id,
+                        access_class=transcription_reference.access_class,
+                    )
                 )
-            )
         payloads = await self._object_content.read_content_bytes(grants)
 
         projected: list[FilePublic] = []
         for file in metadata:
             file_references = by_file[file.id]
-            info = project_file_info(file, file_references)
+            file_legacy_info = legacy_info_by_file.get(file.id)
+            info = project_file_info(
+                file,
+                file_references,
+                [] if file_legacy_info is None else [file_legacy_info],
+            )
             transcription_reference = transcription_by_file.get(file.id)
             transcription = (
                 None
                 if transcription_reference is None
-                else payloads[transcription_reference.content_id].decode("utf-8")
+                else (
+                    transcription_reference.payload
+                    if isinstance(transcription_reference, LegacyFileContentRecord)
+                    else payloads[transcription_reference.content_id]
+                ).decode("utf-8")
             )
             projected.append(
                 FilePublic(
@@ -819,11 +1020,17 @@ class FileService:
                     transcription=transcription,
                     has_download_reference=(
                         file.file_type is FileType.TEXT
-                        and self._first_reference(
-                            file_references,
-                            FileContentVariant.ORIGINAL,
+                        and (
+                            self._first_reference(
+                                file_references,
+                                FileContentVariant.ORIGINAL,
+                            )
+                            is not None
+                            or (
+                                file_legacy_info is not None
+                                and file_legacy_info.original_available
+                            )
                         )
-                        is not None
                     ),
                 )
             )
@@ -864,6 +1071,40 @@ class FileService:
         return by_file
 
     @staticmethod
+    def _legacy_content_by_file(
+        contents: list[LegacyFileContentRecord],
+    ) -> defaultdict[UUID, list[LegacyFileContentRecord]]:
+        by_file: defaultdict[UUID, list[LegacyFileContentRecord]] = defaultdict(list)
+        for content in contents:
+            by_file[content.file_id].append(content)
+        return by_file
+
+    @staticmethod
+    def _legacy_infos_by_file(
+        infos: list[LegacyFileInfoRecord],
+    ) -> defaultdict[UUID, list[LegacyFileInfoRecord]]:
+        by_file: defaultdict[UUID, list[LegacyFileInfoRecord]] = defaultdict(list)
+        for info in infos:
+            by_file[info.file_id].append(info)
+        return by_file
+
+    async def _legacy_primary_content(
+        self,
+        file: FileMetadata,
+        references: list[FileContentReferenceRecord],
+    ) -> list[LegacyFileContentRecord]:
+        variant = legacy_primary_file_variant(
+            file.file_type,
+            parent_file_id=file.parent_file_id,
+        )
+        for preferred_variant in primary_file_variants(file.file_type):
+            if self._first_reference(references, preferred_variant) is not None:
+                return []
+            if preferred_variant is variant:
+                break
+        return await self.repo.get_legacy_content({file.id: {variant}})
+
+    @staticmethod
     def _first_reference(
         references: list[FileContentReferenceRecord],
         variant: FileContentVariant,
@@ -873,22 +1114,29 @@ class FileService:
             None,
         )
 
-    def _primary_reference(
+    def _primary_content(
         self,
         file: FileMetadata,
         references: list[FileContentReferenceRecord],
-    ) -> FileContentReferenceRecord:
-        reference = select_primary_file_reference(file.file_type, references)
+        legacy_content: list[LegacyFileContentRecord],
+    ) -> FileContentReferenceRecord | LegacyFileContentRecord:
+        reference = select_primary_file_content(
+            file.file_type,
+            references,
+            legacy_content,
+        )
         if reference is not None:
             return reference
         raise NotFoundException(f"File {file.id} has no durable content")
 
     @staticmethod
-    def _original_reference(
+    def _original_content(
         references: list[FileContentReferenceRecord],
-    ) -> FileContentReferenceRecord:
-        reference = FileService._first_reference(
+        legacy_content: list[LegacyFileContentRecord],
+    ) -> FileContentReferenceRecord | LegacyFileContentRecord:
+        reference = select_file_content_variant(
             references,
+            legacy_content,
             FileContentVariant.ORIGINAL,
         )
         if reference is None:

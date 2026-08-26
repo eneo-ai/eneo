@@ -10,6 +10,7 @@ import pytest
 from fastapi import UploadFile
 
 from eneo.icons.icon import IconMetadata
+from eneo.icons.icon_repo import LegacyIconContentRecord
 from eneo.icons.icon_service import (
     ICON_ALLOWED_MIMETYPES,
     IconService,
@@ -251,3 +252,47 @@ async def test_open_icon_exposes_the_content_stream_incrementally() -> None:
 
     await opened.aclose()
     assert closed
+
+
+async def test_open_icon_falls_back_to_frozen_legacy_payload() -> None:
+    icon_id = uuid4()
+    tenant_id = uuid4()
+    payload = b"legacy-icon"
+    metadata = IconMetadata(
+        id=icon_id,
+        tenant_id=tenant_id,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+    class Session:
+        def in_transaction(self) -> bool:
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    repository = MagicMock()
+    repository.session = Session()
+    repository.get = AsyncMock(return_value=metadata)
+    repository.get_primary_reference = AsyncMock(return_value=None)
+    repository.get_legacy_primary = AsyncMock(
+        return_value=LegacyIconContentRecord(
+            payload=payload,
+            media_type="image/png",
+        )
+    )
+    object_content = MagicMock()
+    service = IconService(
+        icon_repo=repository,
+        file_size_service=MagicMock(),
+        object_content=object_content,
+    )
+
+    opened = await service.open_icon(icon_id)
+
+    assert b"".join([chunk async for chunk in opened.chunks]) == payload
+    assert opened.content_length == len(payload)
+    assert opened.media_type == "image/png"
+    object_content.open_content.assert_not_called()
