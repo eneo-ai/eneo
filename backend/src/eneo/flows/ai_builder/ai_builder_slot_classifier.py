@@ -754,20 +754,23 @@ def _build_slot_classification_prompt(
         "content proves schema shape, never direction. Return null when direction is "
         "unresolved. "
         "For named_result_evidence: When the user names or enumerates what the final "
-        "result shall contain, cite each stated name with its own exact evidence "
-        "quote. Emitting the citation is always correct when the user stated the "
-        "name. When the user enumerates what the final result shall contain, that "
-        "enumeration IS the field list: emit update with one field name per enumerated "
-        "item. This applies to open-vocabulary names or noun phrases for every "
-        "terminal output type. Use update with upserts for additions and removals for "
-        "removals. Placement is optional enrichment. For each cited leaf, add ordered "
-        "outermost-to-immediate-parent segments only when the cited evidence itself "
-        "proves every immediate parent-child relationship. A quote merely containing "
-        "both names does not prove an edge; do not combine locations' quotes to "
-        "manufacture one. Add unplaced=true or simply omit placement when the location "
-        "is unknown. Never omit a citation because its location is unproven; omit the "
-        "placement instead. Empty segments require evidence that the user put the leaf "
-        "at the top level; an unknown or unproven parent is unplaced, never root. Cite "
+        "result shall contain, cite each stated name. Use the simple form first: put "
+        "each stated name directly in upserts as a string and add delta-level evidence "
+        "quotes covering those names. Use string names in removals for removals. "
+        "Emitting the citation is always correct when the user stated the name. When "
+        "the user enumerates what the final result shall contain, that enumeration IS "
+        "the field list: emit update with one field name per enumerated item. This "
+        "applies to open-vocabulary names or noun phrases for every terminal output "
+        "type. Object entries are optional placement enrichment. Use an object with "
+        "name and its own exact evidence quotes only for a cited name whose location "
+        "you enrich. Add ordered outermost-to-immediate-parent segments only when the "
+        "cited evidence itself proves every immediate parent-child relationship. A "
+        "quote merely containing both names does not prove an edge; do not combine "
+        "locations' quotes to manufacture one. Add unplaced=true or simply omit "
+        "placement when the location is unknown. Never omit a citation because its "
+        "location is unproven; omit the placement instead. Empty segments require "
+        "evidence that the user put the leaf at the top level; an unknown or unproven "
+        "parent is unplaced, never root. Cite "
         "current user_message or structured_answer evidence containing every changed "
         f"name using up to {NAMED_RESULT_DELTA_CITATION_MAX_ITEMS} exact evidence "
         "quotes, and use only as many quotes as needed. Report only additions or "
@@ -895,7 +898,7 @@ def _build_slot_classification_prompt(
         '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"checkpoint_updates": [{"operation": "update"|"clear", "producer_kind": "transcript"|"structured_result"|"report_text", "mode": "view"|"edit"|null, "confidence": "high"|"medium", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
         '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
-        '"named_result_evidence": {"operation": "update"|"clear", "upserts": [{"name": str, ("segments": [str] | "unplaced": true)?, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "removals": [{"name": str, ("segments": [str] | "unplaced": true)?, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
+        '"named_result_evidence": {"operation": "update"|"clear", "upserts": [str | {"name": str, ("segments": [str] | "unplaced": true)?, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "removals": [str | {"name": str, ("segments": [str] | "unplaced": true)?, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"schema_direction": {"input_fingerprint": str|null, "output_fingerprint": str|null, "reference_only": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
         '"secondary_obligations": [str], '

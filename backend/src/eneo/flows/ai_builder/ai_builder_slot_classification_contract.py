@@ -646,6 +646,8 @@ def _parse_named_result_evidence(
     )
     if upserts is None or removals is None:
         return None
+    if operation == "update" and not (upserts or removals):
+        return None
     identities = [
         _classified_named_result_identity(changed) for changed in (*upserts, *removals)
     ]
@@ -767,60 +769,74 @@ def _parse_cited_named_result_locations(
     locations: list[ClassifiedNamedResultEvidence] = []
     allowed_evidence_set = set(allowed_evidence)
     for raw_location in raw_locations:
-        if not isinstance(raw_location, dict):
-            return None
-        payload = cast(dict[str, object], raw_location)
-        raw_name = payload.get("name")
-        explicitly_unplaced = payload.get("unplaced") is True
-        has_segments = "segments" in payload
-        placement_omitted = not has_segments and "unplaced" not in payload
-        is_unplaced = explicitly_unplaced or placement_omitted
-        raw_segments = payload.get("segments")
-        if not isinstance(raw_name, str) or not raw_name:
-            return None
-        if is_unplaced:
-            expected_fields = (
-                {"name", "evidence"}
-                if placement_omitted
-                else {"name", "unplaced", "evidence"}
-            )
-            if has_segments or set(payload) != expected_fields:
-                return None
+        if isinstance(raw_location, str):
+            is_string_entry = True
+            raw_name = raw_location
+            is_unplaced = True
             segments: list[str] = []
-        elif (
-            payload.get("unplaced") is not None
-            or not has_segments
-            or set(payload) != {"name", "segments", "evidence"}
-            or not isinstance(raw_segments, list)
-            or any(
-                not isinstance(segment, str) or not segment
-                for segment in cast(list[object], raw_segments)
+            evidence = allowed_evidence
+        elif isinstance(raw_location, dict):
+            is_string_entry = False
+            payload = cast(dict[str, object], raw_location)
+            raw_name = payload.get("name")
+            explicitly_unplaced = payload.get("unplaced") is True
+            has_segments = "segments" in payload
+            placement_omitted = not has_segments and "unplaced" not in payload
+            is_unplaced = explicitly_unplaced or placement_omitted
+            raw_segments = payload.get("segments")
+            if not isinstance(raw_name, str) or not raw_name:
+                continue
+            if is_unplaced:
+                expected_fields = (
+                    {"name", "evidence"}
+                    if placement_omitted
+                    else {"name", "unplaced", "evidence"}
+                )
+                if has_segments or set(payload) != expected_fields:
+                    continue
+                segments = []
+            elif (
+                payload.get("unplaced") is not None
+                or not has_segments
+                or set(payload) != {"name", "segments", "evidence"}
+                or not isinstance(raw_segments, list)
+                or any(
+                    not isinstance(segment, str) or not segment
+                    for segment in cast(list[object], raw_segments)
+                )
+            ):
+                continue
+            else:
+                segments = cast(list[str], raw_segments)
+            evidence = _parse_classification_evidence(
+                payload.get("evidence", []),
+                classification_input=classification_input,
+                max_items=NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
             )
-        ):
-            return None
+            if not evidence or any(
+                citation not in allowed_evidence_set for citation in evidence
+            ):
+                continue
         else:
-            segments = cast(list[str], raw_segments)
-        evidence = _parse_classification_evidence(
-            payload.get("evidence", []),
-            classification_input=classification_input,
-            max_items=NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
-        )
-        if not evidence or any(
-            citation not in allowed_evidence_set for citation in evidence
-        ):
-            return None
+            continue
+        if not raw_name:
+            continue
         named_evidence = _cited_named_result_evidence(
             raw_name,
             evidence=evidence,
             source_texts=source_texts,
         )
         if named_evidence is None:
+            if is_string_entry:
+                continue
             return None
         if require_removal_intent and not _named_result_removal_has_attestation(
             name=raw_name,
             evidence=named_evidence.evidence,
             source_texts=source_texts,
         ):
+            if is_string_entry:
+                continue
             return None
         if is_unplaced:
             placement: NamedResultPlacement = UnplacedNamedResultPlacement()
@@ -2158,6 +2174,11 @@ def _classified_named_result_location_schema() -> dict[str, object]:
     }
     return {
         "anyOf": [
+            {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+            },
             {
                 "type": "object",
                 "additionalProperties": False,
