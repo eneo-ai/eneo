@@ -191,6 +191,8 @@ async def object_content_database(
         await session.execute(
             text(
                 "TRUNCATE TABLE "
+                "file_icon_backfill_campaign, "
+                "file_icon_backfill_items, "
                 "object_store_connections, "
                 "object_store_bindings, "
                 "object_contents, "
