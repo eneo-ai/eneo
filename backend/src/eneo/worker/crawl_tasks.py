@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.embedding_models.domain.chunking import (
+    chunking_is_unchanged,
+)
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
@@ -727,7 +730,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # These will be populated by bootstrap
             crawl_context: CrawlContext
             existing_titles: list[str] = []
-            existing_publications: dict[str, tuple[bytes, UUID]] = {}
+            existing_publications: dict[
+                str, tuple[bytes, UUID, int | None, int | None]
+            ] = {}
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -882,6 +887,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     tenant_id=website.tenant_id,
                     tenant_slug=tenant.slug if tenant else None,
                     user_id=container.user().id,
+                    chunk_size=website.chunk_size,
+                    chunk_overlap=website.chunk_overlap,
                     # Embedding model - use EmbeddingModelSpec DTO (already extracted)
                     embedding_model_id=embedding_model_spec.id
                     if embedding_model_spec
@@ -918,6 +925,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     InfoBlobs.title,
                     InfoBlobs.content_hash,
                     InfoBlobs.embedding_model_id,
+                    InfoBlobs.chunk_size,
+                    InfoBlobs.chunk_overlap,
                 ).where(
                     InfoBlobs.website_id == params.website_id,
                     active_info_blob_version(),
@@ -925,10 +934,21 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 blob_result = await bootstrap_session.execute(stmt)
 
                 # Build lookups for O(1) operations
-                for title, hash_bytes, model_id in blob_result:
+                for (
+                    title,
+                    hash_bytes,
+                    model_id,
+                    blob_chunk_size,
+                    blob_chunk_overlap,
+                ) in blob_result:
                     existing_titles.append(title)
                     if hash_bytes is not None and model_id is not None:
-                        existing_publications[title] = (hash_bytes, model_id)
+                        existing_publications[title] = (
+                            hash_bytes,
+                            model_id,
+                            blob_chunk_size,
+                            blob_chunk_overlap,
+                        )
 
             finally:
                 # Always close the bootstrap session to return connection to pool
@@ -1154,9 +1174,17 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                         existing_file = existing_publications.get(filename)
 
-                        if embedding_model_spec is not None and existing_file == (
-                            new_file_hash,
-                            embedding_model_spec.id,
+                        if (
+                            embedding_model_spec is not None
+                            and existing_file is not None
+                            and existing_file[0] == new_file_hash
+                            and existing_file[1] == embedding_model_spec.id
+                            and chunking_is_unchanged(
+                                stored_chunk_size=existing_file[2],
+                                stored_chunk_overlap=existing_file[3],
+                                requested_chunk_size=crawl_context.chunk_size,
+                                requested_chunk_overlap=crawl_context.chunk_overlap,
+                            )
                         ):
                             # File unchanged - skip processing
                             num_skipped_files += 1
@@ -1189,6 +1217,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 website_id=params.website_id,
                                 embedding_model=file_embedding_model,
                                 content_hash=new_file_hash,
+                                chunk_size=crawl_context.chunk_size,
+                                chunk_overlap=crawl_context.chunk_overlap,
                             )
 
                         await execute_with_recovery(

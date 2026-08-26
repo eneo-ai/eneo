@@ -673,6 +673,8 @@ class SpaceRepository:
                         user_id=c.user_id,
                         embedding_model_id=c.embedding_model.id,
                         space_id=c.space_id,  # Space_id blir som owner_space_id
+                        chunk_size=c.chunk_size,
+                        chunk_overlap=c.chunk_overlap,
                     )
                     for c in new_collections
                 ]
@@ -688,6 +690,8 @@ class SpaceRepository:
                     name=c.name,
                     size=_set_size_subquery(c),
                     embedding_model_id=c.embedding_model.id,
+                    chunk_size=c.chunk_size,
+                    chunk_overlap=c.chunk_overlap,
                 )
                 .where(CollectionsTable.id == c.id)
             )
@@ -779,6 +783,8 @@ class SpaceRepository:
                         user_id=website.user_id,
                         embedding_model_id=website.embedding_model.id,
                         space_id=space_in_db.id,
+                        chunk_size=website.chunk_size,
+                        chunk_overlap=website.chunk_overlap,
                         **auth_fields,
                     )
                 )
@@ -797,6 +803,8 @@ class SpaceRepository:
                     update_interval=website.update_interval,
                     size=_set_size_subquery(website),
                     embedding_model_id=website.embedding_model.id,
+                    chunk_size=website.chunk_size,
+                    chunk_overlap=website.chunk_overlap,
                     **auth_fields,
                 )
                 .where(WebsitesTable.id == website.id)

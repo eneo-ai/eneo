@@ -33,6 +33,21 @@ class InfoBlobs(BasePublic):
             postgresql_where=text("version_state = 'active'"),
         ),
         Index("ix_info_blobs_source_id", "source_id"),
+        # Scopes the SharePoint delta's chunk-drift check to one source. Partial and
+        # stamp-covering so the comparison stays in the index; created CONCURRENTLY
+        # by the migration.
+        Index(
+            "ix_info_blobs_integration_knowledge_chunking",
+            "integration_knowledge_id",
+            "chunk_size",
+            "chunk_overlap",
+            postgresql_where=text(
+                "version_state = 'active' "
+                "AND integration_knowledge_id IS NOT NULL "
+                "AND chunk_size IS NOT NULL "
+                "AND chunk_overlap IS NOT NULL"
+            ),
+        ),
     )
 
     text: Mapped[str] = mapped_column()
@@ -45,6 +60,10 @@ class InfoBlobs(BasePublic):
     )
     source_id: Mapped[UUID] = mapped_column(nullable=False)
     version_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Effective chunking these chunks were produced with. NULL means the blob
+    # predates this column; the stale check treats that as unknown, not a mismatch.
+    chunk_size: Mapped[Optional[int]] = mapped_column(nullable=True)
+    chunk_overlap: Mapped[Optional[int]] = mapped_column(nullable=True)
 
     # Foreign keys
     user_id: Mapped[UUID] = mapped_column(

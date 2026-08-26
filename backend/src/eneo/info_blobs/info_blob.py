@@ -68,6 +68,9 @@ class InfoBlobAdd(InfoBlobBase, InfoBlobMetadataUpsertPublic):
     integration_knowledge_id: Optional[UUID] = None
     content_hash: Optional[bytes] = None
     sharepoint_item_id: Optional[str] = None
+    # Effective chunking used for this blob's chunks, filled in at publish time.
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
 
     @model_validator(mode="after")
     def require_one_of_group_id_and_website_id(self) -> "InfoBlobAdd":
@@ -117,6 +120,10 @@ class InfoBlobInDBNoText(InDB):
     integration_knowledge_id: Optional[UUID] = None
     sharepoint_item_id: Optional[str] = None
     content_hash: Optional[bytes] = None
+    # Effective chunking the stored chunks were produced with; None for material
+    # ingested before this was recorded.
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
     source_id: UUID
     version_state: str
 

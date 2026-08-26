@@ -124,7 +124,9 @@ async def test_concurrent_deliveries_start_compute_at_most_once_and_preserve_sta
                 SimpleNamespace(
                     get_group=AsyncMock(
                         return_value=SimpleNamespace(
-                            embedding_model=SimpleNamespace(id=uuid4())
+                            embedding_model=SimpleNamespace(id=uuid4()),
+                            chunk_size=None,
+                            chunk_overlap=None,
                         )
                     )
                 )
@@ -217,7 +219,9 @@ async def test_successful_upload_publishes_cas_statuses_without_generic_db_write
             SimpleNamespace(
                 get_group=AsyncMock(
                     return_value=SimpleNamespace(
-                        embedding_model=SimpleNamespace(id=uuid4())
+                        embedding_model=SimpleNamespace(id=uuid4()),
+                        chunk_size=None,
+                        chunk_overlap=None,
                     )
                 )
             )
@@ -322,7 +326,9 @@ async def test_transcription_releases_its_session_before_remote_work(
             SimpleNamespace(
                 get_group=AsyncMock(
                     return_value=SimpleNamespace(
-                        embedding_model=SimpleNamespace(id=uuid4())
+                        embedding_model=SimpleNamespace(id=uuid4()),
+                        chunk_size=None,
+                        chunk_overlap=None,
                     )
                 )
             )
@@ -408,10 +414,15 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
 
     original_chunk_text = Datastore._chunk_text
 
-    def chunk_text(datastore: Datastore, info_blob: InfoBlobInDB):
+    def chunk_text(
+        datastore: Datastore,
+        info_blob: InfoBlobInDB,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ):
         if stalled_phase == "chunking":
             stall_sync_phase()
-        return original_chunk_text(datastore, info_blob)
+        return original_chunk_text(datastore, info_blob, chunk_size, chunk_overlap)
 
     monkeypatch.setattr(Datastore, "_chunk_text", chunk_text)
 
@@ -459,7 +470,9 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
             SimpleNamespace(
                 get_group=AsyncMock(
                     return_value=SimpleNamespace(
-                        embedding_model=SimpleNamespace(id=uuid4())
+                        embedding_model=SimpleNamespace(id=uuid4()),
+                        chunk_size=None,
+                        chunk_overlap=None,
                     )
                 )
             )
@@ -554,7 +567,9 @@ async def test_heartbeat_recovers_after_one_failed_database_update(
             SimpleNamespace(
                 get_group=AsyncMock(
                     return_value=SimpleNamespace(
-                        embedding_model=SimpleNamespace(id=uuid4())
+                        embedding_model=SimpleNamespace(id=uuid4()),
+                        chunk_size=None,
+                        chunk_overlap=None,
                     )
                 )
             )
@@ -702,7 +717,9 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
             SimpleNamespace(
                 get_group=AsyncMock(
                     return_value=SimpleNamespace(
-                        embedding_model=SimpleNamespace(id=uuid4())
+                        embedding_model=SimpleNamespace(id=uuid4()),
+                        chunk_size=None,
+                        chunk_overlap=None,
                     )
                 )
             )

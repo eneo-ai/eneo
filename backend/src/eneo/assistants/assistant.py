@@ -8,6 +8,7 @@ from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.embedding_models.domain.chunking import resolve_chunk_config
 from eneo.files.file_models import File, FileType
 from eneo.files.text import TextMimeTypes
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -221,6 +222,21 @@ class Assistant(Entity):
             self._validate_embedding_model(collections)
 
         self._collections = collections
+
+    def _smallest_chunk_size(self) -> int:
+        """The finest chunking any attached source uses, resolved through defaults.
+
+        Falls back to the platform default when the assistant has no knowledge.
+        """
+        sizes = [
+            resolve_chunk_config(source.chunk_size, source.chunk_overlap)[0]
+            for source in (
+                *self.collections,
+                *self.websites,
+                *self._integration_knowledge_list,
+            )
+        ]
+        return min(sizes) if sizes else resolve_chunk_config(None, None)[0]
 
     @property
     def integration_knowledge_list(self):
@@ -496,9 +512,13 @@ class Assistant(Entity):
                     f"Completion model {effective_model.name} do not support vision."
                 )
 
-        # Fill half the context
+        # Fill half the context. The exact budget is enforced in the context
+        # builder; this count only has to fetch enough rows, so it divides by the
+        # smallest chunk size among the sources to avoid under-filling.
         num_chunks = (
-            effective_model.max_input_tokens // 200 // 2 if version == 2 else 30
+            effective_model.max_input_tokens // self._smallest_chunk_size() // 2
+            if version == 2
+            else 30
         )
 
         # Tool mode: the loopback knowledge-MCP server (when provided by the

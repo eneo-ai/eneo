@@ -1,7 +1,17 @@
 from copy import deepcopy
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generic, Optional, Tuple, Type, TypeVar, Union, cast
+from typing import (
+    Annotated,
+    Any,
+    Generic,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 from uuid import UUID
 
 from pydantic import (
@@ -11,11 +21,17 @@ from pydantic import (
     GetCoreSchemaHandler,
     computed_field,
     create_model,
+    model_validator,
 )
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
 from typing_extensions import TypeIs, override
 
+from eneo.embedding_models.domain.chunking import (
+    MAX_CHUNK_SIZE,
+    MIN_CHUNK_SIZE,
+    validate_overlap_within_policy,
+)
 from eneo.main.exceptions import ErrorCodes
 
 T = TypeVar("T")
@@ -123,6 +139,26 @@ class InDB(BaseResponse):
 
 class ResourcePermissionsMixin(BaseModel):
     permissions: list[ResourcePermission] = []
+
+
+class ChunkConfigRequestMixin(BaseModel):
+    """Chunk configuration a client may set on a knowledge source.
+
+    Customisation is pair-level: both ``None`` delegates to the platform default,
+    while giving either one stores the whole resolved pair. An overlap above the
+    policy ceiling is refused here rather than adjusted at split time.
+    """
+
+    chunk_size: Optional[
+        Annotated[int, Field(ge=MIN_CHUNK_SIZE, le=MAX_CHUNK_SIZE)]
+    ] = None
+    chunk_overlap: Optional[Annotated[int, Field(ge=0)]] = None
+
+    @model_validator(mode="after")
+    def _overlap_within_policy(self):
+        if self.chunk_size is not None and self.chunk_overlap is not None:
+            validate_overlap_within_policy(self.chunk_size, self.chunk_overlap)
+        return self
 
 
 class PaginatedResponse(BaseModel, Generic[T]):

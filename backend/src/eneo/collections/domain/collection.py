@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional, Union, cast, overload
 from typing_extensions import override
 
 from eneo.base.base_entity import Entity
+from eneo.embedding_models.domain.chunking import resolve_source_chunk_config
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 
 if TYPE_CHECKING:
@@ -29,6 +30,8 @@ class Collection(Entity):
         size: int,
         num_info_blobs: int,
         embedding_model: "EmbeddingModel",
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -38,6 +41,8 @@ class Collection(Entity):
         self.size = size
         self.num_info_blobs = num_info_blobs
         self.embedding_model = embedding_model
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
 
     @overload
     @classmethod
@@ -134,8 +139,25 @@ class Collection(Entity):
             size=record.size,
             num_info_blobs=num_info_blobs,
             embedding_model=embedding_model,
+            chunk_size=record.chunk_size,
+            chunk_overlap=record.chunk_overlap,
         )
 
-    def update(self, name: Union[str, NotProvided] = NOT_PROVIDED):
+    def update(
+        self,
+        name: Union[str, NotProvided] = NOT_PROVIDED,
+        chunk_size: Union[int, None, NotProvided] = NOT_PROVIDED,
+        chunk_overlap: Union[int, None, NotProvided] = NOT_PROVIDED,
+    ):
         if is_provided(name):
             self.name = name
+        if is_provided(chunk_size) or is_provided(chunk_overlap):
+            # Merge with what is already stored: the two fields are one setting, and a
+            # size-only change still has to be valid next to the retained overlap.
+            self.chunk_size, self.chunk_overlap = resolve_source_chunk_config(
+                chunk_size=chunk_size if is_provided(chunk_size) else self.chunk_size,
+                chunk_overlap=(
+                    chunk_overlap if is_provided(chunk_overlap) else self.chunk_overlap
+                ),
+                max_input=self.embedding_model.max_input,
+            )

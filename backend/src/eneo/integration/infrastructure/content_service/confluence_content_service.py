@@ -143,6 +143,8 @@ class ConfluenceContentService:
             await self.info_blob_service.publish_info_blob_without_validation(
                 info_blob_add,
                 embedding_model=integration_knowledge.embedding_model,
+                chunk_size=integration_knowledge.chunk_size,
+                chunk_overlap=integration_knowledge.chunk_overlap,
             )
 
         integration_knowledge.size = (

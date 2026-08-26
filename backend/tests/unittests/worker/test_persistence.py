@@ -172,6 +172,8 @@ class TestPreparedPageDataclass:
             content_hash=b"\x00" * 32,  # 32-byte hash
             chunks=["chunk1", "chunk2"],
             embeddings=[[0.1, 0.2], [0.3, 0.4]],
+            chunk_size=200,
+            chunk_overlap=40,
             tenant_id=uuid4(),
             website_id=uuid4(),
             user_id=uuid4(),
@@ -182,6 +184,8 @@ class TestPreparedPageDataclass:
         assert prepared.title == "Test Page"
         assert len(prepared.chunks) == 2
         assert len(prepared.embeddings) == 2
+        # Carried through to the info blob so a later crawl can detect a config change.
+        assert (prepared.chunk_size, prepared.chunk_overlap) == (200, 40)
 
 
 class TestCrawlContextDataclass:

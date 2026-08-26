@@ -38,6 +38,8 @@ class TextProcessor:
         group_id: UUID | None = None,
         website_id: UUID | None = None,
         content_hash: bytes | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
         original: PreparedKnowledgeOriginal | None = None,
     ):
         text = self.extractor.extract(filepath, mimetype)
@@ -49,6 +51,8 @@ class TextProcessor:
             group_id=group_id,
             website_id=website_id,
             content_hash=content_hash,  # Pass hash for files too
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             original=original,
         )
 
@@ -81,6 +85,8 @@ class TextProcessor:
         embedding_model: "EmbeddingModel",
         group_id: UUID,
         original: CapturedKnowledgeOriginal,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> InfoBlobInDB | None:
         return await self.info_blob_service.try_refresh_healthy_reupload(
             self._info_blob_add(
@@ -93,6 +99,8 @@ class TextProcessor:
             ),
             embedding_model=embedding_model,
             original=original,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
     async def precheck_knowledge_publication_capacity(
@@ -103,6 +111,8 @@ class TextProcessor:
         embedding_model: "EmbeddingModel",
         group_id: UUID,
         original: CapturedKnowledgeOriginal,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> None:
         await self.info_blob_service.precheck_knowledge_publication_capacity(
             self._info_blob_add(
@@ -115,6 +125,8 @@ class TextProcessor:
             ),
             embedding_model=embedding_model,
             original=original,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
     async def process_text(
@@ -127,6 +139,8 @@ class TextProcessor:
         website_id: UUID | None = None,
         url: str | None = None,
         content_hash: bytes | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
         original: PreparedKnowledgeOriginal | None = None,
     ):
         info_blob_add = self._info_blob_add(
@@ -141,5 +155,7 @@ class TextProcessor:
         return await self.info_blob_service.publish_info_blob_without_validation(
             info_blob_add,
             embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             original=original,
         )

@@ -5,6 +5,10 @@ from uuid import UUID
 
 from eneo.actors import SpaceAction
 from eneo.admin.quota_service import QuotaService
+from eneo.embedding_models.domain.chunking import (
+    chunking_is_unchanged,
+    resolve_chunk_config,
+)
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
     CapturedKnowledgeOriginal,
@@ -139,6 +143,8 @@ class InfoBlobService:
         *,
         embedding_model: "EmbeddingModel",
         original: CapturedKnowledgeOriginal,
+        chunk_size: int | None,
+        chunk_overlap: int | None,
     ) -> None:
         """Reject combined original and text growth before remote publication.
 
@@ -155,7 +161,11 @@ class InfoBlobService:
                 info_blob,
                 embedding_model=embedding_model,
                 original=original,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
+            # A chunking change republishes the text, so its size is retained again
+            # and has to clear the quota here like any other growth.
             if match.same_searchable_content and match.same_original:
                 return
             await self.quota_service.ensure_capacity(
@@ -168,7 +178,15 @@ class InfoBlobService:
         *,
         embedding_model: "EmbeddingModel",
         original: CapturedKnowledgeOriginal | None,
+        chunk_size: int | None,
+        chunk_overlap: int | None,
     ) -> _PublicationMatch:
+        """Decide whether stored material still satisfies this publication.
+
+        ``chunk_size``/``chunk_overlap`` are the source's own configuration
+        (``None`` = platform default), required rather than defaulted so a caller
+        cannot silently compare an explicitly configured source against the default.
+        """
         original_sha256 = original.captured.sha256 if original is not None else None
         await self.repo.lock_publication_identity(
             info_blob,
@@ -181,10 +199,18 @@ class InfoBlobService:
         active = (
             active_publication.info_blob if active_publication is not None else None
         )
+        # The same bytes split at different boundaries produce different embeddings,
+        # so material chunked under a superseded configuration is stale too.
         same_searchable_content = (
             active is not None
             and active.content_hash == info_blob.content_hash
             and active.embedding_model_id == embedding_model.id
+            and chunking_is_unchanged(
+                stored_chunk_size=active.chunk_size,
+                stored_chunk_overlap=active.chunk_overlap,
+                requested_chunk_size=chunk_size,
+                requested_chunk_overlap=chunk_overlap,
+            )
         )
         existing_original = (
             active_publication.original if active_publication is not None else None
@@ -220,6 +246,8 @@ class InfoBlobService:
         *,
         embedding_model: "EmbeddingModel",
         original: CapturedKnowledgeOriginal,
+        chunk_size: int | None,
+        chunk_overlap: int | None,
     ) -> InfoBlobInDB | None:
         if info_blob.content_hash is None:
             info_blob.content_hash = sha256(info_blob.text.encode("utf-8")).digest()
@@ -229,6 +257,8 @@ class InfoBlobService:
                 info_blob,
                 embedding_model=embedding_model,
                 original=original,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
             if not match.same_searchable_content or not match.same_original:
                 return None
@@ -309,16 +339,28 @@ class InfoBlobService:
         info_blob: InfoBlobAdd,
         *,
         embedding_model: "EmbeddingModel",
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
         original: PreparedKnowledgeOriginal | None = None,
     ) -> InfoBlobInDB:
         if info_blob.content_hash is None:
             info_blob.content_hash = sha256(info_blob.text.encode("utf-8")).digest()
+
+        # Record what the text is actually split with, not what was requested, so a
+        # later publish can tell whether the chunking in force has changed.
+        effective_chunk_size, effective_chunk_overlap = resolve_chunk_config(
+            chunk_size, chunk_overlap
+        )
+        info_blob.chunk_size = effective_chunk_size
+        info_blob.chunk_overlap = effective_chunk_overlap
 
         async with self.repo.session.begin_nested():
             match = await self._lock_publication_match(
                 info_blob,
                 embedding_model=embedding_model,
                 original=original,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
             active_publication = match.publication
             active = (
@@ -365,6 +407,8 @@ class InfoBlobService:
             await self.datastore.add(
                 info_blob=published,
                 embedding_model=embedding_model,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
             if original is not None:
                 prepared = await self._prepare_original(info_blob, original)
@@ -383,6 +427,8 @@ class InfoBlobService:
         info_blobs: list[InfoBlobAdd],
         *,
         embedding_model: "EmbeddingModel",
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> list[InfoBlobInDB]:
         await self._can_perform_action(group_id=group_id, action=SpaceAction.CREATE)
 
@@ -390,6 +436,8 @@ class InfoBlobService:
             await self.publish_info_blob_without_validation(
                 blob,
                 embedding_model=embedding_model,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
             for blob in info_blobs
         ]

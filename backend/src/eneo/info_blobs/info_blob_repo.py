@@ -694,6 +694,37 @@ class InfoBlobRepository:
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
+    async def any_active_chunking_differs_for_integration_knowledge(
+        self,
+        integration_knowledge_id: UUID,
+        *,
+        effective_chunk_size: int,
+        effective_chunk_overlap: int,
+    ) -> bool:
+        """Whether any active blob of this source was chunked differently.
+
+        A stamp of NULL predates the columns and is deliberately not a difference —
+        the same rule the shared stale check applies. Kept as an EXISTS so a delta
+        sync can ask the question without loading a whole corpus.
+        """
+        record = await self.session.scalar(
+            sa.select(sa.literal(True)).where(
+                sa.exists(
+                    sa.select(InfoBlobs.id).where(
+                        InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+                        active_info_blob_version(),
+                        InfoBlobs.chunk_size.is_not(None),
+                        InfoBlobs.chunk_overlap.is_not(None),
+                        sa.or_(
+                            InfoBlobs.chunk_size != effective_chunk_size,
+                            InfoBlobs.chunk_overlap != effective_chunk_overlap,
+                        ),
+                    )
+                )
+            )
+        )
+        return bool(record)
+
     async def get_by_sharepoint_item_and_integration_knowledge(
         self,
         sharepoint_item_id: str,

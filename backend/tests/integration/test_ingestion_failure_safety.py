@@ -362,9 +362,9 @@ async def test_upload_failure_preserves_committed_prior_knowledge(
         monkeypatch.setattr(
             Datastore,
             "_chunk_text",
-            lambda self, info_blob: (_ for _ in ()).throw(
-                RuntimeError("chunking failed")
-            ),
+            lambda self, info_blob, chunk_size=None, chunk_overlap=None: (
+                _ for _ in ()
+            ).throw(RuntimeError("chunking failed")),
         )
     async with db_container():
         result = await upload_info_blob_task(
@@ -626,6 +626,8 @@ async def test_reaped_job_cannot_publish_or_report_success(
         info_blob,
         *,
         embedding_model,
+        chunk_size=None,
+        chunk_overlap=None,
         original=None,
     ):
         nonlocal reaped_finished_at
@@ -633,6 +635,8 @@ async def test_reaped_job_cannot_publish_or_report_success(
             self,
             info_blob,
             embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             original=original,
         )
         async with sessionmanager.session() as session, session.begin():

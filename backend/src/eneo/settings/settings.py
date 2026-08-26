@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
+from eneo.embedding_models.domain import chunking
 from eneo.main.models import InDB
 from eneo.skills.domain.skill import (
     MAX_SKILL_ACTIVATIONS_PER_TURN,
@@ -31,6 +32,32 @@ class SettingsInDB(SettingsUpsert, InDB):
     pass
 
 
+class ChunkingPolicyPublic(BaseModel):
+    """Platform chunking policy, so clients do not duplicate backend constants.
+
+    The defaults are env-overridable per deployment; the fractions are shares of
+    an embedding model's ``max_input`` and of the chunk size respectively.
+    """
+
+    default_chunk_size: int
+    default_chunk_overlap: int
+    min_chunk_size: int
+    max_chunk_size: int
+    max_chunk_fraction: float
+    max_overlap_fraction: float
+
+    @classmethod
+    def from_platform(cls) -> "ChunkingPolicyPublic":
+        return cls(
+            default_chunk_size=chunking.settings.chunk_size,
+            default_chunk_overlap=chunking.settings.chunk_overlap,
+            min_chunk_size=chunking.MIN_CHUNK_SIZE,
+            max_chunk_size=chunking.MAX_CHUNK_SIZE,
+            max_chunk_fraction=chunking.MAX_CHUNK_FRACTION,
+            max_overlap_fraction=chunking.MAX_OVERLAP_FRACTION,
+        )
+
+
 class SettingsPublic(SettingsBase):
     object_content_enabled: bool = False
     using_templates: bool = False  # Feature flag for template management
@@ -44,6 +71,7 @@ class SettingsPublic(SettingsBase):
     api_key_expiry_notifications: bool = (
         True  # Per-tenant API key expiry notifications toggle
     )
+    chunking: ChunkingPolicyPublic
     # Read-only: whether signed file-reference URLs can be minted (a reference
     # base URL or public origin is configured). Gates UI that only makes sense
     # with them (e.g. the assistant inline-file-text toggle). Computed from

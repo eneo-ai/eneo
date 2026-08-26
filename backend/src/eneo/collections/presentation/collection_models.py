@@ -6,7 +6,11 @@ from pydantic import BaseModel
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
-from eneo.main.models import BaseResponse, ResourcePermissionsMixin
+from eneo.main.models import (
+    BaseResponse,
+    ChunkConfigRequestMixin,
+    ResourcePermissionsMixin,
+)
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
@@ -22,6 +26,8 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
     embedding_model: EmbeddingModelPublic
     metadata: CollectionMetadata
     space_id: UUID
+    chunk_size: int | None = None
+    chunk_overlap: int | None = None
 
     @classmethod
     def from_domain(cls, collection: "Collection"):
@@ -39,8 +45,10 @@ class CollectionPublic(ResourcePermissionsMixin, BaseResponse):
             ),
             permissions=collection.permissions,
             space_id=collection.space_id,
+            chunk_size=collection.chunk_size,
+            chunk_overlap=collection.chunk_overlap,
         )
 
 
-class CollectionUpdate(BaseModel):
+class CollectionUpdate(ChunkConfigRequestMixin):
     name: str

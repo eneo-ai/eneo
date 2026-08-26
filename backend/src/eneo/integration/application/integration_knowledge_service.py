@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
 
+from eneo.embedding_models.domain.chunking import resolve_source_chunk_config
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
@@ -25,6 +26,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -184,6 +186,8 @@ class IntegrationKnowledgeService:
         resource_type: str = "site",
         wrapper_id: UUID | None = None,
         wrapper_name: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> tuple[IntegrationKnowledge, "JobInDb"]:
         space = await self.space_repo.one(id=space_id)
 
@@ -222,6 +226,12 @@ class IntegrationKnowledgeService:
             site_id_value = None
             drive_id_value = None
 
+        chunk_size, chunk_overlap = resolve_source_chunk_config(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            max_input=embedding_model.max_input,
+        )
+
         obj = IntegrationKnowledge(
             name=name,
             original_name=name,  # Store original name at creation time
@@ -238,6 +248,8 @@ class IntegrationKnowledgeService:
             selected_item_type=selected_item_type,
             wrapper_id=wrapper_id,
             wrapper_name=wrapper_name,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
         knowledge = await self.integration_knowledge_repo.add(obj=obj)
 
@@ -346,6 +358,8 @@ class IntegrationKnowledgeService:
         space_id: UUID,
         items: list[BatchIntegrationKnowledgeCreateItem],
         wrapper_name: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> list[BatchIntegrationKnowledgeCreateResult]:
         """Create multiple integration knowledge rows in one request.
 
@@ -372,6 +386,8 @@ class IntegrationKnowledgeService:
                     folder_path=item.get("folder_path"),
                     selected_item_type=item.get("selected_item_type"),
                     resource_type=item.get("resource_type") or "site",
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
                     wrapper_id=batch_wrapper_id,
                     wrapper_name=batch_wrapper_name,
                 )
@@ -705,13 +721,15 @@ class IntegrationKnowledgeService:
 
         return job
 
-    async def update_knowledge_name(
+    async def update_knowledge(
         self,
         space_id: UUID,
         integration_knowledge_id: UUID,
-        name: str,
+        name: str | NotProvided = NOT_PROVIDED,
+        chunk_size: int | None | NotProvided = NOT_PROVIDED,
+        chunk_overlap: int | None | NotProvided = NOT_PROVIDED,
     ) -> IntegrationKnowledge:
-        """Update the name of an integration knowledge item."""
+        """Update an integration knowledge item's name and/or chunk configuration."""
         space = await self.space_repo.one(id=space_id)
         # Verify the knowledge exists in this space (for permission check)
         space_knowledge = space.get_integration_knowledge(
@@ -741,7 +759,7 @@ class IntegrationKnowledgeService:
         knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
-        knowledge.name = name
+        knowledge.update(name=name, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         return await self.integration_knowledge_repo.update(knowledge)
 
     async def _get_owned_wrapper_knowledge(

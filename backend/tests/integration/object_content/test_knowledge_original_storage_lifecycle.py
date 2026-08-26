@@ -732,12 +732,16 @@ async def test_remote_upload_becomes_reconcilable_orphan_when_final_transaction_
         info_blob,
         *,
         embedding_model,
+        chunk_size=None,
+        chunk_overlap=None,
         original=None,
     ):
         await original_publish(
             self,
             info_blob,
             embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
             original=original,
         )
         raise QuotaExceededException()

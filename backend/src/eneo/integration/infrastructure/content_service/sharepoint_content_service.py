@@ -8,6 +8,10 @@ from uuid import UUID
 
 from sqlalchemy import event
 
+from eneo.embedding_models.domain.chunking import (
+    chunking_is_unchanged,
+    resolve_chunk_config,
+)
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.sync_log import SyncLog
@@ -541,6 +545,46 @@ class SharePointContentService:
                             exc,
                         )
                         folder_scope_path_unresolved = True
+
+                # A delta result only covers what Graph considers changed, so blobs
+                # on obsolete chunk boundaries would never be revisited. Judged
+                # before the item count: a stamp drift discards the delta result and
+                # falls back to full sync, like an expired token does.
+                effective_size, effective_overlap = resolve_chunk_config(
+                    integration_knowledge.chunk_size,
+                    integration_knowledge.chunk_overlap,
+                )
+                if await self.info_blob_service.repo.any_active_chunking_differs_for_integration_knowledge(
+                    resolved_integration_knowledge_id,
+                    effective_chunk_size=effective_size,
+                    effective_chunk_overlap=effective_overlap,
+                ):
+                    logger.warning(
+                        "Chunking changed since integration knowledge %s was "
+                        "indexed; discarding the delta result, clearing the delta "
+                        "token and falling back to full sync so every stored chunk "
+                        "is rebuilt (delta reported %d changed item(s))",
+                        resolved_integration_knowledge_id,
+                        len(changes),
+                    )
+                    integration_knowledge.delta_token = None
+                    await self.integration_knowledge_repo.update(
+                        obj=integration_knowledge
+                    )
+                    return await self.pull_content(
+                        token_id=token_id,
+                        tenant_app_id=tenant_app_id,
+                        integration_knowledge_id=resolved_integration_knowledge_id,
+                        site_id=resolved_site_id,
+                        drive_id=resolved_drive_id,
+                        resource_type=resource_type
+                        or integration_knowledge.resource_type
+                        or "site",
+                        # Carry the trigger and reason like the sibling recovery
+                        # branches, so the SyncLog shows why the enumeration ran.
+                        sync_trigger=sync_trigger,
+                        recovery="chunking_changed",
+                    )
 
                 if len(changes) == 0:
                     logger.info(
@@ -1180,10 +1224,18 @@ class SharePointContentService:
         # unchanged. SharePoint emits delta changes for metadata edits, moves and
         # co-author saves that do not alter the extracted text; re-embedding those
         # wastes embedding cost for no retrieval benefit.
+        # The chunking has to agree too: this return sits in front of the generic
+        # publisher, so its chunk-aware guard is never reached from here.
         if (
             existing_blob is not None
             and existing_blob.content_hash is not None
             and existing_blob.content_hash == content_hash
+            and chunking_is_unchanged(
+                stored_chunk_size=existing_blob.chunk_size,
+                stored_chunk_overlap=existing_blob.chunk_overlap,
+                requested_chunk_size=integration_knowledge.chunk_size,
+                requested_chunk_overlap=integration_knowledge.chunk_overlap,
+            )
         ):
             # Content is byte-for-byte unchanged: skip the expensive re-chunk +
             # re-embed. Still cheaply refresh title/url if they drifted (e.g. a
@@ -1221,6 +1273,8 @@ class SharePointContentService:
         info_blob = await self.info_blob_service.publish_info_blob_without_validation(
             info_blob_add,
             embedding_model=integration_knowledge.embedding_model,
+            chunk_size=integration_knowledge.chunk_size,
+            chunk_overlap=integration_knowledge.chunk_overlap,
         )
 
         current_size = safe_int(getattr(integration_knowledge, "size", 0))

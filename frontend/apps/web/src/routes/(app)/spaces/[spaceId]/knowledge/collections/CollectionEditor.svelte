@@ -2,6 +2,7 @@
   import { goto } from "$app/navigation";
   import { getEneo } from "$lib/core/Eneo";
   import SelectEmbeddingModel from "$lib/features/ai-models/components/SelectEmbeddingModel.svelte";
+  import ChunkSettings from "$lib/features/knowledge/components/ChunkSettings.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Dialog, Button, Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
@@ -14,9 +15,27 @@
   } = getSpacesManager();
 
   export let mode: "update" | "create" = "create";
-  export let collection: { id: string; name: string } | undefined;
+  export let collection:
+    | {
+        id: string;
+        name: string;
+        chunk_size?: number | null;
+        chunk_overlap?: number | null;
+        embedding_model?: { id: string; max_input?: number | null } | null;
+      }
+    | undefined;
   let collectionName = collection?.name ?? "";
   let embeddingModel: { id: string } | undefined = undefined;
+  let chunkSize: number | null = collection?.chunk_size ?? null;
+  let chunkOverlap: number | null = collection?.chunk_overlap ?? null;
+
+  // The backend clamps chunk size against the source's embedding model. A
+  // deprecated model is filtered out of the space list, so update mode falls
+  // back to the limit carried by the source's own model.
+  $: chunkMaxInput =
+    mode === "create"
+      ? $currentSpace.embedding_models.find((model) => model.id === embeddingModel?.id)?.max_input
+      : collection?.embedding_model?.max_input;
 
   let isProcessing = false;
   async function editCollection() {
@@ -25,7 +44,7 @@
     try {
       collection = await eneo.groups.update({
         group: { id: collection.id },
-        update: { name: collectionName }
+        update: { name: collectionName, chunk_size: chunkSize, chunk_overlap: chunkOverlap }
       });
 
       refreshCurrentSpace();
@@ -44,7 +63,9 @@
       const newCollection = await eneo.groups.create({
         spaceId,
         name: collectionName,
-        embedding_model: embeddingModel
+        embedding_model: embeddingModel,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap
       });
 
       await refreshCurrentSpace("knowledge");
@@ -101,6 +122,7 @@
           bind:value={embeddingModel}
           selectableModels={$currentSpace.embedding_models}
         ></SelectEmbeddingModel>
+        <ChunkSettings bind:chunkSize bind:chunkOverlap maxInput={chunkMaxInput} />
       {:else}
         <Input.Text
           bind:value={collectionName}
@@ -108,6 +130,12 @@
           required
           class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
         ></Input.Text>
+        <ChunkSettings
+          bind:chunkSize
+          bind:chunkOverlap
+          maxInput={chunkMaxInput}
+          hasIndexedContent={true}
+        />
       {/if}
     </Dialog.Section>
 

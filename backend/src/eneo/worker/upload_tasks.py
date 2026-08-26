@@ -194,6 +194,8 @@ async def _publish_prepared_knowledge_upload(
     text: str,
     embedding_model: EmbeddingModel,
     captured_original: CapturedKnowledgeOriginal,
+    chunk_size: int | None,
+    chunk_overlap: int | None,
 ) -> InfoBlobInDB:
     async with _prepared_knowledge_original(
         container=container,
@@ -207,6 +209,8 @@ async def _publish_prepared_knowledge_upload(
                 title=params.filename,
                 group_id=params.group_id,
                 original=original,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
             await lifecycle.finalize(f"/api/v1/info-blobs/{info_blob.id}/")
             return info_blob
@@ -220,6 +224,8 @@ async def _publish_claimed_knowledge_upload(
     text: str,
     embedding_model: EmbeddingModel,
     captured_original: CapturedKnowledgeOriginal,
+    chunk_size: int | None,
+    chunk_overlap: int | None,
 ) -> InfoBlobInDB:
     async with _knowledge_original_publication_claim(
         container=container,
@@ -234,6 +240,8 @@ async def _publish_claimed_knowledge_upload(
                 title=params.filename,
                 group_id=params.group_id,
                 original=captured_original,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
             if info_blob is not None:
                 await lifecycle.finalize(f"/api/v1/info-blobs/{info_blob.id}/")
@@ -245,6 +253,8 @@ async def _publish_claimed_knowledge_upload(
             text=text,
             embedding_model=embedding_model,
             captured_original=captured_original,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
 
@@ -256,6 +266,8 @@ async def _publish_knowledge_upload(
     text: str,
     embedding_model: EmbeddingModel,
     captured_original: CapturedKnowledgeOriginal,
+    chunk_size: int | None,
+    chunk_overlap: int | None,
 ) -> InfoBlobInDB:
     async with Container.session_scope():
         await container.text_processor().precheck_knowledge_publication_capacity(
@@ -264,6 +276,8 @@ async def _publish_knowledge_upload(
             title=params.filename,
             group_id=params.group_id,
             original=captured_original,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
     if captured_original.storage_kind is StorageKind.OBJECT_STORE:
@@ -275,6 +289,8 @@ async def _publish_knowledge_upload(
                 text=text,
                 embedding_model=embedding_model,
                 captured_original=captured_original,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
             )
         )
         try:
@@ -294,6 +310,8 @@ async def _publish_knowledge_upload(
         text=text,
         embedding_model=embedding_model,
         captured_original=captured_original,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
 
 
@@ -477,6 +495,8 @@ async def transcription_task(
                 text=text,
                 embedding_model=embedding_model,
                 captured_original=captured_original,
+                chunk_size=group.chunk_size,
+                chunk_overlap=group.chunk_overlap,
             )
 
     return lifecycle.task_manager.successful()
@@ -532,6 +552,8 @@ async def upload_info_blob_task(
                 text=text,
                 embedding_model=embedding_model,
                 captured_original=captured_original,
+                chunk_size=group.chunk_size,
+                chunk_overlap=group.chunk_overlap,
             )
 
     return lifecycle.task_manager.successful()

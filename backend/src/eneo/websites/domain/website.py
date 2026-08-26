@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Optional, Union, cast, overload
 from typing_extensions import override
 
 from eneo.base.base_entity import Entity
+from eneo.embedding_models.domain.chunking import resolve_source_chunk_config
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
 from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
@@ -57,6 +58,8 @@ class Website(Entity):
         http_auth: Optional[HttpAuthCredentials] = None,
         consecutive_failures: int = 0,
         next_retry_at: Optional["datetime"] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -74,6 +77,8 @@ class Website(Entity):
         self.http_auth = http_auth
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
 
     @property
     def requires_auth(self) -> bool:
@@ -136,6 +141,8 @@ class Website(Entity):
         embedding_model: "EmbeddingModel",
         http_auth_username: Optional[str] = None,
         http_auth_password: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
         /,
     ) -> "Website": ...
 
@@ -154,6 +161,8 @@ class Website(Entity):
         embedding_model: "EmbeddingModel",
         http_auth_username: Optional[str] = None,
         http_auth_password: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
     ) -> "Website": ...
 
     @override
@@ -169,13 +178,21 @@ class Website(Entity):
                 crawl_type,
                 update_interval,
                 embedding_model,
-                *optional_auth,
+                *optional_tail,
             ) = args
+            # The positional overload declares the chunk settings after the auth
+            # pair, so they have to be read from the same positional tail.
             http_auth_username = cast(
-                Optional[str], optional_auth[0] if optional_auth else None
+                Optional[str], optional_tail[0] if optional_tail else None
             )
             http_auth_password = cast(
-                Optional[str], optional_auth[1] if len(optional_auth) > 1 else None
+                Optional[str], optional_tail[1] if len(optional_tail) > 1 else None
+            )
+            chunk_size = cast(
+                Optional[int], optional_tail[2] if len(optional_tail) > 2 else None
+            )
+            chunk_overlap = cast(
+                Optional[int], optional_tail[3] if len(optional_tail) > 3 else None
             )
         else:
             space_id = kwargs["space_id"]
@@ -188,6 +205,8 @@ class Website(Entity):
             embedding_model = kwargs["embedding_model"]
             http_auth_username = kwargs.get("http_auth_username")
             http_auth_password = kwargs.get("http_auth_password")
+            chunk_size = cast(Optional[int], kwargs.get("chunk_size"))
+            chunk_overlap = cast(Optional[int], kwargs.get("chunk_overlap"))
 
         space_id = cast("UUID", space_id)
         user = cast("UserInDB", user)
@@ -199,6 +218,12 @@ class Website(Entity):
         embedding_model = cast("EmbeddingModel", embedding_model)
         http_auth_username = cast(Optional[str], http_auth_username)
         http_auth_password = cast(Optional[str], http_auth_password)
+
+        chunk_size, chunk_overlap = resolve_source_chunk_config(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            max_input=embedding_model.max_input,
+        )
 
         website = cls(
             id=None,
@@ -217,6 +242,8 @@ class Website(Entity):
             latest_crawl=None,
             last_crawled_at=None,
             http_auth=None,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
         # Set auth if both username and password provided
@@ -287,6 +314,8 @@ class Website(Entity):
             http_auth=http_auth,
             consecutive_failures=record.consecutive_failures,
             next_retry_at=record.next_retry_at,
+            chunk_size=record.chunk_size,
+            chunk_overlap=record.chunk_overlap,
         )
 
     def update(
@@ -298,6 +327,8 @@ class Website(Entity):
         update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED,
         http_auth_username: Union[str, None, NotProvided] = NOT_PROVIDED,
         http_auth_password: Union[str, None, NotProvided] = NOT_PROVIDED,
+        chunk_size: Union[int, None, NotProvided] = NOT_PROVIDED,
+        chunk_overlap: Union[int, None, NotProvided] = NOT_PROVIDED,
     ) -> "Website":
         if is_provided(url):
             self.url = url
@@ -328,6 +359,17 @@ class Website(Entity):
                 raise ValueError(
                     "Both http_auth_username and http_auth_password must be provided together"
                 )
+
+        if is_provided(chunk_size) or is_provided(chunk_overlap):
+            # Merge with what is already stored: the two fields are one setting, and a
+            # size-only change still has to be valid next to the retained overlap.
+            self.chunk_size, self.chunk_overlap = resolve_source_chunk_config(
+                chunk_size=chunk_size if is_provided(chunk_size) else self.chunk_size,
+                chunk_overlap=(
+                    chunk_overlap if is_provided(chunk_overlap) else self.chunk_overlap
+                ),
+                max_input=self.embedding_model.max_input,
+            )
 
         return self
 

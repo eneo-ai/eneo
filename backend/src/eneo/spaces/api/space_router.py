@@ -650,6 +650,8 @@ async def create_space_groups(
         name=group.name,
         space_id=id,
         embedding_model_id=embedding_model_id,
+        chunk_size=group.chunk_size,
+        chunk_overlap=group.chunk_overlap,
     )
 
     # Get space for context (graceful degradation if space fetch fails)
@@ -738,6 +740,8 @@ async def create_space_websites(
         ),
         http_auth_username=website.http_auth_username,
         http_auth_password=website.http_auth_password,
+        chunk_size=website.chunk_size,
+        chunk_overlap=website.chunk_overlap,
     )
 
     # Get space for context (graceful degradation if space fetch fails)
@@ -806,6 +810,8 @@ async def create_space_integration_knowledge(
         folder_path=data.folder_path,
         selected_item_type=data.selected_item_type,
         resource_type=data.resource_type or "site",
+        chunk_size=data.chunk_size,
+        chunk_overlap=data.chunk_overlap,
     )
 
     # Get space for context (graceful degradation if space fetch fails)
@@ -866,6 +872,8 @@ async def create_space_integration_knowledge_batch(
         embedding_model_id=data.embedding_model.id,
         space_id=id,
         wrapper_name=data.wrapper_name,
+        chunk_size=data.chunk_size,
+        chunk_overlap=data.chunk_overlap,
         items=[
             {
                 "name": item.name,
@@ -1059,10 +1067,18 @@ async def update_integration_knowledge(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    knowledge = await service.update_knowledge_name(
+    # For the chunk pair, null is a real state ("go back to the platform default"),
+    # so omitted and null are told apart via model_fields_set. A null name is not
+    # a change — a source has no such thing as "no name".
+    provided = data.model_fields_set
+    knowledge = await service.update_knowledge(
         space_id=id,
         integration_knowledge_id=integration_knowledge_id,
-        name=data.name,
+        name=data.name if data.name is not None else NOT_PROVIDED,
+        chunk_size=data.chunk_size if "chunk_size" in provided else NOT_PROVIDED,
+        chunk_overlap=(
+            data.chunk_overlap if "chunk_overlap" in provided else NOT_PROVIDED
+        ),
     )
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 

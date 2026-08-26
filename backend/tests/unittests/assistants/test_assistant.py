@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -25,6 +26,50 @@ def assistant():
         attachments=[],
         published=False,
     )
+
+
+class TestRetrievalBudget:
+    """How many chunks retrieval asks for has to follow the chunking in use.
+
+    The count is a proxy for a token budget that the context builder enforces
+    exactly, so it must fetch *enough*. A hardcoded 200 was right while every chunk
+    was 200 tokens; per-source chunking made it wrong, and the damaging direction is
+    fine chunking, where too few chunks leave most of the budget unused.
+    """
+
+    @staticmethod
+    def _source(chunk_size, chunk_overlap=None):
+        # A plain namespace, not a MagicMock: the resolver compares the overlap
+        # numerically, and auto-generated attributes are not orderable.
+        return SimpleNamespace(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    def test_no_sources_falls_back_to_the_platform_default(self, assistant):
+        """The count is computed before the retrieval branch, so this must not raise."""
+        assert assistant._smallest_chunk_size() == 200
+
+    def test_a_delegating_source_counts_as_the_platform_default(self, assistant):
+        assistant._collections = [self._source(None)]
+
+        assert assistant._smallest_chunk_size() == 200
+
+    def test_the_finest_source_decides(self, assistant):
+        # Dividing by the largest would under-fill the budget whenever a source
+        # chunks finely, which is the case fine chunking is chosen for.
+        assistant._collections = [self._source(800), self._source(50)]
+        assistant._websites = [self._source(400)]
+
+        assert assistant._smallest_chunk_size() == 50
+
+    def test_integration_sources_are_included(self, assistant):
+        assistant._integration_knowledge_list = [self._source(100)]
+
+        assert assistant._smallest_chunk_size() == 100
+
+    def test_all_sources_at_the_default_reproduce_the_previous_count(self, assistant):
+        """Backwards compatible by construction: 200 everywhere is the old divisor."""
+        assistant._collections = [self._source(200), self._source(None)]
+
+        assert 128_000 // assistant._smallest_chunk_size() // 2 == 128_000 // 200 // 2
 
 
 def test_assistant_has_embedding_model_id_none_if_no_groups_or_websites(
@@ -267,8 +312,14 @@ async def test_ask_forwards_mcp_alongside_knowledge(assistant_with_model):
     embedding_model = MagicMock(id=1)
     mcp_servers = [MagicMock()]
     assistant_with_model.mcp_servers = mcp_servers
-    assistant_with_model.collections = [MagicMock(embedding_model=embedding_model)]
-    assistant_with_model.websites = [MagicMock(embedding_model=embedding_model)]
+    # Real chunk values: retrieval sizes its chunk budget from the sources, and a
+    # production source always carries an int or None here.
+    assistant_with_model.collections = [
+        MagicMock(embedding_model=embedding_model, chunk_size=None, chunk_overlap=None)
+    ]
+    assistant_with_model.websites = [
+        MagicMock(embedding_model=embedding_model, chunk_size=None, chunk_overlap=None)
+    ]
 
     references_service = MagicMock()
     references_service.get_references = AsyncMock()

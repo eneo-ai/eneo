@@ -23,13 +23,13 @@ export function initGroups(client) {
 
     /**
      * Create a new group.
-     * @param {import('../types/fetch').JSONRequestBody<"post", "/api/v1/groups/"> | {spaceId: string, name: string, embedding_model?: {id: string}}} group
+     * @param {import('../types/fetch').JSONRequestBody<"post", "/api/v1/groups/"> | {spaceId: string, name: string, embedding_model?: {id: string}, chunk_size?: number | null, chunk_overlap?: number | null}} group
      * @returns The newly created group
      * @throws {EneoError}
      * */
     create: async (group) => {
       if ("spaceId" in group) {
-        const { spaceId: id, name, embedding_model } = group;
+        const { spaceId: id, name, embedding_model, chunk_size, chunk_overlap } = group;
         const res = await client.fetch("/api/v1/spaces/{id}/knowledge/groups/", {
           method: "post",
           params: {
@@ -38,7 +38,7 @@ export function initGroups(client) {
             }
           },
           requestBody: {
-            "application/json": { name, embedding_model }
+            "application/json": { name, embedding_model, chunk_size, chunk_overlap }
           }
         });
         return res;

@@ -10429,6 +10429,27 @@ export interface components {
       message_id: string;
       skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
     };
+    /**
+     * ChunkingPolicyPublic
+     * @description Platform chunking policy, so clients do not duplicate backend constants.
+     *
+     *     The defaults are env-overridable per deployment; the fractions are shares of
+     *     an embedding model's ``max_input`` and of the chunk size respectively.
+     */
+    ChunkingPolicyPublic: {
+      /** Default Chunk Size */
+      default_chunk_size: number;
+      /** Default Chunk Overlap */
+      default_chunk_overlap: number;
+      /** Min Chunk Size */
+      min_chunk_size: number;
+      /** Max Chunk Size */
+      max_chunk_size: number;
+      /** Max Chunk Fraction */
+      max_chunk_fraction: number;
+      /** Max Overlap Fraction */
+      max_overlap_fraction: number;
+    };
     /** CollectionMetadata */
     CollectionMetadata: {
       /** Num Info Blobs */
@@ -10461,9 +10482,17 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** CollectionUpdate */
     CollectionUpdate: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
       name: string;
     };
@@ -11283,12 +11312,20 @@ export interface components {
     };
     /** CreateSpaceGroupsRequest */
     CreateSpaceGroupsRequest: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
       name: string;
       embedding_model?: components["schemas"]["ModelId"] | null;
     };
     /** CreateSpaceIntegrationKnowledge */
     CreateSpaceIntegrationKnowledge: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
       name: string;
       embedding_model: components["schemas"]["ModelId"];
@@ -11330,6 +11367,10 @@ export interface components {
     };
     /** CreateSpaceIntegrationKnowledgeBatchRequest */
     CreateSpaceIntegrationKnowledgeBatchRequest: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       embedding_model: components["schemas"]["ModelId"];
       /** Wrapper Name */
       wrapper_name?: string | null;
@@ -13175,6 +13216,10 @@ export interface components {
       wrapper_id?: string | null;
       /** Wrapper Name */
       wrapper_name?: string | null;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Permissions */
       permissions?: components["schemas"]["ResourcePermission"][];
       metadata: components["schemas"]["IntegrationKnowledgeMetaData"];
@@ -17246,6 +17291,7 @@ export interface components {
        * @default true
        */
       api_key_expiry_notifications?: boolean;
+      chunking: components["schemas"]["ChunkingPolicyPublic"];
       /**
        * File References Enabled
        * @default false
@@ -19619,8 +19665,12 @@ export interface components {
     };
     /** UpdateIntegrationKnowledgeRequest */
     UpdateIntegrationKnowledgeRequest: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
-      name: string;
+      name?: string | null;
     };
     /** UpdateIntegrationKnowledgeWrapperRequest */
     UpdateIntegrationKnowledgeWrapperRequest: {
@@ -20465,6 +20515,10 @@ export interface components {
     };
     /** WebsiteCreate */
     WebsiteCreate: {
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /** Name */
       name?: string | null;
       /** Url */
@@ -20607,6 +20661,10 @@ export interface components {
        * @description True if website was auto-disabled after 10 consecutive failures. User must manually change update_interval to re-enable.
        */
       is_auto_disabled: boolean;
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
     };
     /** WebsiteUpdate */
     WebsiteUpdate: {
@@ -20620,6 +20678,10 @@ export interface components {
       crawl_type?: components["schemas"]["CrawlType"];
       /** Update Interval */
       update_interval?: components["schemas"]["UpdateInterval"];
+      /** Chunk Size */
+      chunk_size?: number | null;
+      /** Chunk Overlap */
+      chunk_overlap?: number | null;
       /**
        * Http Auth Username
        * @description Username for HTTP Basic Authentication. Set to null to remove auth. Must be provided with password.

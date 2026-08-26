@@ -25,6 +25,7 @@ from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.jobs.job_models import JobPublic
 from eneo.main.models import (
     NOT_PROVIDED,
+    ChunkConfigRequestMixin,
     InDB,
     MCPToolSetting,
     ModelId,
@@ -272,7 +273,7 @@ class CreateSpaceServiceResponse(InDB, ResourcePermissionsMixin):
 # Groups
 
 
-class CreateSpaceGroupsRequest(CreateRequest):
+class CreateSpaceGroupsRequest(CreateRequest, ChunkConfigRequestMixin):
     embedding_model: Optional[ModelId] = None
 
 
@@ -331,7 +332,7 @@ class UpdateSpaceGroupMemberRequest(BaseModel):
     role: SpaceRoleValue
 
 
-class CreateSpaceIntegrationKnowledge(BaseModel):
+class CreateSpaceIntegrationKnowledge(ChunkConfigRequestMixin):
     name: str
     embedding_model: ModelId
     url: str
@@ -356,7 +357,7 @@ class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
     )
 
 
-class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):
+class CreateSpaceIntegrationKnowledgeBatchRequest(ChunkConfigRequestMixin):
     embedding_model: ModelId
     wrapper_name: Optional[str] = None
     items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(
@@ -379,8 +380,10 @@ class CreateSpaceIntegrationKnowledgeBatchResponse(BaseModel):
     failed_count: int
 
 
-class UpdateIntegrationKnowledgeRequest(BaseModel):
-    name: str
+class UpdateIntegrationKnowledgeRequest(ChunkConfigRequestMixin):
+    # Optional so the same endpoint can carry a rename, a chunking change, or both.
+    # The router reads model_fields_set to tell "omitted" from an explicit null.
+    name: str | None = None
 
 
 class UpdateIntegrationKnowledgeWrapperRequest(BaseModel):

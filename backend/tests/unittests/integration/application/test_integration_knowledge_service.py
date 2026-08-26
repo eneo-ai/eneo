@@ -22,6 +22,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.models import NOT_PROVIDED
 from eneo.roles.permissions import Permission
 from tests.fixtures import TEST_USER
 
@@ -223,7 +224,7 @@ class TestTenantAppAdminPermission:
         service = self._make_service(non_admin_user, actor, space, tenant_app_knowledge)
 
         with pytest.raises(UnauthorizedException) as exc_info:
-            await service.update_knowledge_name(
+            await service.update_knowledge(
                 space_id=space.id,
                 integration_knowledge_id=tenant_app_knowledge.id,
                 name="New Name",
@@ -235,7 +236,7 @@ class TestTenantAppAdminPermission:
     ):
         service = self._make_service(TEST_USER, actor, space, tenant_app_knowledge)
 
-        await service.update_knowledge_name(
+        await service.update_knowledge(
             space_id=space.id,
             integration_knowledge_id=tenant_app_knowledge.id,
             name="New Name",
@@ -247,7 +248,7 @@ class TestTenantAppAdminPermission:
     ):
         service = self._make_service(non_admin_user, actor, space, user_oauth_knowledge)
 
-        await service.update_knowledge_name(
+        await service.update_knowledge(
             space_id=space.id,
             integration_knowledge_id=user_oauth_knowledge.id,
             name="New Name",
@@ -292,7 +293,7 @@ class TestTenantAppAdminPermission:
         assert "Admin permission is required" in str(exc_info.value)
 
 
-class TestUpdateKnowledgeName:
+class TestUpdateKnowledge:
     """Tests for the update_knowledge_name method."""
 
     async def test_rename_knowledge_success(
@@ -305,14 +306,19 @@ class TestUpdateKnowledgeName:
         actor.can_edit_integrations.return_value = True
         new_name = "New Knowledge Name"
 
-        await service.update_knowledge_name(
+        await service.update_knowledge(
             space_id=integration_knowledge.space_id,
             integration_knowledge_id=integration_knowledge.id,
             name=new_name,
         )
 
         # Verify the name was updated
-        assert integration_knowledge.name == new_name
+        # The rename itself lives on the entity, which also guards the chunk pair
+        # against being reset by a name-only edit. Assert the delegation here and
+        # leave that contract to the entity's own tests.
+        integration_knowledge.update.assert_called_once_with(
+            name=new_name, chunk_size=NOT_PROVIDED, chunk_overlap=NOT_PROVIDED
+        )
         # Verify repo.update was called
         service.integration_knowledge_repo.update.assert_called_once_with(
             integration_knowledge
@@ -328,7 +334,7 @@ class TestUpdateKnowledgeName:
         actor.can_edit_integrations.return_value = False
 
         with pytest.raises(UnauthorizedException):
-            await service.update_knowledge_name(
+            await service.update_knowledge(
                 space_id=integration_knowledge.space_id,
                 integration_knowledge_id=integration_knowledge.id,
                 name="New Name",
@@ -350,7 +356,7 @@ class TestUpdateKnowledgeName:
         integration_knowledge.space_id = uuid4()
 
         with pytest.raises(UnauthorizedException) as exc_info:
-            await service.update_knowledge_name(
+            await service.update_knowledge(
                 space_id=space.id,
                 integration_knowledge_id=integration_knowledge.id,
                 name="New Name",
@@ -371,7 +377,7 @@ class TestUpdateKnowledgeName:
         original = integration_knowledge.original_name
         new_name = "New Knowledge Name"
 
-        await service.update_knowledge_name(
+        await service.update_knowledge(
             space_id=integration_knowledge.space_id,
             integration_knowledge_id=integration_knowledge.id,
             name=new_name,
@@ -380,7 +386,12 @@ class TestUpdateKnowledgeName:
         # original_name should remain unchanged
         assert integration_knowledge.original_name == original
         # name should be updated
-        assert integration_knowledge.name == new_name
+        # The rename itself lives on the entity, which also guards the chunk pair
+        # against being reset by a name-only edit. Assert the delegation here and
+        # leave that contract to the entity's own tests.
+        integration_knowledge.update.assert_called_once_with(
+            name=new_name, chunk_size=NOT_PROVIDED, chunk_overlap=NOT_PROVIDED
+        )
 
     async def test_rename_fetches_knowledge_from_repo(
         self,
@@ -391,7 +402,7 @@ class TestUpdateKnowledgeName:
         """Test that knowledge is fetched from repo for update (to get created_at)."""
         actor.can_edit_integrations.return_value = True
 
-        await service.update_knowledge_name(
+        await service.update_knowledge(
             space_id=integration_knowledge.space_id,
             integration_knowledge_id=integration_knowledge.id,
             name="New Name",

@@ -59,6 +59,8 @@ class IntegrationKnowledgeAssembler:
             selected_item_type=getattr(item, "selected_item_type", None),
             wrapper_id=getattr(item, "wrapper_id", None),
             wrapper_name=getattr(item, "wrapper_name", None),
+            chunk_size=getattr(item, "chunk_size", None),
+            chunk_overlap=getattr(item, "chunk_overlap", None),
             metadata=IntegrationKnowledgeMetaData(
                 size=item.size,
                 last_sync_summary=getattr(item, "last_sync_summary", None),

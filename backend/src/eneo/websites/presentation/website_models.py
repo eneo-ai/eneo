@@ -1,16 +1,29 @@
 from datetime import datetime
-from typing import Optional, Union
+from typing import Annotated, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 from pydantic.networks import HttpUrl
 
+from eneo.embedding_models.domain.chunking import (
+    MAX_CHUNK_SIZE,
+    MIN_CHUNK_SIZE,
+    validate_overlap_within_policy,
+)
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
 from eneo.main.models import (
     NOT_PROVIDED,
     BaseResponse,
+    ChunkConfigRequestMixin,
     IdAndName,
     InDB,
     ModelId,
@@ -121,6 +134,8 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
         description="True if website was auto-disabled after 10 consecutive failures. "
         "User must manually change update_interval to re-enable."
     )
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
 
     @classmethod
     def from_domain(cls, website: Website):
@@ -148,10 +163,12 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             consecutive_failures=website.consecutive_failures,
             next_retry_at=website.next_retry_at,
             is_auto_disabled=website.is_auto_disabled,
+            chunk_size=website.chunk_size,
+            chunk_overlap=website.chunk_overlap,
         )
 
 
-class WebsiteCreate(BaseModel):
+class WebsiteCreate(ChunkConfigRequestMixin):
     name: Optional[str] = None
     url: str
     download_files: bool = False
@@ -195,6 +212,12 @@ class WebsiteUpdate(BaseModel):
     download_files: Union[bool, NotProvided] = NOT_PROVIDED
     crawl_type: Union[CrawlType, NotProvided] = NOT_PROVIDED
     update_interval: Union[UpdateInterval, NotProvided] = NOT_PROVIDED
+    # Same rule as ChunkConfigRequestMixin, restated because the tri-state sentinel
+    # makes the field types incompatible with it.
+    chunk_size: Union[
+        Annotated[int, Field(ge=MIN_CHUNK_SIZE, le=MAX_CHUNK_SIZE)], None, NotProvided
+    ] = NOT_PROVIDED
+    chunk_overlap: Union[Annotated[int, Field(ge=0)], None, NotProvided] = NOT_PROVIDED
 
     http_auth_username: Union[str, None, NotProvided] = Field(
         NOT_PROVIDED,
@@ -228,6 +251,12 @@ class WebsiteUpdate(BaseModel):
             raise ValueError("To remove auth, both username and password must be null")
 
         return v
+
+    @model_validator(mode="after")
+    def _overlap_within_policy(self) -> "WebsiteUpdate":
+        if isinstance(self.chunk_size, int) and isinstance(self.chunk_overlap, int):
+            validate_overlap_within_policy(self.chunk_size, self.chunk_overlap)
+        return self
 
 
 class BulkCrawlRequest(BaseModel):
