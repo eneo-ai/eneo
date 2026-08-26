@@ -9,7 +9,7 @@ from eneo.flows.domain.flow_step_validation import (
 )
 
 SPEAKER_MAPPING_CONFIG_KEY = "speaker_mapping"
-SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES = frozenset({"text", "multiselect"})
+SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES = frozenset({"text", "multiselect", "list"})
 SPEAKER_MAPPING_SPEAKER_COUNT_FIELD_TYPES = frozenset({"number"})
 
 
@@ -98,13 +98,13 @@ def validate_speaker_mapping_output_config(
     if raw_field is None:
         raise FlowStepValidationError(
             f"Step {step.step_order}: output_config.speaker_mapping.participants_field "
-            "must name a form field of type 'text' or 'multiselect'.",
+            "must name a form field of type 'text', 'multiselect' or 'list'.",
             step_order=step.step_order,
         )
     field_type = form_field_types.get(raw_field.strip())
     if field_type not in SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES:
         raise FlowStepValidationError(
             f"Step {step.step_order}: output_config.speaker_mapping.participants_field "
-            f"'{raw_field}' must name a form field of type 'text' or 'multiselect'.",
+            f"'{raw_field}' must name a form field of type 'text', 'multiselect' or 'list'.",
             step_order=step.step_order,
         )

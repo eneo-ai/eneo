@@ -198,7 +198,7 @@ def completion_model_ref_strip_log_extra(
     }
 
 
-_VALID_FORM_FIELD_TYPES = {"text", "number", "date", "select", "multiselect"}
+_VALID_FORM_FIELD_TYPES = {"text", "number", "date", "select", "multiselect", "list"}
 
 _FORM_FIELD_TYPE_COERCIONS: dict[str, str] = {
     "textarea": "text",
@@ -218,7 +218,9 @@ _FORM_FIELD_TYPE_COERCIONS: dict[str, str] = {
     "checkboxes": "multiselect",
     "multi_select": "multiselect",
     "multi-select": "multiselect",
-    "tags": "multiselect",
+    "tags": "list",
+    "array": "list",
+    "chips": "list",
     "datetime": "date",
     "time": "date",
 }

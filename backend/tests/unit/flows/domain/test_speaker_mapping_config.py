@@ -37,7 +37,12 @@ def _step(output_config: dict[str, object] | None) -> FlowStepValidationView:
     )
 
 
-FIELDS = {"deltagare": "text", "antal": "number", "roller": "multiselect"}
+FIELDS = {
+    "deltagare": "text",
+    "antal": "number",
+    "roller": "multiselect",
+    "namn": "list",
+}
 
 
 def test_participants_field_reads_the_config_block() -> None:
@@ -61,8 +66,8 @@ def test_draft_allows_missing_block_but_publish_requires_it() -> None:
         )
 
 
-@pytest.mark.parametrize("field", ["deltagare", "roller"])
-def test_publish_accepts_text_or_multiselect_fields(field: str) -> None:
+@pytest.mark.parametrize("field", ["deltagare", "roller", "namn"])
+def test_publish_accepts_text_multiselect_or_list_fields(field: str) -> None:
     validate_speaker_mapping_output_config(
         step=_step({"speaker_mapping": {"participants_field": field}}),
         form_field_types=FIELDS,

@@ -473,6 +473,7 @@
     if (type === "date") return m.flow_form_field_type_date();
     if (type === "select") return m.flow_form_field_type_select();
     if (type === "multiselect") return m.flow_form_field_type_multiselect();
+    if (type === "list") return m.flow_form_field_type_list();
     return m.flow_form_field_type_text();
   }
 
@@ -625,6 +626,7 @@
                     <option value="date">{m.flow_form_field_type_date()}</option>
                     <option value="select">{m.flow_form_field_type_select()}</option>
                     <option value="multiselect">{m.flow_form_field_type_multiselect()}</option>
+                    <option value="list">{m.flow_form_field_type_list()}</option>
                   </select>
                 </label>
                 <label class="field-purpose">

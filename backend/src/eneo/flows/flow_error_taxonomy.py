@@ -299,6 +299,23 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Send an array of strings or a comma-separated string.",
         user_action="Correct the selected values and try again.",
     ),
+    FlowApiErrorCode.INPUT_INVALID_LIST_VALUE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A list field contains a value that is not a string.",
+        consumer_action="Send every list value as a string.",
+        user_action="Correct the entered values and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_LIST_TYPE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause=(
+            "A list field has neither an array nor a newline/comma/semicolon "
+            "separated string value."
+        ),
+        consumer_action="Send an array of strings or a delimited string.",
+        user_action="Correct the entered values and try again.",
+    ),
     FlowApiErrorCode.RUN_ACCESS_DENIED: _entry(
         category="Flow access",
         surfaced_through="API error response",

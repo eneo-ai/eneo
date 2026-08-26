@@ -4,6 +4,7 @@ import math
 from datetime import date
 from typing import Any, cast
 
+from eneo.flows.domain.speaker_labels import parse_participants
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import FlowMetadata
 from eneo.main.exceptions import BadRequestException
@@ -96,6 +97,14 @@ def normalize_and_validate_flow_run_payload(
                 field_name=key,
                 value=value,
                 options=options,
+                required=required,
+            )
+            continue
+
+        if field_type == "list":
+            normalized_payload[key] = coerce_list_field(
+                field_name=key,
+                value=value,
                 required=required,
             )
             continue
@@ -295,3 +304,39 @@ def coerce_multiselect_field(
                 field_type="multiselect",
             )
     return raw_values
+
+
+def coerce_list_field(*, field_name: str, value: Any, required: bool) -> list[str]:
+    """Free-entry string list: a JSON array of strings, or one string split on
+    newlines, commas and semicolons. Trimmed, empties dropped, duplicates
+    removed with order kept."""
+    raw: str | list[str]
+    if isinstance(value, list):
+        items = cast(list[object], value)
+        strings = [item for item in items if isinstance(item, str)]
+        if len(strings) != len(items):
+            raise _flow_payload_error(
+                message=f"Field '{field_name}' must contain only strings.",
+                code=FlowApiErrorCode.INPUT_INVALID_LIST_VALUE,
+                field_name=field_name,
+                field_type="list",
+            )
+        raw = strings
+    elif isinstance(value, str):
+        raw = value
+    else:
+        raise _flow_payload_error(
+            message=f"Field '{field_name}' must be an array of strings.",
+            code=FlowApiErrorCode.INPUT_INVALID_LIST_TYPE,
+            field_name=field_name,
+            field_type="list",
+        )
+    values = parse_participants(raw)
+    if required and not values:
+        raise _flow_payload_error(
+            message=f"Field '{field_name}' must contain at least one value.",
+            code=FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY,
+            field_name=field_name,
+            field_type="list",
+        )
+    return values

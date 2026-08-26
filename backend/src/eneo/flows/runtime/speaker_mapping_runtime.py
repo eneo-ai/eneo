@@ -8,7 +8,6 @@ from typing import Any, cast
 
 from eneo.flows.domain.speaker_labels import SPEAKER_LABEL_RE, parse_participants
 from eneo.flows.domain.speaker_mapping_config import (
-    speaker_mapping_participants_field,
     speaker_mapping_speaker_count_field,
 )
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
@@ -129,20 +128,16 @@ def resolve_max_speakers(
     run_input_payload: Mapping[str, Any] | None,
 ) -> int | None:
     """Upper bound on speakers for diarization, from the first speaker-mapping
-    step: the participant count when the participants field is filled, else the
-    value of the optional speaker-count number field. A bound (not an exact
-    count) so an unlisted voice still gets its own label. None when neither is
-    available."""
+    step's optional speaker-count number field. The participant list is
+    deliberately not used: it is "who I know was there", not a complete roster,
+    and a cap below the real speaker count would merge unlisted voices into
+    the wrong person. None when no count is given, so the diarizer chooses."""
     for step in steps:
         if getattr(step, "output_mode", None) != "speaker_mapping":
             continue
-        output_config = getattr(step, "output_config", None)
-        participants = resolve_participants(
-            run_input_payload, speaker_mapping_participants_field(output_config)
+        count_field = speaker_mapping_speaker_count_field(
+            getattr(step, "output_config", None)
         )
-        if participants:
-            return len(participants)
-        count_field = speaker_mapping_speaker_count_field(output_config)
         if count_field is None:
             return None
         semantic = read_semantic_flow_input_payload(dict(run_input_payload or {}))

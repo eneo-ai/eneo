@@ -580,8 +580,10 @@ function createFlowEditor(data: FlowEditorInitData) {
 
     const fields = getFlowFormSchemaFields($update.metadata_json);
     let participantsField =
+      fields.find((field: FlowFormField) => field.type === "list")?.name ??
       fields.find((field: FlowFormField) => field.type === "multiselect" || field.type === "text")
-        ?.name ?? null;
+        ?.name ??
+      null;
     if (participantsField === null) {
       const name = m.flow_transcription_participants_field_name();
       replaceFormSchemaFields([
@@ -589,7 +591,7 @@ function createFlowEditor(data: FlowEditorInitData) {
         {
           name,
           label: m.flow_transcription_participants_field_label(),
-          type: "text",
+          type: "list",
           required: false
         }
       ]);

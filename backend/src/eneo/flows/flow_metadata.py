@@ -30,6 +30,7 @@ class FlowFormFieldType(str, Enum):
     NUMBER = "number"
     DATE = "date"
     SELECT = "select"
+    LIST = "list"
 
 
 CareDataApprovalMode = Literal["single_reviewer_outside_flow"]
@@ -628,18 +629,31 @@ def _parse_options(
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].options must be a list for multiselect."
             )
-        return _parse_option_list(cast(list[object], options), index=index)
+        parsed = _parse_option_list(cast(list[object], options), index=index)
+        if mode is FlowFormSchemaParseMode.WRITE and not parsed:
+            raise BadRequestException(
+                f"metadata_json.form_schema.fields[{index}].options must contain at "
+                "least one option for multiselect. Use type 'list' for free entry."
+            )
+        return parsed
     if field_type is FlowFormFieldType.SELECT:
         if options is not None and not isinstance(options, list):
             raise BadRequestException(
                 f"metadata_json.form_schema.fields[{index}].options must be a list for select."
             )
         if isinstance(options, list):
-            return _parse_option_list(cast(list[object], options), index=index)
+            parsed = _parse_option_list(cast(list[object], options), index=index)
+            if mode is FlowFormSchemaParseMode.WRITE and not parsed:
+                raise BadRequestException(
+                    f"metadata_json.form_schema.fields[{index}].options must contain "
+                    "at least one option for select."
+                )
+            return parsed
         return None
     if options is not None:
         raise BadRequestException(
-            f"metadata_json.form_schema.fields[{index}].options is only valid for select or multiselect."
+            f"metadata_json.form_schema.fields[{index}].options is only valid for "
+            "select or multiselect."
         )
     return None
 

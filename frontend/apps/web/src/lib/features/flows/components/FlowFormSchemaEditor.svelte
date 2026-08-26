@@ -51,7 +51,8 @@
     { value: "number", label: () => m.flow_form_field_type_number() },
     { value: "date", label: () => m.flow_form_field_type_date() },
     { value: "select", label: () => m.flow_form_field_type_select() },
-    { value: "multiselect", label: () => m.flow_form_field_type_multiselect() }
+    { value: "multiselect", label: () => m.flow_form_field_type_multiselect() },
+    { value: "list", label: () => m.flow_form_field_type_list() }
   ];
 
   const formSchema = $derived(getFlowFormSchemaMetadata($update.metadata_json));
@@ -181,6 +182,15 @@
     });
   }
 
+  /** Select and multi-select fields are only saved once they offer an option. */
+  function hasPersistableFieldOptions(fields: LocalFormField[]): boolean {
+    return fields.every(
+      (field) =>
+        !flowFormFieldHasOptions(field.type) ||
+        (field.options ?? []).some((option) => option.trim().length > 0)
+    );
+  }
+
   function syncToStore(fields: LocalFormField[]) {
     flowEditor.replaceFormSchemaFields(fields);
     lastReconciledFormSchemaSignature = getMeaningfulLocalFormSchemaSignature(fields);
@@ -188,7 +198,7 @@
   }
 
   function commitIfPersistable(fields: LocalFormField[]) {
-    if (hasPersistableFieldNames(fields)) {
+    if (hasPersistableFieldNames(fields) && hasPersistableFieldOptions(fields)) {
       syncToStore(fields);
     }
   }
@@ -624,6 +634,12 @@
                   />
                 </label>
               </div>
+            {/if}
+
+            {#if currentType === "list"}
+              <p class="text-muted mt-2 pl-[56px] text-xs">
+                {m.flow_form_field_type_list_hint()}
+              </p>
             {/if}
 
             <!-- Options (for select / multiselect) -->

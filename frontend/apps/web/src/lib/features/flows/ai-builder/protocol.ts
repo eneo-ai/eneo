@@ -469,7 +469,7 @@ const requirementsSummaryEventDataSchema = z.object({
       z.object({
         key: z.string(),
         label: z.string(),
-        type: z.enum(["text", "number", "date", "select", "multiselect"]),
+        type: z.enum(["text", "number", "date", "select", "multiselect", "list"]),
         required: z.boolean(),
         // Already localized by the server, from the same owner as the
         // question's own option labels.

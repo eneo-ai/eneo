@@ -1393,7 +1393,14 @@ def test_openapi_run_contract_guides_consumer_forms_uploads_and_review(
     assert form_field_type_values == {
         field_type.value for field_type in FlowFormFieldType
     }
-    assert form_field_type_values == {"text", "multiselect", "number", "date", "select"}
+    assert form_field_type_values == {
+        "text",
+        "multiselect",
+        "number",
+        "date",
+        "select",
+        "list",
+    }
     assert "review screens" in run_contract["steps_requiring_review"]["description"]
     assert "empty list" in run_contract["steps_requiring_review"]["description"]
     assert "Review behavior" in review_step["review_mode"]["description"]

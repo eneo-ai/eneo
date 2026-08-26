@@ -304,7 +304,8 @@ class RuntimeInputFieldPayload(BaseModel):
 
     `key` is the variable name the compiled form and the step instructions
     use, `label` and `type` are what the form control shows and is, and
-    `options` are the choices a `select` or `multiselect` offers. Values are
+    `options` are the choices a `select` or `multiselect` offers (a `list`
+    field is free entry and has none). Values are
     exact rather than clipped: the summary sentence composes every field into
     one line and has to keep that line readable, while a list gives each field
     its own row and must show the identity the compiled flow will use.

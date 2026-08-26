@@ -2,7 +2,7 @@ import type { FlowStep } from "@eneo/eneo-js";
 import type { FlowFormField } from "./flowFormSchema";
 
 /** Form field types whose value can be read as a list of participant names. */
-export const SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES = new Set(["text", "multiselect"]);
+export const SPEAKER_MAPPING_PARTICIPANT_FIELD_TYPES = new Set(["text", "multiselect", "list"]);
 
 export function getSpeakerMappingParticipantsField(
   step: Pick<FlowStep, "output_config">

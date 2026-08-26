@@ -13,6 +13,7 @@
   import { m } from "$lib/paraglide/messages";
   import type { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
+  import FlowListInput from "./FlowListInput.svelte";
 
   let {
     formFields,
@@ -92,6 +93,15 @@
             {/each}
           </Select.Content>
         </Select.Root>
+      {:else if field.type === "list"}
+        <FlowListInput
+          id={inputId}
+          values={readFlowRunFieldMultiValue(currentFormValues, field)}
+          required={field.required}
+          {invalid}
+          {describedBy}
+          onchange={(values) => launchInputState.setFieldValue(field, values)}
+        />
       {:else if field.type === "select"}
         <Select.Root
           type="single"

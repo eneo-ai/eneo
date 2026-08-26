@@ -92,6 +92,20 @@ def _ai_builder_origin() -> dict[str, object]:
             "metadata_json.form_schema.fields[0].options is only valid for select or multiselect.",
         ),
         (
+            _metadata([{"name": "names", "type": "list", "options": ["a"]}]),
+            "metadata_json.form_schema.fields[0].options is only valid for select or multiselect.",
+        ),
+        (
+            _metadata([{"name": "case_id", "type": "multiselect", "options": []}]),
+            "metadata_json.form_schema.fields[0].options must contain at least one "
+            "option for multiselect. Use type 'list' for free entry.",
+        ),
+        (
+            _metadata([{"name": "case_id", "type": "select", "options": []}]),
+            "metadata_json.form_schema.fields[0].options must contain at least one "
+            "option for select.",
+        ),
+        (
             _metadata([{"name": "step_1", "type": "text"}]),
             "Form field 1 is named 'step_1'. Names like step_1 are reserved for "
             "Flow step aliases. Use a descriptive field name instead.",
@@ -431,3 +445,23 @@ def test_parse_flow_metadata_preserves_care_data_write_errors(
 ) -> None:
     with pytest.raises(BadRequestException, match=re.escape(message)):
         parse_flow_metadata(metadata_json, mode=FlowMetadataParseMode.WRITE)
+
+
+def test_list_field_is_accepted_without_options() -> None:
+    parsed = parse_flow_metadata(
+        _metadata([{"name": "names", "type": "list"}]),
+        mode=FlowMetadataParseMode.WRITE,
+    )
+    assert parsed is not None
+    field = parsed.form_schema.fields[0]
+    assert field.type is FlowFormFieldType.LIST
+    assert field.options is None
+
+
+def test_persisted_read_tolerates_empty_options_on_multiselect() -> None:
+    parsed = parse_flow_metadata(
+        _metadata([{"name": "case_id", "type": "multiselect", "options": []}]),
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    )
+    assert parsed is not None
+    assert parsed.form_schema.fields[0].options == []

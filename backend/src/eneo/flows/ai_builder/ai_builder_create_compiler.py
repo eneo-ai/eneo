@@ -557,9 +557,9 @@ def _flow_input_schema_with_form_fields(
 def _form_field_json_schema(field: FormFieldSpec) -> FlowPersistedJsonObject:
     if field.type == "number":
         return {"type": "number"}
-    if field.type == "multiselect":
+    if field.type in {"multiselect", "list"}:
         items: FlowPersistedJsonObject = {"type": "string"}
-        if field.options:
+        if field.type == "multiselect" and field.options:
             items["enum"] = list(field.options)
         return {"type": "array", "items": items}
     schema: FlowPersistedJsonObject = {"type": "string"}

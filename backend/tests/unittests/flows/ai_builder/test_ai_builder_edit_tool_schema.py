@@ -401,6 +401,7 @@ class TestBuildEditFlowToolSchema:
             "date",
             "select",
             "multiselect",
+            "list",
         ]
         assert properties["options"] == {
             "type": ["array", "null"],

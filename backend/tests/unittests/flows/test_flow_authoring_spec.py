@@ -45,6 +45,8 @@ def test_assistant_spec_rejects_local_resource_refs(field_name: str) -> None:
         ("string", "text"),
         ("dropdown", "select"),
         ("multi-select", "multiselect"),
+        ("tags", "list"),
+        ("list", "list"),
         ("datetime", "date"),
         ("unsupported", "text"),
     ],
