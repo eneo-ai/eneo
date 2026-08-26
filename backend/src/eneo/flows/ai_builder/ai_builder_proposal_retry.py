@@ -560,10 +560,6 @@ def _build_retry_feedback(
             intent_rules.append(
                 "The backend owns typed source references in create mode. Correct each malformed output_fields[].name to a plain ASCII JSON key without template syntax; do not add edit-only source-reference fields."
             )
-        if "duplicate_step_name" in failure_codes:
-            intent_rules.append(
-                "Every steps[] name must be unique case-insensitively; rename duplicate semantic steps with specific labels."
-            )
         suffix = (
             " ".join(intent_rules)
             + " Keep valid semantic parts and fix only the listed issues. "

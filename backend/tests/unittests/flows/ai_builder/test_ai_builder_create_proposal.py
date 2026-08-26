@@ -327,7 +327,7 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
 
 
 @pytest.mark.asyncio
-async def test_outline_validation_failure_preserves_duplicate_step_name_code() -> None:
+async def test_create_compile_disambiguates_duplicate_step_names() -> None:
     result = await process_create_intent_arguments(
         turn=_make_turn(),
         conversation=[ConversationMessage(role="user", content="Bygg ett textflöde.")],
@@ -348,10 +348,11 @@ async def test_outline_validation_failure_preserves_duplicate_step_name_code() -
     )
 
     assert result.compiled_proposal is not None
-    validation = result.compiled_proposal.validation
-    assert not validation.valid
-    assert any(error.code == "duplicate_step_name" for error in validation.errors)
-    assert any("Duplicate step name" in error.message for error in validation.errors)
+    assert result.compiled_proposal.validation.valid
+    assert [step.name for step in result.compiled_proposal.content.spec.steps] == [
+        "Förbered PDF-innehåll",
+        "Förbered PDF-innehåll (2)",
+    ]
 
 
 @pytest.mark.asyncio
@@ -489,6 +490,69 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
     assert corrected.failure_kind is None
     assert corrected.compiled_proposal is not None
     assert corrected.compiled_proposal.validation.valid
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "retryable"),
+    [
+        ("assembly_plan_invariant_failed", False),
+        ("invalid_structured_underlag_projection", False),
+        ("assembly_source_file_first_step_requires_json", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_process_create_intent_arguments_only_returns_retryable_architecture_feedback(
+    failure_code: str,
+    retryable: bool,
+) -> None:
+    error = AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        detail="The proposed architecture could not be compiled.",
+        log_context={"failure_code": failure_code},
+    )
+    arguments = {
+        "flow_name": "Architecture classification",
+        "plan_rationale": "Exercise architecture failure ownership.",
+        "steps": [
+            {
+                "name": "Summarize",
+                "instructions": "Summarize the supplied text.",
+            }
+        ],
+    }
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_create_proposal."
+        "compile_create_intent_to_spec",
+        side_effect=error,
+    ):
+        if not retryable:
+            with pytest.raises(AIBuilderArchitectureError) as exc_info:
+                await _process_create_intent_arguments(
+                    turn=_make_turn(),
+                    conversation=[],
+                    arguments=arguments,
+                    tool_call_id="call-architecture-classification",
+                    available_model_refs=None,
+                    available_kb_refs=None,
+                )
+
+            assert exc_info.value is error
+            return
+
+        result = await _process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[],
+            arguments=arguments,
+            tool_call_id="call-architecture-classification",
+            available_model_refs=None,
+            available_kb_refs=None,
+        )
+
+    assert result.compiled_proposal is None
+    assert result.feedback == error.detail
+    assert result.failure_kind == "validation"
+    assert result.failure_codes == frozenset({failure_code})
 
 
 @pytest.mark.asyncio

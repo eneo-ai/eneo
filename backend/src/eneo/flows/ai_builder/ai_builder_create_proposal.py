@@ -68,13 +68,19 @@ _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
         "assembly_document_report_compose_topology_missing",
         "flow_input_schema_composite_bindings_unsupported",
         "flow_input_schema_target_missing",
-        # A dropped obligation is a compiler defect against a name the user
-        # already confirmed. The compiled-postcondition breach of the
-        # attested result contract is the same class: admission verified the
-        # model's declaration, so a violation surfacing after compilation is
-        # a server defect. No model can repair a server bug, and asking one
-        # to try would spend the turn's budget hiding it.
+        # Admission verified the model's attested result contract, so a
+        # compiled-postcondition breach is a server defect. No model can repair
+        # a server bug, and asking one to try would spend the turn's budget
+        # hiding it.
         "attested_result_contract_broken",
+        # The assembly invariants assert on fields the assembler itself wrote
+        # (PlannedStep construction, underlag channels, step ordering), and the
+        # projection error rejects source refs the server synthesized. In create
+        # mode the model authors neither, so a failure here is a server defect:
+        # its feedback names nothing the model can edit, and the sealed receipts
+        # show retries burning the whole call budget without ever repairing one.
+        "assembly_plan_invariant_failed",
+        "invalid_structured_underlag_projection",
         "section_writer_structured_source_ambiguous",
         "terminal_output_type_mismatch",
         "template_attachment_selection_invalid",

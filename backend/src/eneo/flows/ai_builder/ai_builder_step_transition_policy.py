@@ -156,7 +156,7 @@ def normalize_ai_builder_step_topology(
         spec if not mutated else spec.model_copy(update={"steps": normalized_steps})
     )
     if disambiguate_duplicate_step_names:
-        normalized_spec, step_name_changes = _normalize_duplicate_step_names(
+        normalized_spec, step_name_changes = disambiguate_ai_builder_step_names(
             normalized_spec
         )
         changes.extend(step_name_changes)
@@ -167,7 +167,7 @@ def normalize_ai_builder_step_topology(
     return normalized_spec, changes
 
 
-def _normalize_duplicate_step_names(
+def disambiguate_ai_builder_step_names(
     spec: FlowDraftSpecCore,
 ) -> tuple[FlowDraftSpecCore, list[tuple[StepSpec, StepNormalizationChange]]]:
     used_names: set[str] = set()

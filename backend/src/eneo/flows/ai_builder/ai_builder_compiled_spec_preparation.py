@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     format_resource_resolution_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
+    disambiguate_ai_builder_step_names,
     normalize_ai_builder_spec,
 )
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
@@ -53,6 +54,8 @@ def prepare_compiled_spec_for_session(
             disambiguate_duplicate_step_names=True,
             ui_language=ui_language,
         )
+    else:
+        prepared_spec, _normalization_changes = disambiguate_ai_builder_step_names(spec)
     if resource_catalog is not None:
         prepared_spec, resolution_issues = canonicalize_flow_spec_resources(
             prepared_spec,

@@ -435,14 +435,28 @@ def test_create_invalid_source_ref_retry_uses_create_contract() -> None:
     feedback = proposal_retry_module._build_retry_feedback(
         target_kind=TargetKind.CREATE,
         feedback="A derived typed source reference is invalid.",
-        failure_codes=frozenset({"invalid_source_refs", "duplicate_step_name"}),
+        failure_codes=frozenset({"invalid_source_refs"}),
     )
 
     assert "output_fields[].name" in feedback
     assert "backend owns typed source references" in feedback
-    assert "Every steps[] name must be unique" in feedback
     assert "uses_previous_fields" not in feedback
     assert "uses_previous_outputs" not in feedback
+
+
+def test_create_duplicate_step_name_has_no_repair_recipe() -> None:
+    duplicate_name_feedback = proposal_retry_module._build_retry_feedback(
+        target_kind=TargetKind.CREATE,
+        feedback="Duplicate step name.",
+        failure_codes=frozenset({"duplicate_step_name"}),
+    )
+    generic_feedback = proposal_retry_module._build_retry_feedback(
+        target_kind=TargetKind.CREATE,
+        feedback="Duplicate step name.",
+        failure_codes=frozenset(),
+    )
+
+    assert duplicate_name_feedback == generic_feedback
 
 
 @pytest.mark.asyncio
