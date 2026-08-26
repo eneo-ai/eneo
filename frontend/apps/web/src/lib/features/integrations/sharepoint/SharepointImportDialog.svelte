@@ -525,6 +525,7 @@
                 type="single"
                 value={fixtureScenario ?? ""}
                 onValueChange={changeFixtureScenario}
+                disabled={loadPreview.isLoading}
               >
                 <Select.Trigger
                   class="h-8 min-w-0 flex-1 sm:w-56 sm:flex-none"
@@ -858,7 +859,7 @@
 
     <Dialog.Footer class="mx-0 mb-0 shrink-0 rounded-none border-t px-4 py-4 sm:px-6">
       {#if activeStep === "complete"}
-        <Button class="w-full sm:w-auto" onclick={() => (dialogOpen = false)}>
+        <Button class="w-full sm:w-auto" onclick={() => handleDialogOpenChange(false)}>
           {m.close()}
         </Button>
       {:else}
