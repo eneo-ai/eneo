@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, cast, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import (
     BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
-    PrivateAttr,
     ValidationError,
     field_validator,
     model_validator,
@@ -57,31 +57,50 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.planning_state import NamedResultPlacement
+
 # Safety guard against runaway tool output. This should not be a practical
 # product cap for legitimate advanced flows.
 MAX_PROPOSAL_STEPS = 256
 
-RESULT_KEYS_ARGUMENT = "result_keys"
+
+def fold_named_result_location(
+    name: str,
+    *,
+    segments: Sequence[str] = (),
+) -> tuple[str, ...]:
+    return tuple(fold_result_field_name(part) for part in (*segments, name))
 
 
 @dataclass(frozen=True, slots=True)
 class ObligatedResultKey:
-    """One user-named result key the server projects into the create schema."""
+    """One user-attested result key the proposal is verified against."""
 
     name: str
+    placement: NamedResultPlacement
     declared_shape: Literal["array", "object"] | None = None
+
+    @property
+    def folded_identity(self) -> tuple[str, ...]:
+        return fold_named_result_location(
+            self.name,
+            segments=(
+                self.placement.segments if self.placement.kind == "exact" else ()
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class ProposalObligationProjection:
-    """The admitted obligation keys in the exact prepared-schema order.
+    """The attested result keys, in the order the confirmation showed them.
 
-    One instance is built where the prepared schema is built, travels with it,
-    and is read again at admission, so the record the model answered with is
-    always resolved against the very key set it was shown. It also fixes the
-    order the compiled fields appear in, which JSON object member order cannot:
-    a provider is free to emit the members in any order. Which obligations are
-    eligible is re-derived from one pure rule; the ORDER is never re-derived.
+    One instance is built at request preparation, travels with the prepared
+    request, and is read again by the prompt rule, admission verification and
+    the compiled postcondition, so all three always hold the proposal to the
+    very locations the user attested. It also fixes canonicalized sibling order
+    within each attested parent. Which keys are eligible is re-derived from one
+    pure rule; the order is never re-derived.
     """
 
     keys: tuple[ObligatedResultKey, ...]
@@ -89,75 +108,306 @@ class ProposalObligationProjection:
     def __post_init__(self) -> None:
         if not self.keys:
             raise ValueError("An obligation projection requires at least one key")
-        if len({key.name for key in self.keys}) != len(self.keys):
-            raise ValueError("Obligation projection keys must be unique")
-
-    @property
-    def ordered_keys(self) -> tuple[str, ...]:
-        return tuple(key.name for key in self.keys)
-
-
-def build_result_keys_schema(
-    projection: ProposalObligationProjection,
-) -> dict[str, Any]:
-    """The flat staged `result_keys` record for one admitted projection.
-
-    Every key is a closed record of `field_type`, `description` and
-    `required`. Placement is NOT among them: every projected obligation is a
-    root of the outcome contract, decided by the server. A parent relationship
-    is user evidence, and the understanding pass does not persist one, so
-    asking the proposal model where a name belongs asks it to re-invent
-    evidence that was never captured — which it did, producing contradictory
-    parents, containment cycles and repairs it could not escape.
-
-    `field_type` is a single-value enum wherever the user declared a shape, so
-    the shape the user attested to is the only legal answer and the server
-    materializes it from the projection either way. Where the user declared no
-    shape the model chooses the semantic type. An object becomes an open map:
-    the result key is user-owned, while its members were never declared.
-    """
-
-    properties: dict[str, Any] = {
-        key.name: {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["field_type", "description", "required"],
-            "properties": {
-                "field_type": {
-                    "type": "string",
-                    "enum": (
-                        [key.declared_shape]
-                        if key.declared_shape is not None
-                        else list(_STRUCTURED_FIELD_TYPE_VALUES)
-                    ),
-                },
-                "description": {"type": "string"},
-                "required": {"type": "boolean"},
-            },
+        identities = [(key.placement.kind, key.folded_identity) for key in self.keys]
+        if len(set(identities)) != len(identities):
+            raise ValueError("Obligation projection locations must be unique")
+        unplaced_leaves = {
+            key.folded_identity[-1]
+            for key in self.keys
+            if key.placement.kind == "unplaced"
         }
-        for key in projection.keys
-    }
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": list(projection.ordered_keys),
-        "properties": properties,
-    }
+        exact_leaves = {
+            key.folded_identity[-1]
+            for key in self.keys
+            if key.placement.kind == "exact"
+        }
+        if unplaced_leaves & exact_leaves:
+            raise ValueError(
+                "Unplaced obligation keys cannot also have exact locations"
+            )
+
+    def render_key_location(self, key: ObligatedResultKey) -> str:
+        if key.placement.kind == "unplaced":
+            return key.name
+        path: tuple[str, ...] = (*key.placement.segments, key.name)
+        shapes_by_path: dict[tuple[str, ...], str | None] = {
+            (*candidate.placement.segments, candidate.name): candidate.declared_shape
+            for candidate in self.keys
+            if candidate.placement.kind == "exact"
+        }
+        return ".".join(
+            part + ("[]" if shapes_by_path.get(path[: index + 1]) == "array" else "")
+            for index, part in enumerate(path)
+        )
 
 
-# The canonical field-type vocabulary has one owner; this reads it rather
-# than restating it.
-_STRUCTURED_FIELD_TYPE_VALUES: tuple[str, ...] = get_args(StructuredFieldType)
+@dataclass(frozen=True, slots=True)
+class AttestedContractViolation:
+    """One way the terminal tree fails the attested result contract."""
+
+    kind: Literal[
+        "missing_location",
+        "rename",
+        "duplicate_location",
+        "shape_conflict",
+        "ambiguous_placement",
+    ]
+    key_name: str
+    expected_path: tuple[str, ...] | None
+    declared_shape: Literal["array", "object"] | None
+    matched_names: tuple[str, ...]
+    candidate_paths: tuple[str, ...] = ()
+    expected_display_path: str | None = None
 
 
-class _StagedObligatedField(BaseModel):
-    """One returned `result_keys` record, before it becomes a field graph."""
+@dataclass(frozen=True, slots=True)
+class AttestedResultField:
+    """One field in a terminal result tree consumed by shared verification."""
 
-    model_config = ConfigDict(extra="forbid")
+    name: str
+    field_type: str
+    children: tuple[AttestedResultField, ...] = ()
 
-    field_type: StructuredFieldType
-    description: str
-    required: bool
+
+@dataclass(frozen=True, slots=True)
+class ResolvedObligationLocation:
+    """An attested key paired with its verified terminal-tree path."""
+
+    key: ObligatedResultKey
+    path: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AttestedResultContractResolution:
+    violations: tuple[AttestedContractViolation, ...]
+    locations: tuple[ResolvedObligationLocation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _FieldOccurrence:
+    field: AttestedResultField
+    path: tuple[str, ...]
+    display_path: tuple[str, ...]
+
+
+_NO_OCCURRENCES: tuple[_FieldOccurrence, ...] = ()
+
+
+def _index_attested_result_fields(
+    fields: Sequence[AttestedResultField],
+) -> tuple[
+    dict[tuple[str, ...], tuple[_FieldOccurrence, ...]],
+    dict[str, tuple[_FieldOccurrence, ...]],
+]:
+    by_folded_path_lists: dict[tuple[str, ...], list[_FieldOccurrence]] = {}
+    by_folded_leaf_lists: dict[str, list[_FieldOccurrence]] = {}
+
+    def visit(
+        siblings: Sequence[AttestedResultField],
+        parent: tuple[str, ...],
+        display_parent: tuple[str, ...],
+    ) -> None:
+        for field in siblings:
+            path = (*parent, field.name)
+            display_name = field.name + ("[]" if field.field_type == "array" else "")
+            display_path = (*display_parent, display_name)
+            occurrence = _FieldOccurrence(
+                field=field,
+                path=path,
+                display_path=display_path,
+            )
+            folded_path = tuple(fold_result_field_name(part) for part in path)
+            by_folded_path_lists.setdefault(folded_path, []).append(occurrence)
+            by_folded_leaf_lists.setdefault(folded_path[-1], []).append(occurrence)
+            visit(field.children, path, display_path)
+
+    visit(fields, (), ())
+    return (
+        {key: tuple(value) for key, value in by_folded_path_lists.items()},
+        {key: tuple(value) for key, value in by_folded_leaf_lists.items()},
+    )
+
+
+def resolve_attested_result_contract(
+    terminal_fields: Sequence[AttestedResultField],
+    *,
+    projection: ProposalObligationProjection,
+) -> AttestedResultContractResolution:
+    """Resolve every attested location from one traversal of the terminal tree."""
+
+    by_folded_path, by_folded_leaf = _index_attested_result_fields(terminal_fields)
+    violations: list[AttestedContractViolation] = []
+    locations: list[ResolvedObligationLocation] = []
+    for key in projection.keys:
+        if key.placement.kind == "exact":
+            expected_path = (*key.placement.segments, key.name)
+            group = by_folded_path.get(key.folded_identity, _NO_OCCURRENCES)
+            exact = tuple(item for item in group if item.path == expected_path)
+            if not group:
+                kind = "missing_location"
+            elif not exact:
+                kind = "rename"
+            elif len(group) > 1:
+                kind = "duplicate_location"
+            elif (
+                key.declared_shape is not None
+                and exact[0].field.field_type != key.declared_shape
+            ):
+                kind = "shape_conflict"
+            else:
+                locations.append(
+                    ResolvedObligationLocation(key=key, path=exact[0].path)
+                )
+                continue
+            violations.append(
+                AttestedContractViolation(
+                    kind=kind,
+                    key_name=key.name,
+                    expected_path=expected_path,
+                    declared_shape=key.declared_shape,
+                    matched_names=tuple(item.field.name for item in group),
+                    candidate_paths=tuple(
+                        _render_occurrence_path(item) for item in group
+                    ),
+                    expected_display_path=projection.render_key_location(key),
+                )
+            )
+            continue
+
+        group = by_folded_leaf.get(key.folded_identity[-1], _NO_OCCURRENCES)
+        # Ambiguity is tested before emptiness so the type checker can
+        # compose the narrowing: after both fail, exactly one occurrence
+        # remains.
+        if len(group) > 1:
+            violations.append(
+                AttestedContractViolation(
+                    kind="ambiguous_placement",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=tuple(item.field.name for item in group),
+                    candidate_paths=tuple(
+                        _render_occurrence_path(item) for item in group[:10]
+                    ),
+                )
+            )
+        elif not group:
+            violations.append(
+                AttestedContractViolation(
+                    kind="missing_location",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=(),
+                )
+            )
+        elif (only := group[0]).field.name != key.name:
+            violations.append(
+                AttestedContractViolation(
+                    kind="rename",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=(only.field.name,),
+                    candidate_paths=(_render_occurrence_path(only),),
+                )
+            )
+        elif (
+            key.declared_shape is not None
+            and only.field.field_type != key.declared_shape
+        ):
+            violations.append(
+                AttestedContractViolation(
+                    kind="shape_conflict",
+                    key_name=key.name,
+                    expected_path=None,
+                    declared_shape=key.declared_shape,
+                    matched_names=(only.field.name,),
+                    candidate_paths=(_render_occurrence_path(only),),
+                )
+            )
+        else:
+            locations.append(ResolvedObligationLocation(key=key, path=only.path))
+    return AttestedResultContractResolution(
+        violations=tuple(violations),
+        locations=tuple(locations),
+    )
+
+
+def _render_occurrence_path(occurrence: _FieldOccurrence) -> str:
+    return ".".join(occurrence.display_path)
+
+
+def attested_result_contract_violations(
+    terminal_fields: Sequence[AttestedResultField],
+    *,
+    projection: ProposalObligationProjection,
+) -> tuple[AttestedContractViolation, ...]:
+    """The one admission and compiled-postcondition verification predicate."""
+
+    return resolve_attested_result_contract(
+        terminal_fields,
+        projection=projection,
+    ).violations
+
+
+def attested_violation_message(violation: AttestedContractViolation) -> str:
+    """One actionable sentence per violation kind, shared by both callers."""
+
+    expected_path = violation.expected_path
+    if violation.kind == "missing_location" and expected_path is None:
+        return (
+            f"the user-named result `{violation.key_name}` must exist exactly once "
+            "somewhere in the final step's output_fields"
+        )
+    if violation.kind == "missing_location" and len(expected_path or ()) == 1:
+        return (
+            f"the user-named result `{violation.key_name}` must exist at the "
+            "top level of the final step's output_fields"
+        )
+    if violation.kind == "missing_location":
+        parent = ".".join((expected_path or ())[:-1])
+        return (
+            f"the user-named result `{violation.key_name}` must exist directly "
+            f"under `{parent}` in the final step's output_fields"
+        )
+    if violation.kind == "rename":
+        if expected_path is not None and len(expected_path) > 1:
+            found_paths = ", ".join(f"`{path}`" for path in violation.candidate_paths)
+            return (
+                f"rename location {found_paths} to exactly "
+                f"`{violation.expected_display_path}` — the user attested to that path"
+            )
+        found = ", ".join(f"`{name}`" for name in violation.matched_names)
+        return (
+            f"rename {found} to exactly `{violation.key_name}` — the user "
+            "attested to that spelling"
+        )
+    if violation.kind == "duplicate_location":
+        parent = (expected_path or ())[:-1]
+        location = (
+            "at the top level" if not parent else f"directly under `{'.'.join(parent)}`"
+        )
+        return (
+            f"declare `{violation.key_name}` exactly once {location} in "
+            "the final step's output_fields"
+        )
+    if violation.kind == "ambiguous_placement":
+        candidates = ", ".join(f"`{path}`" for path in violation.candidate_paths)
+        return (
+            f"the user-named result `{violation.key_name}` has ambiguous placement: "
+            f"{candidates} (showing {len(violation.candidate_paths)} of "
+            f"{len(violation.matched_names)})"
+        )
+    location = (
+        violation.expected_display_path or ".".join(expected_path)
+        if expected_path is not None
+        else violation.candidate_paths[0]
+    )
+    return (
+        f"`{location}` must be of type "
+        f"`{violation.declared_shape}` — the user declared that shape"
+    )
 
 
 class FlowInputFieldIntent(BaseModel):
@@ -439,25 +689,6 @@ class CreateFlowIntent(BaseModel):
     steps: list[CreateSemanticStepIntent]
     assumptions: list[str] = Field(default_factory=list)
 
-    # The projected obligation graph is server-owned: it is materialized from
-    # the staged `result_keys` record against the prepared schema's key order,
-    # never accepted as a model-authored argument.
-    _obligated_output_fields: tuple[StructuredFieldDraft, ...] = PrivateAttr(
-        default=(),
-    )
-
-    @property
-    def obligated_output_fields(self) -> tuple[StructuredFieldDraft, ...]:
-        return self._obligated_output_fields
-
-    def admit_obligated_output_fields(
-        self,
-        fields: tuple[StructuredFieldDraft, ...],
-    ) -> None:
-        """Record the server-materialized obligation graph on this intent."""
-
-        self._obligated_output_fields = fields
-
     @field_validator("flow_name", "plan_rationale")
     @classmethod
     def _normalize_required_text(cls, value: str) -> str:
@@ -511,157 +742,81 @@ def parse_create_flow_intent_arguments(
     obligation_projection: ProposalObligationProjection | None = None,
 ) -> CreateFlowIntent:
     remaining = dict(arguments)
-    staged_result_keys = (
-        remaining.pop(RESULT_KEYS_ARGUMENT, None)
-        if obligation_projection is not None
-        else None
-    )
-    if obligation_projection is not None:
-        remaining = _without_obligated_terminal_field_copies(
-            remaining,
-            projection=obligation_projection,
-        )
     try:
         intent = CreateFlowIntent.model_validate(remaining)
-        if obligation_projection is not None:
-            intent.admit_obligated_output_fields(
-                _materialize_obligated_output_fields(
-                    staged_result_keys,
-                    projection=obligation_projection,
-                )
-            )
     except ValidationError as error:
         raise ProposalIntentArgumentError(safe_validation_issues(error)) from error
-    except ValueError as error:
-        raise ProposalIntentArgumentError(
-            (f"{RESULT_KEYS_ARGUMENT}: {error} [value_error]",)
-        ) from error
+    if obligation_projection is not None:
+        _verify_attested_result_contract(
+            intent,
+            projection=obligation_projection,
+        )
     return intent
 
 
-def _without_obligated_terminal_field_copies(
-    arguments: dict[str, Any],
+def _verify_attested_result_contract(
+    intent: CreateFlowIntent,
     *,
     projection: ProposalObligationProjection,
-) -> dict[str, Any]:
-    """Discard terminal field copies whose placement the server owns.
+) -> None:
+    """Admission arm of the one verification predicate.
 
-    The projected result keys are always materialized as terminal roots. A
-    model-authored copy therefore cannot affect the compiled contract, so
-    validating that dead copy would only create repair work. Prune it while the
-    payload is still raw because a redundant copy can itself be structurally
-    invalid and fail before the typed compiler sees the useful fields that
-    remain.
+    The model authors its own output_fields; this verifies the attested
+    contract on the terminal step's complete field tree.
     """
 
-    raw_steps_value: object = arguments.get("steps")
-    if not isinstance(raw_steps_value, list) or not raw_steps_value:
-        return arguments
-    raw_steps = cast(list[object], raw_steps_value)
-    terminal_step_value = raw_steps[-1]
-    if not isinstance(terminal_step_value, dict):
-        return arguments
-    terminal_step = cast(dict[str, object], terminal_step_value)
-    raw_fields_value = terminal_step.get("output_fields")
-    if not isinstance(raw_fields_value, list):
-        return arguments
-    raw_fields = cast(list[object], raw_fields_value)
-
-    obligated_identities = {fold_result_field_name(key.name) for key in projection.keys}
-    surviving_fields, changed = _prune_raw_obligated_field_copies(
-        raw_fields,
-        obligated_identities=obligated_identities,
+    if not intent.steps:
+        return
+    terminal_index = len(intent.steps) - 1
+    terminal = intent.steps[terminal_index]
+    fields = list(terminal.output_fields or ())
+    terminal_fields = attested_result_fields_from_drafts(fields)
+    violations = attested_result_contract_violations(
+        terminal_fields,
+        projection=projection,
     )
-    if not changed:
-        return arguments
+    if not violations:
+        return
+    prefix = f"steps.{terminal_index}.output_fields"
+    index_of = {field.name: i for i, field in enumerate(fields)}
 
-    admitted_step: dict[str, object] = {
-        **terminal_step,
-        "output_fields": surviving_fields or None,
-    }
-    return {
-        **arguments,
-        "steps": [*raw_steps[:-1], admitted_step],
-    }
-
-
-def _prune_raw_obligated_field_copies(
-    fields: list[object],
-    *,
-    obligated_identities: set[str],
-) -> tuple[list[object], bool]:
-    surviving: list[object] = []
-    changed = False
-    for field in fields:
-        if not isinstance(field, dict):
-            surviving.append(field)
-            continue
-        raw_field = cast(dict[str, object], field)
-        name = raw_field.get("name")
+    def _path(violation: AttestedContractViolation) -> str:
         if (
-            isinstance(name, str)
-            and fold_result_field_name(name) in obligated_identities
+            violation.kind == "rename"
+            and violation.matched_names
+            and violation.expected_path is not None
+            and len(violation.expected_path) == 1
         ):
-            changed = True
-            continue
+            return f"{prefix}.{index_of[violation.matched_names[0]]}.name"
+        if (
+            violation.kind == "shape_conflict"
+            and violation.expected_path is not None
+            and len(violation.expected_path) == 1
+        ):
+            return f"{prefix}.{index_of[violation.key_name]}.field_type"
+        return prefix
 
-        children = raw_field.get("children")
-        field_type = raw_field.get("field_type")
-        if field_type in ("object", "array") and isinstance(children, list):
-            surviving_children, children_changed = _prune_raw_obligated_field_copies(
-                cast(list[object], children),
-                obligated_identities=obligated_identities,
-            )
-            if children_changed:
-                changed = True
-                if not surviving_children:
-                    continue
-                raw_field = {**raw_field, "children": surviving_children}
-        surviving.append(raw_field)
-    return surviving, changed
-
-
-def _materialize_obligated_output_fields(
-    staged_result_keys: object,
-    *,
-    projection: ProposalObligationProjection,
-) -> tuple[StructuredFieldDraft, ...]:
-    """Turn the staged flat record into the obligated root fields.
-
-    Every obligation is a root, in the projection's order rather than the
-    returned object's member order, so permuting the members a provider
-    happens to emit cannot change the compiled graph. The shape comes from the
-    projection wherever the user declared one; the model only ever chooses a
-    leaf type for a name the user left unshaped.
-
-    A user-declared group compiles as an open object. Nothing in this contract
-    can name what belongs inside it — the parent relationship was never
-    captured — so the honest contract is an object whose members are not
-    constrained, not a string that quietly loses the group.
-    """
-
-    names = projection.ordered_keys
-    if not isinstance(staged_result_keys, dict):
-        raise ValueError("a record for every declared result key is required")
-    raw = cast(dict[str, Any], staged_result_keys)
-    missing = [name for name in names if name not in raw]
-    if missing:
-        raise ValueError(f"missing records for {', '.join(missing)}")
-    staged = {name: _StagedObligatedField.model_validate(raw[name]) for name in names}
-
-    fields: list[StructuredFieldDraft] = []
-    for key in projection.keys:
-        field_type = key.declared_shape or staged[key.name].field_type
-        fields.append(
-            StructuredFieldDraft(
-                name=key.name,
-                field_type=field_type,
-                description=staged[key.name].description,
-                required=staged[key.name].required,
-                allow_additional_properties=field_type == "object",
-            )
+    raise ProposalIntentArgumentError(
+        tuple(
+            f"{_path(v)}: {attested_violation_message(v)} [value_error]"
+            for v in violations
         )
-    return tuple(fields)
+    )
+
+
+def attested_result_fields_from_drafts(
+    fields: Sequence[StructuredFieldDraft],
+) -> tuple[AttestedResultField, ...]:
+    return tuple(
+        AttestedResultField(
+            name=field.name,
+            field_type=str(field.field_type),
+            children=attested_result_fields_from_drafts(
+                field.fields or field.item_fields or ()
+            ),
+        )
+        for field in fields
+    )
 
 
 class ProposalIntentArgumentError(ValueError):
@@ -697,7 +852,6 @@ def build_create_flow_tool_schema(
     tool_name: str,
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
-    obligation_projection: ProposalObligationProjection | None = None,
 ) -> dict[str, Any]:
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")
@@ -736,11 +890,6 @@ def build_create_flow_tool_schema(
             f"{rendered_runtime_inputs}. Do not repeat any exact runtime-input "
             "identity as a source output field."
         )
-    projected_result_keys = (
-        {RESULT_KEYS_ARGUMENT: build_result_keys_schema(obligation_projection)}
-        if obligation_projection is not None
-        else {}
-    )
     return {
         "type": "function",
         "function": {
@@ -756,7 +905,6 @@ def build_create_flow_tool_schema(
                 "required": [
                     "flow_name",
                     "plan_rationale",
-                    *projected_result_keys,
                     "steps",
                 ],
                 "properties": {
@@ -780,7 +928,6 @@ def build_create_flow_tool_schema(
                         "type": "array",
                         "items": {"type": "string"},
                     },
-                    **projected_result_keys,
                     # The recursive proposal body stays last for the same
                     # reason as output_fields inside each step.
                     "steps": {
@@ -878,11 +1025,14 @@ def build_semantic_step_schema(
 
 
 __all__ = [
+    "AttestedContractViolation",
+    "AttestedResultContractResolution",
+    "AttestedResultField",
     "CreateFlowIntent",
     "ObligatedResultKey",
     "ProposalIntentArgumentError",
     "ProposalObligationProjection",
-    "RESULT_KEYS_ARGUMENT",
+    "ResolvedObligationLocation",
     "AddStep",
     "AssistantSpecPatch",
     "FlowInputFieldIntent",
@@ -891,8 +1041,11 @@ __all__ = [
     "OrderedEditStep",
     "SemanticStepIntent",
     "build_create_flow_tool_schema",
-    "build_result_keys_schema",
+    "attested_result_fields_from_drafts",
+    "attested_result_contract_violations",
+    "attested_violation_message",
     "build_semantic_step_schema",
     "parse_create_flow_intent_arguments",
+    "resolve_attested_result_contract",
     "safe_validation_issues",
 ]

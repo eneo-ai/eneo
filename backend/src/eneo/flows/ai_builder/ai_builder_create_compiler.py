@@ -24,7 +24,6 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     StructuredFieldDraft,
-    structured_field_draft_names,
 )
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     EMPTY_REQUESTED_OUTPUT_SECTIONS,
@@ -33,11 +32,16 @@ from eneo.flows.ai_builder.ai_builder_primary_input_fields import (
     is_primary_runtime_input_shadow_field,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    AttestedResultField,
     CreateFlowIntent,
+    ProposalObligationProjection,
+    attested_result_contract_violations,
+    attested_result_fields_from_drafts,
+    attested_violation_message,
+    resolve_attested_result_contract,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     fold_result_field_name,
-    structured_field_names_satisfy_result_field,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_fields import (
     RuntimeInputFieldHint,
@@ -70,14 +74,14 @@ def compile_create_intent_to_spec(
     *,
     context: CreateCompileContext | None = None,
     field_diagnostics: list[LintWarning] | None = None,
+    obligation_projection: ProposalObligationProjection | None = None,
 ) -> FlowDraftSpecCore:
-    obligated_output_fields = intent.obligated_output_fields
     envelope_output_fields = (
         context.result_contract_output_fields if context is not None else ()
     )
-    intent = _intent_with_obligated_output_fields(
+    intent = _canonicalize_attested_output_fields(
         intent,
-        envelope_fields=envelope_output_fields,
+        projection=obligation_projection,
     )
     runtime_input_type = (
         context.effective_runtime_input_type if context is not None else InputType.TEXT
@@ -166,13 +170,7 @@ def compile_create_intent_to_spec(
         aggregation_intent=aggregation_intent,
         terminal_output_schema=context.terminal_output_schema if context else None,
         source_reader_required_fields=source_reader_required_fields,
-        # With obligations, the envelope is already merged onto the terminal
-        # step above, under a precedence the assembly's any-depth completion
-        # cannot express. Leaving it here as well would let it re-complete
-        # that branch against the merged graph.
-        result_contract_output_fields=(
-            () if obligated_output_fields else envelope_output_fields
-        ),
+        result_contract_output_fields=envelope_output_fields,
         result_contract_required_roles=(
             context.result_contract_required_roles if context is not None else ()
         ),
@@ -295,144 +293,89 @@ def compile_create_intent_to_spec(
                     "reason": "template_preparation_stage_limit_exceeded",
                 },
             )
-        return _spec_preserving_obligations(compiled_spec, obligated_output_fields)
+        return _spec_satisfying_attested_contract(
+            compiled_spec, projection=obligation_projection
+        )
 
 
-def _intent_with_obligated_output_fields(
+def _canonicalize_attested_output_fields(
     intent: CreateFlowIntent,
     *,
-    envelope_fields: tuple[StructuredFieldDraft, ...],
+    projection: ProposalObligationProjection | None,
 ) -> CreateFlowIntent:
-    """Place the admitted obligation graph on the terminal step, once.
+    """Normalize attested siblings in place throughout the terminal tree."""
 
-    Precedence is explicit and it is enforced where it cannot be defeated.
-    Routing obligations through the server-owned result-contract parameter
-    would not do it: that path only *completes* a field it cannot already
-    find, and it finds one at any depth and under any folded alias
-    (`_complete_result_contract_output_fields` in the assembly), so a
-    model-authored nested `documents: string` would silently stand in for an
-    obligated root `documents: array`.
-
-    The same any-depth search cuts the other way, so the envelope is completed
-    here too rather than in the assembly: the model's own fields keep the
-    assembly's existing satisfaction rule, so nothing about plans without
-    obligations changes, while an obligation satisfies an envelope role only by
-    carrying that role's own name. The assembly's global alias semantics are
-    untouched — it simply has nothing left to complete on this branch.
-
-    Create admission has already removed model-authored copies of obligated
-    terminal fields, including invalid copies that typed validation could not
-    admit. The compiler therefore only has to combine the admitted model fields
-    with the server-owned roots and the remaining envelope fields.
-    """
-
-    obligated = intent.obligated_output_fields
-    if not obligated or not intent.steps:
+    if projection is None or not intent.steps:
         return intent
-    obligated_identities = {fold_result_field_name(field.name) for field in obligated}
-    terminal_step = intent.steps[-1]
-    model_fields = terminal_step.output_fields or []
-    model_declared_names = structured_field_draft_names(tuple(model_fields))
-    uncovered_envelope_fields = [
-        field
-        for field in envelope_fields
-        if fold_result_field_name(field.name) not in obligated_identities
-        and not structured_field_names_satisfy_result_field(
-            model_declared_names,
-            field.name,
-        )
-    ]
-    return intent.model_copy(
-        update={
-            "steps": [
-                *intent.steps[:-1],
-                terminal_step.model_copy(
-                    update={
-                        "output_fields": [
-                            *obligated,
-                            *model_fields,
-                            *uncovered_envelope_fields,
-                        ]
-                    }
-                ),
-            ]
-        }
+    terminal = intent.steps[-1]
+    fields = list(terminal.output_fields or ())
+    if not fields:
+        return intent
+    resolution = resolve_attested_result_contract(
+        attested_result_fields_from_drafts(fields),
+        projection=projection,
     )
+    if resolution.violations:
+        return intent
+    attested_paths = {location.path for location in resolution.locations}
+    ordered_names_by_parent: dict[tuple[str, ...], list[str]] = {}
+    for location in resolution.locations:
+        ordered_names_by_parent.setdefault(location.path[:-1], []).append(
+            location.path[-1]
+        )
+
+    def normalize_siblings(
+        siblings: list[StructuredFieldDraft],
+        parent_path: tuple[str, ...],
+    ) -> list[StructuredFieldDraft]:
+        normalized: list[StructuredFieldDraft] = []
+        for field in siblings:
+            path = (*parent_path, field.name)
+            updates: dict[str, object] = {}
+            children = field.fields or field.item_fields
+            if children:
+                normalized_children = normalize_siblings(list(children), path)
+                if field.field_type == "object":
+                    updates["fields"] = normalized_children
+                else:
+                    updates["item_fields"] = normalized_children
+            if path in attested_paths:
+                updates["required"] = True
+                if field.field_type not in ("object", "array"):
+                    updates["nullable"] = True
+            normalized.append(field.model_copy(update=updates) if updates else field)
+
+        attested_names = ordered_names_by_parent.get(parent_path, [])
+        if not attested_names:
+            return normalized
+        by_name = {field.name: field for field in normalized}
+        attested = [by_name[name] for name in attested_names]
+        attested_name_set = set(attested_names)
+        return attested + [
+            field for field in normalized if field.name not in attested_name_set
+        ]
+
+    reordered = normalize_siblings(fields, ())
+    new_terminal = terminal.model_copy(update={"output_fields": reordered})
+    return intent.model_copy(update={"steps": [*intent.steps[:-1], new_terminal]})
 
 
-def _missing_obligation_paths(
-    fields: tuple[StructuredFieldDraft, ...],
-    schema: dict[str, Any],
-    *,
-    path: str = "",
-) -> list[str]:
-    """Obligation paths the compiled contract does not carry, in graph order.
-
-    Each obligation is looked for beneath its own obligated parent, so the
-    answer is a path and not a name. Identity is still folded per segment, so
-    a fold-equivalent spelling of the same field is preserved rather than
-    reported.
-    """
-
-    properties = {
-        fold_result_field_name(str(name)): value
-        for name, value in resolve_schema_properties(_schema_object(schema)).items()
-    }
-    missing: list[str] = []
-    for field in fields:
-        field_path = f"{path}.{field.name}" if path else field.name
-        declared = properties.get(fold_result_field_name(field.name))
-        if not isinstance(declared, dict):
-            missing.append(field_path)
-            continue
-        children = tuple((field.fields or []) + (field.item_fields or []))
-        if children:
-            missing.extend(
-                _missing_obligation_paths(
-                    children,
-                    cast(dict[str, Any], declared),
-                    path=field_path,
-                )
-            )
-    return missing
-
-
-def _schema_object(schema: dict[str, Any]) -> dict[str, Any]:
-    """The object node whose properties a field's children live in.
-
-    An array's children are declared on its `items`, and the obligated graph
-    reaches them through `item_fields` without a numeric segment, so the array
-    node is transparent here.
-    """
-
-    items = schema.get("items")
-    if schema.get("type") == "array" and isinstance(items, dict):
-        return _schema_object(cast(dict[str, Any], items))
-    return schema
-
-
-def _spec_preserving_obligations(
+def _spec_satisfying_attested_contract(
     spec: FlowDraftSpecCore,
-    obligated_output_fields: tuple[StructuredFieldDraft, ...],
+    *,
+    projection: ProposalObligationProjection | None,
 ) -> FlowDraftSpecCore:
-    """Compiler postcondition: every admitted obligation survived compilation.
+    """Compiler postcondition: the SAME predicate admission ran, re-run on the
+    compiled terminal contract.
 
-    A defect detector, never a repair. The model cannot cause this to fire —
-    placement is server-owned above — so firing means the compiler dropped a
-    name the user was already shown at confirmation, and shipping that plan
-    would break the promise the confirmation made. It fails closed as a
+    A defect detector, never a repair: admission already verified the model's
+    declaration, so a violation here means compilation dropped, renamed or
+    retyped a name the user was shown at confirmation. It fails closed as a
     non-repairable architecture failure rather than asking a model to fix a
     server bug.
-
-    It checks every admitted obligation at its own PATH, not merely somewhere
-    in the contract: a lost `assessment.risks` is exactly as broken a promise
-    as a lost `assessment`, and the same name legitimately exists at another
-    depth — the server's envelope `risks` sits at the root while the user's
-    `risks` sits inside `assessment` — so a flat name set would let one mask
-    the other's loss.
     """
 
-    if not obligated_output_fields:
+    if projection is None:
         return spec
     outcome_contract = next(
         (
@@ -442,24 +385,64 @@ def _spec_preserving_obligations(
         ),
         None,
     )
-    missing = _missing_obligation_paths(
-        obligated_output_fields,
-        outcome_contract if isinstance(outcome_contract, dict) else {},
+    schema = outcome_contract if isinstance(outcome_contract, dict) else {}
+    terminal_fields = _attested_fields_from_schema(schema)
+    violations = attested_result_contract_violations(
+        terminal_fields,
+        projection=projection,
     )
-    if not missing:
+    if not violations:
         return spec
+    detail = "; ".join(
+        attested_violation_message(violation) for violation in violations
+    )
     raise AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
-        detail=(
-            "The compiled Flow lost result fields the user named: "
-            f"{', '.join(missing)}."
-        ),
+        detail=(f"The compiled Flow broke the attested result contract: {detail}."),
         log_context={
-            "failure_code": "named_result_obligation_dropped",
-            "reason": "named_result_obligation_dropped",
-            "field_names": ",".join(missing),
+            "failure_code": "attested_result_contract_broken",
+            "reason": ";".join(f"{v.kind}:{v.key_name}" for v in violations),
+            "field_names": ",".join(v.key_name for v in violations),
         },
     )
+
+
+def _attested_fields_from_schema(
+    schema: dict[str, Any],
+) -> tuple[AttestedResultField, ...]:
+    fields: list[AttestedResultField] = []
+    for raw_name, raw_value in resolve_schema_properties(schema).items():
+        if not isinstance(raw_value, dict):
+            continue
+        value = cast(dict[str, Any], raw_value)
+        field_type = _schema_field_type(value)
+        child_schema = value
+        if field_type == "array" and isinstance(value.get("items"), dict):
+            child_schema = cast(dict[str, Any], value["items"])
+        fields.append(
+            AttestedResultField(
+                name=str(raw_name),
+                field_type=field_type,
+                children=_attested_fields_from_schema(child_schema),
+            )
+        )
+    return tuple(fields)
+
+
+def _schema_field_type(schema: dict[str, Any]) -> str:
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str):
+        return raw_type
+    if isinstance(raw_type, list):
+        return next(
+            (
+                item
+                for item in cast(list[object], raw_type)
+                if isinstance(item, str) and item != "null"
+            ),
+            "",
+        )
+    return ""
 
 
 def _apply_flow_input_schema(

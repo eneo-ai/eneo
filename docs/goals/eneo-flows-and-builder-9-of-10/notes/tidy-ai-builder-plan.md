@@ -423,15 +423,16 @@ Understanding call (classifier)
   (`ai_builder_discovery_decision_engine.py:115-119`). Evidence rules stay.
 
 Create proposal
-- Shape unchanged. Boundary closure in two steps: first the proven defect (model
-  duplicates of projected `result_keys` are pruned; END STATE says reject), then each
-  raw-JSON normalizer only with captured evidence that its route no longer needs it
-  (strict-capable routes already reject malformed nesting at the provider; the
-  normalizers exist for non-strict routes and were added from specific captures).
-- The prompt rule that asks the model to restate server-known source facts as
-  `output_fields` (`ai_builder_plan_proposal_task.py:126`) is rewritten so projected
-  obligations are never re-authored; a duplicate is then a rejection with the exact
-  path, repaired at most once.
+- Boundary closure, as landed after two measured rollbacks: user-named results
+  are VERIFIED, not injected — `result_keys` left the create tool schema, the
+  model authors its own `output_fields`, a positive prompt rule lists the
+  attested names that must appear at the terminal root, and one shared
+  predicate is read by admission and the compiled postcondition. Each raw-JSON
+  normalizer is still deleted only with captured evidence that its route no
+  longer needs it (strict-capable routes already reject malformed nesting at
+  the provider; the normalizers exist for non-strict routes and were added
+  from specific captures). The two result-key transport defenses died with
+  the injection.
 - `output_fields` recursion stays. A flat parent-id concept list is adopted only if
   the non-strict failure family survives the normalizer deletions; it trades malformed
   nesting for dangling or cyclic ids and is not free.
@@ -623,7 +624,7 @@ their default if the owner is silent.
 | O4 | Language: bilingual copy stays; matching families deleted in both languages; no English corpus investment | Default: yes to all three |
 | O5 | Split `ai_builder_api_battle_test.py` into a package | Default: no; decompose `_quality_report` only when a slice touches it |
 | O6 | Corpus population 172 → 182 | Default: accept as a corpus release after the unchanged-corpus comparison; the tracked manifest is the population owner |
-| O7 | Model duplicate of a projected `result_keys` name | Default: reject with exact path (one repair), not prune |
+| O7 | User-named result contract at the terminal step | AMENDED by owner 2026-08-24 (evidence: two four-leg floor breaches, attribution receipt `21-rejection-attribution-receipt.json`): verification, not injection — the model authors output_fields; admission verifies every attested name exists exactly once at the terminal root with exact spelling and declared-shape-compatible type; missing or conflicting names are rejected with the exact path; user-named results compile REQUIRED-BUT-NULLABLE (the field always exists; a source that lacks it yields an explicit empty/degradation value, never fabrication, never omission); named-results-first ordering is KEPT via canonicalization of projected roots only. No field is invented, dropped, or renamed; requiredness, nullability and projected-root order are canonicalized as disclosed. |
 | O8 | Delete `ai_builder_canonicalization.py` legacy id aliases | Default: yes (prerelease, sessions are disposable) |
 
 Answered by the owner on 2026-08-21, before any commit:
@@ -966,12 +967,36 @@ escalated to the product owner.
 
 ### Phase 2: closed proposal boundary (4.3)
 
-- [ ] **2.1 Projected obligations: reject, never prune.** First product slice. Rewrite
-  the prompt rule at `ai_builder_plan_proposal_task.py:126`; replace
-  `_without_obligated_terminal_field_copies` and `_prune_raw_obligated_field_copies`
-  with a rejection naming the exact path (O7); prove provider schema → typed
-  admission → compile → final validator with a payload that duplicates a projected
-  key and one that does not. Cohort: obligation cases ×3 plus broad ×1.
+- [ ] **2.1 User-named results: one declaration, verified (D2).** First product
+  slice, redesigned twice under measurement (the reject-on-duplicate design
+  breached the repairs and first-pass floors in two four-leg rounds; the
+  attribution receipt `21-rejection-attribution-receipt.json` is the decision
+  record: 62/65 repairs were the rejection, first attempts 41 flat root
+  copies / 21 nested, and "remove it" feedback produced nesting). The owner
+  amendment of O7 and the master wording are ADOPTED (2026-08-24). The frozen
+  contract (peer iterations 33-35): remove `result_keys` from the create tool
+  schema; the model authors output_fields naturally; admission VERIFIES the
+  attested contract — exactly one terminal-root field per projected
+  folded-identity group; spelling must exactly match the attested name
+  (folding only locates a rename for an actionable error); a declared shape
+  constrains the effective JSON type, an undeclared shape accepts any legal
+  structured type; nested occurrences never satisfy the root constraint (no
+  any-depth scanner); legal child structure stays with the typed field model;
+  requiredness/nullability: OWNER RULED 2026-08-24 — required-but-nullable; the
+  compiled output contract RECHECKS exact root spelling and declared shape
+  (one shared predicate with admission, not two truth tables); projection
+  ordering: OWNER RULED 2026-08-24 — kept; canonicalize projected roots
+  only, preserving relative order of all other fields. Positive prompt contract: list the
+  fields that must appear at the final step's root. DELETE with the slice:
+  schema injection, materialization, the rejection-of-duplicates, the
+  prohibition prompt text, `_rehome_steps_from_result_projection` and
+  `_discard_server_owned_result_key_children` (dead transport defenses;
+  honestly advances 2.3). Tests: exact agreement, folded alias, duplicate
+  roots, missing root, nested-only, shape conflict, unshaped legal type,
+  envelope collision, stand-down modes, stable nonprojected order, and the
+  FINAL COMPILED property spelling and JSON type. Measurement: fresh
+  four-leg round under a newly frozen predeclaration on the existing
+  lineage.
 - [ ] **2.2 Server-mechanics repair families.** Attribute
   `invalid_structured_underlag_projection` and `assembly_plan_invariant_failed` to
   their compile/assembly owners (the observations named in section 3); fix them where
@@ -1102,6 +1127,17 @@ STALL-POLICY, never fixed by restoring a table.
   (confirmation, checkpoint question, session cap, retry section),
   `master-program.md` (close the 0.1b note: lineage and population after 0.4).
   Follow the repository's docs writing rules.
+- [ ] **6.5 Policy-constant table (bounded, iteration 35).** One table, four
+  categories, ONLY for numeric/enumerated values that change user behavior,
+  cost, retention, safety or operability (never an every-literal inventory):
+  (a) protocol/safety invariants — named and documented in place (attachment
+  hard limit, payload caps, structured fan-in 64, proposal attempt cap);
+  (b) admin policy ONLY with real customer/legal evidence (owner/product
+  ruling per row before any persistence or UI is built);
+  (c) internal tuning — stays code, documented (temperature, token targets,
+  clause-segmenter windows);
+  (d) challenge-for-removal — tenant-visible knobs that conflict with the
+  no-missed-details goal (conversation minimum-budget/shrink settings).
 - [ ] **6.3 Burn-down.** Grep gates for every deleted symbol in this document; run
   import-linter, vulture and the full Builder suite; route the ten hardcoded English
   fallback strings in the frontend through Paraglide keys; final broad ×3 and the
@@ -1181,11 +1217,43 @@ STALL-POLICY, never fixed by restoring a table.
    SHA. Then 0.2 (b), gated against the validated (a). Cohort (c) is never landed
    (O2); it stays a patch under `.codex/artifacts/`.
 5. 0.3b, the harness disclosed-decision assertions, against the tracked corpus.
-6. First product slice: 2.1 (projected obligations: reject, never prune). Smallest
-   diff, highest certainty, full cross-contract proof, its own cohort. Write the
-   Phase 1 design-gate packet while 2.1's cohort runs.
-7. Then 2.2 (the two server-mechanics families), 0.4 (the corpus release, which opens
-   a new lineage), Phase 1.
+6. **Owner reprioritization (2026-08-24 evening, peer-reviewed at max effort,
+   iteration 35): the production-readiness order.** Quality > runtime token
+   efficiency (tokens are a tiebreaker, never traded against intent
+   capture). The executable order from here:
+   1. Regenerate the smartness evidence packet with named suite-summary
+      denominators (172 cases; conformance 54.71/54.39/57.31 %); no rate is
+      decision-grade without its denominator.
+   2. 2.1-D2 (verification, not injection) under its frozen contract (see
+      the 2.1 slice entry), fresh four-leg round on the existing lineage —
+      D2's acceptance/repair gates do not depend on the leaf matcher.
+   3. 2.2 server-mechanics families, as already ordered.
+   4. The leaf matcher as a SCORER-ONLY replay on the unchanged corpus:
+      the adjudicated rule verbatim (contiguous whole-word noun phrase
+      quoted from that case's prompt, leaf-only, exact for entity
+      identifiers, negative examples encoded), replayed over the three
+      existing broad receipts, reporting stable passes / stable failures /
+      mixed. Separate lineage event.
+   5. Runtime/model-call instrumentation on that same corpus (separate
+      lineage event).
+   6. The ten new cases as their own corpus release (new lineage, O6).
+   7. The deterministic `parse_failed` family: per-case raw classifier
+      output and first rejecting contract branch first
+      (`ai_builder_slot_classifier.py:243`,
+      `ai_builder_slot_classification_contract.py:490`), then the fix.
+   8. Then: 2.4 duplicate names, 2.5 retry shrink, GUARDED explicitness
+      (must measure wrong-auto-commit and skipped-necessary-question rates
+      alongside redundant-question reduction, with ambiguous/contradiction
+      cases for all three slots, and no increase in incorrect commit-grade
+      decisions), document-terminal field preservation, terminal
+      flattening, prose collapse.
+   9. Supported-model-route qualification (repeated cohorts per configured
+      capability route, not one secondary-model broad), then the master's
+      release lanes.
+   Security, operations, UX recovery and launch-SLO tracks run in parallel
+   from now; they are release gates owned by the master program's existing
+   lanes (FLOW-QUALITY, public API readiness, load/deployment/rollback),
+   referenced as hard dependencies, never duplicated here.
 
 ---
 

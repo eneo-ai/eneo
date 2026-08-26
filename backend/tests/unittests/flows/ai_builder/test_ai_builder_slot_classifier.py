@@ -58,7 +58,11 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_prompt_hash,
 )
-from eneo.flows.ai_builder.planning_state import CheckpointProducerKind
+from eneo.flows.ai_builder.planning_state import (
+    CheckpointProducerKind,
+    ExactNamedResultPlacement,
+    UnplacedNamedResultPlacement,
+)
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
@@ -98,6 +102,13 @@ def _classification_input(
 
 def _evidence(quote: str, *, source_id: str = "user_message:user-1") -> dict[str, str]:
     return {"source_id": source_id, "quote": quote}
+
+
+def _named_result_locations(
+    names: list[str] | tuple[str, ...],
+    evidence: list[dict[str, str]],
+) -> list[dict[str, object]]:
+    return [{"name": name, "segments": [], "evidence": evidence} for name in names]
 
 
 _VALID_CLASSIFICATION_RESPONSE: dict[str, object] = {
@@ -263,8 +274,8 @@ def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
                     **_VALID_CLASSIFICATION_RESPONSE,
                     "named_result_evidence": {
                         "operation": "update",
-                        "names": names,
-                        "removed_names": [],
+                        "upserts": _named_result_locations(names, [_evidence(quote)]),
+                        "removals": [],
                         "confidence": "high",
                         "reason": "The user explicitly enumerated JSON fields.",
                         "evidence": [_evidence(quote)],
@@ -276,7 +287,7 @@ def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
         )
         assert result is not None
         return (
-            result.named_result_evidence.names
+            tuple(item.name for item in result.named_result_evidence.upserts)
             if result.named_result_evidence is not None
             else None
         )
@@ -329,8 +340,10 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": ["id"],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        ["id"], [_evidence(evidence_quote)]
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON property.",
                     "evidence": [_evidence(evidence_quote)],
@@ -348,7 +361,7 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
 
     assert result is not None
     assert result.named_result_evidence is not None
-    assert result.named_result_evidence.names == ("id",)
+    assert tuple(item.name for item in result.named_result_evidence.upserts) == ("id",)
 
 
 @pytest.mark.parametrize(
@@ -452,8 +465,10 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": [classified_name],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        [classified_name], [_evidence(quote)]
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON property.",
                     "evidence": [_evidence(quote)],
@@ -471,10 +486,10 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
 
     assert result is not None
     assert result.named_result_evidence is not None
-    assert result.named_result_evidence.names == (expected_name,)
-    assert result.named_result_evidence.evidence_by_name[0].declared_shape == (
-        expected_shape
+    assert tuple(item.name for item in result.named_result_evidence.upserts) == (
+        expected_name,
     )
+    assert result.named_result_evidence.upserts[0].declared_shape == expected_shape
 
 
 _PROCUREMENT_PROMPT = (
@@ -503,6 +518,18 @@ _PROCUREMENT_QUOTES = [
 
 
 def _named_result_response(names: list[str], quotes: list[str]) -> str:
+    evidence = [_evidence(quote) for quote in quotes]
+    return _named_result_response_with_locations(
+        _named_result_locations(names, evidence),
+        quotes,
+    )
+
+
+def _named_result_response_with_locations(
+    locations: list[object],
+    quotes: list[str],
+) -> str:
+    evidence = [_evidence(quote) for quote in quotes]
     return json.dumps(
         {
             "slots": [],
@@ -511,11 +538,11 @@ def _named_result_response(names: list[str], quotes: list[str]) -> str:
             "form_intake": None,
             "named_result_evidence": {
                 "operation": "update",
-                "names": names,
-                "removed_names": [],
+                "upserts": locations,
+                "removals": [],
                 "confidence": "high",
                 "reason": "The user enumerated the result fields sentence by sentence.",
-                "evidence": [_evidence(quote) for quote in quotes],
+                "evidence": evidence,
             },
             "example_output_constraints": None,
             "schema_direction": None,
@@ -537,7 +564,836 @@ def test_parser_admits_names_cited_across_several_sentences() -> None:
 
     assert result is not None
     assert result.named_result_evidence is not None
-    assert list(result.named_result_evidence.names) == _PROCUREMENT_NAMES
+    assert [item.name for item in result.named_result_evidence.upserts] == (
+        _PROCUREMENT_NAMES
+    )
+
+
+def test_parser_demotes_unattested_procurement_roots_to_unplaced() -> None:
+    result = parse_slot_classification_response(
+        _named_result_response(_PROCUREMENT_NAMES, _PROCUREMENT_QUOTES),
+        allowed_slot_values={},
+        classification_input=_classification_input(_PROCUREMENT_PROMPT),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    placements = {
+        item.name: item.placement for item in result.named_result_evidence.upserts
+    }
+    assert placements["bids"] == ExactNamedResultPlacement()
+    assert placements["requirements"] == ExactNamedResultPlacement()
+    for assessment_field in _PROCUREMENT_NAMES[2:8]:
+        assert placements[assessment_field] == UnplacedNamedResultPlacement()
+
+
+def test_parser_demotes_sibling_comention_submitted_as_nested_path() -> None:
+    quote = "The JSON result contains bids and requirements."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "requirements",
+                    "segments": ["bids"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert (
+        result.named_result_evidence.upserts[0].placement
+        == UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_keeps_explicit_parent_child_relationship_exact() -> None:
+    quote = "Each timestamp belongs directly to events."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        ExactNamedResultPlacement(segments=("events",))
+    )
+
+
+def test_parser_demotes_a_negated_parent_child_relationship() -> None:
+    quote = "events must not contain timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_demotes_a_relationship_marker_across_clauses() -> None:
+    quote = "events are separate; contains timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_demotes_a_same_sentence_intervening_subject() -> None:
+    # The marker's subject is "the response", not "events" — a comma-joined
+    # clause must not lend the edge its authority.
+    quote = "events are separate, but the response contains timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_demotes_on_any_clause_negation_even_when_unrelated() -> None:
+    # DELIBERATE conservative ruling (fail-closed): the negation is about
+    # "status", but token rules cannot prove that. Demotion is the safe
+    # state — the user re-places the field in one click on the card, while
+    # a falsely admitted location becomes a wrong obligation.
+    quote = "JSON contains timestamp but not status."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": [],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_demotes_an_edge_on_any_clause_negation() -> None:
+    # Same conservative ruling as the root case above.
+    quote = "events contain timestamp but not message."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        # A prohibited placement is never an obligation — including with
+        # typographic apostrophes.
+        "Do not generate JSON with timestamp.",
+        "Skapa inte JSON med timestamp.",
+        "Don\u2019t generate JSON with timestamp.",
+        "JSON with timestamp not included.",
+    ],
+)
+def test_parser_demotes_a_negated_root_claim(quote: str) -> None:
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": [],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "Do not let events contain timestamp.",
+        "Do not use events[].timestamp.",
+        "Don\u2019t use events[].timestamp.",
+        # The removal idiom is not placement evidence.
+        "Använd inte längre events[].timestamp.",
+        # A negated predicate ATTACHED to the field rejects the placement.
+        "events[].timestamp should not be included.",
+    ],
+)
+def test_parser_demotes_a_negated_edge_claim(quote: str) -> None:
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_demotes_a_post_marker_negation() -> None:
+    quote = "events include no timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_rejects_shape_suffix_as_root_evidence() -> None:
+    # A shaped nested mention ("timestamp[]" inside an events sentence) is
+    # not evidence the name lives at the top level.
+    quote = "events contain timestamp[]."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": [],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_does_not_borrow_a_root_artifact_from_a_nested_statement() -> None:
+    quote = "The report describes how events contain timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": [],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_does_not_borrow_a_name_substring_for_root_attestation() -> None:
+    quote = "timestamp is separate; output contains not_timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": [],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_does_not_treat_omission_as_root_attestation() -> None:
+    quote = "The output omits timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": [],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_does_not_borrow_a_parent_substring_for_edge_attestation() -> None:
+    quote = "event is separate; not_event contains timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["event"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_admits_a_typed_direct_path_as_one_location() -> None:
+    quote = "events[].timestamp"
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        ExactNamedResultPlacement(segments=("events",))
+    )
+
+
+def test_parser_demotes_a_marker_owned_by_an_intervening_subject() -> None:
+    quote = "events are separate. The response contains timestamp."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_demotes_an_unsupported_standalone_root_claim() -> None:
+    quote = "timestamp is required."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "timestamp",
+                    "segments": [],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_accepts_explicit_unplaced_variant_and_forbids_segments() -> None:
+    quote = "The assessment must include a status, but its parent is unknown."
+    unplaced = {
+        "name": "status",
+        "unplaced": True,
+        "evidence": [_evidence(quote)],
+    }
+
+    admitted = parse_slot_classification_response(
+        _named_result_response_with_locations([unplaced], [quote]),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+    rejected = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [{**unplaced, "segments": []}],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert admitted is not None
+    assert admitted.named_result_evidence is not None
+    assert admitted.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+    assert rejected is not None
+    assert rejected.named_result_evidence is None
+
+
+def test_parser_treats_omitted_placement_as_unplaced() -> None:
+    quote = "The result must include status."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "status",
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_binds_string_upsert_to_matching_delta_evidence() -> None:
+    quote = "Status is required."
+    unrelated_quote = "Priority is optional."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            ["status"],
+            [quote, unrelated_quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(f"{quote} {unrelated_quote}"),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    named_result = result.named_result_evidence.upserts[0]
+    assert named_result.name == "status"
+    assert named_result.placement == UnplacedNamedResultPlacement()
+    assert named_result.evidence == (
+        ClassifiedEvidence(source_id="user_message:user-1", quote=quote),
+    )
+
+
+def test_parser_drops_string_upsert_missing_from_delta_evidence() -> None:
+    quote = "Status is required."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            ["status", "priority"],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert tuple(item.name for item in result.named_result_evidence.upserts) == (
+        "status",
+    )
+
+
+def test_parser_promotes_attested_explicit_unplaced_field_to_root() -> None:
+    quote = (
+        "Returnera JSON med validation_status, violations[] och normalized_payload{}"
+    )
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "validation_status",
+                    "unplaced": True,
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        ExactNamedResultPlacement()
+    )
+
+
+def test_parser_promotes_attested_omitted_placement_field_to_root() -> None:
+    quote = "Return JSON with validation_status."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "validation_status",
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        ExactNamedResultPlacement()
+    )
+
+
+def test_parser_promotes_attested_string_upsert_to_root() -> None:
+    quote = "Return JSON with validation_status."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            ["validation_status"],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        ExactNamedResultPlacement()
+    )
+
+
+def test_parser_accepts_mixed_string_and_object_upserts() -> None:
+    string_quote = "Status is required."
+    object_quote = "Each timestamp belongs directly to events."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                "status",
+                {
+                    "name": "timestamp",
+                    "segments": ["events"],
+                    "evidence": [_evidence(object_quote)],
+                },
+            ],
+            [string_quote, object_quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(f"{string_quote} {object_quote}"),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert tuple(item.name for item in result.named_result_evidence.upserts) == (
+        "status",
+        "timestamp",
+    )
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+    assert result.named_result_evidence.upserts[1].placement == (
+        ExactNamedResultPlacement(segments=("events",))
+    )
+
+
+def test_parser_rejects_duplicate_folded_name_across_entry_forms() -> None:
+    quote = "Status is required."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                "Status",
+                {
+                    "name": "status",
+                    "evidence": [_evidence(quote)],
+                },
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is None
+
+
+def test_parser_keeps_valid_entries_when_an_object_entry_is_malformed() -> None:
+    quote = "Status is required. Priority is required."
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                "status",
+                {
+                    "name": "priority",
+                    "segments": "not-a-list",
+                    "evidence": [_evidence(quote)],
+                },
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert tuple(item.name for item in result.named_result_evidence.upserts) == (
+        "status",
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_fields",
+    [
+        {"operation": "replace"},
+        {"upserts": "status"},
+    ],
+)
+def test_parser_drops_unparseable_named_result_container(
+    invalid_fields: dict[str, object],
+) -> None:
+    quote = "Status is required."
+    delta = {
+        "operation": "update",
+        "upserts": ["status"],
+        "removals": [],
+        "confidence": "high",
+        "reason": "Update the named result.",
+        "evidence": [_evidence(quote)],
+    }
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": delta | invalid_fields,
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is None
+
+
+def test_parser_promotes_a_raw_swedish_name_and_stores_its_folded_key() -> None:
+    quote = "returnera JSON med bedömning, berörda verksamheter och nästa steg"
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "bedömning",
+                    "unplaced": True,
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    named_result = result.named_result_evidence.upserts[0]
+    assert named_result.name == "bedomning"
+    assert named_result.placement == ExactNamedResultPlacement()
+
+
+def test_parser_attests_a_swedish_edge_and_stores_folded_components() -> None:
+    quote = "JSON ska innehålla källor, och källor innehåller källnamn"
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "källnamn",
+                    "segments": ["källor"],
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    named_result = result.named_result_evidence.upserts[0]
+    assert named_result.name == "kallnamn"
+    assert named_result.placement == ExactNamedResultPlacement(segments=("kallor",))
+
+
+def test_parser_keeps_unattested_explicit_unplaced_field_unplaced() -> None:
+    quote = "Under kallor[] ska varje kalla ha kallnamn, dokumenttyp och sakuppgifter"
+    result = parse_slot_classification_response(
+        _named_result_response_with_locations(
+            [
+                {
+                    "name": "kallnamn",
+                    "unplaced": True,
+                    "evidence": [_evidence(quote)],
+                }
+            ],
+            [quote],
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.upserts[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
 
 
 def test_parser_rejects_the_delta_when_one_name_is_cited_with_two_shapes() -> None:
@@ -577,10 +1433,14 @@ def test_parser_admits_distinct_names_declaring_different_shapes() -> None:
 
     assert result is not None
     assert result.named_result_evidence is not None
-    assert result.named_result_evidence.names == ("bids", "requirements")
-    assert [
-        item.declared_shape for item in result.named_result_evidence.evidence_by_name
-    ] == ["array", "object"]
+    assert tuple(item.name for item in result.named_result_evidence.upserts) == (
+        "bids",
+        "requirements",
+    )
+    assert [item.declared_shape for item in result.named_result_evidence.upserts] == [
+        "array",
+        "object",
+    ]
 
 
 def test_parser_rejects_delta_citing_more_quotes_than_the_contract_allows() -> None:
@@ -597,9 +1457,8 @@ def test_parser_rejects_delta_citing_more_quotes_than_the_contract_allows() -> N
         classification_input=_classification_input(text),
     )
 
-    # Overflow is a malformed delta: the whole classification is a visible
-    # parse failure, never a silently truncated citation list.
-    assert result is None
+    assert result is not None
+    assert result.named_result_evidence is None
 
 
 @pytest.mark.parametrize(
@@ -638,8 +1497,8 @@ def test_parser_refuses_unverified_named_result_evidence(
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": names,
-                    "removed_names": [],
+                    "upserts": _named_result_locations(names, [_evidence(quote)]),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "Claimed field declaration.",
                     "evidence": [_evidence(quote)],
@@ -680,8 +1539,10 @@ def test_parser_refuses_short_citations_of_nested_or_list_names(
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": ["id"],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        ["id"], [_evidence(evidence_quote)]
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "Claimed field declaration.",
                     "evidence": [_evidence(evidence_quote)],
@@ -724,8 +1585,8 @@ def test_parser_accepts_only_cited_output_field_deltas(
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": list(added),
-                    "removed_names": list(removed),
+                    "upserts": _named_result_locations(added, [_evidence(quote)]),
+                    "removals": _named_result_locations(removed, [_evidence(quote)]),
                     "confidence": "high",
                     "reason": "Apply the user's current field change.",
                     "evidence": [_evidence(quote)],
@@ -744,10 +1605,248 @@ def test_parser_accepts_only_cited_output_field_deltas(
     assert result is not None
     if accepted:
         assert result.named_result_evidence is not None
-        assert result.named_result_evidence.names == added
-        assert result.named_result_evidence.removed_names == removed
+        assert (
+            tuple(item.name for item in result.named_result_evidence.upserts) == added
+        )
+        assert tuple(item.name for item in result.named_result_evidence.removals) == (
+            removed
+        )
     else:
         assert result.named_result_evidence is None
+
+
+def test_parser_accepts_relocation_from_unplaced_to_exact() -> None:
+    removal_quote = "Remove timestamp."
+    placement_quote = "Events contains timestamp."
+    source_text = f"{placement_quote} {removal_quote}"
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [
+                        {
+                            "name": "timestamp",
+                            "segments": ["events"],
+                            "evidence": [_evidence(placement_quote)],
+                        }
+                    ],
+                    "removals": [
+                        {
+                            "name": "timestamp",
+                            "unplaced": True,
+                            "evidence": [_evidence(removal_quote)],
+                        }
+                    ],
+                    "confidence": "high",
+                    "reason": "Move timestamp under events.",
+                    "evidence": [
+                        _evidence(removal_quote),
+                        _evidence(placement_quote),
+                    ],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(source_text),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert len(result.named_result_evidence.removals) == 1
+    assert len(result.named_result_evidence.upserts) == 1
+
+
+def test_parser_rejects_contradictory_exact_and_unplaced_upserts() -> None:
+    quote = "Events contains timestamp and timestamp is required."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [
+                        {
+                            "name": "timestamp",
+                            "segments": ["events"],
+                            "evidence": [_evidence(quote)],
+                        },
+                        {
+                            "name": "timestamp",
+                            "unplaced": True,
+                            "evidence": [_evidence(quote)],
+                        },
+                    ],
+                    "removals": [],
+                    "confidence": "high",
+                    "reason": "Contradictory timestamp placements.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is None
+
+
+def test_parser_treats_omitted_removal_placement_as_unplaced() -> None:
+    quote = "Remove status."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [],
+                    "removals": [
+                        {
+                            "name": "status",
+                            "evidence": [_evidence(quote)],
+                        }
+                    ],
+                    "confidence": "high",
+                    "reason": "Remove the named result.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert result.named_result_evidence.removals[0].placement == (
+        UnplacedNamedResultPlacement()
+    )
+
+
+def test_parser_treats_string_removal_as_parentless() -> None:
+    quote = "Remove status."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [],
+                    "removals": ["status"],
+                    "confidence": "high",
+                    "reason": "Remove the named result.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    removal = result.named_result_evidence.removals[0]
+    assert removal.name == "status"
+    assert removal.placement == UnplacedNamedResultPlacement()
+    assert removal.evidence == (
+        ClassifiedEvidence(source_id="user_message:user-1", quote=quote),
+    )
+
+
+@pytest.mark.parametrize(
+    ("quote", "admitted"),
+    [
+        ("Keep status unchanged.", False),
+        ("Behåll status.", False),
+        ("Remove status.", True),
+        ("Ta bort status.", True),
+        ("Don't remove status.", False),
+        ("Don\u2019t remove status.", False),
+        ("I cannot remove status.", False),
+        ("We didn't remove status.", False),
+        ("We wouldn\u2019t remove status.", False),
+        ("Ta inte bort status.", False),
+        # The anchored "{name} inte längre" idiom is the one kept removal
+        # idiom; bare "utan" and clause-negated removals fail closed (the
+        # card's removal affordance is the recovery).
+        ("Utan status.", False),
+        ("Status inte längre.", True),
+        ("Remove status without changing priority.", False),
+    ],
+)
+def test_parser_requires_explicit_removal_intent(
+    quote: str,
+    admitted: bool,
+) -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "checkpoint_updates": [],
+                "form_intake": None,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [],
+                    "removals": _named_result_locations(
+                        ("status",),
+                        [_evidence(quote)],
+                    ),
+                    "confidence": "high",
+                    "reason": "Apply the user's current field change.",
+                    "evidence": [_evidence(quote)],
+                },
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+                "assumptions": [],
+                "contradictions": [],
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    if admitted:
+        assert result.named_result_evidence is not None
+        assert tuple(item.name for item in result.named_result_evidence.removals) == (
+            "status",
+        )
+    else:
+        assert result.named_result_evidence is None
+
+
+def test_parser_attests_an_accented_removal_and_stores_its_folded_key() -> None:
+    quote = "Ta bort bedömning."
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "named_result_evidence": {
+                    "operation": "update",
+                    "upserts": [],
+                    "removals": _named_result_locations(
+                        ("bedömning",),
+                        [_evidence(quote)],
+                    ),
+                    "confidence": "high",
+                    "reason": "Remove the named result.",
+                    "evidence": [_evidence(quote)],
+                },
+            }
+        ),
+        allowed_slot_values={},
+        classification_input=_classification_input(quote),
+    )
+
+    assert result is not None
+    assert result.named_result_evidence is not None
+    assert tuple(item.name for item in result.named_result_evidence.removals) == (
+        "bedomning",
+    )
 
 
 def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
@@ -762,8 +1861,8 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "clear",
-                    "names": [],
-                    "removed_names": [],
+                    "upserts": [],
+                    "removals": [],
                     "confidence": "high",
                     "reason": "The user removed the named field constraints.",
                     "evidence": [_evidence(quote)],
@@ -782,7 +1881,7 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
     assert result is not None
     assert result.named_result_evidence is not None
     assert result.named_result_evidence.operation == "clear"
-    assert result.named_result_evidence.names == ()
+    assert result.named_result_evidence.upserts == ()
 
 
 def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> None:
@@ -806,8 +1905,17 @@ def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> N
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": list(names),
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        names,
+                        [
+                            {
+                                "source_id": source.source_id,
+                                "quote": source.text,
+                            }
+                            for source in sources
+                        ],
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "Reconstructed complete JSON field set.",
                     "evidence": [
@@ -2521,6 +3629,42 @@ def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
     assert "do not choose the most likely option" in prompt
 
 
+def test_classification_prompt_leads_with_simple_named_result_entries() -> None:
+    messages = classifier._build_slot_classification_prompt(
+        classification_input=_classification_input(
+            "The result must contain status and priority."
+        ),
+        allowed_slot_values={"terminal_output": frozenset({"structured_json"})},
+        ui_language="en",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    citation_instruction = (
+        "When the user names or enumerates what the final result shall contain, "
+        "cite each stated name."
+    )
+    simple_form_instruction = (
+        "Use the simple form first: put each stated name directly in upserts as a "
+        "string"
+    )
+    placement_instruction = "Object entries are optional placement enrichment."
+    assert citation_instruction in prompt
+    assert simple_form_instruction in prompt
+    assert "delta-level evidence quotes covering those names" in prompt
+    assert "Emitting the citation is always correct when the user stated the name." in (
+        prompt
+    )
+    assert "that enumeration IS the field list" in prompt
+    assert placement_instruction in prompt
+    assert prompt.index(simple_form_instruction) < prompt.index(placement_instruction)
+    assert (
+        "Never omit a citation because its location is unproven; omit the placement "
+        "instead."
+    ) in prompt
+    assert '"upserts": [str | {"name": str' in prompt
+    assert '"removals": [str | {"name": str' in prompt
+
+
 @pytest.mark.asyncio
 async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> None:
     litellm_client = AsyncMock()
@@ -2708,8 +3852,8 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     output_fields_schema = schema["properties"]["named_result_evidence"]["anyOf"][0]
     assert output_fields_schema["required"] == [
         "operation",
-        "names",
-        "removed_names",
+        "upserts",
+        "removals",
         "confidence",
         "reason",
         "evidence",
@@ -2718,13 +3862,30 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "update",
         "clear",
     ]
-    assert output_fields_schema["properties"]["names"]["maxItems"] == (
+    assert output_fields_schema["properties"]["upserts"]["maxItems"] == (
         classification_contract.NAMED_RESULT_EVIDENCE_MAX_ITEMS
     )
-    assert output_fields_schema["properties"]["removed_names"]["maxItems"] == (
+    assert output_fields_schema["properties"]["removals"]["maxItems"] == (
         classification_contract.NAMED_RESULT_EVIDENCE_MAX_ITEMS
     )
-    assert output_fields_schema["properties"]["names"]["items"]["maxLength"] == (
+    location_schema = output_fields_schema["properties"]["upserts"]["items"]
+    string_location, exact_location, unplaced_location, omitted_location = (
+        location_schema["anyOf"]
+    )
+    assert string_location == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH,
+    }
+    assert exact_location["required"] == ["name", "segments", "evidence"]
+    assert unplaced_location["required"] == ["name", "unplaced", "evidence"]
+    assert omitted_location["required"] == ["name", "evidence"]
+    assert set(omitted_location["properties"]) == {"name", "evidence"}
+    assert unplaced_location["properties"]["unplaced"] == {
+        "type": "boolean",
+        "enum": [True],
+    }
+    assert exact_location["properties"]["name"]["maxLength"] == (
         classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     slot_schema = schema["properties"]["slots"]
@@ -3086,12 +4247,15 @@ def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
                 **_VALID_CLASSIFICATION_RESPONSE,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": [
-                        "service_reference",
-                        "applicant_channels",
-                        "submitted_fields",
-                    ],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        [
+                            "service_reference",
+                            "applicant_channels",
+                            "submitted_fields",
+                        ],
+                        [_evidence(quote)],
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "Fälten är uppräknade i texten.",
                     "evidence": [_evidence(quote)],
@@ -3104,37 +4268,46 @@ def test_parser_accepts_names_cited_with_shape_notation_in_source() -> None:
 
     assert result is not None
     assert result.named_result_evidence is not None
-    assert result.named_result_evidence.names == (
+    assert tuple(item.name for item in result.named_result_evidence.upserts) == (
         "service_reference",
         "applicant_channels",
         "submitted_fields",
     )
 
 
-def test_parser_fails_the_attempt_for_a_malformed_present_delta() -> None:
-    # A present-but-unparseable delta must fail the whole attempt visibly
-    # (parse_failed retries) instead of resolving without the fields — the
-    # silent collapse is what made live schema loss unattributable.
-    quote = "Utdata ska innehålla service_reference."
+def test_parser_drops_a_malformed_named_result_delta_but_keeps_slots() -> None:
+    quote = "Return a PDF report."
     result = parse_slot_classification_response(
         json.dumps(
             {
                 **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "The user explicitly requested a PDF.",
+                        "evidence": [_evidence(quote)],
+                        "evidence_level": "explicit",
+                    }
+                ],
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": 42,
-                    "removed_names": [],
+                    "upserts": [],
+                    "removals": [],
                     "confidence": "high",
                     "reason": "Trasig delta.",
                     "evidence": [_evidence(quote)],
                 },
             }
         ),
-        allowed_slot_values={},
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
         classification_input=_classification_input(quote),
     )
 
-    assert result is None
+    assert result is not None
+    assert tuple(slot.value for slot in result.slots) == ("pdf_document",)
+    assert result.named_result_evidence is None
 
 
 @pytest.mark.parametrize(

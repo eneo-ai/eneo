@@ -50,12 +50,14 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.planning_state import (
+    ExactNamedResultPlacement,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
     FileRoleEvidence,
     NamedResultEvidence,
+    named_result_location_id,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -1928,6 +1930,7 @@ def test_compaction_keeps_the_field_list_the_user_edited() -> None:
                 content="",
                 metadata={
                     "named_content_fields_edit": {
+                        "schema_version": 1,
                         "requirements_version": "c" * 64,
                         "field_names": ["case_id", "Beslutsdatum"],
                     }
@@ -1948,3 +1951,66 @@ def test_compaction_keeps_the_field_list_the_user_edited() -> None:
 
     assert expected.named_result_obligations == ("case_id", "Beslutsdatum")
     assert build_planning_state_from_conversation(compacted) == expected
+
+
+def test_compaction_replays_a_placed_field_at_its_parent_path() -> None:
+    source = "user_message:json-fields"
+    quote = "Create a machine-readable report containing reports{}."
+    parent = NamedResultEvidence(
+        name="reports",
+        declared_shape="object",
+        confidence="high",
+        evidence=[f"quote:{source}:{quote}"],
+    )
+    described = _classifier_result_msg(
+        "json-fields",
+        SlotClassificationResult(),
+        named_result_evidence_snapshot=(
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=(parent,),
+                confidence="high",
+                reason="Initial result container.",
+                evidence=(ClassifiedEvidence(source_id=source, quote=quote),),
+            )
+        ),
+    )
+    parent_id = named_result_location_id(parent)
+    conversation = [
+        ConversationMessage(
+            message_id=described.message_id,
+            role="user",
+            content=quote,
+            metadata=described.metadata,
+        ),
+        ConversationMessage(
+            message_id="field-edit",
+            role="user",
+            content="",
+            metadata={
+                "named_content_fields_edit": {
+                    "schema_version": 1,
+                    "requirements_version": "c" * 64,
+                    "field_names": [parent_id, "Status"],
+                    "added_field_names": ["Status"],
+                    "added_field_placements": {"status": parent_id},
+                }
+            },
+        ),
+        *[_msg("assistant", content=f"filler {index}") for index in range(10)],
+        _msg("user", content="continue"),
+    ]
+
+    expected = build_planning_state_from_conversation(conversation)
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=4,
+        tail_messages=2,
+    )
+    rebuilt = build_planning_state_from_conversation(compacted)
+
+    assert expected.named_result_evidence[-1].name == "Status"
+    assert expected.named_result_evidence[-1].placement == ExactNamedResultPlacement(
+        segments=("reports",)
+    )
+    assert rebuilt == expected

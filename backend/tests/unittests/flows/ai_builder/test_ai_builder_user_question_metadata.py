@@ -20,6 +20,11 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
 )
+from eneo.flows.ai_builder.planning_state import (
+    ExactNamedResultPlacement,
+    NamedResultEvidence,
+    named_result_location_id,
+)
 
 
 def _pending_question_conversation(
@@ -504,6 +509,8 @@ def test_delegation_is_refused_when_the_recorded_question_disagrees_with_itself(
 
 def _disclosed_fields_conversation(
     version: str = "a" * 64,
+    *,
+    named_content_fields: list[NamedContentFieldPayload] | None = None,
 ) -> list[ConversationMessage]:
     """A session that has shown one disclosure naming two content fields."""
 
@@ -513,9 +520,24 @@ def _disclosed_fields_conversation(
         input_description="Ett mötesprotokoll.",
         output_description="En rapport.",
         requirements_version=version,
-        named_content_fields=[
-            NamedContentFieldPayload(id="beslut", label="beslut"),
-            NamedContentFieldPayload(id="farhågor", label="farhågor"),
+        named_content_fields=named_content_fields
+        or [
+            NamedContentFieldPayload(
+                id="beslut",
+                label="beslut",
+                name="beslut",
+                segments=[],
+                unplaced=False,
+                can_contain_fields=False,
+            ),
+            NamedContentFieldPayload(
+                id="farhågor",
+                label="farhågor",
+                name="farhågor",
+                segments=[],
+                unplaced=False,
+                can_contain_fields=False,
+            ),
         ],
     )
     return [
@@ -525,6 +547,79 @@ def _disclosed_fields_conversation(
             metadata=requirements_summary_to_metadata(summary),
         )
     ]
+
+
+def _located_field(name: str, *segments: str) -> NamedContentFieldPayload:
+    evidence = NamedResultEvidence(
+        name=name,
+        placement=ExactNamedResultPlacement(segments=segments),
+        evidence=["quote:user_message:user-1:field"],
+        confidence="high",
+    )
+    return NamedContentFieldPayload(
+        id=named_result_location_id(evidence),
+        label=name,
+        name=name,
+        segments=list(segments),
+        unplaced=False,
+        can_contain_fields=False,
+    )
+
+
+def test_editing_keeps_same_leaf_locations_distinct_by_opaque_id() -> None:
+    events = _located_field("events")
+    alerts = _located_field("alerts")
+    events_timestamp = _located_field("timestamp", "events")
+    alerts_timestamp = _located_field("timestamp", "alerts")
+    kept_ids = [events.id, alerts.id, alerts_timestamp.id]
+
+    prepared = prepare_user_question_metadata(
+        conversation=_disclosed_fields_conversation(
+            named_content_fields=[
+                events,
+                alerts,
+                events_timestamp,
+                alerts_timestamp,
+            ]
+        ),
+        message="",
+        question_answer={
+            "kind": "named_content_fields_edit",
+            "requirements_version": "a" * 64,
+            "field_names": kept_ids,
+        },
+    )
+
+    assert prepared.metadata is not None
+    assert prepared.metadata["named_content_fields_edit"] == {
+        "schema_version": 1,
+        "requirements_version": "a" * 64,
+        "field_names": kept_ids,
+        "added_field_names": [],
+        "added_field_placements": {},
+    }
+
+
+def test_editing_rejects_an_unknown_opaque_location_id_exactly() -> None:
+    events = _located_field("events")
+    unknown_id = _located_field("timestamp", "events").id
+
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        prepare_user_question_metadata(
+            conversation=_disclosed_fields_conversation(named_content_fields=[events]),
+            message="",
+            question_answer={
+                "kind": "named_content_fields_edit",
+                "requirements_version": "a" * 64,
+                "field_names": [events.id, unknown_id],
+            },
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {
+        "reason": "unknown_field_id",
+        "field_id": unknown_id,
+    }
 
 
 def test_editing_the_field_list_records_the_set_the_user_left_standing() -> None:
@@ -541,16 +636,42 @@ def test_editing_the_field_list_records_the_set_the_user_left_standing() -> None
 
     assert prepared.metadata == {
         "named_content_fields_edit": {
+            "schema_version": 1,
             "requirements_version": "a" * 64,
             "field_names": ["beslut", "Beslutsdatum"],
             # The card showed "beslut" and "farhågor", so only the third name
             # is new. Keeping a chip and re-adding one look identical in the
             # resulting set, and only this card can tell them apart.
             "added_field_names": ["Beslutsdatum"],
+            "added_field_placements": {},
         },
         "ui_language": "sv",
     }
     assert not prepared.is_requirements_confirmation
+
+
+def test_editing_rekeys_placements_to_the_deduplicated_spelling() -> None:
+    # Deduplication keeps the FIRST spelling ("Status"); the request
+    # validator normalized the placement key independently. Admission must
+    # re-key the placement to the surviving spelling so replay's exact
+    # lookup cannot silently drop the placed addition to root.
+    parent = _located_field("events")
+    prepared = prepare_user_question_metadata(
+        conversation=_disclosed_fields_conversation(named_content_fields=[parent]),
+        message="",
+        question_answer={
+            "kind": "named_content_fields_edit",
+            "requirements_version": "a" * 64,
+            "field_names": [parent.id, "Status", "status"],
+            "added_field_placements": {"Status": parent.id},
+            "ui_language": "sv",
+        },
+    )
+
+    edit = prepared.metadata["named_content_fields_edit"]
+    assert edit["field_names"] == [parent.id, "Status"]
+    assert edit["added_field_names"] == ["Status"]
+    assert edit["added_field_placements"] == {"Status": parent.id}
 
 
 def test_editing_the_field_list_is_refused_against_an_older_disclosure() -> None:
@@ -613,9 +734,11 @@ def test_a_field_name_keeps_the_punctuation_the_card_showed_it_with() -> None:
 
     assert prepared.metadata is not None
     assert prepared.metadata["named_content_fields_edit"] == {
+        "schema_version": 1,
         "requirements_version": "a" * 64,
         "field_names": ["attachment_inventory[]", "ärende.id"],
         "added_field_names": ["attachment_inventory[]", "ärende.id"],
+        "added_field_placements": {},
     }
 
 

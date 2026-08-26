@@ -73,6 +73,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     AttachmentCoverage,
     CheckpointProducerKind,
+    ExactNamedResultPlacement,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
@@ -90,8 +91,10 @@ from eneo.flows.ai_builder.planning_state import (
     SlotConfidence,
     SlotSource,
     StepTriple,
+    UnplacedNamedResultPlacement,
     is_named_content_fields_edit_reference,
     named_content_fields_edit_evidence_reference,
+    named_result_location_id,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     apply_policy_defaults_from_resolved_slots,
@@ -447,6 +450,35 @@ def _model_evidence(
     )
 
 
+def _two_timestamp_hierarchies() -> list[NamedResultEvidence]:
+    return [
+        NamedResultEvidence(
+            name="events",
+            declared_shape="array",
+            evidence=["quote:user_message:user-0:events[]"],
+            confidence="high",
+        ),
+        NamedResultEvidence(
+            name="alerts",
+            declared_shape="array",
+            evidence=["quote:user_message:user-0:alerts[]"],
+            confidence="high",
+        ),
+        NamedResultEvidence(
+            name="timestamp",
+            placement=ExactNamedResultPlacement(segments=("events",)),
+            evidence=["quote:user_message:user-0:events[].timestamp"],
+            confidence="high",
+        ),
+        NamedResultEvidence(
+            name="timestamp",
+            placement=ExactNamedResultPlacement(segments=("alerts",)),
+            evidence=["quote:user_message:user-0:alerts[].timestamp"],
+            confidence="high",
+        ),
+    ]
+
+
 def _parse_named_result_delta(
     *,
     names: tuple[str, ...],
@@ -454,6 +486,13 @@ def _parse_named_result_delta(
     confidence: SlotClassificationConfidence = "high",
     classification_input: SlotClassificationInput,
 ) -> SlotClassificationResult:
+    citations = [
+        {
+            "source_id": source.source_id,
+            "quote": source.text,
+        }
+        for source in classification_input.sources
+    ]
     parsed = parse_slot_classification_response(
         json.dumps(
             {
@@ -463,17 +502,17 @@ def _parse_named_result_delta(
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": list(names),
-                    "removed_names": list(removed_names),
+                    "upserts": [
+                        {"name": name, "segments": [], "evidence": citations}
+                        for name in names
+                    ],
+                    "removals": [
+                        {"name": name, "segments": [], "evidence": citations}
+                        for name in removed_names
+                    ],
                     "confidence": confidence,
                     "reason": "The user explicitly changed named results.",
-                    "evidence": [
-                        {
-                            "source_id": source.source_id,
-                            "quote": source.text,
-                        }
-                        for source in classification_input.sources
-                    ],
+                    "evidence": citations,
                 },
                 "example_output_constraints": None,
                 "schema_direction": None,
@@ -2705,39 +2744,441 @@ class TestFlowObservedSlotsYieldToTheEdit:
 
 
 class TestModelSlotMerge:
-    def test_named_result_delta_rejects_missing_per_name_evidence(self) -> None:
+    def test_parser_constructs_exact_only_from_each_locations_edge_evidence(
+        self,
+    ) -> None:
+        source = SlotClassificationSource(
+            source_id="user_message:user-1",
+            kind="user_message",
+            text=(
+                "Keep events. Keep timestamp. "
+                "Each timestamp belongs directly to events."
+            ),
+            message_id="user-1",
+        )
+        citations = [
+            {"source_id": source.source_id, "quote": "Keep events."},
+            {"source_id": source.source_id, "quote": "Keep timestamp."},
+            {
+                "source_id": source.source_id,
+                "quote": "Each timestamp belongs directly to events.",
+            },
+        ]
+
+        def parse(item_evidence: list[dict[str, str]]) -> ClassifiedNamedResultEvidence:
+            result = parse_slot_classification_response(
+                json.dumps(
+                    {
+                        "slots": [],
+                        "file_roles": [],
+                        "checkpoint_updates": [],
+                        "form_intake": None,
+                        "named_result_evidence": {
+                            "operation": "update",
+                            "upserts": [
+                                {
+                                    "name": "timestamp",
+                                    "segments": ["events"],
+                                    "evidence": item_evidence,
+                                }
+                            ],
+                            "removals": [],
+                            "confidence": "high",
+                            "reason": "The user named a nested result.",
+                            "evidence": citations,
+                        },
+                        "example_output_constraints": None,
+                        "schema_direction": None,
+                        "secondary_obligations": [],
+                        "assumptions": [],
+                        "contradictions": [],
+                    }
+                ),
+                allowed_slot_values={},
+                classification_input=SlotClassificationInput(
+                    sources=(source,), current_user_message_id="user-1"
+                ),
+            )
+            assert result is not None
+            assert result.named_result_evidence is not None
+            return result.named_result_evidence.upserts[0]
+
+        weak = parse([citations[1]])
+        exact = parse([citations[2]])
+
+        assert weak.placement == UnplacedNamedResultPlacement()
+        assert exact.placement == ExactNamedResultPlacement(segments=("events",))
+
+    def test_named_result_delta_rejects_duplicate_full_location_identity(self) -> None:
+        evidence = _model_evidence("events[].timestamp")
         with pytest.raises(
             ValueError,
-            match="evidence_by_name must exactly cover named-result changes",
+            match="unique location identities",
         ):
             ClassifiedNamedResultDelta(
                 operation="update",
-                names=("case_id",),
+                upserts=(
+                    ClassifiedNamedResultEvidence(
+                        name="timestamp",
+                        placement=ExactNamedResultPlacement(segments=("events",)),
+                        evidence=evidence,
+                    ),
+                ),
+                removals=(
+                    ClassifiedNamedResultEvidence(
+                        name="timestamp",
+                        placement=ExactNamedResultPlacement(segments=("events",)),
+                        evidence=evidence,
+                    ),
+                ),
                 confidence="high",
-                reason="The user explicitly named the result field.",
-                evidence=_model_evidence("case_id"),
+                reason="The same location cannot be changed twice.",
+                evidence=evidence,
             )
 
-    def test_named_result_delta_rejects_per_name_evidence_outside_delta(
+    def test_named_result_delta_rejects_location_evidence_outside_delta(
         self,
     ) -> None:
         with pytest.raises(
             ValueError,
-            match="evidence_by_name citations must belong to delta evidence",
+            match="location citations must belong to delta evidence",
         ):
             ClassifiedNamedResultDelta(
                 operation="update",
-                names=("case_id",),
-                confidence="high",
-                reason="The user explicitly named the result field.",
-                evidence=_model_evidence("case_id"),
-                evidence_by_name=(
+                upserts=(
                     ClassifiedNamedResultEvidence(
                         name="case_id",
                         evidence=_model_evidence("unrelated evidence"),
                     ),
                 ),
+                confidence="high",
+                reason="The user explicitly named the result field.",
+                evidence=_model_evidence("case_id"),
             )
+
+    def test_location_removal_is_independent_for_same_leaf_under_two_paths(
+        self,
+    ) -> None:
+        state = _state()
+        state.named_result_evidence = _two_timestamp_hierarchies()
+        evidence = _model_evidence("Remove events[].timestamp")
+
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    upserts=(),
+                    removals=(
+                        ClassifiedNamedResultEvidence(
+                            name="timestamp",
+                            placement=ExactNamedResultPlacement(segments=("events",)),
+                            evidence=evidence,
+                        ),
+                    ),
+                    confidence="high",
+                    reason="The user removed one exact field.",
+                    evidence=evidence,
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="Remove events[].timestamp",
+        )
+
+        assert [item.folded_exact_identity for item in state.named_result_evidence] == [
+            ("events",),
+            ("alerts",),
+            ("alerts", "timestamp"),
+        ]
+
+    def test_unplaced_to_exact_is_atomic_and_weak_recitation_does_not_demote(
+        self,
+    ) -> None:
+        state = _state()
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name="events",
+                declared_shape="array",
+                evidence=["quote:user_message:user-0:events[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="timestamp",
+                placement=UnplacedNamedResultPlacement(),
+                evidence=["quote:user_message:user-0:timestamp"],
+                confidence="high",
+            ),
+        ]
+        exact_evidence = _model_evidence("events[].timestamp")
+        exact = ClassifiedNamedResultEvidence(
+            name="timestamp",
+            placement=ExactNamedResultPlacement(segments=("events",)),
+            evidence=exact_evidence,
+        )
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    upserts=(exact,),
+                    confidence="high",
+                    reason="The relationship is explicit.",
+                    evidence=exact_evidence,
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="events[].timestamp",
+        )
+        assert state.named_result_evidence[-1].placement == ExactNamedResultPlacement(
+            segments=("events",)
+        )
+
+        weak_evidence = _model_evidence("Timestamp")
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    upserts=(
+                        ClassifiedNamedResultEvidence(
+                            name="Timestamp",
+                            placement=UnplacedNamedResultPlacement(),
+                            evidence=weak_evidence,
+                        ),
+                    ),
+                    confidence="high",
+                    reason="The field was recited without placement evidence.",
+                    evidence=weak_evidence,
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text="Timestamp",
+        )
+        assert state.named_result_evidence[-1].placement == ExactNamedResultPlacement(
+            segments=("events",)
+        )
+
+    def test_parsed_relocation_replaces_unplaced_with_exact(self) -> None:
+        state = _state()
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name="events",
+                declared_shape="array",
+                evidence=["quote:user_message:user-0:events[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="timestamp",
+                placement=UnplacedNamedResultPlacement(),
+                evidence=["quote:user_message:user-0:timestamp"],
+                confidence="high",
+            ),
+        ]
+        removal_quote = "Remove timestamp."
+        placement_quote = "Events contains timestamp."
+        source_text = f"{placement_quote} {removal_quote}"
+        source_id = "user_message:user-1"
+        parsed = parse_slot_classification_response(
+            json.dumps(
+                {
+                    "slots": [],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "named_result_evidence": {
+                        "operation": "update",
+                        "upserts": [
+                            {
+                                "name": "timestamp",
+                                "segments": ["events"],
+                                "evidence": [
+                                    {
+                                        "source_id": source_id,
+                                        "quote": placement_quote,
+                                    }
+                                ],
+                            }
+                        ],
+                        "removals": [
+                            {
+                                "name": "timestamp",
+                                "unplaced": True,
+                                "evidence": [
+                                    {
+                                        "source_id": source_id,
+                                        "quote": removal_quote,
+                                    }
+                                ],
+                            }
+                        ],
+                        "confidence": "high",
+                        "reason": "Move timestamp under events.",
+                        "evidence": [
+                            {"source_id": source_id, "quote": placement_quote},
+                            {"source_id": source_id, "quote": removal_quote},
+                        ],
+                    },
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
+                    "assumptions": [],
+                    "contradictions": [],
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=SlotClassificationInput(
+                sources=(
+                    SlotClassificationSource(
+                        source_id=source_id,
+                        kind="user_message",
+                        text=source_text,
+                        message_id="user-1",
+                    ),
+                ),
+                current_user_message_id="user-1",
+            ),
+        )
+        assert parsed is not None
+        assert parsed.named_result_evidence is not None
+
+        merge_llm_resolved_slots(
+            state,
+            parsed,
+            prompt_hash="a" * 64,
+            freeform_text=source_text,
+        )
+
+        timestamps = [
+            item for item in state.named_result_evidence if item.name == "timestamp"
+        ]
+        assert len(timestamps) == 1
+        assert timestamps[0].placement == ExactNamedResultPlacement(
+            segments=("events",)
+        )
+
+    def test_weak_recitation_matching_multiple_exact_locations_mutates_none(
+        self,
+    ) -> None:
+        # The same folded leaf lives under two Exact paths. A locationless
+        # recitation has no target, so it must change none of their
+        # spelling, placement, or provenance — and must not be admitted as
+        # a new Unplaced entry either.
+        state = _state()
+        state.named_result_evidence = [
+            NamedResultEvidence(
+                name="events",
+                declared_shape="array",
+                evidence=["quote:user_message:user-0:events[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="logs",
+                declared_shape="array",
+                evidence=["quote:user_message:user-0:logs[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="timestamp",
+                placement=ExactNamedResultPlacement(segments=("events",)),
+                evidence=["quote:user_message:user-0:events[].timestamp"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="timestamp",
+                placement=ExactNamedResultPlacement(segments=("logs",)),
+                evidence=["quote:user_message:user-0:logs[].timestamp"],
+                confidence="high",
+            ),
+        ]
+        before = [item.model_copy(deep=True) for item in state.named_result_evidence]
+
+        weak_evidence = _model_evidence("Timestamp")
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    upserts=(
+                        ClassifiedNamedResultEvidence(
+                            name="Timestamp",
+                            placement=UnplacedNamedResultPlacement(),
+                            evidence=weak_evidence,
+                        ),
+                    ),
+                    confidence="high",
+                    reason="The field was recited without placement evidence.",
+                    evidence=weak_evidence,
+                )
+            ),
+            prompt_hash="c" * 64,
+            freeform_text="Timestamp",
+        )
+
+        assert state.named_result_evidence == before
+
+    def test_parent_respelling_retains_descendants_and_fold_change_cascades(
+        self,
+    ) -> None:
+        state = _state()
+        state.named_result_evidence = _two_timestamp_hierarchies()[:2] + [
+            _two_timestamp_hierarchies()[2]
+        ]
+        evidence = _model_evidence("Events")
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    upserts=(
+                        ClassifiedNamedResultEvidence(
+                            name="Events",
+                            evidence=evidence,
+                            declared_shape="array",
+                        ),
+                    ),
+                    confidence="high",
+                    reason="The container spelling changed.",
+                    evidence=evidence,
+                )
+            ),
+            prompt_hash="a" * 64,
+            freeform_text="Events",
+        )
+        descendant = state.named_result_evidence[2]
+        assert descendant.placement == ExactNamedResultPlacement(segments=("Events",))
+        assert descendant.evidence == ["quote:user_message:user-0:events[].timestamp"]
+
+        replacement_evidence = _model_evidence("Replace Events with incidents")
+        merge_llm_resolved_slots(
+            state,
+            SlotClassificationResult(
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    upserts=(
+                        ClassifiedNamedResultEvidence(
+                            name="incidents",
+                            evidence=replacement_evidence,
+                            declared_shape="array",
+                        ),
+                    ),
+                    removals=(
+                        ClassifiedNamedResultEvidence(
+                            name="Events",
+                            evidence=replacement_evidence,
+                        ),
+                    ),
+                    confidence="high",
+                    reason="The container identity changed.",
+                    evidence=replacement_evidence,
+                )
+            ),
+            prompt_hash="b" * 64,
+            freeform_text="Replace Events with incidents",
+        )
+        assert [item.name for item in state.named_result_evidence] == [
+            "alerts",
+            "incidents",
+        ]
 
     def test_checkpoint_needs_evidence_that_states_the_review(self) -> None:
         state = _state()
@@ -2864,8 +3305,19 @@ class TestModelSlotMerge:
                     "form_intake": None,
                     "named_result_evidence": {
                         "operation": "update",
-                        "names": ["case_id"],
-                        "removed_names": [],
+                        "upserts": [
+                            {
+                                "name": "case_id",
+                                "segments": [],
+                                "evidence": [
+                                    {
+                                        "source_id": user_source.source_id,
+                                        "quote": user_source.text,
+                                    }
+                                ],
+                            }
+                        ],
+                        "removals": [],
                         "confidence": "high",
                         "reason": "The user explicitly named the JSON field.",
                         "evidence": [
@@ -2915,6 +3367,8 @@ class TestModelSlotMerge:
         )
 
         assert state.output_schema_evidence is None
+        # "JSON output field:" names the root artifact itself, so the
+        # subject-anchored rule attests case_id at the top level.
         assert state.named_result_evidence == [
             NamedResultEvidence(
                 name="case_id",
@@ -2945,11 +3399,7 @@ class TestModelSlotMerge:
             SlotClassificationResult(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    names=("case_id", "status"),
-                    confidence="high",
-                    reason="The user explicitly named the JSON result fields.",
-                    evidence=initial_evidence,
-                    evidence_by_name=tuple(
+                    upserts=tuple(
                         ClassifiedNamedResultEvidence(
                             name=name,
                             evidence=initial_evidence,
@@ -2957,6 +3407,9 @@ class TestModelSlotMerge:
                         )
                         for name in ("case_id", "status")
                     ),
+                    confidence="high",
+                    reason="The user explicitly named the JSON result fields.",
+                    evidence=initial_evidence,
                 )
             ),
             prompt_hash="a" * 64,
@@ -3049,16 +3502,15 @@ class TestModelSlotMerge:
             SlotClassificationResult(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    names=("priority",),
-                    confidence="high",
-                    reason="The user named another field.",
-                    evidence=priority_evidence,
-                    evidence_by_name=(
+                    upserts=(
                         ClassifiedNamedResultEvidence(
                             name="priority",
                             evidence=priority_evidence,
                         ),
                     ),
+                    confidence="high",
+                    reason="The user named another field.",
+                    evidence=priority_evidence,
                 )
             ),
             prompt_hash="c" * 64,
@@ -3081,7 +3533,7 @@ class TestModelSlotMerge:
         )
         clear_delta = ClassifiedNamedResultDelta(
             operation="clear",
-            names=(),
+            upserts=(),
             confidence="high",
             reason="The user removed all named results.",
             evidence=clear_evidence,
@@ -3151,16 +3603,15 @@ class TestModelSlotMerge:
                 SlotClassificationResult(
                     named_result_evidence=ClassifiedNamedResultDelta(
                         operation="update",
-                        names=("overflow",),
-                        confidence="high",
-                        reason="The user added a field.",
-                        evidence=overflow_evidence,
-                        evidence_by_name=(
+                        upserts=(
                             ClassifiedNamedResultEvidence(
                                 name="overflow",
                                 evidence=overflow_evidence,
                             ),
                         ),
+                        confidence="high",
+                        reason="The user added a field.",
+                        evidence=overflow_evidence,
                     )
                 ),
                 prompt_hash="a" * 64,
@@ -3180,7 +3631,8 @@ class TestModelSlotMerge:
         latest_classification: SlotClassificationMetadata | None = None
         for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS):
             prefix = f"field_{index:03d}_"
-            name = prefix + "n" * (240 - len(prefix))
+            name_length = 232 if index == 0 else 240
+            name = prefix + "n" * (name_length - len(prefix))
             message_id = f"maximum-{index}"
             sources = tuple(
                 SlotClassificationSource(
@@ -3271,7 +3723,7 @@ class TestModelSlotMerge:
             SlotClassificationSource(
                 source_id=f"user_message:{churn_message_id}:removed",
                 kind="user_message",
-                text=removed_name,
+                text=f"Remove {removed_name}.",
                 message_id=churn_message_id,
             ),
         )
@@ -3372,16 +3824,15 @@ class TestModelSlotMerge:
             SlotClassificationResult(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    names=("Case ID",),
-                    confidence="high",
-                    reason="The user corrected the spelling of one result name.",
-                    evidence=corrected_evidence,
-                    evidence_by_name=(
+                    upserts=(
                         ClassifiedNamedResultEvidence(
                             name="Case ID",
                             evidence=corrected_evidence,
                         ),
                     ),
+                    confidence="high",
+                    reason="The user corrected the spelling of one result name.",
+                    evidence=corrected_evidence,
                 )
             ),
             prompt_hash="f" * 64,
@@ -3519,8 +3970,20 @@ class TestModelSlotMerge:
                     "form_intake": None,
                     "named_result_evidence": {
                         "operation": "update",
-                        "names": ["bids"],
-                        "removed_names": [],
+                        "upserts": [
+                            {
+                                "name": "bids",
+                                "segments": [],
+                                "evidence": [
+                                    {
+                                        "source_id": "user_message:user-1",
+                                        "quote": quote,
+                                    }
+                                    for quote in quotes
+                                ],
+                            }
+                        ],
+                        "removals": [],
                         "confidence": "high",
                         "reason": "The user described the same field twice.",
                         "evidence": [
@@ -3590,17 +4053,16 @@ class TestModelSlotMerge:
             SlotClassificationResult(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    names=("case_id", "status"),
-                    confidence="high",
-                    reason="The user also mentioned field names in prose.",
-                    evidence=named_evidence,
-                    evidence_by_name=tuple(
+                    upserts=tuple(
                         ClassifiedNamedResultEvidence(
                             name=name,
                             evidence=named_evidence,
                         )
                         for name in ("case_id", "status")
                     ),
+                    confidence="high",
+                    reason="The user also mentioned field names in prose.",
+                    evidence=named_evidence,
                 )
             ),
             prompt_hash="b" * 64,
@@ -3631,7 +4093,7 @@ class TestModelSlotMerge:
             SlotClassificationResult(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="clear",
-                    names=(),
+                    upserts=(),
                     confidence="high",
                     reason="The user removed all named field constraints.",
                     evidence=_model_evidence(
@@ -5771,19 +6233,311 @@ class TestNamedContentFieldsEdit:
         *field_names: str,
         message_id: str = "edited",
         added: tuple[str, ...] = (),
+        placements: dict[str, str] | None = None,
     ) -> ConversationMessage:
+        edit = {
+            "schema_version": 1,
+            "requirements_version": "c" * 64,
+            "field_names": list(field_names),
+            "added_field_names": list(added),
+        }
+        if placements is not None:
+            edit["added_field_placements"] = placements
         return ConversationMessage(
             message_id=message_id,
             role="user",
             content="",
-            metadata={
-                "named_content_fields_edit": {
-                    "requirements_version": "c" * 64,
-                    "field_names": list(field_names),
-                    "added_field_names": list(added),
-                }
-            },
+            metadata={"named_content_fields_edit": edit},
         )
+
+    def _described_nested_group_message(self) -> ConversationMessage:
+        quotes = ("reports{}", "reports{}.sections[]", "legacy")
+        source = SlotClassificationSource(
+            source_id="user_message:user-0",
+            kind="user_message",
+            text=" ".join(quotes),
+            message_id="described",
+        )
+        classification_input = SlotClassificationInput(
+            sources=(source,),
+            current_user_message_id="described",
+        )
+        named_results = [
+            NamedResultEvidence(
+                name="reports",
+                declared_shape="object",
+                evidence=["quote:user_message:user-0:reports{}"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="sections",
+                placement=ExactNamedResultPlacement(segments=("reports",)),
+                declared_shape="array",
+                evidence=["quote:user_message:user-0:reports{}.sections[]"],
+                confidence="high",
+            ),
+            NamedResultEvidence(
+                name="legacy",
+                placement=UnplacedNamedResultPlacement(),
+                evidence=["quote:user_message:user-0:legacy"],
+                confidence="high",
+            ),
+        ]
+        snapshot = (
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=named_results,
+                confidence="high",
+                reason="A nested group and one unplaced field.",
+                evidence=_model_evidence(*quotes, source_id=source.source_id),
+            )
+        )
+        metadata = metadata_with_slot_classification(
+            None,
+            slot_classification_metadata_from_attempt(
+                SlotClassificationAttempt(
+                    outcome="resolved",
+                    result=SlotClassificationResult(),
+                ),
+                prompt_hash="f" * 64,
+                classification_input=classification_input,
+                model="openai/gpt-test",
+                provider="openai",
+                named_result_evidence_snapshot=snapshot,
+            ),
+        )
+        assert metadata is not None
+        return ConversationMessage(
+            message_id="described",
+            role="user",
+            content=source.text,
+            metadata=metadata,
+        )
+
+    def test_adding_a_field_under_a_nested_group_uses_the_parents_full_path(
+        self,
+    ) -> None:
+        described = self._described_nested_group_message()
+        before = build_planning_state_from_conversation([described])
+        ids = {
+            item.folded_exact_identity: named_result_location_id(item)
+            for item in before.named_result_evidence
+            if item.folded_exact_identity is not None
+        }
+        parent_id = ids[("reports", "sections")]
+
+        rebuilt = build_planning_state_from_conversation(
+            [
+                described,
+                self._edit_message(
+                    ids[("reports",)],
+                    parent_id,
+                    "title",
+                    added=("title",),
+                    placements={"title": parent_id},
+                ),
+            ]
+        )
+
+        added = rebuilt.named_result_evidence[-1]
+        assert added.name == "title"
+        assert added.placement == ExactNamedResultPlacement(
+            segments=("reports", "sections")
+        )
+        assert added.origin == "card_edit"
+        assert added.evidence == [
+            named_content_fields_edit_evidence_reference("edited")
+        ]
+
+    def test_placing_an_unplaced_field_replaces_it_with_one_exact_entry(self) -> None:
+        described = self._described_nested_group_message()
+        before = build_planning_state_from_conversation([described])
+        exact_ids = {
+            item.folded_exact_identity: named_result_location_id(item)
+            for item in before.named_result_evidence
+            if item.folded_exact_identity is not None
+        }
+        parent_id = exact_ids[("reports", "sections")]
+
+        rebuilt = build_planning_state_from_conversation(
+            [
+                described,
+                self._edit_message(
+                    exact_ids[("reports",)],
+                    parent_id,
+                    "legacy",
+                    added=("legacy",),
+                    placements={"legacy": parent_id},
+                ),
+            ]
+        )
+
+        legacy = [
+            item for item in rebuilt.named_result_evidence if item.name == "legacy"
+        ]
+        assert len(legacy) == 1
+        assert legacy[0].folded_exact_identity == ("reports", "sections", "legacy")
+
+    def test_placing_under_a_parent_id_not_kept_by_the_card_is_rejected(
+        self,
+    ) -> None:
+        described = self._described_nested_group_message()
+        before = build_planning_state_from_conversation([described])
+        ids = {
+            item.folded_exact_identity: named_result_location_id(item)
+            for item in before.named_result_evidence
+            if item.folded_exact_identity is not None
+        }
+        parent_id = ids[("reports", "sections")]
+
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            build_planning_state_from_conversation(
+                [
+                    described,
+                    self._edit_message(
+                        ids[("reports",)],
+                        "sections",
+                        "title",
+                        added=("title",),
+                        placements={"title": parent_id},
+                    ),
+                ]
+            )
+
+        assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+        assert exc_info.value.context == {
+            "reason": "orphan_named_result_path",
+            "path": "reports.sections.title",
+        }
+
+    def _described_two_timestamp_hierarchies_message(self) -> ConversationMessage:
+        quotes = (
+            "events[]",
+            "alerts[]",
+            "events[].timestamp",
+            "alerts[].timestamp",
+        )
+        source = SlotClassificationSource(
+            source_id="user_message:user-0",
+            kind="user_message",
+            text=" ".join(quotes),
+            message_id="described",
+        )
+        classification_input = SlotClassificationInput(
+            sources=(source,),
+            current_user_message_id="described",
+        )
+        snapshot = (
+            SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
+                operation="replace",
+                named_results=_two_timestamp_hierarchies(),
+                confidence="high",
+                reason="Two independently located timestamp results.",
+                evidence=_model_evidence(
+                    *quotes,
+                    source_id="user_message:user-0",
+                ),
+            )
+        )
+        metadata = metadata_with_slot_classification(
+            None,
+            slot_classification_metadata_from_attempt(
+                SlotClassificationAttempt(
+                    outcome="resolved",
+                    result=SlotClassificationResult(),
+                ),
+                prompt_hash="f" * 64,
+                classification_input=classification_input,
+                model="openai/gpt-test",
+                provider="openai",
+                named_result_evidence_snapshot=snapshot,
+            ),
+        )
+        assert metadata is not None
+        return ConversationMessage(
+            message_id="described",
+            role="user",
+            content=source.text,
+            metadata=metadata,
+        )
+
+    def test_location_ids_remove_only_the_selected_same_leaf_path(self) -> None:
+        described = self._described_two_timestamp_hierarchies_message()
+        before = build_planning_state_from_conversation([described])
+        ids = {
+            item.folded_exact_identity: named_result_location_id(item)
+            for item in before.named_result_evidence
+        }
+
+        rebuilt = build_planning_state_from_conversation(
+            [
+                described,
+                self._edit_message(
+                    ids[("events",)],
+                    ids[("alerts",)],
+                    ids[("alerts", "timestamp")],
+                ),
+            ]
+        )
+
+        assert [
+            item.folded_exact_identity for item in rebuilt.named_result_evidence
+        ] == [
+            ("events",),
+            ("alerts",),
+            ("alerts", "timestamp"),
+        ]
+
+    def test_removing_a_parent_cascades_when_descendant_is_omitted(self) -> None:
+        described = self._described_two_timestamp_hierarchies_message()
+        before = build_planning_state_from_conversation([described])
+        ids = {
+            item.folded_exact_identity: named_result_location_id(item)
+            for item in before.named_result_evidence
+        }
+
+        rebuilt = build_planning_state_from_conversation(
+            [
+                described,
+                self._edit_message(
+                    ids[("alerts",)],
+                    ids[("alerts", "timestamp")],
+                ),
+            ]
+        )
+
+        assert [
+            item.folded_exact_identity for item in rebuilt.named_result_evidence
+        ] == [
+            ("alerts",),
+            ("alerts", "timestamp"),
+        ]
+
+    def test_card_edit_rejects_orphan_descendant_with_exact_path(self) -> None:
+        described = self._described_two_timestamp_hierarchies_message()
+        before = build_planning_state_from_conversation([described])
+        ids = {
+            item.folded_exact_identity: named_result_location_id(item)
+            for item in before.named_result_evidence
+        }
+
+        with pytest.raises(AIBuilderBadRequestException) as exc_info:
+            build_planning_state_from_conversation(
+                [
+                    described,
+                    self._edit_message(
+                        ids[("events", "timestamp")],
+                        ids[("alerts",)],
+                        ids[("alerts", "timestamp")],
+                    ),
+                ]
+            )
+
+        assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+        assert exc_info.value.context == {
+            "reason": "orphan_named_result_path",
+            "path": "events.timestamp",
+        }
 
     def test_the_card_edit_becomes_the_field_set_every_later_turn_rebuilds(
         self,

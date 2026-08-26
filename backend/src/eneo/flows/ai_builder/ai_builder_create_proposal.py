@@ -69,9 +69,12 @@ _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
         "flow_input_schema_composite_bindings_unsupported",
         "flow_input_schema_target_missing",
         # A dropped obligation is a compiler defect against a name the user
-        # already confirmed. No model can repair a server bug, and asking one
+        # already confirmed. The compiled-postcondition breach of the
+        # attested result contract is the same class: admission verified the
+        # model's declaration, so a violation surfacing after compilation is
+        # a server defect. No model can repair a server bug, and asking one
         # to try would spend the turn's budget hiding it.
-        "named_result_obligation_dropped",
+        "attested_result_contract_broken",
         "section_writer_structured_source_ambiguous",
         "terminal_output_type_mismatch",
         "template_attachment_selection_invalid",
@@ -105,6 +108,7 @@ async def process_create_intent_arguments(
             intent,
             context=compile_context,
             field_diagnostics=field_diagnostics,
+            obligation_projection=obligation_projection,
         )
     except ProposalIntentArgumentError as error:
         logger.info(

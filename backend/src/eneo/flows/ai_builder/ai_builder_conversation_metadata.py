@@ -75,6 +75,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
+    NAMED_RESULT_LOCATION_ID_MAX_LENGTH,
     NAMED_RESULT_PROVENANCE_MAX_ITEMS,
     AttachmentCoverage,
     CheckpointProducerKind,
@@ -83,6 +84,7 @@ from eneo.flows.ai_builder.planning_state import (
     NamedResultEvidence,
     RuntimeMetadataFieldPurpose,
     is_named_content_fields_edit_reference,
+    is_named_result_location_id,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import FlowPersistedJsonObject
@@ -358,13 +360,22 @@ class SlotClassificationNamedResultEvidenceMetadata(BaseModel):
             raise ValueError(
                 "clear named-result evidence must not contain named results"
             )
-        folded_names = [
-            fold_result_field_name(item.name) for item in self.named_results
+        exact_identities = [
+            identity
+            for item in self.named_results
+            if (identity := item.folded_exact_identity) is not None
         ]
-        if any(not name for name in folded_names) or len(folded_names) != len(
-            set(folded_names)
+        unplaced_leaves = [
+            fold_result_field_name(item.name)
+            for item in self.named_results
+            if item.folded_exact_identity is None
+        ]
+        if (
+            len(exact_identities) != len(set(exact_identities))
+            or len(unplaced_leaves) != len(set(unplaced_leaves))
+            or set(unplaced_leaves) & {identity[-1] for identity in exact_identities}
         ):
-            raise ValueError("named-result evidence names must be uniquely foldable")
+            raise ValueError("named-result evidence locations must be unique")
         planning_references = {
             item.to_classified_evidence().planning_reference() for item in self.evidence
         }
@@ -1088,7 +1099,7 @@ class DelegatedQuestionAnswerRequest(BaseModel):
 
 
 class NamedContentFieldsEditRequest(BaseModel):
-    """The names the user leaves standing on the confirmation card.
+    """The field identifiers the user leaves standing on the confirmation card.
 
     The payload is the resulting full set, not a delta: the user is answering
     a disclosure they can see in front of them, so what they submit is simply
@@ -1097,9 +1108,10 @@ class NamedContentFieldsEditRequest(BaseModel):
     whose fields these are, and an edit against an older one is refused rather
     than merged.
 
-    Names only. The label the card shows is prose the disclosure owner renders
-    from the name and the shape the user declared, so a client-supplied label
-    could only disagree with it.
+    Existing fields return their opaque disclosure identifiers. New names are
+    the only raw values: the server marks those in `added_field_names`, and
+    replay admits them at the selected parent, or at the root when the client
+    supplied no placement.
 
     `added_field_names` is the server's own reading of the same submission, not
     something a client states: which of these names the card did not already
@@ -1114,13 +1126,18 @@ class NamedContentFieldsEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal["named_content_fields_edit"] = "named_content_fields_edit"
+    schema_version: Literal[1] = 1
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     field_names: list[
-        Annotated[str, Field(max_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH)]
+        Annotated[str, Field(max_length=NAMED_RESULT_LOCATION_ID_MAX_LENGTH)]
     ] = Field(max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS)
     added_field_names: list[
         Annotated[str, Field(max_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH)]
     ] = Field(default_factory=list[str], max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS)
+    added_field_placements: dict[
+        Annotated[str, Field(max_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH)],
+        Annotated[str, Field(max_length=NAMED_RESULT_LOCATION_ID_MAX_LENGTH)],
+    ] = Field(default_factory=dict, max_length=NAMED_RESULT_EVIDENCE_MAX_ITEMS)
     ui_language: str | None = Field(
         default=None,
         max_length=_MAX_UI_LANGUAGE_LENGTH,
@@ -1134,6 +1151,27 @@ class NamedContentFieldsEditRequest(BaseModel):
             for name in self.added_field_names
         ):
             raise ValueError("added named-result fields must be part of the edited set")
+        raw_submitted = {
+            fold_result_field_name(name): name
+            for name in self.field_names
+            if not is_named_result_location_id(name)
+        }
+        placement_folds = [
+            fold_result_field_name(name) for name in self.added_field_placements
+        ]
+        if len(placement_folds) != len(set(placement_folds)):
+            raise ValueError("placed named-result fields must have unique folded names")
+        if any(
+            fold_result_field_name(name) not in raw_submitted
+            for name in self.added_field_placements
+        ):
+            raise ValueError(
+                "placed named-result fields must be added fields in the edited set"
+            )
+        self.added_field_placements = {
+            raw_submitted[fold_result_field_name(name)]: parent_id
+            for name, parent_id in self.added_field_placements.items()
+        }
         return self
 
     @property
@@ -1141,6 +1179,12 @@ class NamedContentFieldsEditRequest(BaseModel):
         return frozenset(
             fold_result_field_name(name) for name in self.added_field_names
         )
+
+
+class _PersistedNamedContentFieldsEditVersion(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    schema_version: Literal[1]
 
 
 AIBuilderQuestionAnswerRequest: TypeAlias = Annotated[
@@ -1186,6 +1230,7 @@ def named_content_fields_edit_from_metadata(
     data = dict(edit)
     data.setdefault("kind", "named_content_fields_edit")
     try:
+        _PersistedNamedContentFieldsEditVersion.model_validate(data)
         return NamedContentFieldsEditRequest.model_validate(data)
     except ValidationError as error:
         _warn_invalid_persisted_metadata(

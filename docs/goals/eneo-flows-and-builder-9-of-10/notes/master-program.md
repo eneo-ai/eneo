@@ -468,6 +468,13 @@ user opts object storage in) or explicitly descoped by the user.
 ### Standing rulings — NOT slices (adjudicated; apply when touched)
 - END STATE (above) is adopted and binding: no second skeleton
   compiler; surface closure means OMIT AND REJECT, never omit-and-strip.
+  Amendment (owner, 2026-08-24, evidence-forced): for USER-NAMED RESULT
+  fields the closure is VERIFY, NOT INJECT — the schema no longer carries a
+  server copy of the attested names; the model's own declaration is verified
+  against the attested contract (exact spelling, exactly once at the
+  terminal root, declared-shape-compatible type, required-but-nullable), and
+  a missing or conflicting name is rejected with the exact path. Nothing is
+  silently stripped; the reject arm of the rule is unchanged.
 - NO CATALOG-IDENTITY ROUTING (user decision 2026-08-15): product code never
   selects a feature, route or behaviour from a literal model name, model
   family, catalog row id, tenant or environment identity. Product selection
@@ -699,6 +706,46 @@ overlap. This cadence supersedes both the earlier N=1-only per-slice
 interpretation and the fixed 45-minute spacing rule by user decision on
 2026-08-11.
 
+
+
+### Builder launch contract (adopted 2026-08-24, peer iteration 35)
+
+"Never fails" means, precisely: no known deterministic failure within a
+declared support envelope; recoverable external failures preserve work and
+retry safely; unsupported cases fail explicitly. Regression floors prevent
+regressions; this contract defines production-ready. The smallest set that
+must be true before launch, each mapped to one owner and one executable gate
+(existing lanes referenced, never duplicated):
+
+- One authoritative program and a declared supported-use and model-capability
+  matrix (route-by-route, qualified by repeated cohorts on each configured
+  production route).
+- Trusted evaluator and frozen corpus with named denominators.
+- Zero known deterministic supported-case failures and zero silent loss of
+  confirmed critical details (request-to-execution: confirmed details survive
+  planning, compilation, applying and representative real execution).
+- End-to-end executed-output tests across representative simple, complex,
+  document, structured, attachment and governed cases, including source
+  grounding fidelity, not merely field-name presence.
+- Owner/SRE-approved success, latency, recovery and error-budget SLOs holding
+  on each supported route.
+- Safe preview/test-run, correction, undo, resume and explicit
+  unsupported-state UX; wrong-auto-commit and skipped-necessary-question
+  rates measured.
+- Security, privacy, tenant isolation, authorization, prompt-injection,
+  residency, retention/deletion and audit gates complete; raw debug capture
+  disabled and retention-bounded in production.
+- Provider outage, rate limiting, cancellation, SSE reconnect, idempotency,
+  concurrent edit/publish, version skew and queue recovery exercised
+  (existing runtime P1 lanes are hard dependencies).
+- Operational telemetry, alerting, capacity evidence, canary, rollback and
+  incident ownership (the failure ledger has an owner).
+- Accessibility and Swedish/English behavior verified.
+- A bounded domain-user pilot: completion rate, correction rate, abandonment,
+  time to useful flow, and zero critical missed-detail defects.
+
+These tracks run in parallel with product slices from 2026-08-24 on; they are
+release gates, not a polish phase.
 
 ## Operating protocol (for any agent continuing this)
 

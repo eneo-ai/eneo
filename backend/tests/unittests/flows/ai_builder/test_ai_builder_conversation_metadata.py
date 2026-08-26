@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     CLASSIFIER_RETENTION_CLASSES,
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
     LLMResolvableSlotName,
+    NamedContentFieldsEditRequest,
     SlotClassificationNamedResultEvidenceMetadata,
     SlotClassificationSchemaDirectionMetadata,
     edit_context_from_metadata,
@@ -23,6 +24,8 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     make_persisted_assistant_tool_call,
     metadata_for_user_message,
     metadata_with_slot_classification,
+    named_content_fields_edit_from_metadata,
+    named_content_fields_edit_to_metadata,
     provider_safe_tool_call_id,
     question_answer_from_metadata,
     question_answer_has_real_payload,
@@ -165,6 +168,77 @@ def test_question_answer_request_discriminator_is_not_persisted() -> None:
     answer = question_answer_from_metadata(metadata)
     assert answer is not None
     assert question_answer_question_id(answer) == "primary_runtime_input"
+
+
+def test_unversioned_named_content_fields_edit_is_discarded() -> None:
+    assert (
+        named_content_fields_edit_from_metadata(
+            {
+                "named_content_fields_edit": {
+                    "requirements_version": _REQUIREMENTS_VERSION,
+                    "field_names": ["legacy_root"],
+                }
+            }
+        )
+        is None
+    )
+
+
+def test_named_content_fields_edit_metadata_carries_placement_schema_version() -> None:
+    parent_id = '["exact",["reports"]]'
+    metadata = named_content_fields_edit_to_metadata(
+        NamedContentFieldsEditRequest(
+            requirements_version=_REQUIREMENTS_VERSION,
+            field_names=[parent_id, "current_root"],
+            added_field_placements={"current_root": parent_id},
+        )
+    )
+
+    assert metadata["named_content_fields_edit"]["schema_version"] == 1
+    assert metadata["named_content_fields_edit"]["added_field_placements"] == {
+        "current_root": parent_id
+    }
+    assert named_content_fields_edit_from_metadata(metadata) is not None
+
+
+def test_named_content_fields_edit_rejects_placement_for_a_non_added_name() -> None:
+    parent_id = '["exact",["reports"]]'
+
+    with pytest.raises(
+        ValidationError,
+        match="placed named-result fields must be added fields in the edited set",
+    ):
+        NamedContentFieldsEditRequest(
+            requirements_version=_REQUIREMENTS_VERSION,
+            field_names=[parent_id, "title"],
+            added_field_placements={"summary": parent_id},
+        )
+
+
+def test_named_content_fields_edit_normalizes_placement_to_submitted_spelling() -> None:
+    parent_id = '["exact",["reports"]]'
+
+    request = NamedContentFieldsEditRequest(
+        requirements_version=_REQUIREMENTS_VERSION,
+        field_names=[parent_id, "Status"],
+        added_field_placements={"status": parent_id},
+    )
+
+    assert request.added_field_placements == {"Status": parent_id}
+
+
+def test_named_content_fields_edit_rejects_duplicate_folded_placement_keys() -> None:
+    parent_id = '["exact",["reports"]]'
+
+    with pytest.raises(
+        ValidationError,
+        match="placed named-result fields must have unique folded names",
+    ):
+        NamedContentFieldsEditRequest(
+            requirements_version=_REQUIREMENTS_VERSION,
+            field_names=[parent_id, "Status"],
+            added_field_placements={"Status": parent_id, "status": parent_id},
+        )
 
 
 def test_saved_flow_step_edit_context_round_trips_through_metadata() -> None:

@@ -12,6 +12,8 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     comparison_scope_is_relevant,
     report_disposition_is_relevant,
@@ -86,6 +88,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
+    ClassifiedNamedResultEvidence,
     ClassifiedSlot,
     SlotClassificationResult,
     planning_reference_cites_source,
@@ -104,6 +107,7 @@ from eneo.flows.ai_builder.planning_state import (
     TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX,
     CheckpointIntent,
     ConfirmedRuntimeMetadataField,
+    ExactNamedResultPlacement,
     ExampleOutputConstraintEvidence,
     ExampleOutputSchemaInferenceOutcome,
     FileRole,
@@ -111,13 +115,17 @@ from eneo.flows.ai_builder.planning_state import (
     MappedFileLimit,
     NamedResultDeclaredShape,
     NamedResultEvidence,
+    NamedResultPlacement,
     PlanningSignal,
     PlanningState,
     ResolvedSlot,
     SchemaEvidence,
     SlotConfidence,
     SlotSource,
+    UnplacedNamedResultPlacement,
+    is_named_result_location_id,
     named_content_fields_edit_evidence_reference,
+    named_result_location_id,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
 from eneo.flows.domain.flow import Flow
@@ -973,60 +981,35 @@ def _merge_model_named_result_evidence(
     if classified_evidence.operation == "clear":
         state.named_result_evidence = []
         return
-    removed = {
-        fold_result_field_name(name) for name in classified_evidence.removed_names
+    exact_removals = {
+        identity
+        for item in classified_evidence.removals
+        if (identity := item.folded_exact_identity) is not None
     }
-    retained = [
+    # A parentless removal claim targets "the field {leaf} with no known
+    # parent" — the model cannot know whether that entry is stored as root
+    # Exact or as Unplaced (the two are exclusive per leaf), so either claim
+    # matches either storage.
+    unplaced_removals = {
+        fold_result_field_name(item.name)
+        for item in classified_evidence.removals
+        if isinstance(item.placement, UnplacedNamedResultPlacement)
+    } | {identity[0] for identity in exact_removals if len(identity) == 1}
+    named_results = [
         item
         for item in state.named_result_evidence
-        if fold_result_field_name(item.name) not in removed
-    ]
-    cited_by_fold = {
-        fold_result_field_name(item.name): item
-        for item in classified_evidence.evidence_by_name
-    }
-
-    def _recited(
-        name: str,
-        *,
-        prior_shape: NamedResultDeclaredShape | None,
-    ) -> NamedResultEvidence:
-        cited = cited_by_fold[fold_result_field_name(name)]
-        return NamedResultEvidence(
-            name=name,
-            confidence=classified_evidence.confidence,
-            # A re-citation without notation is silence, not a retraction:
-            # writing `foo` again does not withdraw the `foo[]` the user
-            # already declared. Only a different literal marker replaces the
-            # shape, and only a removal clears the identity.
-            declared_shape=cited.declared_shape or prior_shape,
-            evidence=[
-                evidence.planning_reference()
-                for evidence in cited.evidence[:NAMED_RESULT_EVIDENCE_MAX_CITATIONS]
-            ],
+        if not _named_result_is_removed(
+            item,
+            exact_removals=exact_removals,
+            unplaced_removals=unplaced_removals,
         )
-
-    # Every valid re-citation replaces the identity it names: the newest
-    # citation owns the spelling, the confidence, and the provenance, and it
-    # keeps the position the identity already held.
-    recited_by_fold = {
-        fold_result_field_name(name): name for name in classified_evidence.names
-    }
-    named_results: list[NamedResultEvidence] = []
-    replaced: set[str] = set()
-    for item in retained:
-        folded = fold_result_field_name(item.name)
-        recited_name = recited_by_fold.get(folded)
-        if recited_name is None:
-            named_results.append(item)
-            continue
-        named_results.append(_recited(recited_name, prior_shape=item.declared_shape))
-        replaced.add(folded)
-    named_results.extend(
-        _recited(name, prior_shape=None)
-        for name in classified_evidence.names
-        if fold_result_field_name(name) not in replaced
-    )
+    ]
+    for upsert in classified_evidence.upserts:
+        named_results = _apply_named_result_upsert(
+            named_results,
+            upsert=upsert,
+            confidence=classified_evidence.confidence,
+        )
     if len(named_results) > NAMED_RESULT_EVIDENCE_MAX_ITEMS:
         raise AIBuilderBadRequestException(
             "The named results exceed the Builder safety limit.",
@@ -1038,6 +1021,155 @@ def _merge_model_named_result_evidence(
             },
         )
     state.named_result_evidence = named_results
+
+
+def _named_result_is_removed(
+    item: NamedResultEvidence,
+    *,
+    exact_removals: set[tuple[str, ...]],
+    unplaced_removals: set[str],
+) -> bool:
+    identity = item.folded_exact_identity
+    if identity is None:
+        return fold_result_field_name(item.name) in unplaced_removals
+    if len(identity) == 1 and identity[0] in unplaced_removals:
+        return True
+    return any(identity[: len(removed)] == removed for removed in exact_removals)
+
+
+def _apply_named_result_upsert(
+    current: list[NamedResultEvidence],
+    *,
+    upsert: ClassifiedNamedResultEvidence,
+    confidence: SlotConfidence,
+) -> list[NamedResultEvidence]:
+    folded_leaf = fold_result_field_name(upsert.name)
+    exact_identity = upsert.folded_exact_identity
+    if exact_identity is None:
+        exact_matches = [
+            (index, item)
+            for index, item in enumerate(current)
+            if item.folded_exact_identity is not None
+            and fold_result_field_name(item.name) == folded_leaf
+        ]
+        if exact_matches:
+            if len(exact_matches) != 1:
+                return current
+            index, prior = exact_matches[0]
+            updated = list(current)
+            updated[index] = _materialized_named_result(
+                upsert,
+                confidence=confidence,
+                placement=prior.placement,
+                prior_shape=prior.declared_shape,
+            )
+            return updated
+        matching_unplaced = next(
+            (
+                index
+                for index, item in enumerate(current)
+                if isinstance(item.placement, UnplacedNamedResultPlacement)
+                and fold_result_field_name(item.name) == folded_leaf
+            ),
+            None,
+        )
+        materialized = _materialized_named_result(upsert, confidence=confidence)
+        if matching_unplaced is None:
+            return [*current, materialized]
+        updated = list(current)
+        updated[matching_unplaced] = materialized
+        return updated
+
+    prior_index = next(
+        (
+            index
+            for index, item in enumerate(current)
+            if item.folded_exact_identity == exact_identity
+        ),
+        None,
+    )
+    unplaced_index = next(
+        (
+            index
+            for index, item in enumerate(current)
+            if isinstance(item.placement, UnplacedNamedResultPlacement)
+            and fold_result_field_name(item.name) == folded_leaf
+        ),
+        None,
+    )
+    updated = [
+        item
+        for index, item in enumerate(current)
+        if index != unplaced_index or index == prior_index
+    ]
+    if prior_index is None:
+        materialized = _materialized_named_result(upsert, confidence=confidence)
+        if unplaced_index is None:
+            return [*updated, materialized]
+        updated.insert(min(unplaced_index, len(updated)), materialized)
+        return updated
+
+    prior = current[prior_index]
+    materialized = _materialized_named_result(
+        upsert,
+        confidence=confidence,
+        prior_shape=prior.declared_shape,
+    )
+    replacement_index = updated.index(prior)
+    updated[replacement_index] = materialized
+    if isinstance(upsert.placement, ExactNamedResultPlacement):
+        segment_index = len(upsert.placement.segments)
+        updated = [
+            _respell_named_result_descendant(
+                item,
+                parent_identity=exact_identity,
+                segment_index=segment_index,
+                spelling=upsert.name,
+            )
+            for item in updated
+        ]
+    return updated
+
+
+def _materialized_named_result(
+    upsert: ClassifiedNamedResultEvidence,
+    *,
+    confidence: SlotConfidence,
+    placement: NamedResultPlacement | None = None,
+    prior_shape: NamedResultDeclaredShape | None = None,
+) -> NamedResultEvidence:
+    return NamedResultEvidence(
+        name=upsert.name,
+        placement=placement or upsert.placement,
+        confidence=confidence,
+        declared_shape=upsert.declared_shape or prior_shape,
+        evidence=[
+            evidence.planning_reference()
+            for evidence in upsert.evidence[:NAMED_RESULT_EVIDENCE_MAX_CITATIONS]
+        ],
+    )
+
+
+def _respell_named_result_descendant(
+    item: NamedResultEvidence,
+    *,
+    parent_identity: tuple[str, ...],
+    segment_index: int,
+    spelling: str,
+) -> NamedResultEvidence:
+    identity = item.folded_exact_identity
+    if (
+        identity is None
+        or len(identity) <= len(parent_identity)
+        or identity[: len(parent_identity)] != parent_identity
+    ):
+        return item
+    assert isinstance(item.placement, ExactNamedResultPlacement)
+    segments = list(item.placement.segments)
+    segments[segment_index] = spelling
+    return item.model_copy(
+        update={"placement": ExactNamedResultPlacement(segments=tuple(segments))}
+    )
 
 
 def _apply_named_content_fields_edit(
@@ -1058,20 +1190,90 @@ def _apply_named_content_fields_edit(
     compaction keeps only the last word.
     """
 
-    known = {
-        fold_result_field_name(item.name): item for item in state.named_result_evidence
+    known_by_id = {
+        named_result_location_id(item): item for item in state.named_result_evidence
     }
+    known_by_leaf: dict[str, list[NamedResultEvidence]] = {}
+    for item in state.named_result_evidence:
+        known_by_leaf.setdefault(fold_result_field_name(item.name), []).append(item)
     added = edit.added_field_folds
-    state.named_result_evidence = [
-        _kept_named_result(known.get(folded), is_added=folded in added)
-        or NamedResultEvidence(
-            name=name,
-            confidence="high",
-            evidence=[named_content_fields_edit_evidence_reference(message_id)],
+    selected: list[NamedResultEvidence] = []
+    placed_paths: list[str] = []
+    for value in edit.field_names:
+        folded = fold_result_field_name(value)
+        known = known_by_id.get(value)
+        if known is None and not is_named_result_location_id(value):
+            same_leaf = known_by_leaf.get(folded, [])
+            if len(same_leaf) == 1 and folded not in added:
+                known = same_leaf[0]
+        kept = _kept_named_result(known, is_added=folded in added)
+        if kept is not None:
+            selected.append(kept)
+        elif known is not None and folded not in added:
+            selected.append(
+                known.model_copy(
+                    update={
+                        "evidence": [
+                            named_content_fields_edit_evidence_reference(message_id)
+                        ]
+                    }
+                )
+            )
+        elif folded in added or not is_named_result_location_id(value):
+            parent_id = edit.added_field_placements.get(value)
+            placement = ExactNamedResultPlacement()
+            if parent_id is not None:
+                parent = known_by_id.get(parent_id)
+                parent_identity = (
+                    parent.folded_exact_identity if parent is not None else None
+                )
+                path = ".".join((*parent_identity, value)) if parent_identity else value
+                if parent_id not in edit.field_names or parent_identity is None:
+                    raise _invalid_named_result_path(path)
+                placement = ExactNamedResultPlacement(segments=parent_identity)
+                placed_paths.append(path)
+            try:
+                added_result = NamedResultEvidence(
+                    name=value,
+                    placement=placement,
+                    confidence="high",
+                    evidence=[named_content_fields_edit_evidence_reference(message_id)],
+                )
+            except ValidationError as error:
+                path = ".".join((*placement.segments, value))
+                raise _invalid_named_result_path(path) from error
+            selected.append(added_result)
+
+    selected_exact_identities = {
+        identity
+        for item in selected
+        if (identity := item.folded_exact_identity) is not None
+    }
+    for item in selected:
+        identity = item.folded_exact_identity
+        if identity is None or all(
+            identity[:prefix_length] in selected_exact_identities
+            for prefix_length in range(1, len(identity))
+        ):
+            continue
+        assert isinstance(item.placement, ExactNamedResultPlacement)
+        raise _invalid_named_result_path(
+            ".".join((*item.placement.segments, item.name))
         )
-        for name in edit.field_names
-        for folded in (fold_result_field_name(name),)
-    ]
+    try:
+        state.named_result_evidence = selected
+    except ValidationError as error:
+        if not placed_paths:
+            raise
+        raise _invalid_named_result_path(placed_paths[-1]) from error
+
+
+def _invalid_named_result_path(path: str) -> AIBuilderBadRequestException:
+    return AIBuilderBadRequestException(
+        "Structured question answer could not be applied.",
+        code=AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD,
+        context={"reason": "orphan_named_result_path", "path": path},
+    )
 
 
 def _kept_named_result(

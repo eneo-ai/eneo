@@ -47,11 +47,6 @@ from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
 from eneo.flows.ai_builder.planning_state import ArchitectureCommitDraft, PlanningState
 from eneo.flows.enums import FlowAuthoringOutputMode
 
-# How many user-named result keys one create schema projects. Its own
-# constant on purpose: the classifier's per-delta citation bound is a
-# different contract, and obligations accumulate across turns while
-# citations do not. The observed corpus maximum is 9.
-NAMED_RESULT_PROJECTION_MAX_ITEMS = 12
 PlannerActionKind = Literal[
     "ask_question",
     "confirm_requirements",
@@ -76,13 +71,13 @@ def named_result_projection(
     *,
     is_edit_mode: bool = False,
 ) -> ProposalObligationProjection | None:
-    """The obligation keys this turn projects into the create tool schema.
+    """The user-attested result keys this turn holds the proposal to.
 
-    One rule, read by both admission and the schema builder, so the refusal
-    the user sees before confirming and the schema the model later answers
-    can never disagree about which names are in play. An exact declared
-    output schema is already authoritative, and edit mode has no create
-    schema to project into, so both stand down.
+    One rule, read by the prompt, admission and the compiled postcondition,
+    so the locations the model is told to declare and both verification arms
+    can never disagree about which result paths are in play. An exact declared
+    output schema is already authoritative, and edit mode has no create contract
+    to verify, so both stand down.
     """
 
     if is_edit_mode:
@@ -93,7 +88,11 @@ def named_result_projection(
     if output_evidence is not None and output_evidence.source == "declared_schema":
         return None
     keys = tuple(
-        ObligatedResultKey(name=item.name, declared_shape=item.declared_shape)
+        ObligatedResultKey(
+            name=item.name,
+            placement=item.placement,
+            declared_shape=item.declared_shape,
+        )
         for item in session_state.named_result_evidence
         if item.is_commit_grade
     )
@@ -103,18 +102,19 @@ def named_result_projection(
 def _named_result_projection_refusal_code(
     projection: ProposalObligationProjection | None,
 ) -> AIBuilderErrorCode | None:
-    """Refuse a projection the create schema cannot express, before confirming.
+    """Refuse a projection whose names cannot compile, before confirming.
 
-    Both checks are about the stored spelling the user attested to. A name
-    that only compiles after folding would reach the terminal contract under
-    a different spelling than the one disclosed, so it is refused rather than
-    quietly renamed.
+    The check is about the stored spelling the user attested to: a name that
+    only compiles after folding would reach the terminal contract under a
+    different spelling than the one disclosed, so it is refused rather than
+    quietly renamed. Count is not checked here: the attested contract no
+    longer occupies schema space, and planning state's
+    NAMED_RESULT_EVIDENCE_MAX_ITEMS is the single bound on how many named
+    results a session can accumulate.
     """
 
     if projection is None:
         return None
-    if len(projection.keys) > NAMED_RESULT_PROJECTION_MAX_ITEMS:
-        return AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED
     if any(
         not re.fullmatch(STRUCTURED_FIELD_NAME_PATTERN, key.name)
         for key in projection.keys
@@ -350,7 +350,6 @@ def _ordered_ask_targets(
 
 
 __all__ = [
-    "NAMED_RESULT_PROJECTION_MAX_ITEMS",
     "PlannerActionKind",
     "PlannerActionPolicy",
     "build_planner_action_policy",

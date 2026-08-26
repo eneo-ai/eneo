@@ -100,6 +100,7 @@ from eneo.flows.ai_builder.planning_state import (
     FCM_VERSION,
     PLANNER_CONTRACT_VERSION,
     CheckpointIntent,
+    ExactNamedResultPlacement,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
     ExampleOutputSourceCoverage,
@@ -146,6 +147,13 @@ def _make_response(content: object, *, complete_contract: bool = True) -> MagicM
     response = MagicMock()
     response.choices = [choice]
     return response
+
+
+def _named_result_locations(
+    names: tuple[str, ...] | list[str],
+    evidence: list[dict[str, str]],
+) -> list[dict[str, object]]:
+    return [{"name": name, "segments": [], "evidence": evidence} for name in names]
 
 
 def _route(
@@ -593,20 +601,13 @@ async def test_runtime_retains_named_results_until_structured_output_choice(
             result=SlotClassificationResult(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
-                    names=("case_id", "status"),
+                    upserts=tuple(
+                        ClassifiedNamedResultEvidence(name=name, evidence=cited)
+                        for name in ("case_id", "status")
+                    ),
                     confidence="high",
                     reason="The user explicitly named required result content.",
                     evidence=cited,
-                    evidence_by_name=(
-                        ClassifiedNamedResultEvidence(
-                            name="case_id",
-                            evidence=cited,
-                        ),
-                        ClassifiedNamedResultEvidence(
-                            name="status",
-                            evidence=cited,
-                        ),
-                    ),
                 )
             ),
         )
@@ -705,8 +706,16 @@ def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": ["sökta insatser"],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        ["sökta insatser"],
+                        [
+                            {
+                                "source_id": "user_message:user-prior",
+                                "quote": "sökta insatser",
+                            }
+                        ],
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "The earlier turn named the field.",
                     "evidence": [
@@ -2515,6 +2524,79 @@ async def test_runtime_does_not_mutate_planning_state_when_metadata_admission_fa
 
 
 @pytest.mark.asyncio
+async def test_runtime_discards_orphan_named_result_delta_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = PlanningState.empty()
+    evidence = (
+        ClassifiedEvidence(
+            source_id="user_message:user-1",
+            quote="Return JSON; timestamp belongs directly to events.",
+        ),
+    )
+    classify = AsyncMock(
+        return_value=SlotClassificationAttempt(
+            outcome="resolved",
+            result=SlotClassificationResult(
+                slots=(
+                    ClassifiedSlot(
+                        slot_name="terminal_output",
+                        value="structured_json",
+                        confidence="high",
+                        reason="The user requested JSON.",
+                        evidence=evidence,
+                        evidence_level="explicit",
+                    ),
+                ),
+                named_result_evidence=ClassifiedNamedResultDelta(
+                    operation="update",
+                    upserts=(
+                        ClassifiedNamedResultEvidence(
+                            name="timestamp",
+                            placement=ExactNamedResultPlacement(segments=("events",)),
+                            evidence=evidence,
+                        ),
+                    ),
+                    confidence="high",
+                    reason="The relationship is explicit but its prefix is absent.",
+                    evidence=evidence,
+                ),
+            ),
+        )
+    )
+    monkeypatch.setattr(runtime, "classify_slots", classify)
+    monkeypatch.setattr(
+        runtime,
+        "build_planning_state_from_conversation",
+        MagicMock(return_value=state),
+    )
+
+    context = await build_runtime_discovery_context(
+        [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content=evidence[0].quote,
+            )
+        ],
+        litellm_client=AsyncMock(),
+        completion_model_route=_route(),
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+    )
+
+    assert context.planning_state.resolved_slots["terminal_output"].value == (
+        "structured_json"
+    )
+    assert context.planning_state.named_result_evidence == []
+    assert context.slot_classification_result is not None
+    assert context.slot_classification_result.named_result_evidence is None
+    assert context.slot_classification_metadata is not None
+    assert context.slot_classification_metadata.named_result_evidence is None
+
+
+@pytest.mark.asyncio
 async def test_runtime_classifies_named_results_after_slots_are_resolved(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2533,8 +2615,16 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": ["sökta insatser", "status"],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        ["sökta insatser", "status"],
+                        [
+                            {
+                                "source_id": "user_message:user-1",
+                                "quote": "sökta insatser och status",
+                            }
+                        ],
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON fields.",
                     "evidence": [
@@ -2619,7 +2709,7 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
         ui_language="sv",
     ).decision
     assert isinstance(confirmation, ConfirmRequirements)
-    assert [field.id for field in confirmation.payload.named_content_fields] == [
+    assert [field.label for field in confirmation.payload.named_content_fields] == [
         "sokta_insatser",
         "status",
     ]
@@ -2668,8 +2758,16 @@ async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": ["case_id", "status"],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        ["case_id", "status"],
+                        [
+                            {
+                                "source_id": "user_message:user-1",
+                                "quote": "JSON with case_id and status",
+                            }
+                        ],
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "The user explicitly named the JSON fields.",
                     "evidence": [
@@ -2778,6 +2876,7 @@ async def test_runtime_materializes_incremental_named_result_addition_and_remova
     assert prior_classification is not None
     prior_metadata = metadata_with_slot_classification(None, prior_classification)
     assert prior_metadata is not None
+    edit_quote = "Remove status{} and add priority{}."
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(
@@ -2788,14 +2887,30 @@ async def test_runtime_materializes_incremental_named_result_addition_and_remova
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": ["priority"],
-                    "removed_names": ["status"],
+                    "upserts": _named_result_locations(
+                        ["priority"],
+                        [
+                            {
+                                "source_id": "user_message:user-2",
+                                "quote": edit_quote,
+                            }
+                        ],
+                    ),
+                    "removals": _named_result_locations(
+                        ["status"],
+                        [
+                            {
+                                "source_id": "user_message:user-2",
+                                "quote": edit_quote,
+                            }
+                        ],
+                    ),
                     "confidence": "high",
                     "reason": "The user added one field.",
                     "evidence": [
                         {
                             "source_id": "user_message:user-2",
-                            "quote": "Remove status and add priority",
+                            "quote": edit_quote,
                         }
                     ],
                 },
@@ -2818,7 +2933,7 @@ async def test_runtime_materializes_incremental_named_result_addition_and_remova
             ConversationMessage(
                 message_id="user-2",
                 role="user",
-                content="Remove status and add priority.",
+                content=edit_quote,
             ),
         ],
         litellm_client=litellm_client,
@@ -2867,16 +2982,15 @@ def test_runtime_does_not_materialize_low_confidence_named_result_snapshot() -> 
     )
     classified = ClassifiedNamedResultDelta(
         operation="update",
-        names=("case_id",),
-        confidence="low",
-        reason="The field name was uncertain.",
-        evidence=classified_evidence,
-        evidence_by_name=(
+        upserts=(
             ClassifiedNamedResultEvidence(
                 name="case_id",
                 evidence=classified_evidence,
             ),
         ),
+        confidence="low",
+        reason="The field name was uncertain.",
+        evidence=classified_evidence,
     )
 
     assert (
@@ -2920,8 +3034,16 @@ async def test_runtime_retains_named_result_evidence_for_non_json_terminal_outpu
                 "form_intake": None,
                 "named_result_evidence": {
                     "operation": "update",
-                    "names": ["case_id", "status"],
-                    "removed_names": [],
+                    "upserts": _named_result_locations(
+                        ["case_id", "status"],
+                        [
+                            {
+                                "source_id": "user_message:user-1",
+                                "quote": "case_id och status",
+                            }
+                        ],
+                    ),
+                    "removals": [],
                     "confidence": "high",
                     "reason": "The user named fields for an intermediate JSON matrix.",
                     "evidence": [

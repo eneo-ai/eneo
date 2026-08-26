@@ -7617,6 +7617,7 @@ def test_non_json_named_result_evidence_cannot_change_public_plan_shape(
     assert state.output_schema_evidence is None
     assert state.named_result_evidence[0].model_dump() == {
         "name": "case_summary",
+        "placement": {"kind": "exact", "segments": ()},
         "evidence": ["quote:user_message:user-1:case summary"],
         "confidence": "high",
         "declared_shape": None,

@@ -6466,5 +6466,12 @@
   "flow_validation_msg_invalid_output_contract_schema": "Stegets utdataschema är ogiltigt. Den tekniska beskrivningen visar detaljerna.",
   "flow_validation_msg_output_contract_type_mismatch": "Stegets utdataschema stämmer inte med stegets utdatatyp.",
   "flow_run_knowledge_source_relevance_tooltip": "Källans bästa avsnitt hade {percent} % semantisk likhet med sökfrågan som användes vid körningen. Nivåerna är visningsetiketter, inte kalibrerade trösklar.",
-  "flow_run_knowledge_chunks_shown_of_matched": "Visar {displayed} av {matched} matchade segment"
+  "flow_run_knowledge_chunks_shown_of_matched": "Visar {displayed} av {matched} matchade segment",
+  "ai_builder_requirements_group_inside": "Inuti {parent}",
+  "ai_builder_requirements_group_unplaced": "Plats ej angiven – bekräftas utan bestämd placering",
+  "ai_builder_requirements_group_show_more": "+{count} fält till",
+  "ai_builder_requirements_field_remove_with_children": "Ta bort {field} och {count} underfält",
+  "ai_builder_requirements_field_place": "Placera {field} i en grupp",
+  "ai_builder_requirements_place_label": "Placering för det nya fältet",
+  "ai_builder_requirements_place_top_level": "Toppnivå"
 }

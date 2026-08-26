@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
-    NAMED_RESULT_PROJECTION_MAX_ITEMS,
     PlannerActionPolicy,
     build_planner_action_policy,
 )
@@ -106,20 +105,6 @@ _ARCHITECTURE_REFUSAL_MESSAGES: Mapping[AIBuilderErrorCode, Mapping[Locale, str]
         "sv": (
             "Den valda DOCX-mallen kunde inte läsas på ett säkert sätt. Bifoga en "
             "giltig DOCX-fil och försök igen."
-        ),
-    },
-    AIBuilderErrorCode.SCHEMA_LIMIT_EXCEEDED: {
-        "en": (
-            "Without an attached output schema, at most "
-            f"{NAMED_RESULT_PROJECTION_MAX_ITEMS} named result fields can be "
-            "built for you, and this flow names more. Name fewer result fields, "
-            "or attach the output schema you want, and try again."
-        ),
-        "sv": (
-            "Utan ett bifogat utdataschema kan högst "
-            f"{NAMED_RESULT_PROJECTION_MAX_ITEMS} namngivna resultatfält byggas "
-            "åt dig, och flödet namnger fler. Namnge färre resultatfält, eller "
-            "bifoga det utdataschema du vill ha, och försök igen."
         ),
     },
     AIBuilderErrorCode.NAMED_RESULT_KEY_UNSUPPORTED: {

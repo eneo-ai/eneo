@@ -913,7 +913,7 @@ def test_server_confirmation_distinguishes_named_results_from_full_schema(
 
     assert isinstance(decision, ConfirmRequirements)
     assert placement_text in decision.payload.summary
-    assert [field.id for field in decision.payload.named_content_fields] == [
+    assert [field.label for field in decision.payload.named_content_fields] == [
         "case_id",
         "status",
     ]
@@ -940,7 +940,9 @@ def test_server_confirmation_discloses_every_named_result_with_its_shape(
 
     assert isinstance(decision, ConfirmRequirements)
     fields = decision.payload.named_content_fields
-    assert [field.id for field in fields] == [f"field_{index}" for index in range(9)]
+    assert [field.label.split(" (", 1)[0] for field in fields] == [
+        f"field_{index}" for index in range(9)
+    ]
     shape_text = (
         "field_8 (användaren skrev en lista)"
         if ui_language == "sv"

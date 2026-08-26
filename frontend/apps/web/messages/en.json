@@ -6466,5 +6466,12 @@
   "flow_validation_msg_invalid_output_contract_schema": "The step's output schema is invalid. The technical details show the specifics.",
   "flow_validation_msg_output_contract_type_mismatch": "The step's output schema does not match the step's output type.",
   "flow_run_knowledge_source_relevance_tooltip": "The source's best segment had {percent}% semantic similarity with the retrieval query used during the run. The levels are display labels, not calibrated thresholds.",
-  "flow_run_knowledge_chunks_shown_of_matched": "Showing {displayed} of {matched} matched segments"
+  "flow_run_knowledge_chunks_shown_of_matched": "Showing {displayed} of {matched} matched segments",
+  "ai_builder_requirements_group_inside": "Inside {parent}",
+  "ai_builder_requirements_group_unplaced": "Placement not specified – confirmed without a fixed position",
+  "ai_builder_requirements_group_show_more": "+{count} more fields",
+  "ai_builder_requirements_field_remove_with_children": "Remove {field} and {count} child fields",
+  "ai_builder_requirements_field_place": "Place {field} in a group",
+  "ai_builder_requirements_place_label": "Placement for the new field",
+  "ai_builder_requirements_place_top_level": "Top level"
 }

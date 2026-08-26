@@ -483,6 +483,14 @@ const requirementsSummaryEventDataSchema = z.object({
       z.object({
         id: z.string(),
         label: z.string(),
+        // The raw leaf spelling; hierarchy keys on identities, never on the
+        // display label (which carries shape prose). Placement is the parent
+        // path segments, or an explicitly unplaced name. All defaulted so an
+        // older backend payload still parses as a flat top-level list.
+        name: z.string().default(""),
+        segments: z.array(z.string()).default([]),
+        unplaced: z.boolean().default(false),
+        can_contain_fields: z.boolean().default(false),
         origin: z.enum(["described", "card_edit"]).optional()
       })
     )

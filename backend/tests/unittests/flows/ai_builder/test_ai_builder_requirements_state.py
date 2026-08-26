@@ -210,6 +210,10 @@ class TestRenderConfirmedRequirementsBlocks:
                     NamedContentFieldPayload(
                         id="beslut",
                         label="beslut",
+                        name="beslut",
+                        segments=[],
+                        unplaced=False,
+                        can_contain_fields=False,
                     )
                 ]
             }
@@ -269,6 +273,10 @@ class TestRenderConfirmedRequirementsBlocks:
                     NamedContentFieldPayload(
                         id="beslut",
                         label="beslut",
+                        name="beslut",
+                        segments=[],
+                        unplaced=False,
+                        can_contain_fields=False,
                     )
                 ]
             }

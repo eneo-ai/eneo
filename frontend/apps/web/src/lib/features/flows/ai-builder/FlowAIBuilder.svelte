@@ -675,9 +675,13 @@
           oncanceledit={() => (editingQuestionId = null)}
           onconfirm={handleRequirementsConfirm}
           onchange={handleRequirementsChange}
-          oneditcontentfields={(fieldNames) => {
+          oneditcontentfields={(fieldNames, addedFieldPlacements) => {
             if (!latestSummary) return;
-            void service.editNamedContentFields(latestSummary.requirements_version, fieldNames);
+            void service.editNamedContentFields(
+              latestSummary.requirements_version,
+              fieldNames,
+              addedFieldPlacements
+            );
           }}
           oneditanswer={handleEditAnswer}
         />

@@ -38,14 +38,21 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Annotated, Literal, assert_never
+from typing import Annotated, Literal, TypeAlias, assert_never, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.files.file_models import FileType
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
-from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
+from eneo.flows.ai_builder.ai_builder_new_step_models import (
+    MAX_STRUCTURED_FIELD_DEPTH,
+    STRUCTURED_FIELD_NAME_PATTERN,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    FlowInputFieldIntent,
+    fold_named_result_location,
+)
 from eneo.flows.enums import (
     FlowAuthoringInputType,
     FlowAuthoringOutputMode,
@@ -56,7 +63,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 20
+BUILDER_SCHEMA_VERSION: int = 21
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -720,6 +727,9 @@ class MappedFileLimit(_PlanningModel):
 
 NAMED_RESULT_EVIDENCE_MAX_ITEMS = 100
 NAMED_RESULT_FIELD_NAME_MAX_LENGTH = 240
+NAMED_RESULT_LOCATION_ID_MAX_LENGTH = (
+    MAX_STRUCTURED_FIELD_DEPTH * (6 * NAMED_RESULT_FIELD_NAME_MAX_LENGTH + 3) + 32
+)
 NAMED_RESULT_PROVENANCE_MAX_ITEMS = 200
 NAMED_RESULT_EVIDENCE_MAX_CITATIONS = (
     NAMED_RESULT_PROVENANCE_MAX_ITEMS // NAMED_RESULT_EVIDENCE_MAX_ITEMS
@@ -761,8 +771,24 @@ def is_named_content_fields_edit_reference(reference: str) -> bool:
     return reference.startswith(prefix) and bool(reference[len(prefix) :])
 
 
+class ExactNamedResultPlacement(_PlanningModel):
+    kind: Literal["exact"] = "exact"
+    segments: tuple[str, ...] = ()
+
+
+class UnplacedNamedResultPlacement(_PlanningModel):
+    kind: Literal["unplaced"] = "unplaced"
+
+
+NamedResultPlacement: TypeAlias = Annotated[
+    ExactNamedResultPlacement | UnplacedNamedResultPlacement,
+    Field(discriminator="kind"),
+]
+
+
 class NamedResultEvidence(_PlanningModel):
     name: str = Field(min_length=1, max_length=NAMED_RESULT_FIELD_NAME_MAX_LENGTH)
+    placement: NamedResultPlacement = Field(default_factory=ExactNamedResultPlacement)
     evidence: list[str] = Field(
         min_length=1,
         max_length=NAMED_RESULT_EVIDENCE_MAX_CITATIONS,
@@ -773,9 +799,33 @@ class NamedResultEvidence(_PlanningModel):
     @field_validator("name")
     @classmethod
     def require_bounded_name(cls, name: str) -> str:
-        if not name.strip():
+        if not name.strip() or not _is_compilable_named_result_segment(name):
             raise ValueError("named result evidence name must be non-empty")
         return name
+
+    @model_validator(mode="after")
+    def require_compilable_bounded_placement(self) -> NamedResultEvidence:
+        if not isinstance(self.placement, ExactNamedResultPlacement):
+            return self
+        if len(self.placement.segments) + 1 > MAX_STRUCTURED_FIELD_DEPTH:
+            raise ValueError("named result placement exceeds structured field depth")
+        if any(
+            not _is_compilable_named_result_segment(segment)
+            for segment in self.placement.segments
+        ):
+            raise ValueError(
+                "named result placement segments must be compilable identifiers"
+            )
+        return self
+
+    @property
+    def folded_exact_identity(self) -> tuple[str, ...] | None:
+        if not isinstance(self.placement, ExactNamedResultPlacement):
+            return None
+        return fold_named_result_location(
+            self.name,
+            segments=self.placement.segments,
+        )
 
     @property
     def is_commit_grade(self) -> bool:
@@ -808,6 +858,51 @@ class NamedResultEvidence(_PlanningModel):
             )
             else "described"
         )
+
+
+def named_result_location_id(item: NamedResultEvidence) -> str:
+    """Encode the folded placement identity as an opaque card identifier."""
+
+    identity = item.folded_exact_identity
+    encoded = json.dumps(
+        [
+            "exact" if identity is not None else "unplaced",
+            list(identity or fold_named_result_location(item.name)),
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(encoded) > NAMED_RESULT_LOCATION_ID_MAX_LENGTH:
+        raise ValueError("named result location id exceeds its bounded encoding")
+    return encoded
+
+
+def is_named_result_location_id(value: str) -> bool:
+    """Whether a string has the opaque location-id shape emitted to the card."""
+
+    try:
+        raw = cast(object, json.loads(value))
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(raw, list):
+        return False
+    decoded = cast(list[object], raw)
+    if len(decoded) != 2:
+        return False
+    kind, segments = decoded
+    if kind not in {"exact", "unplaced"} or not isinstance(segments, list):
+        return False
+    items = cast(list[object], segments)
+    return (
+        bool(items)
+        and all(isinstance(segment, str) and segment for segment in items)
+        and (kind == "exact" or len(items) == 1)
+    )
+
+
+def _is_compilable_named_result_segment(value: str) -> bool:
+    folded = fold_result_field_name(value.strip())
+    return bool(folded and re.fullmatch(STRUCTURED_FIELD_NAME_PATTERN, folded))
 
 
 class PlanningState(_PlanningModel):
@@ -880,15 +975,44 @@ class PlanningState(_PlanningModel):
 
     @model_validator(mode="after")
     def _owned_collections_are_valid(self) -> PlanningState:
-        folded_names = [
-            fold_result_field_name(item.name) for item in self.named_result_evidence
-        ]
-        if any(not name for name in folded_names) or len(folded_names) != len(
-            set(folded_names)
-        ):
+        exact_by_identity: dict[tuple[str, ...], NamedResultEvidence] = {}
+        unplaced_leaves: set[str] = set()
+        exact_leaves: set[str] = set()
+        for item in self.named_result_evidence:
+            folded_leaf = fold_result_field_name(item.name)
+            identity = item.folded_exact_identity
+            if identity is None:
+                if folded_leaf in unplaced_leaves:
+                    raise ValueError(
+                        "named_result_evidence must contain unique unplaced names"
+                    )
+                unplaced_leaves.add(folded_leaf)
+                continue
+            if identity in exact_by_identity:
+                raise ValueError(
+                    "named_result_evidence must contain unique exact locations"
+                )
+            exact_by_identity[identity] = item
+            exact_leaves.add(folded_leaf)
+        conflicting_leaves = unplaced_leaves & exact_leaves
+        if conflicting_leaves:
+            leaf = sorted(conflicting_leaves)[0]
             raise ValueError(
-                "named_result_evidence must contain unique foldable result names"
+                f"unplaced named result `{leaf}` cannot coexist with an exact placement"
             )
+        for identity, item in exact_by_identity.items():
+            assert isinstance(item.placement, ExactNamedResultPlacement)
+            for prefix_length in range(1, len(identity)):
+                prefix = identity[:prefix_length]
+                container = exact_by_identity.get(prefix)
+                if container is None or container.declared_shape not in {
+                    "array",
+                    "object",
+                }:
+                    path = ".".join((*item.placement.segments, item.name))
+                    raise ValueError(
+                        f"named_result_evidence contains orphan exact path `{path}`"
+                    )
         checkpoint_producers = [
             intent.producer_kind for intent in self.checkpoint_intents
         ]
