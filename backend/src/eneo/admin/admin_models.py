@@ -6,6 +6,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from eneo.authentication.auth_models import (
+    ApiKeyOwnership,
+    ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
@@ -174,7 +176,7 @@ class AdminUsersQueryParams(BaseModel):
 
 class AdminApiKeysQueryParams(BaseModel):
     limit: int = Field(default=50, ge=1, le=200)
-    cursor: datetime | None = None
+    cursor: str | None = None
     previous: bool = False
     scope_type: ApiKeyScopeType | None = None
     scope_id: UUID | None = None
@@ -185,6 +187,12 @@ class AdminApiKeysQueryParams(BaseModel):
     user_relation: ApiKeyUserRelation = ApiKeyUserRelation.OWNER
     search: str | None = None
     expires_within_days: int | None = None
+    ownership: ApiKeyOwnership | None = None
+    min_permission: ApiKeyPermission | None = None
+    eligible_for_module_binding: bool = Field(
+        default=False,
+        description="Only return keys that can be bound to a module installation.",
+    )
 
 
 class AdminApiKeyUsageQueryParams(BaseModel):

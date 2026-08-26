@@ -142,10 +142,11 @@ USING_ACCESS_MANAGEMENT=True
 # Access to system admin endpoints
 ENEO_SUPER_API_KEY=your-secure-api-key
 
-# Access to modules endpoint (higher privilege)
-ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
-
 ```
+
+Modules are configured after login in **Admin > Modules** by an administrator
+with the `modules` permission. No separate module-management environment key is
+required.
 
 Administrators with the Storage permission set upload limits and choose storage
 for eligible new File and Icon writes in **Admin > Storage**. Changes take effect

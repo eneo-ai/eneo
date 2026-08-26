@@ -5,7 +5,6 @@ from uuid import UUID
 from pydantic import HttpUrl
 
 from eneo.main.exceptions import BadRequestException, NotFoundException
-from eneo.main.models import ModelId
 from eneo.modules.module import ModuleTenantAssignment
 from eneo.tenants.crawler_settings_helper import get_all_crawler_settings
 from eneo.tenants.masking import mask_api_key
@@ -202,11 +201,6 @@ class TenantService:
         tenant = await self.get_tenant_by_id(tenant_id)
         self._validate(tenant, tenant_id)
         return await self.repo.update_show_model_pricing(tenant_id, show_model_pricing)
-
-    async def replace_modules(
-        self, list_of_module_ids: list[ModelId], tenant_id: UUID
-    ) -> TenantInDB:
-        return await self.repo.replace_modules(list_of_module_ids, tenant_id)
 
     async def enable_module(
         self, tenant_id: UUID, module_id: UUID

@@ -21,7 +21,11 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.modules.module import ModuleClientConfig, ModuleInDB, ModuleTenantClientConfig
+from eneo.modules.module import (
+    ModuleInDB,
+    ModuleInstallationConfig,
+    ModuleTenantClientConfig,
+)
 from eneo.modules.module_auth import (
     MODULE_HANDOFF_AT_CLAIM,
     MODULE_TENANT_ID_CLAIM,
@@ -646,35 +650,33 @@ class TestRefreshToken:
         assert kwargs["tenant_id"] == TENANT_ID
 
 
-class TestModuleClientConfig:
+class TestModuleInstallationConfig:
     def test_redirect_uris_are_normalized_and_deduplicated(self):
-        config = ModuleClientConfig(
+        config = ModuleInstallationConfig(
             redirect_uris=[
                 "https://TTT.example.com/auth/callback/",
                 "https://ttt.example.com/auth/callback",
-            ]
+            ],
+            service_key_id=None,
         )
 
         assert config.redirect_uris == [REDIRECT_URI]
 
     def test_invalid_redirect_uri_is_rejected(self):
         with pytest.raises(ValidationError):
-            ModuleClientConfig(
-                redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"]
+            ModuleInstallationConfig(
+                redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"],
+                service_key_id=None,
             )
 
-    def test_update_values_preserve_omitted_fields(self):
-        config = ModuleClientConfig(redirect_uris=[REDIRECT_URI])
+    def test_service_key_must_be_present_but_may_be_explicitly_null(self):
+        with pytest.raises(ValidationError):
+            ModuleInstallationConfig(redirect_uris=[REDIRECT_URI])
 
-        assert config.update_values() == {"redirect_uris": [REDIRECT_URI]}
-
-    def test_update_values_keep_explicit_null(self):
-        config = ModuleClientConfig(service_key_id=None)
-
-        assert config.update_values() == {"service_key_id": None}
-
-    def test_empty_update_has_no_values(self):
-        assert ModuleClientConfig().update_values() == {}
+        unbound = ModuleInstallationConfig(
+            redirect_uris=[REDIRECT_URI], service_key_id=None
+        )
+        assert unbound.service_key_id is None
 
 
 class TestModuleTicketRequest:
@@ -714,7 +716,7 @@ class TestModuleServiceKeyRegistration:
         )
 
         broker.api_key_repo.get.assert_awaited_once_with(
-            key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID
+            key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID, for_update=True
         )
 
     async def test_rejects_unknown_or_wrong_tenant_key(self):

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from eneo.modules.module import ModuleBase, ModuleCreate, ModuleInDB, Modules
+from eneo.modules.module import ModuleBase, ModuleCreate, ModuleInDB
 
 
 @pytest.mark.parametrize("module_key", ["", " ", "\t", "\n"])
@@ -37,10 +37,10 @@ def test_module_key_rejects_non_url_safe_keys(module_key: str) -> None:
 
 @pytest.mark.parametrize(
     "module_key",
-    ["tal-till-text", "speech_to_text", "Reports.v2", Modules.ENEO_APPLICATIONS],
+    ["tal-till-text", "speech_to_text", "Reports.v2", "eneo-applications"],
 )
 def test_module_key_preserves_url_safe_formats(
-    module_key: Modules | str,
+    module_key: str,
 ) -> None:
     module = ModuleCreate(name=module_key)
 
