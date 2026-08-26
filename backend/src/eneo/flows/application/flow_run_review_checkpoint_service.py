@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Awaitable, TypeAlias, TypeVar, assert_never
+from typing import Any, Awaitable, TypeAlias, TypeVar, assert_never, cast
 from uuid import UUID
 
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
+    FlowRun,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
 )
@@ -32,6 +33,8 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
+from eneo.flows.domain.speaker_labels import apply_speaker_names
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     StepOutputMetadataError,
@@ -42,6 +45,11 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    FlowRunInputEnvelopePatch,
+)
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
     FlowRunReviewCheckpointResumeResult,
@@ -51,6 +59,11 @@ from eneo.flows.output_processing import (
     validate_against_contract,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.speaker_mapping_runtime import (
+    SpeakerMappingValidationError,
+    mapping_to_names,
+    validate_speaker_mapping,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     NotFoundException,
@@ -272,15 +285,73 @@ def _validate_against_output_contract(
         raise
 
 
+SPEAKER_MAPPING_PAYLOAD_KEY = "speaker_mapping"
+
+
+def speaker_mapping_extension(
+    payload: FlowPersistedJsonObject | None,
+) -> dict[str, Any] | None:
+    """The speaker-mapping step's payload extension, when the checkpoint is one."""
+    if payload is None:
+        return None
+    extension = payload.get(SPEAKER_MAPPING_PAYLOAD_KEY)
+    return cast(dict[str, Any], extension) if isinstance(extension, dict) else None
+
+
+def _speaker_mapping_text(
+    *,
+    checkpoint: FlowRunReviewCheckpoint,
+    extension: dict[str, Any],
+    structured: StructuredOutputValue,
+    source_text: str | None,
+) -> tuple[str, StructuredOutputValue]:
+    """Re-apply an edited mapping to the source transcript.
+
+    The mapping is the value the reviewer owns; the step text is derived from it
+    so the two never disagree. Names outside the participant list are allowed:
+    the reviewer is correcting, not proposing.
+    """
+    if source_text is None:
+        raise TypedIOValidationException(
+            "Review checkpoint source transcript is unavailable.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            context={"checkpoint_id": str(checkpoint.id)},
+        )
+    inventory = extension.get("inventory")
+    participants = extension.get("participants")
+    try:
+        mapping = validate_speaker_mapping(
+            structured,
+            inventory=cast(list[dict[str, Any]], inventory)
+            if isinstance(inventory, list)
+            else [],
+            participants=cast(list[str], participants)
+            if isinstance(participants, list)
+            else [],
+            allow_free_text=True,
+        )
+    except SpeakerMappingValidationError as exc:
+        raise TypedIOValidationException(
+            f"Review checkpoint step {checkpoint.step_order} speaker mapping is "
+            f"invalid: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            context={"checkpoint_id": str(checkpoint.id)},
+        ) from exc
+    return apply_speaker_names(source_text, mapping_to_names(mapping)), mapping
+
+
 def build_edited_review_payload(
     *,
     checkpoint: FlowRunReviewCheckpoint,
     edited_value: FlowReviewEditedValue,
+    source_text: str | None = None,
 ) -> FlowPersistedJsonObject:
     """Rebuild the reviewed step's payload from the one value the reviewer owns.
 
     Both persisted encodings of a JSON step output — the structured value and its
     text rendering — are derived here, so an edit cannot leave them disagreeing.
+    For a speaker-mapping step the text is the source transcript with the edited
+    mapping applied, which needs ``source_text``.
     """
     if checkpoint.schema_version != _REVIEW_CHECKPOINT_SCHEMA_VERSION:
         raise TypedIOValidationException(
@@ -326,7 +397,16 @@ def build_edited_review_payload(
             structured = _structured_value(
                 checkpoint=checkpoint, edited_value=edited_value
             )
-            text = _rendered_json_text(checkpoint=checkpoint, structured=structured)
+            extension = speaker_mapping_extension(previous_payload)
+            if extension is not None:
+                text, structured = _speaker_mapping_text(
+                    checkpoint=checkpoint,
+                    extension=extension,
+                    structured=structured,
+                    source_text=source_text,
+                )
+            else:
+                text = _rendered_json_text(checkpoint=checkpoint, structured=structured)
         case FlowOutputType.PDF | FlowOutputType.DOCX:
             raise _review_edit_not_allowed(
                 message=(
@@ -390,11 +470,15 @@ class FlowRunReviewCheckpointService:
         flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
         access_policy: FlowRunAccessPolicy,
         flow_run_terminalizer: FlowRunTerminalizer,
+        flow_run_repo: FlowRunRepository | None = None,
     ):
         self.user = user
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.access_policy = access_policy
         self.flow_run_terminalizer = flow_run_terminalizer
+        # Only speaker-mapping edits need step results and the run input; the
+        # dependency stays optional so plain review edits need no repository.
+        self.flow_run_repo = flow_run_repo
 
     def _principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
@@ -450,11 +534,18 @@ class FlowRunReviewCheckpointService:
                 expected_revision=expected_checkpoint_revision,
             )
         )
+        extension = speaker_mapping_extension(checkpoint.current_payload_json)
+        source_text = (
+            await self._load_speaker_mapping_source_text(run=run, extension=extension)
+            if extension is not None
+            else None
+        )
         current_payload_json = build_edited_review_payload(
             checkpoint=checkpoint,
             edited_value=edited_value,
+            source_text=source_text,
         )
-        return await self._with_review_lifecycle_translation(
+        edited = await self._with_review_lifecycle_translation(
             self.flow_run_review_checkpoint_repo.edit_review_checkpoint_payload(
                 checkpoint_id=checkpoint_id,
                 tenant_id=self.user.tenant_id,
@@ -464,6 +555,93 @@ class FlowRunReviewCheckpointService:
                 current_payload_json=current_payload_json,
                 principal=principal,
             )
+        )
+        if extension is not None and source_text is not None:
+            await self._sync_run_transcript(
+                run=run,
+                checkpoint=checkpoint,
+                source_text=source_text,
+                new_text=str(current_payload_json.get("text", "")),
+            )
+        return edited
+
+    async def _load_speaker_mapping_source_text(
+        self, *, run: FlowRun, extension: dict[str, Any]
+    ) -> str:
+        """The transcript the mapping step read, from that step's stored output."""
+        if self.flow_run_repo is None:
+            raise FlowRuntimeInvariantError(
+                "Speaker-mapping review edits need a flow run repository."
+            )
+        raw_step_id = extension.get("source_step_id")
+        try:
+            source_step_id = UUID(str(raw_step_id))
+        except (TypeError, ValueError) as exc:
+            raise TypedIOValidationException(
+                "Review checkpoint speaker mapping has no source step.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            ) from exc
+        source = await self.flow_run_repo.get_step_result(
+            run_id=run.id, step_id=source_step_id, tenant_id=run.tenant_id
+        )
+        if source is None:
+            raise NotFoundException(
+                "The transcript step this speaker mapping was built from is missing."
+            )
+        expected_attempt = extension.get("source_attempt_no")
+        if (
+            isinstance(expected_attempt, int)
+            and source.current_attempt_no is not None
+            and source.current_attempt_no != expected_attempt
+        ):
+            raise FlowBadRequestException(
+                "The transcript step was re-run after this mapping was proposed; "
+                "re-run the speaker mapping step instead of editing it.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            )
+        try:
+            step_text = interpret_step_text(source.output_payload_json)
+        except StepOutputMetadataError as exc:
+            raise TypedIOValidationException(
+                f"Transcript step output is invalid: {exc}",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
+            ) from exc
+        if isinstance(step_text, FileBackedStepText):
+            raise FlowBadRequestException(
+                "Review edit is not supported when the transcript is stored as a "
+                "generated file.",
+                code=FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED,
+                context={"file_id": str(step_text.file_id)},
+            )
+        return step_text.text
+
+    async def _sync_run_transcript(
+        self,
+        *,
+        run: FlowRun,
+        checkpoint: FlowRunReviewCheckpoint,
+        source_text: str,
+        new_text: str,
+    ) -> None:
+        """Keep ``{{transkribering}}`` equal to the reviewed transcript.
+
+        The run-level transcript is only replaced when it still carries the
+        source transcript or this step's previous rendering, never text a later
+        step or user wrote.
+        """
+        if self.flow_run_repo is None:
+            return
+        current = (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
+        previous_payload = checkpoint.current_payload_json or {}
+        previous_text = previous_payload.get("text")
+        if current not in (source_text, previous_text):
+            return
+        run.input_payload_json = await self.flow_run_repo.update_input_payload(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+                transcript=new_text
+            ),
         )
 
     async def approve_review_checkpoint(

@@ -109,3 +109,33 @@ describe("hasDeletedStepReferences", () => {
     expect(hasDeletedStepReferences([step], new Map([["a9", "clean prompt text"]]))).toBe(false);
   });
 });
+
+describe("speaker_mapping config validation", () => {
+  it("flags a mapping step without a participants field", () => {
+    const step = {
+      id: "s2",
+      assistant_id: "a",
+      step_order: 2,
+      user_description: "Namnge talare",
+      input_source: "previous_step",
+      input_type: "text",
+      output_mode: "speaker_mapping",
+      output_type: "json",
+      input_bindings: null,
+      input_contract: null,
+      output_contract: null,
+      input_config: null,
+      output_config: { speaker_mapping: { participants_field: null } },
+      review_policy: { mode: "edit" }
+    } as unknown as import("@eneo/eneo-js").FlowStep;
+    const issues = computeStepConfigValidationIssues([step], "p:");
+    expect(issues.get("p:speaker_mapping_no_participants_field:2")).toEqual([
+      "speaker_mapping_no_participants_field"
+    ]);
+    const ok = computeStepConfigValidationIssues(
+      [{ ...step, output_config: { speaker_mapping: { participants_field: "deltagare" } } }],
+      "p:"
+    );
+    expect(ok.has("p:speaker_mapping_no_participants_field:2")).toBe(false);
+  });
+});

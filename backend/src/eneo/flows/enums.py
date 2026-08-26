@@ -53,6 +53,9 @@ class FlowOutputMode(str, Enum):
     TRANSCRIBE_ONLY = "transcribe_only"
     TEMPLATE_FILL = "template_fill"
     RENDER_VERBATIM = "render_verbatim"
+    # An LLM proposes which person each diarized speaker label is; the run then
+    # pauses for a reviewer to confirm. Manual authoring only for now.
+    SPEAKER_MAPPING = "speaker_mapping"
 
 
 class FlowPrimaryOutputExecutionKind(str, Enum):
@@ -73,6 +76,7 @@ FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE: Mapping[
         ),
         FlowOutputMode.TEMPLATE_FILL: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
         FlowOutputMode.RENDER_VERBATIM: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.SPEAKER_MAPPING: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
     }
 )
 

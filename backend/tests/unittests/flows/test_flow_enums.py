@@ -37,6 +37,7 @@ def test_output_mode_completion_model_capability_covers_every_mode() -> None:
         FlowOutputMode.TRANSCRIBE_ONLY: False,
         FlowOutputMode.TEMPLATE_FILL: False,
         FlowOutputMode.RENDER_VERBATIM: False,
+        FlowOutputMode.SPEAKER_MAPPING: True,
     }
 
 
@@ -54,6 +55,7 @@ def test_primary_output_execution_kind_covers_every_mode() -> None:
         FlowOutputMode.COMPOSE_TEXT: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
         FlowOutputMode.TEMPLATE_FILL: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
         FlowOutputMode.RENDER_VERBATIM: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.SPEAKER_MAPPING: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
     }
 
 

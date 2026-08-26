@@ -15409,6 +15409,8 @@ export interface components {
       | "flow_input_invalid_option"
       | "flow_input_invalid_multiselect_value"
       | "flow_input_invalid_multiselect_type"
+      | "flow_input_invalid_list_value"
+      | "flow_input_invalid_list_type"
       | "flow_run_access_denied"
       | "flow_run_cancelled"
       | "flow_run_user_cancelled"
@@ -16051,7 +16053,7 @@ export interface components {
      * FlowFormFieldType
      * @enum {string}
      */
-    FlowFormFieldType: "text" | "multiselect" | "number" | "date" | "select";
+    FlowFormFieldType: "text" | "multiselect" | "number" | "date" | "select" | "list";
     /** FlowInputFieldIntent */
     FlowInputFieldIntent: {
       /** Label */
@@ -16076,7 +16078,7 @@ export interface components {
        * @default text
        * @enum {string}
        */
-      type?: "text" | "number" | "date" | "select" | "multiselect";
+      type?: "text" | "number" | "date" | "select" | "multiselect" | "list";
     };
     /**
      * FlowInputLimitsPublic
@@ -16234,7 +16236,8 @@ export interface components {
       | "http_post"
       | "transcribe_only"
       | "template_fill"
-      | "render_verbatim";
+      | "render_verbatim"
+      | "speaker_mapping";
     /**
      * FlowOutputType
      * @enum {string}
@@ -21803,7 +21806,7 @@ export interface components {
       name: string;
       /**
        * Options
-       * @description Allowed choices for select and multiselect fields.
+       * @description Allowed choices for select and multiselect fields. Absent for list fields, which accept any strings.
        */
       options?: string[] | null;
       /**
@@ -21817,7 +21820,7 @@ export interface components {
        * @default false
        */
       required?: boolean;
-      /** @description Form control type clients should render. One of: text, number, date, select, multiselect. */
+      /** @description Form control type clients should render. One of: text, number, date, select, multiselect, list. */
       type: components["schemas"]["FlowFormFieldType"];
     };
     /** FormFieldSpec */
@@ -21954,6 +21957,8 @@ export interface components {
       output_type?: string | null;
       /** Run Status */
       run_status?: string | null;
+      /** Speaker Identification */
+      speaker_identification?: boolean | null;
       /** Step Order */
       step_order?: number | null;
       /** Type */
@@ -27209,7 +27214,8 @@ export interface components {
      *
      *     `key` is the variable name the compiled form and the step instructions
      *     use, `label` and `type` are what the form control shows and is, and
-     *     `options` are the choices a `select` or `multiselect` offers. Values are
+     *     `options` are the choices a `select` or `multiselect` offers (a `list`
+     *     field is free entry and has none). Values are
      *     exact rather than clipped: the summary sentence composes every field into
      *     one line and has to keep that line readable, while a list gives each field
      *     its own row and must show the identity the compiled flow will use.
@@ -27232,7 +27238,7 @@ export interface components {
        * Type
        * @enum {string}
        */
-      type: "text" | "number" | "date" | "select" | "multiselect";
+      type: "text" | "number" | "date" | "select" | "multiselect" | "list";
     };
     /** RuntimeMetadataFieldAnswer */
     RuntimeMetadataFieldAnswer: {
@@ -28336,6 +28342,13 @@ export interface components {
        * @default false
        */
       file_references_enabled?: boolean;
+      /**
+       * Flow Transcription Service Configured
+       * @default false
+       */
+      flow_transcription_service_configured?: boolean;
+      /** Flow Transcription Service Mode */
+      flow_transcription_service_mode?: ("full" | "diarize") | null;
       /**
        * Object Content Enabled
        * @default false

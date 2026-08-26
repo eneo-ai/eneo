@@ -2,8 +2,10 @@
 
 import asyncio
 import hashlib
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from tenacity import (
@@ -14,7 +16,10 @@ from tenacity import (
 )
 
 from eneo.files.audio import AudioFile
-from eneo.main.exceptions import ProviderRejectedRequestException
+from eneo.main.exceptions import (
+    ProviderCapabilityRejectedException,
+    ProviderRejectedRequestException,
+)
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.domain.provider_call_observer import (
@@ -35,6 +40,116 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain import TranscriptionModel
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptWord:
+    """One recognized word with absolute timestamps (seconds from audio start)."""
+
+    word: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptSegment:
+    """One provider segment with absolute timestamps (seconds from audio start)."""
+
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkTranscription:
+    text: str
+    # None when timestamps were not requested or the provider returned none.
+    words: tuple[TranscriptWord, ...] | None
+    segments: tuple[TranscriptSegment, ...] | None
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterTranscription:
+    """A whole file's transcript, with timestamps when every chunk had them.
+
+    ``words`` carries word-level timestamps; ``segments`` the coarser
+    segment-level ones, which many servers return even when they skip words.
+    Both are None when timestamps were not requested, or when the provider
+    could not deliver that granularity for at least one chunk
+    (``timestamps_degraded`` is True when neither survived). A partial list
+    would silently mislabel speakers, so each is all or nothing.
+    """
+
+    text: str
+    words: tuple[TranscriptWord, ...] | None
+    segments: tuple[TranscriptSegment, ...] | None
+    timestamps_degraded: bool
+
+
+def _extract_segments(response: object) -> tuple[TranscriptSegment, ...] | None:
+    raw: object = getattr(response, "segments", None)
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return None
+    segments: list[TranscriptSegment] = []
+    for item in cast(Sequence[object], raw):
+        text: object
+        start: object
+        end: object
+        if isinstance(item, Mapping):
+            mapping = cast(Mapping[str, object], item)
+            text, start, end = (
+                mapping.get("text"),
+                mapping.get("start"),
+                mapping.get("end"),
+            )
+        else:
+            text = getattr(item, "text", None)
+            start = getattr(item, "start", None)
+            end = getattr(item, "end", None)
+        if not isinstance(text, str):
+            return None
+        if isinstance(start, bool) or not isinstance(start, (int, float)):
+            return None
+        if isinstance(end, bool) or not isinstance(end, (int, float)):
+            return None
+        stripped = text.strip()
+        if stripped:
+            segments.append(
+                TranscriptSegment(text=stripped, start=float(start), end=float(end))
+            )
+    return tuple(segments) if segments else None
+
+
+def _extract_words(response: object) -> tuple[TranscriptWord, ...] | None:
+    raw: object = getattr(response, "words", None)
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return None
+    words: list[TranscriptWord] = []
+    for item in cast(Sequence[object], raw):
+        text: object
+        start: object
+        end: object
+        if isinstance(item, Mapping):
+            mapping = cast(Mapping[str, object], item)
+            text, start, end = (
+                mapping.get("word"),
+                mapping.get("start"),
+                mapping.get("end"),
+            )
+        else:
+            text = getattr(item, "word", None)
+            start = getattr(item, "start", None)
+            end = getattr(item, "end", None)
+        if not isinstance(text, str):
+            return None
+        if isinstance(start, bool) or not isinstance(start, (int, float)):
+            return None
+        if isinstance(end, bool) or not isinstance(end, (int, float)):
+            return None
+        words.append(
+            TranscriptWord(word=text.strip(), start=float(start), end=float(end))
+        )
+    return tuple(words) if words else None
 
 
 class LiteLLMTranscriptionAdapter:
@@ -94,14 +209,27 @@ class LiteLLMTranscriptionAdapter:
         *,
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
-    ) -> str:
+        want_words: bool = False,
+    ) -> AdapterTranscription:
         """
         Transcribe an audio file, splitting into 5-minute chunks with timestamps.
+
+        With ``want_words`` each chunk is asked for word-level timestamps, which
+        are shifted by the measured length of the chunks before it so they are
+        absolute for the whole file. A provider that refuses or omits them
+        degrades the whole file to text only; the transcript itself is never
+        affected.
         """
         text = ""
         five_minutes = 60 * 5
         chunk_index = 0
         total_duration_seconds = int(audio_file.duration)
+        words: list[TranscriptWord] = []
+        segments: list[TranscriptSegment] = []
+        words_available = True
+        segments_available = True
+        degraded = False
+        offset_seconds = 0.0
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
             total_chunks = len(files)
@@ -113,15 +241,67 @@ class LiteLLMTranscriptionAdapter:
                     if i == total_chunks - 1
                     else (chunk_index + 1) * five_minutes
                 )
-                block_text = await self._transcribe_chunk(
-                    path,
-                    language=language,
-                    observer=observer,
-                    # The timestamps below are nominal five-minute markers; the
-                    # splitter emits whole blocks, so what this request actually
-                    # sends has to be measured from the file itself.
-                    audio_seconds=await asyncio.to_thread(_measure_seconds, path),
-                )
+                # The timestamps below are nominal five-minute markers; the
+                # splitter emits whole blocks, so what this request actually
+                # sends has to be measured from the file itself.
+                measured_seconds = await asyncio.to_thread(_measure_seconds, path)
+                request_words = want_words and not degraded
+                try:
+                    chunk = await self._transcribe_chunk(
+                        path,
+                        language=language,
+                        observer=observer,
+                        audio_seconds=measured_seconds,
+                        want_words=request_words,
+                    )
+                except ProviderCapabilityRejectedException:
+                    if not request_words:
+                        raise
+                    logger.warning(
+                        f"[LiteLLM] {self.litellm_model}: provider rejected word "
+                        "timestamps; continuing without them"
+                    )
+                    degraded = True
+                    chunk = await self._transcribe_chunk(
+                        path,
+                        language=language,
+                        observer=observer,
+                        audio_seconds=measured_seconds,
+                        want_words=False,
+                    )
+                # Timestamp plausibility is judged by the external service, which
+                # can force-align from the audio; forward what the provider gave.
+                if request_words:
+                    if chunk.words is None:
+                        words_available = False
+                    if chunk.segments is None:
+                        segments_available = False
+                    if chunk.words is None and chunk.segments is None:
+                        logger.warning(
+                            f"[LiteLLM] {self.litellm_model}: provider returned no "
+                            "timestamps; continuing without them"
+                        )
+                        degraded = True
+                if not degraded and chunk.words is not None:
+                    words.extend(
+                        TranscriptWord(
+                            word=word.word,
+                            start=word.start + offset_seconds,
+                            end=word.end + offset_seconds,
+                        )
+                        for word in chunk.words
+                    )
+                if not degraded and chunk.segments is not None:
+                    segments.extend(
+                        TranscriptSegment(
+                            text=segment.text,
+                            start=segment.start + offset_seconds,
+                            end=segment.end + offset_seconds,
+                        )
+                        for segment in chunk.segments
+                    )
+                offset_seconds += measured_seconds
+                block_text = chunk.text
 
                 end_time = chunk_end
 
@@ -136,7 +316,16 @@ class LiteLLMTranscriptionAdapter:
                 )
                 chunk_index += 1
 
-        return text
+        keep_words = want_words and not degraded and words_available and bool(words)
+        keep_segments = (
+            want_words and not degraded and segments_available and bool(segments)
+        )
+        return AdapterTranscription(
+            text=text,
+            words=tuple(words) if keep_words else None,
+            segments=tuple(segments) if keep_segments else None,
+            timestamps_degraded=want_words and not (keep_words or keep_segments),
+        )
 
     @retry(
         wait=wait_random_exponential(min=1, max=20),
@@ -157,7 +346,8 @@ class LiteLLMTranscriptionAdapter:
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
         audio_seconds: float,
-    ) -> str:
+        want_words: bool = False,
+    ) -> ChunkTranscription:
         """
         Transcribe a single audio chunk using LiteLLM.
 
@@ -179,6 +369,11 @@ class LiteLLMTranscriptionAdapter:
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Setting language=sv fallback for KB-Whisper"
             )
+
+        if want_words:
+            kwargs["response_format"] = "verbose_json"
+            # Segments are the fallback when a server has no word alignment.
+            kwargs["timestamp_granularities"] = ["word", "segment"]
 
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Making transcription request for chunk"
@@ -242,7 +437,11 @@ class LiteLLMTranscriptionAdapter:
                     provider_response_id=getattr(response, "id", None),
                 ),
             )
-        return response.text  # type: ignore[return-value]
+        return ChunkTranscription(
+            text=response.text,  # type: ignore[arg-type]
+            words=_extract_words(response) if want_words else None,
+            segments=_extract_segments(response) if want_words else None,
+        )
 
 
 def _measure_seconds(file_path: Path) -> float:

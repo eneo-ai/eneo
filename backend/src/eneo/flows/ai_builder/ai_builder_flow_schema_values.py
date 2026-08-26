@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal, TypeAlias, get_args
 
 BuilderFormFieldType: TypeAlias = Literal[
-    "text", "number", "date", "select", "multiselect"
+    "text", "number", "date", "select", "multiselect", "list"
 ]
 FlowInputFieldProvenance: TypeAlias = Literal[
     "user_confirmed",

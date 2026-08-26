@@ -13,6 +13,8 @@ export type FlowRunProgressStep = {
   inputSource?: string;
   outputMode?: string;
   outputType?: string;
+  /** Audio step whose transcription also labels speakers (external service). */
+  speakerIdentification?: boolean;
   errorMessage?: string | null;
   errorCode?: string | null;
   numTokensInput?: number | null;
@@ -64,6 +66,7 @@ export function buildFlowRunProgressSnapshot(
       inputSource: typeof node.input_source === "string" ? node.input_source : undefined,
       outputMode: typeof node.output_mode === "string" ? node.output_mode : undefined,
       outputType: typeof node.output_type === "string" ? node.output_type : undefined,
+      speakerIdentification: node.speaker_identification === true ? true : undefined,
       errorMessage: live?.error_message ?? node.error_message ?? null,
       errorCode: live?.error_code ?? null,
       numTokensInput: live?.num_tokens_input ?? node.num_tokens_input ?? null,

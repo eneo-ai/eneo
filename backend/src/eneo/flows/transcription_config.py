@@ -16,6 +16,7 @@ class FlowTranscriptionConfig:
     enabled: bool
     model_id: UUID | None
     language: str
+    diarization: bool
 
 
 def parse_transcription_config(
@@ -55,10 +56,17 @@ def parse_transcription_config(
             "wizard.transcription_language must be one of: auto, sv, en."
         )
 
+    raw_diarization = wizard.get("transcription_diarization", True)
+    if not isinstance(raw_diarization, bool):
+        raise FlowTranscriptionConfigError(
+            "wizard.transcription_diarization must be a boolean when provided."
+        )
+
     return FlowTranscriptionConfig(
         enabled=enabled,
         model_id=model_id,
         language=language,
+        diarization=raw_diarization,
     )
 
 

@@ -394,7 +394,7 @@ def _report_disposition_from_state(state: PlanningState) -> ReportDisposition | 
 def _step_output_mode_value(
     output_mode: FlowOutputMode,
 ) -> FlowAuthoringOutputMode | None:
-    if output_mode is FlowOutputMode.HTTP_POST:
+    if output_mode in {FlowOutputMode.HTTP_POST, FlowOutputMode.SPEAKER_MAPPING}:
         return None
     return FlowAuthoringOutputMode(output_mode.value)
 

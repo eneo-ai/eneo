@@ -32,6 +32,8 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   INPUT_INVALID_OPTION: "flow_input_invalid_option";
   INPUT_INVALID_MULTISELECT_VALUE: "flow_input_invalid_multiselect_value";
   INPUT_INVALID_MULTISELECT_TYPE: "flow_input_invalid_multiselect_type";
+  INPUT_INVALID_LIST_VALUE: "flow_input_invalid_list_value";
+  INPUT_INVALID_LIST_TYPE: "flow_input_invalid_list_type";
   RUN_ACCESS_DENIED: "flow_run_access_denied";
   RUN_CANCELLED: "flow_run_cancelled";
   RUN_USER_CANCELLED: "flow_run_user_cancelled";
@@ -178,6 +180,8 @@ export type FlowApiErrorCode =
   | "flow_input_invalid_option"
   | "flow_input_invalid_multiselect_value"
   | "flow_input_invalid_multiselect_type"
+  | "flow_input_invalid_list_value"
+  | "flow_input_invalid_list_type"
   | "flow_run_access_denied"
   | "flow_run_cancelled"
   | "flow_run_user_cancelled"

@@ -20,6 +20,7 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
 from eneo.flows.domain.step_item_map import build_step_item_map_config
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -37,6 +38,7 @@ from eneo.flows.output_modes import (
     ALLOWED_OUTPUT_MODES,
     compose_text_violation,
     render_verbatim_violation,
+    speaker_mapping_violation,
     text_document_pass_through_violation,
     transcribe_only_violation,
 )
@@ -469,11 +471,18 @@ def _parse_output_fields(item: Mapping[str, object]) -> _StepOutputFields:
         if isinstance(output_classification_override_raw, int)
         else None
     )
+    output_contract = _optional_json_object(item.get("output_contract"))
+    if output_mode == "speaker_mapping":
+        if output_contract is not None:
+            raise BadRequestException(
+                "Speaker mapping steps cannot declare output_contract; it is fixed."
+            )
+        output_contract = dict(SPEAKER_MAPPING_OUTPUT_CONTRACT)
     return _StepOutputFields(
         output_mode=output_mode,
         output_type=output_type,
         output_config=raw_output_config,
-        output_contract=_optional_json_object(item.get("output_contract")),
+        output_contract=output_contract,
         output_classification_override=output_classification_override,
         retrieval_policy=retrieval_policy,
     )
@@ -490,6 +499,35 @@ def _parse_output_config(
     if not _is_json_object(raw_output_config):
         raise BadRequestException("Webhook output_config must be an object.")
     output_config = raw_output_config
+
+    if output_mode == "speaker_mapping":
+        block = output_config.get("speaker_mapping")
+        if block is not None:
+            if not isinstance(block, dict):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping must be an object."
+                )
+            participants_field: object = cast(dict[str, object], block).get(
+                "participants_field"
+            )
+            if participants_field is not None and not _non_empty_string(
+                participants_field
+            ):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping.participants_field "
+                    "must be a non-empty string or null."
+                )
+            speaker_count_field: object = cast(dict[str, object], block).get(
+                "speaker_count_field"
+            )
+            if speaker_count_field is not None and not _non_empty_string(
+                speaker_count_field
+            ):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping.speaker_count_field "
+                    "must be a non-empty string or null."
+                )
+        return output_config
 
     if output_mode == "template_fill":
         bindings = output_config.get("bindings")
@@ -611,6 +649,15 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
             )
             if text_document_pass_through_error is not None:
                 raise BadRequestException(text_document_pass_through_error)
+            speaker_mapping_error = speaker_mapping_violation(
+                step_order=identity.step_order,
+                input_source=input_fields.input_source,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if speaker_mapping_error is not None:
+                raise BadRequestException(speaker_mapping_error)
             runtime_input = build_runtime_input_config(input_fields.input_config)
             if runtime_input.execution_mode == "per_source" and not (
                 has_required_runtime_source_identity_fields(

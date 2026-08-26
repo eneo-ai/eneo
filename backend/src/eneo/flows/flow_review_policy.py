@@ -77,6 +77,11 @@ def parse_flow_step_review_policy(
     output_type: FlowOutputType,
 ) -> FlowStepReviewPolicy | None:
     if raw_policy is None:
+        if output_mode is FlowOutputMode.SPEAKER_MAPPING:
+            raise BadRequestException(
+                "Steps with output_mode 'speaker_mapping' require review_policy.mode 'edit'.",
+                code=FLOW_REVIEW_POLICY_INVALID,
+            )
         return None
     if flow_output_mode_has_outbound_delivery(output_mode):
         raise BadRequestException(
@@ -98,6 +103,14 @@ def parse_flow_step_review_policy(
                 "Step review_policy is invalid.",
                 code=FLOW_REVIEW_POLICY_INVALID,
             ) from exc
+    if (
+        output_mode is FlowOutputMode.SPEAKER_MAPPING
+        and policy.mode is not FlowStepReviewMode.EDIT
+    ):
+        raise BadRequestException(
+            "Steps with output_mode 'speaker_mapping' require review_policy.mode 'edit'.",
+            code=FLOW_REVIEW_POLICY_INVALID,
+        )
     if policy.mode is FlowStepReviewMode.EDIT and output_type in {
         FlowOutputType.PDF,
         FlowOutputType.DOCX,

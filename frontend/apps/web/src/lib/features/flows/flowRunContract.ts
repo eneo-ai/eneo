@@ -1,5 +1,6 @@
 import type { FlowRunContractTemplateReadiness, FlowRunStepInputs } from "@eneo/eneo-js";
 import {
+  flowFormFieldIsMultiValue,
   getFlowFormFieldRuntimeKey,
   type NormalizedFlowFormField
 } from "$lib/features/flows/flowFormSchema";
@@ -104,7 +105,7 @@ export function getMissingFlowRunRequiredFields(
 ): NormalizedFlowFormField[] {
   return formFields.filter((field) => {
     if (!field.required) return false;
-    if (field.type === "multiselect") {
+    if (flowFormFieldIsMultiValue(field.type)) {
       return readFlowRunFieldMultiValue(formValues, field).length === 0;
     }
     return readFlowRunFieldValue(formValues, field).trim().length === 0;
@@ -115,7 +116,7 @@ export function getFlowRunReviewFieldValue(
   formValues: Readonly<Record<string, unknown>>,
   field: NormalizedFlowFormField
 ): string {
-  if (field.type === "multiselect") {
+  if (flowFormFieldIsMultiValue(field.type)) {
     return readFlowRunFieldMultiValue(formValues, field).join(", ");
   }
   return readFlowRunFieldValue(formValues, field).trim();
@@ -140,7 +141,7 @@ export function computeReusedFlowRunInput({
     for (const field of formFields) {
       const key = getFlowFormFieldRuntimeKey(field.name);
       const previous = lastInputPayload[key];
-      if (field.type === "multiselect") {
+      if (flowFormFieldIsMultiValue(field.type)) {
         formValues[key] = Array.isArray(previous)
           ? previous.map((item) => String(item))
           : typeof previous === "string"
@@ -173,7 +174,7 @@ export function buildFlowRunInputPayload({
     const payload: Record<string, unknown> = {};
     for (const field of formFields) {
       const key = getFlowFormFieldRuntimeKey(field.name);
-      if (field.type === "multiselect") {
+      if (flowFormFieldIsMultiValue(field.type)) {
         payload[key] = readFlowRunFieldMultiValue(formValues, field);
       } else if (field.type === "number") {
         const raw = readFlowRunFieldValue(formValues, field).trim();

@@ -123,6 +123,11 @@
   import FlowStepContextSection from "./FlowStepContextSection.svelte";
   import FlowStepInputTemplateSection from "./FlowStepInputTemplateSection.svelte";
   import FlowStepTemplateFillSection from "./FlowStepTemplateFillSection.svelte";
+  import FlowStepSpeakerMappingSection from "./FlowStepSpeakerMappingSection.svelte";
+  import {
+    buildSpeakerMappingOutputConfig,
+    getSpeakerMappingParticipantsField
+  } from "$lib/features/flows/speakerMappingConfig";
   import FlowStepOutputSection from "./FlowStepOutputSection.svelte";
   import FlowStepTypedIoBanners from "./FlowStepTypedIoBanners.svelte";
   import FlowStepReviewSection from "./FlowStepReviewSection.svelte";
@@ -145,6 +150,8 @@
     onStepChanged,
     onJsonValidationChanged,
     onOpenTranscriptionSettings,
+    speakerMappingStepOffered = false,
+    onAddSpeakerMappingStep,
     onBuildFlowWithAI,
     onEditStepWithAI
   }: {
@@ -169,6 +176,9 @@
     onStepChanged?: (detail: { index: number; step: FlowStep }) => void;
     onJsonValidationChanged?: (detail: { hasErrors: boolean; fields: string[] }) => void;
     onOpenTranscriptionSettings?: () => void;
+    /** Diarization is on and no step after this one names the speakers yet. */
+    speakerMappingStepOffered?: boolean;
+    onAddSpeakerMappingStep?: () => void;
     onBuildFlowWithAI?: () => void;
     onEditStepWithAI?: (step: FlowStep) => void;
   } = $props();
@@ -1055,6 +1065,8 @@
             onRuntimeInputChange={(detail) => updateRuntimeInputSettings(detail.patch)}
             onHttpConfigChange={(detail) => updateStep("input_config", detail.config)}
             onOpenTranscriptionSettings={() => onOpenTranscriptionSettings?.()}
+            {speakerMappingStepOffered}
+            onAddSpeakerMappingStep={() => onAddSpeakerMappingStep?.()}
           />
 
           {#if isTranscribeOnly}
@@ -1214,6 +1226,27 @@
               onCitationModeChange={(detail) => handleCitationModeChange(detail.value)}
               onSwitchToTemplateFill={() => handleOutputModeChange("template_fill")}
             />
+            {#if activeStep.output_mode === "speaker_mapping"}
+              <FlowStepSpeakerMappingSection
+                step={activeStep}
+                {isPublished}
+                formFields={formSchema?.fields ?? []}
+                onParticipantsFieldChange={(detail) =>
+                  updateStep(
+                    "output_config",
+                    buildSpeakerMappingOutputConfig(activeStep?.output_config ?? null, detail.value)
+                  )}
+                onSpeakerCountFieldChange={(detail) =>
+                  updateStep(
+                    "output_config",
+                    buildSpeakerMappingOutputConfig(
+                      activeStep?.output_config ?? null,
+                      getSpeakerMappingParticipantsField(activeStep),
+                      detail.value
+                    )
+                  )}
+              />
+            {/if}
           {/if}
         </FlowStepChapter>
 

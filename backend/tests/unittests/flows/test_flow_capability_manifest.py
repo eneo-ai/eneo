@@ -59,8 +59,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_eight() -> None:
-    assert FCM_VERSION == 8
+def test_fcm_version_is_nine() -> None:
+    assert FCM_VERSION == 9
 
 
 def test_ai_builder_form_field_types_match_flow_authoring_values() -> None:
@@ -1006,7 +1006,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V9: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1034,6 +1034,7 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
         "output_mode_http_post",
         "output_mode_pass_through",
         "output_mode_render_verbatim",
+        "output_mode_speaker_mapping",
         "output_mode_template_fill",
         "output_mode_transcribe_only",
         "per_source_reader_execution",
@@ -1047,23 +1048,21 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "forbids_template_fill_or_transcribe_only",
-                    "Citation capability is disabled when `output_mode` is "
-                    "`compose_text`, `template_fill`, `transcribe_only`, or "
-                    "`render_verbatim` (non-LLM pathways). "
-                    "Any other output_mode preserves capability when the rest holds.",
+                    "Citation capability is disabled when `output_mode` is `compose_text`, "
+                    "`template_fill`, `transcribe_only`, or `render_verbatim` (non-LLM pathways). Any "
+                    "other output_mode preserves capability when the rest holds.",
                 ),
                 (
                     "requires_citation_capable_output_config",
-                    "Citation capability requires `resolve_citation_mode(output_config) "
-                    "== 'inline_inref_sidecar'`; any other resolved mode (including "
-                    "`off`, missing keys, non-dict payloads) collapses capability to "
-                    "`False`.",
+                    "Citation capability requires `resolve_citation_mode(output_config) == "
+                    "'inline_inref_sidecar'`; any other resolved mode (including `off`, missing keys, "
+                    "non-dict payloads) collapses capability to `False`.",
                 ),
                 (
                     "requires_text_output_type",
                     "Citation capability holds only when `output_type=TEXT`; "
-                    "`is_citation_capable_step` returns `False` for JSON/PDF/DOCX "
-                    "outputs regardless of citation_mode.",
+                    "`is_citation_capable_step` returns `False` for JSON/PDF/DOCX outputs regardless "
+                    "of citation_mode.",
                 ),
             ),
             (),
@@ -1076,9 +1075,8 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "input_contract_forbidden",
-                    "Steps using the `any` input capability must not set "
-                    "`input_contract`; the runtime rejects contract on "
-                    "non-contract-allowed capabilities.",
+                    "Steps using the `any` input capability must not set `input_contract`; the "
+                    "runtime rejects contract on non-contract-allowed capabilities.",
                 ),
             ),
             (),
@@ -1091,16 +1089,14 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "input_contract_forbidden",
-                    "Steps using the `audio` input capability must not set "
-                    "`input_contract`; the runtime rejects contract on "
-                    "non-contract-allowed capabilities.",
+                    "Steps using the `audio` input capability must not set `input_contract`; the "
+                    "runtime rejects contract on non-contract-allowed capabilities.",
                 ),
                 (
                     "requires_enabled_flow_transcription_config",
                     "Flows containing any `AUDIO`-input step require "
-                    "`metadata_json.wizard.transcription_enabled=True` and "
-                    "a non-null `transcription_model.id`; "
-                    "`_validate_audio_transcription_settings` rejects "
+                    "`metadata_json.wizard.transcription_enabled=True` and a non-null "
+                    "`transcription_model.id`; `_validate_audio_transcription_settings` rejects "
                     "missing config for every audio step regardless of `output_mode`.",
                 ),
             ),
@@ -1114,15 +1110,14 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "input_contract_forbidden",
-                    "Steps using the `document` input capability must not set "
-                    "`input_contract`; the runtime rejects contract on "
-                    "non-contract-allowed capabilities.",
+                    "Steps using the `document` input capability must not set `input_contract`; the "
+                    "runtime rejects contract on non-contract-allowed capabilities.",
                 ),
                 (
                     "requires_non_empty_extraction",
-                    "Steps using the `document` input capability must produce "
-                    "non-empty extracted text at runtime; empty extraction is "
-                    "rejected by `validate_runtime_input_policy`.",
+                    "Steps using the `document` input capability must produce non-empty extracted "
+                    "text at runtime; empty extraction is rejected by "
+                    "`validate_runtime_input_policy`.",
                 ),
             ),
             (),
@@ -1135,15 +1130,13 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "input_contract_forbidden",
-                    "Steps using the `file` input capability must not set "
-                    "`input_contract`; the runtime rejects contract on "
-                    "non-contract-allowed capabilities.",
+                    "Steps using the `file` input capability must not set `input_contract`; the "
+                    "runtime rejects contract on non-contract-allowed capabilities.",
                 ),
                 (
                     "requires_non_empty_extraction",
-                    "Steps using the `file` input capability must produce non-empty "
-                    "extracted text at runtime; empty extraction is rejected by "
-                    "`validate_runtime_input_policy`.",
+                    "Steps using the `file` input capability must produce non-empty extracted text at "
+                    "runtime; empty extraction is rejected by `validate_runtime_input_policy`.",
                 ),
             ),
             (),
@@ -1156,14 +1149,13 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "input_contract_forbidden",
-                    "Steps using the `image` input capability must not set "
-                    "`input_contract`; the runtime rejects contract on "
-                    "non-contract-allowed capabilities.",
+                    "Steps using the `image` input capability must not set `input_contract`; the "
+                    "runtime rejects contract on non-contract-allowed capabilities.",
                 ),
                 (
                     "requires_at_least_one_file",
-                    "Steps using the `image` input capability must present at least "
-                    "one compatible file at runtime.",
+                    "Steps using the `image` input capability must present at least one compatible "
+                    "file at runtime.",
                 ),
             ),
             (),
@@ -1178,9 +1170,8 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "requires_text_input_text_output",
-                    "Steps using `compose_text` must have `input_type=TEXT` and "
-                    "`output_type=TEXT`; any other IO pair is rejected by "
-                    "`supports_step_io_tuple`.",
+                    "Steps using `compose_text` must have `input_type=TEXT` and `output_type=TEXT`; "
+                    "any other IO pair is rejected by `supports_step_io_tuple`.",
                 ),
             ),
             (),
@@ -1193,11 +1184,10 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "requires_http_output_config",
-                    "Steps using `http_post` output mode must declare an "
-                    "`output_config` object that passes `validate_http_output_config`; "
-                    "the authored HTTP transport config is the only accepted shape. "
-                    "The capability does not pin per-field rules — see the transport "
-                    "validators for URL scheme, body-mode, auth, and timeout "
+                    "Steps using `http_post` output mode must declare an `output_config` object that "
+                    "passes `validate_http_output_config`; the authored HTTP transport config is the "
+                    "only accepted shape. The capability does not pin per-field rules — see the "
+                    "transport validators for URL scheme, body-mode, auth, and timeout "
                     "constraints.",
                 ),
             ),
@@ -1211,9 +1201,9 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "forbids_text_document_render_path",
-                    "Steps with `input_type=TEXT` and `output_type=PDF` or "
-                    "`DOCX` cannot use `pass_through`; direct text-to-document "
-                    "rendering is owned by `render_verbatim`.",
+                    "Steps with `input_type=TEXT` and `output_type=PDF` or `DOCX` cannot use "
+                    "`pass_through`; direct text-to-document rendering is owned by "
+                    "`render_verbatim`.",
                 ),
             ),
             (),
@@ -1226,14 +1216,38 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "forbids_output_contract",
-                    "Steps using `render_verbatim` render resolved text directly "
-                    "and must not declare an `output_contract`.",
+                    "Steps using `render_verbatim` render resolved text directly and must not declare "
+                    "an `output_contract`.",
                 ),
                 (
                     "requires_text_input_document_output",
-                    "Steps using `render_verbatim` must have `input_type=TEXT` "
-                    "and `output_type=PDF` or `DOCX`; any other IO pair is "
-                    "rejected by `supports_step_io_tuple`.",
+                    "Steps using `render_verbatim` must have `input_type=TEXT` and `output_type=PDF` "
+                    "or `DOCX`; any other IO pair is rejected by `supports_step_io_tuple`.",
+                ),
+            ),
+            (),
+        ),
+        (
+            "not_exposed",
+            None,
+            None,
+            (),
+            (
+                (
+                    "fixed_output_contract",
+                    "Steps using `speaker_mapping` must not declare an `output_contract`; the runtime "
+                    "pins `SPEAKER_MAPPING_OUTPUT_CONTRACT`.",
+                ),
+                (
+                    "requires_edit_review_policy",
+                    "Steps using `speaker_mapping` must declare `review_policy.mode='edit'`; "
+                    "`parse_flow_step_review_policy` rejects any other policy.",
+                ),
+                (
+                    "requires_previous_step_text_json",
+                    "Steps using `speaker_mapping` must have `input_source=previous_step`, "
+                    "`input_type=TEXT` and `output_type=JSON`; `supports_step_io_tuple` and "
+                    "`speaker_mapping_violation` reject other combinations.",
                 ),
             ),
             (),
@@ -1246,9 +1260,9 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "forbids_output_contract",
-                    "Steps using `template_fill` must not declare an "
-                    "`output_contract`; `_validate_output_contract_compatibility` "
-                    "raises when the mode and contract coexist.",
+                    "Steps using `template_fill` must not declare an `output_contract`; "
+                    "`_validate_output_contract_compatibility` raises when the mode and contract "
+                    "coexist.",
                 ),
                 (
                     "requires_docx_output_type",
@@ -1257,9 +1271,8 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
                 ),
                 (
                     "requires_template_fill_output_config",
-                    "Publishable flows with a `template_fill` step require a "
-                    "complete `output_config` template block; "
-                    "`validate_template_fill_output_config` enforces this when "
+                    "Publishable flows with a `template_fill` step require a complete `output_config` "
+                    "template block; `validate_template_fill_output_config` enforces this when "
                     "`require_complete_template_fill_config=True`.",
                 ),
             ),
@@ -1274,14 +1287,13 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
                 (
                     "requires_audio_input_text_output",
                     "Steps using `transcribe_only` must have `input_type=AUDIO` and "
-                    "`output_type=TEXT`; any other IO pair is rejected by "
-                    "`supports_step_io_tuple`.",
+                    "`output_type=TEXT`; any other IO pair is rejected by `supports_step_io_tuple`.",
                 ),
                 (
                     "requires_audio_runtime_input_format",
-                    "Steps using `transcribe_only` with runtime_input enabled must "
-                    "declare `input_format='audio'`; "
-                    "`_validate_runtime_input_publish_rules` rejects other formats.",
+                    "Steps using `transcribe_only` with runtime_input enabled must declare "
+                    "`input_format='audio'`; `_validate_runtime_input_publish_rules` rejects other "
+                    "formats.",
                 ),
             ),
             (),
@@ -1294,22 +1306,21 @@ _FCM_SURFACE_FINGERPRINT_V8: tuple[object, ...] = (
             (
                 (
                     "bounded_concurrent_source_calls",
-                    "Source calls are mapped with a named runtime concurrency "
-                    "bound and fail-fast at step-attempt granularity.",
+                    "Source calls are mapped with a named runtime concurrency bound and fail-fast at "
+                    "step-attempt granularity.",
                 ),
                 (
                     "requires_documents_array_contract",
-                    "Per-source reader execution requires a JSON output contract "
-                    "shaped as exactly one top-level `documents[]` array; "
-                    "corpus-level synthesis belongs to a downstream writer step.",
+                    "Per-source reader execution requires a JSON output contract shaped as exactly "
+                    "one top-level `documents[]` array; corpus-level synthesis belongs to a "
+                    "downstream writer step.",
                 ),
                 (
                     "runtime_sets_source_identity",
-                    "Every documents[] item schema declares `source_label` and "
-                    "`source_file_id` as required strings; `parse_runtime_steps` "
-                    "rejects invalid per-source contracts before provider work. "
-                    "The runtime, not the model, writes their values from uploaded "
-                    "file metadata.",
+                    "Every documents[] item schema declares `source_label` and `source_file_id` as "
+                    "required strings; `parse_runtime_steps` rejects invalid per-source contracts "
+                    "before provider work. The runtime, not the model, writes their values from "
+                    "uploaded file metadata.",
                 ),
             ),
             ("input_config.runtime_input.execution_mode",),
@@ -1355,11 +1366,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V8, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V9, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V8}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V9}\n\n"
         f"Actual:   {actual}"
     )
 

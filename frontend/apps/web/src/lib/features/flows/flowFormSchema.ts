@@ -1,7 +1,7 @@
 import flowVariableDefinitions from "./flowVariableDefinitions.generated.json";
 
 export type FlowFormFieldType =
-  "text" | "number" | "date" | "select" | "multiselect" | "email" | "textarea" | "string";
+  "text" | "number" | "date" | "select" | "multiselect" | "list" | "email" | "textarea" | "string";
 
 export type FlowFormField = {
   name: string;
@@ -25,7 +25,8 @@ export type FlowFormSchemaMetadata = {
   fields: FlowFormField[];
 };
 
-export type NormalizedFlowFormFieldType = "text" | "number" | "date" | "select" | "multiselect";
+export type NormalizedFlowFormFieldType =
+  "text" | "number" | "date" | "select" | "multiselect" | "list";
 
 export type NormalizedFlowFormField = {
   name: string;
@@ -38,6 +39,7 @@ export type NormalizedFlowFormField = {
 
 const LEGACY_TEXT_TYPES = new Set(["email", "textarea", "string"]);
 const OPTION_FIELD_TYPES = new Set<NormalizedFlowFormFieldType>(["select", "multiselect"]);
+const MULTI_VALUE_FIELD_TYPES = new Set<NormalizedFlowFormFieldType>(["multiselect", "list"]);
 const RESERVED_RUNTIME_VARIABLE_NAMES = new Set(flowVariableDefinitions.reservedRuntimeVariables);
 const FORM_FIELD_NAMESPACE_HEADS = new Set(flowVariableDefinitions.formFieldNamespaceHeads);
 export const PRIMARY_FLOW_INPUT_KEYS = new Set(flowVariableDefinitions.primaryFlowInputKeys);
@@ -56,6 +58,7 @@ export function normalizeFlowFormFieldType(
   if (normalized === "date") return "date";
   if (normalized === "select") return "select";
   if (normalized === "multiselect") return "multiselect";
+  if (normalized === "list") return "list";
   return "text";
 }
 
@@ -63,6 +66,13 @@ export function flowFormFieldHasOptions(
   type: FlowFormFieldType | string | null | undefined
 ): boolean {
   return OPTION_FIELD_TYPES.has(normalizeFlowFormFieldType(type));
+}
+
+/** True for field types whose run value is a list of strings. */
+export function flowFormFieldIsMultiValue(
+  type: FlowFormFieldType | string | null | undefined
+): boolean {
+  return MULTI_VALUE_FIELD_TYPES.has(normalizeFlowFormFieldType(type));
 }
 
 export function normalizeFlowFormFields(

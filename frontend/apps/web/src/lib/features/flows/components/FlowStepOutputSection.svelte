@@ -101,6 +101,8 @@
         return m.flow_output_mode_invalid_template_fill();
       case "transcribe_only_requires_audio_text":
         return m.flow_output_mode_invalid_transcribe_only();
+      case "speaker_mapping_requires_text_json":
+        return m.flow_output_mode_invalid_speaker_mapping();
       case "text_document_requires_render_verbatim":
         return m.flow_output_mode_invalid_text_document();
     }

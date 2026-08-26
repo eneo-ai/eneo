@@ -352,6 +352,47 @@
     transcriptionModelId !== null && transcriptionModel === null
   );
   const transcriptionLanguage = $derived(wizardMetadata.transcription_language ?? "sv");
+  const transcriptionDiarization = $derived(wizardMetadata.transcription_diarization ?? true);
+  // Speaker identification is only honoured by the external transcription
+  // service, so the control is hidden on deployments without one.
+  const transcriptionServiceConfigured = $derived(
+    data.settings?.flow_transcription_service_configured ?? false
+  );
+  // In "full" mode the service transcribes and the flow's model is only a
+  // governance anchor; in "diarize" mode the flow's model transcribes and the
+  // service only adds speaker labels, so the picker stays meaningful.
+  const transcriptionServiceReplacesModel = $derived(
+    transcriptionServiceConfigured && data.settings?.flow_transcription_service_mode === "full"
+  );
+  // Offer a "name the speakers" step after an audio step when diarization is
+  // on and no step already does it.
+  const activeStepForOffer = $derived(
+    ($update.steps ?? []).find((step) => step.id === $activeStepId) ?? null
+  );
+  const speakerMappingStepOffered = $derived(
+    transcriptionServiceConfigured &&
+      transcriptionEnabled &&
+      transcriptionDiarization &&
+      activeStepForOffer?.input_type === "audio" &&
+      !($update.steps ?? []).some((step) => step.output_mode === "speaker_mapping")
+  );
+  const transcriptionServiceDiarizeOnly = $derived(
+    transcriptionServiceConfigured && data.settings?.flow_transcription_service_mode === "diarize"
+  );
+  // With the service replacing the model the picker is hidden, but a model is
+  // still required as the governance anchor: pick the first accessible one.
+  $effect(() => {
+    if (!transcriptionServiceReplacesModel || !transcriptionEnabled || $isPublished) return;
+    if (transcriptionModelId !== null) return;
+    const fallback = ($currentSpace.transcription_models ?? [])[0];
+    if (fallback) flowEditor.setWizardMetadata({ transcription_model: { id: fallback.id } });
+  });
+  const transcriptionModelUnavailableForService = $derived(
+    transcriptionServiceReplacesModel &&
+      transcriptionEnabled &&
+      transcriptionModelId === null &&
+      ($currentSpace.transcription_models ?? []).length === 0
+  );
   const stepsCount = $derived($update.steps?.length ?? 0);
   const checklistHasName = $derived(($update.name ?? "").trim().length > 0);
   const checklistHasSteps = $derived(stepsCount > 0);
@@ -1036,26 +1077,36 @@
                     transition:slide={{ duration: reducedMotion ? 0 : 200 }}
                   >
                     <Field.Group class="gap-4">
-                      <div class="grid gap-4 sm:grid-cols-2">
-                        <Field.Field>
-                          <Field.Label for="flow-transcription-model">
-                            {m.flow_transcription_model_label()}
-                          </Field.Label>
-                          <SelectAIModelV2
-                            bind:selectedModel={transcriptionModel}
-                            availableModels={$currentSpace.transcription_models}
-                            dropdownLabel={m.flow_transcription_model_label()}
-                            on:change={(event) => {
-                              const selected = event.detail.selectedModel;
-                              const newId = selected?.id ?? null;
-                              if (newId !== transcriptionModelId) {
-                                flowEditor.setWizardMetadata({
-                                  transcription_model: newId ? { id: newId } : null
-                                });
-                              }
-                            }}
-                          />
-                        </Field.Field>
+                      <div
+                        class="grid gap-4 {transcriptionServiceReplacesModel
+                          ? ''
+                          : 'sm:grid-cols-2'}"
+                      >
+                        {#if !transcriptionServiceReplacesModel}
+                          <Field.Field>
+                            <Field.Label for="flow-transcription-model">
+                              {m.flow_transcription_model_label()}
+                            </Field.Label>
+                            <SelectAIModelV2
+                              bind:selectedModel={transcriptionModel}
+                              availableModels={$currentSpace.transcription_models}
+                              dropdownLabel={m.flow_transcription_model_label()}
+                              on:change={(event) => {
+                                const selected = event.detail.selectedModel;
+                                const newId = selected?.id ?? null;
+                                if (newId !== transcriptionModelId) {
+                                  flowEditor.setWizardMetadata({
+                                    transcription_model: newId ? { id: newId } : null
+                                  });
+                                }
+                              }}
+                            />
+                          </Field.Field>
+                        {:else}
+                          <p class="text-muted text-sm leading-relaxed" role="note">
+                            {m.flow_transcription_external_service_note()}
+                          </p>
+                        {/if}
                         <Field.Field>
                           <Field.Label for="flow-transcription-language">
                             {m.flow_transcription_language_label()}
@@ -1093,7 +1144,31 @@
                           </Select.Root>
                         </Field.Field>
                       </div>
-                      {#if transcriptionModelMissingInSpace}
+                      {#if transcriptionServiceConfigured}
+                        <div
+                          class="bg-primary flex items-start justify-between gap-4 rounded-lg border px-3 py-3 transition-colors {transcriptionDiarization
+                            ? 'border-accent-default/40'
+                            : 'border-default'}"
+                        >
+                          <div class="min-w-0">
+                            <p class="text-sm font-medium">{m.flow_transcription_diarization()}</p>
+                            <p class="text-muted mt-1 text-xs leading-relaxed">
+                              {m.flow_transcription_diarization_desc()}
+                              {#if transcriptionServiceDiarizeOnly}
+                                {m.flow_transcription_diarization_words_hint()}
+                              {/if}
+                            </p>
+                          </div>
+                          <Switch
+                            checked={transcriptionDiarization}
+                            disabled={$isPublished}
+                            aria-label={m.flow_transcription_diarization()}
+                            onCheckedChange={(checked) =>
+                              flowEditor.setWizardMetadata({ transcription_diarization: checked })}
+                          />
+                        </div>
+                      {/if}
+                      {#if transcriptionModelMissingInSpace || transcriptionModelUnavailableForService}
                         <div
                           class="border-warning-default/40 bg-warning-dimmer text-warning-stronger rounded-lg border px-3 py-2 text-sm"
                           role="status"
@@ -1206,13 +1281,17 @@
                   securityClassifications={data.securityClassifications}
                   {transcriptionEnabled}
                   transcriptionModelConfigured={transcriptionModel !== null}
-                  transcriptionModelLabel={transcriptionModel?.nickname ??
-                    transcriptionModel?.name ??
-                    null}
+                  transcriptionModelLabel={transcriptionServiceReplacesModel
+                    ? m.flow_transcription_external_service_label()
+                    : (transcriptionModel?.nickname ?? transcriptionModel?.name ?? null)}
                   formSchema={formSchemaMetadata}
                   onBuildFlowWithAI={canUseAIBuilder ? openWholeFlowAIBuilder : undefined}
                   onEditStepWithAI={canUseAIBuilder ? openStepInAIBuilder : undefined}
                   onOpenTranscriptionSettings={() => void navigateToStage(2)}
+                  {speakerMappingStepOffered}
+                  onAddSpeakerMappingStep={() =>
+                    activeStepForOffer &&
+                    void flowEditor.insertSpeakerMappingStepAfter(activeStepForOffer.step_order)}
                   onJsonValidationChanged={(detail) => {
                     hasStepJsonValidationErrors = detail.hasErrors;
                     stepJsonValidationFields = detail.fields;

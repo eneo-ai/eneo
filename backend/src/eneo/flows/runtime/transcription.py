@@ -3,13 +3,17 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.audio import AudioMimeTypes
+from eneo.flows.domain.speaker_labels import (
+    build_speaker_inventory,
+    renumber_speaker_labels,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfig,
@@ -24,6 +28,27 @@ from eneo.model_providers.domain.provider_call_observer import (
 
 # Reads one authorized audio file's bytes, immediately before transcription.
 LoadAudioPayload: TypeAlias = Callable[[UUID], Awaitable["File"]]
+
+
+class FlowStepTranscriber(Protocol):
+    """What a flow audio step needs from a transcription engine.
+
+    Satisfied by ``Transcriber`` (model-registry LiteLLM path) and
+    ``RemoteFlowTranscriber`` (external transcription service).
+    """
+
+    async def transcribe(
+        self,
+        file: "File",
+        transcription_model: "TranscriptionModel",
+        *,
+        language: str | None = None,
+        diarize: bool = True,
+        persist_cache_to_file: bool = True,
+        observer: "ProviderCallObserver | None" = None,
+        max_speakers: int | None = None,
+    ) -> "TranscribedAudio": ...
+
 
 # Must stay aligned with
 # frontend/apps/web/src/lib/features/audio/recordingSession.ts::buildSegmentFilenameBase.
@@ -107,7 +132,7 @@ def _join_transcription_blocks(
 
 if TYPE_CHECKING:
     from eneo.files.file_models import File, FileInfo
-    from eneo.files.transcriber import Transcriber
+    from eneo.files.transcriber import TranscribedAudio
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -115,6 +140,10 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+
+
+def _empty_speakers() -> list[dict[str, Any]]:
+    return []
 
 
 @dataclass(frozen=True)
@@ -130,6 +159,17 @@ class FlowTranscriptionResult:
     elapsed_ms: int
     files_count: int
     near_inline_limit: bool
+    # None: no speaker labels requested. "external": labelled by the external
+    # service. "skipped:<reason>": requested but not produced.
+    diarization: str | None = None
+    # Time spent in the external speaker-labelling calls, when any were made.
+    diarization_elapsed_ms: int | None = None
+    # Labelled speakers across all files, after renumbering to unique labels.
+    speakers: list[dict[str, Any]] = field(default_factory=_empty_speakers)
+    # Upper bound given to diarization, from the participants form field.
+    max_speakers: int | None = None
+    # Coarsest word-timestamp source across files, as reported by the service.
+    alignment: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -145,6 +185,11 @@ class FlowTranscriptionResult:
             "model_id": str(self.model_id) if self.model_id is not None else None,
             "language": self.language,
             "file_ids": [str(file_id) for file_id in self.file_ids],
+            "diarization": self.diarization,
+            "diarization_elapsed_ms": self.diarization_elapsed_ms,
+            "speakers": self.speakers,
+            "max_speakers": self.max_speakers,
+            "alignment": self.alignment,
         }
 
 
@@ -203,7 +248,7 @@ async def resolve_transcription_model_for_step(
 async def transcribe_audio_input(
     *,
     files: list["FileInfo"],
-    transcriber: "Transcriber",
+    transcriber: FlowStepTranscriber,
     transcription_model: "TranscriptionModel",
     language: str,
     step_order: int,
@@ -212,6 +257,8 @@ async def transcribe_audio_input(
     load_audio_payload: "LoadAudioPayload",
     transcription_call_observer: "ProviderCallObserver | None" = None,
     near_limit_ratio: float = 0.85,
+    diarize: bool = True,
+    max_speakers: int | None = None,
 ) -> FlowTranscriptionResult:
     """Transcribe each audio file in request order, one payload at a time.
 
@@ -248,8 +295,15 @@ async def transcribe_audio_input(
     block_segments: list[tuple[str, int, datetime] | None] = []
     measured_seconds: list[float] = []
     every_file_measured = True
+    diarization_outcomes: list[str | None] = []
+    diarization_elapsed: list[int] = []
+    speakers: list[dict[str, Any]] = []
+    alignments: list[str] = []
+    # Labels are assigned per file by the diarization service; renumber so one
+    # label means one speaker across the whole transcript.
+    label_offset = 0
 
-    for file in files:
+    for file_index, file in enumerate(files):
         # Reading a payload is part of this step's typed failure surface: it
         # authorizes, hydrates and verifies bytes, and every way it can fail
         # must reach the caller as a flow error rather than an escaping
@@ -269,8 +323,10 @@ async def transcribe_audio_input(
                     audio_file,
                     transcription_model,
                     language=provider_language,
+                    diarize=diarize,
                     persist_cache_to_file=False,
                     observer=transcription_call_observer,
+                    max_speakers=max_speakers if diarize else None,
                 )
             finally:
                 del audio_file
@@ -293,7 +349,20 @@ async def transcribe_audio_input(
         else:
             measured_seconds.append(transcribed.duration_seconds)
 
+        diarization_outcomes.append(transcribed.diarization)
+        if transcribed.diarization_elapsed_ms is not None:
+            diarization_elapsed.append(transcribed.diarization_elapsed_ms)
+        if transcribed.alignment:
+            alignments.append(transcribed.alignment)
         block_text = transcribed.text
+        if transcribed.diarization == "external":
+            block_text, label_count = renumber_speaker_labels(block_text, label_offset)
+            speakers.extend(
+                build_speaker_inventory(
+                    block_text, file_index=file_index, file_id=str(file.id)
+                )
+            )
+            label_offset += label_count
         if block_text.strip():
             text_blocks.append(block_text.strip())
             block_segments.append(
@@ -334,7 +403,40 @@ async def transcribe_audio_input(
         elapsed_ms=elapsed_ms,
         files_count=len(files),
         near_inline_limit=near_inline_limit,
+        diarization=_combine_diarization_outcomes(diarization_outcomes),
+        diarization_elapsed_ms=sum(diarization_elapsed)
+        if diarization_elapsed
+        else None,
+        speakers=speakers,
+        max_speakers=max_speakers if diarize else None,
+        alignment=_coarsest_alignment(alignments),
     )
+
+
+# Ordered from most to least precise; a step reports its weakest file.
+_ALIGNMENT_PRECISION = ("provider_words", "forced", "segment_split", "segment_only")
+REDUCED_PRECISION_ALIGNMENTS = frozenset({"segment_split", "segment_only"})
+
+
+def _coarsest_alignment(alignments: list[str]) -> str | None:
+    if not alignments:
+        return None
+    known = [value for value in alignments if value in _ALIGNMENT_PRECISION]
+    if not known:
+        return alignments[0]
+    return max(known, key=_ALIGNMENT_PRECISION.index)
+
+
+def _combine_diarization_outcomes(outcomes: list[str | None]) -> str | None:
+    """One outcome for the step: any skipped file makes the step's labels partial."""
+    skipped = [
+        outcome for outcome in outcomes if outcome and outcome.startswith("skipped")
+    ]
+    if skipped:
+        return skipped[0]
+    if outcomes and all(outcome == "external" for outcome in outcomes):
+        return "external"
+    return None
 
 
 async def resolve_and_transcribe_audio_for_step(
@@ -345,11 +447,12 @@ async def resolve_and_transcribe_audio_for_step(
     step_order: int,
     files: list["FileInfo"],
     requested_ids: list[UUID],
-    transcriber: "Transcriber",
+    transcriber: FlowStepTranscriber,
     max_files: int,
     max_inline_text_bytes: int,
     load_audio_payload: LoadAudioPayload,
     transcription_call_observer: "ProviderCallObserver | None" = None,
+    max_speakers: int | None = None,
 ) -> FlowTranscriptionResult:
     try:
         transcription_config = parse_transcription_config(version_metadata)
@@ -395,4 +498,6 @@ async def resolve_and_transcribe_audio_for_step(
         max_inline_text_bytes=max_inline_text_bytes,
         load_audio_payload=load_audio_payload,
         transcription_call_observer=transcription_call_observer,
+        diarize=transcription_config.diarization,
+        max_speakers=max_speakers,
     )

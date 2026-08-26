@@ -10,6 +10,7 @@ from eneo.flows.api.flow_graph import (
     GraphEdge,
     GraphNode,
     GraphResponse,
+    annotate_speaker_identification,
     build_graph_from_steps,
     build_graph_response,
     enrich_nodes_with_run_results,
@@ -43,6 +44,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_input": None,
             "num_tokens_output": None,
             "error_message": None,
+            "speaker_identification": None,
         },
         {
             "id": str(_GOLDEN_STEP_1_ID),
@@ -58,6 +60,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_input": None,
             "num_tokens_output": None,
             "error_message": None,
+            "speaker_identification": None,
         },
         {
             "id": str(_GOLDEN_STEP_2_ID),
@@ -73,6 +76,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_input": None,
             "num_tokens_output": None,
             "error_message": None,
+            "speaker_identification": None,
         },
         {
             "id": str(_GOLDEN_STEP_3_ID),
@@ -88,6 +92,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_input": None,
             "num_tokens_output": None,
             "error_message": None,
+            "speaker_identification": None,
         },
         {
             "id": str(_GOLDEN_STEP_4_ID),
@@ -103,6 +108,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_input": 11,
             "num_tokens_output": 17,
             "error_message": None,
+            "speaker_identification": None,
         },
         {
             "id": "output",
@@ -118,6 +124,7 @@ _GOLDEN_GRAPH_RESPONSE = {
             "num_tokens_input": None,
             "num_tokens_output": None,
             "error_message": None,
+            "speaker_identification": None,
         },
     ],
     "edges": [
@@ -591,3 +598,46 @@ def test_build_graph_marks_template_fill_steps_as_assembly_nodes() -> None:
     assembly_node = next(node for node in nodes if node.id == str(steps[0]["step_id"]))
 
     assert assembly_node.type == "assembly"
+
+
+def _audio_and_text_nodes() -> list[GraphNode]:
+    return [
+        GraphNode(id="a", label="Audio", type="llm", step_order=1, input_type="audio"),
+        GraphNode(id="t", label="Text", type="llm", step_order=2, input_type="text"),
+    ]
+
+
+def test_speaker_identification_marks_only_audio_steps_when_service_is_configured() -> (
+    None
+):
+    nodes = annotate_speaker_identification(
+        _audio_and_text_nodes(),
+        wizard_metadata={
+            "transcription_enabled": True,
+            "transcription_diarization": True,
+        },
+        service_configured=True,
+    )
+
+    assert [node.speaker_identification for node in nodes] == [True, None]
+
+
+def test_speaker_identification_stays_unset_without_a_service_or_when_off() -> None:
+    wizard = {"transcription_enabled": True, "transcription_diarization": True}
+
+    without_service = annotate_speaker_identification(
+        _audio_and_text_nodes(), wizard_metadata=wizard, service_configured=False
+    )
+    switched_off = annotate_speaker_identification(
+        _audio_and_text_nodes(),
+        wizard_metadata={**wizard, "transcription_diarization": False},
+        service_configured=True,
+    )
+    malformed = annotate_speaker_identification(
+        _audio_and_text_nodes(),
+        wizard_metadata={"transcription_diarization": "yes"},
+        service_configured=True,
+    )
+
+    for nodes in (without_service, switched_off, malformed):
+        assert [node.speaker_identification for node in nodes] == [None, None]

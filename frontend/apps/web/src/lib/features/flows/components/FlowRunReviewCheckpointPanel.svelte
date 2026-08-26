@@ -14,6 +14,14 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import SpeakerMappingReviewEditor from "./SpeakerMappingReviewEditor.svelte";
+  import {
+    buildEditedMapping,
+    buildSpeakerRows,
+    getSpeakerMappingParticipants,
+    isSpeakerMappingCheckpoint,
+    type SpeakerMappingRow
+  } from "$lib/features/flows/speakerMappingReview";
 
   let {
     runId,
@@ -34,6 +42,17 @@
   let loadError: string | null = $state(null);
   let actionError: string | null = $state(null);
   let draftValueText = $state("");
+  let speakerRows = $state<SpeakerMappingRow[]>([]);
+  const isSpeakerMapping = $derived(isSpeakerMappingCheckpoint(checkpoint?.current_payload_json));
+  const speakerParticipants = $derived(
+    getSpeakerMappingParticipants(checkpoint?.current_payload_json)
+  );
+  // Reviewer edits not yet sent to the server.
+  const speakerEditsPending = $derived(
+    isSpeakerMapping &&
+      JSON.stringify(buildEditedMapping(speakerRows)) !==
+        JSON.stringify(buildEditedMapping(buildSpeakerRows(checkpoint?.current_payload_json)))
+  );
   let rejectReason = $state("");
   let activeAction: ReviewAction | null = $state(null);
   let nowMs = $state(Date.now());
@@ -71,7 +90,9 @@
     payload: Record<string, unknown> | null | undefined,
     outputType: FlowRunReviewCheckpoint["output_type"]
   ): string {
-    if (outputType === "json") {
+    // A speaker-mapping step's text is the transcript with names applied, which
+    // is what the reviewer wants to compare, not the mapping JSON.
+    if (outputType === "json" && !isSpeakerMappingCheckpoint(payload)) {
       return JSON.stringify(payload?.structured ?? {}, null, 2);
     }
     return typeof payload?.text === "string" ? payload.text : "";
@@ -110,6 +131,7 @@
         nextCheckpoint.current_payload_json,
         nextCheckpoint.output_type
       );
+      speakerRows = buildSpeakerRows(nextCheckpoint.current_payload_json);
     }
   }
 
@@ -167,7 +189,9 @@
 
   async function saveEdit() {
     if (!checkpoint || !canEdit) return;
-    const editedValue = parseDraftValue(checkpoint.output_type);
+    const editedValue = isSpeakerMapping
+      ? buildEditedMapping(speakerRows)
+      : parseDraftValue(checkpoint.output_type);
     if (editedValue === null) return;
     activeAction = "edit";
     actionError = null;
@@ -196,12 +220,25 @@
     activeAction = "approve";
     actionError = null;
     try {
+      // Approving is meant to accept what the reviewer sees, so pending
+      // speaker edits are saved first rather than silently dropped.
+      let current = checkpoint;
+      if (speakerEditsPending && canEdit) {
+        current = await eneo.flows.runs.reviewCheckpoints.edit({
+          flowId,
+          runId,
+          checkpointId: current.id,
+          expectedCheckpointRevision: current.revision,
+          editedValue: buildEditedMapping(speakerRows)
+        });
+        applyCheckpoint(current);
+      }
       applyCheckpoint(
         await eneo.flows.runs.reviewCheckpoints.approve({
           flowId,
           runId,
-          checkpointId: checkpoint.id,
-          expectedCheckpointRevision: checkpoint.revision
+          checkpointId: current.id,
+          expectedCheckpointRevision: current.revision
         })
       );
       toast.success(m.flow_run_review_approved());
@@ -357,29 +394,45 @@
     {/if}
 
     <Field.Group class="grid gap-4 lg:grid-cols-2">
-      <Field.Field>
-        <Field.Label class="text-primary text-xs font-medium" for="flow-review-current-payload">
-          {m.flow_run_review_current_payload()}
-        </Field.Label>
-        <Textarea
-          id="flow-review-current-payload"
-          bind:value={draftValueText}
+      {#if isSpeakerMapping}
+        <SpeakerMappingReviewEditor
+          rows={speakerRows}
+          participants={speakerParticipants}
           disabled={!canEdit || activeAction !== null}
-          aria-invalid={reviewDecisionExpired || checkpointExpired}
-          class="min-h-72 resize-y font-mono text-xs leading-relaxed lg:min-h-80"
-          spellcheck={false}
+          onChange={(rows) => (speakerRows = rows)}
         />
-      </Field.Field>
-      <Field.Field>
-        <Field.Label class="text-primary text-xs font-medium">
-          {m.flow_run_review_original_payload()}
-        </Field.Label>
-        <pre
-          class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{renderEditableValue(
-            checkpoint.original_payload_json,
-            checkpoint.output_type
-          )}</pre>
-      </Field.Field>
+        <Field.Field>
+          <Field.Label class="text-primary text-xs font-medium">
+            {m.flow_run_review_speakers_preview()}
+          </Field.Label>
+          <pre
+            class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{draftValueText}</pre>
+        </Field.Field>
+      {:else}
+        <Field.Field>
+          <Field.Label class="text-primary text-xs font-medium" for="flow-review-current-payload">
+            {m.flow_run_review_current_payload()}
+          </Field.Label>
+          <Textarea
+            id="flow-review-current-payload"
+            bind:value={draftValueText}
+            disabled={!canEdit || activeAction !== null}
+            aria-invalid={reviewDecisionExpired || checkpointExpired}
+            class="min-h-72 resize-y font-mono text-xs leading-relaxed lg:min-h-80"
+            spellcheck={false}
+          />
+        </Field.Field>
+        <Field.Field>
+          <Field.Label class="text-primary text-xs font-medium">
+            {m.flow_run_review_original_payload()}
+          </Field.Label>
+          <pre
+            class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{renderEditableValue(
+              checkpoint.original_payload_json,
+              checkpoint.output_type
+            )}</pre>
+        </Field.Field>
+      {/if}
     </Field.Group>
 
     <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
@@ -405,7 +458,7 @@
       class="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end"
     >
       <Button
-        variant="outline"
+        variant={speakerEditsPending ? "default" : "outline"}
         size="sm"
         class="min-h-10 sm:min-h-8"
         disabled={!canEdit || activeAction !== null}

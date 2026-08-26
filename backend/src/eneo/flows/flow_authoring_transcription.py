@@ -53,6 +53,7 @@ _TRANSCRIPTION_WIZARD_KEYS = {
     "transcription_enabled",
     "transcription_model",
     "transcription_language",
+    "transcription_diarization",
 }
 
 

@@ -14,6 +14,7 @@ import { shouldSaveAssistantImmediately } from "./assistantSavePolicy";
 import { AssistantSaveManager } from "./flowAssistantSaveManager";
 import {
   buildFlowFormSchemaMetadata,
+  getFlowFormSchemaFields,
   getFlowFormFieldVariableExpression,
   isFlowFormFieldBareAliasSafe,
   toPersistedFlowFormFields,
@@ -21,6 +22,7 @@ import {
 } from "./flowFormSchema";
 import { remapStepOrderTemplateTokens, replaceExactTemplateToken } from "./flowVariableTokens";
 import { getFlowStepValidationIssues } from "./flowStepTypes";
+import { buildSpeakerMappingOutputConfig } from "./speakerMappingConfig";
 import { m } from "$lib/paraglide/messages";
 import { parseServerValidationIdentity } from "$lib/features/flows/flowStepValidationMessages";
 
@@ -633,6 +635,59 @@ function createFlowEditor(data: FlowEditorInitData) {
     return tempId;
   }
 
+  /**
+   * Inserts a preconfigured "name the speakers" step right after the given
+   * transcription step and makes sure a participants form field exists. The
+   * step is the same shape `applyOutputModeChange("speaker_mapping")` produces.
+   */
+  async function insertSpeakerMappingStepAfter(afterOrder: number): Promise<void> {
+    await insertStepAfter(afterOrder);
+    const $update = get(editor.state.update);
+    const inserted = ($update.steps ?? []).find(
+      (s: FlowStep) => s.step_order === afterOrder + 1 && Boolean(s.id?.startsWith("_temp_"))
+    );
+    if (!inserted) return;
+
+    const fields = getFlowFormSchemaFields($update.metadata_json);
+    let participantsField =
+      fields.find((field: FlowFormField) => field.type === "list")?.name ??
+      fields.find((field: FlowFormField) => field.type === "multiselect" || field.type === "text")
+        ?.name ??
+      null;
+    if (participantsField === null) {
+      const name = m.flow_transcription_participants_field_name();
+      replaceFormSchemaFields([
+        ...fields,
+        {
+          name,
+          label: m.flow_transcription_participants_field_label(),
+          type: "list",
+          required: false
+        }
+      ]);
+      participantsField = name;
+    }
+
+    editor.state.update.update((u) => ({
+      ...u,
+      steps: (u.steps ?? []).map((s: FlowStep) =>
+        s.id === inserted.id
+          ? {
+              ...s,
+              user_description: m.flow_transcription_speaker_mapping_step_name(),
+              input_source: "previous_step",
+              input_type: "text",
+              output_mode: "speaker_mapping",
+              output_type: "json",
+              output_contract: null,
+              review_policy: { mode: "edit" },
+              output_config: buildSpeakerMappingOutputConfig(s.output_config, participantsField)
+            }
+          : s
+      )
+    }));
+  }
+
   async function insertStepAfter(afterOrder: number): Promise<void> {
     const $update = get(editor.state.update);
     const currentSteps = [...($update.steps ?? [])];
@@ -664,7 +719,9 @@ function createFlowEditor(data: FlowEditorInitData) {
       updatedSteps.push(newStep as FlowStep);
     }
 
-    editor.state.update.update((u) => ({ ...u, steps: updatedSteps }));
+    // Later steps move down one order, so their `step_N` references (bindings
+    // and prompts) must follow them; the remap also owns the auto-save.
+    await applyStepsWithSafeOrderRemap(updatedSteps);
     activeStepId.set(tempId);
 
     try {
@@ -928,6 +985,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     setResource,
     addStep,
     insertStepAfter,
+    insertSpeakerMappingStepAfter,
     createDraftingChainStarter,
     assistantRevision,
     assistantReloadRevision,

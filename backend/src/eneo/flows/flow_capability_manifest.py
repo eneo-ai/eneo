@@ -39,7 +39,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 8
+FCM_VERSION: int = 9
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -368,6 +368,44 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
                 ),
             ),
         ),
+        FlowOutputMode.SPEAKER_MAPPING: (
+            "Speaker-to-person mapping",
+            (
+                "A completion model proposes which participant each diarized "
+                "speaker label (`SPEAKER_NN`) in the previous step's transcript "
+                "is, using a participant list from a run-time form field. The "
+                "step output is the mapping (structured) plus the transcript "
+                "with names applied (text), and the run always pauses for an "
+                "edit review so a person confirms the mapping."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_previous_step_text_json",
+                    description=(
+                        "Steps using `speaker_mapping` must have "
+                        "`input_source=previous_step`, `input_type=TEXT` and "
+                        "`output_type=JSON`; `supports_step_io_tuple` and "
+                        "`speaker_mapping_violation` reject other combinations."
+                    ),
+                ),
+                InvariantSpec(
+                    id="requires_edit_review_policy",
+                    description=(
+                        "Steps using `speaker_mapping` must declare "
+                        "`review_policy.mode='edit'`; "
+                        "`parse_flow_step_review_policy` rejects any other policy."
+                    ),
+                ),
+                InvariantSpec(
+                    id="fixed_output_contract",
+                    description=(
+                        "Steps using `speaker_mapping` must not declare an "
+                        "`output_contract`; the runtime pins "
+                        "`SPEAKER_MAPPING_OUTPUT_CONTRACT`."
+                    ),
+                ),
+            ),
+        ),
         FlowOutputMode.RENDER_VERBATIM: (
             "Verbatim document render",
             (
@@ -398,8 +436,20 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
 )
 
 
+# Output modes the planner cannot author yet; the engine still runs them.
+_NOT_EXPOSED_OUTPUT_MODES: Mapping[FlowOutputMode, str] = MappingProxyType(
+    {
+        FlowOutputMode.SPEAKER_MAPPING: (
+            "Manual authoring only: the planner has no participant-field "
+            "selection, review-forcing rule or speaker-mapping checkpoint kind."
+        ),
+    }
+)
+
+
 def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
     label, description, invariants = _OUTPUT_MODE_CAPABILITY_SEED[mode]
+    not_exposed_reason = _NOT_EXPOSED_OUTPUT_MODES.get(mode)
     return FlowCapability(
         id=f"output_mode_{mode.value}",
         label=label,
@@ -407,8 +457,8 @@ def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
         applies_to_tuples=(),
         required_config=(),
         invariants=invariants,
-        exposure="builder",
-        not_exposed_reason=None,
+        exposure="not_exposed" if not_exposed_reason is not None else "builder",
+        not_exposed_reason=not_exposed_reason,
     )
 
 
@@ -626,6 +676,8 @@ def supports_step_io_tuple(
             FlowOutputType.PDF,
             FlowOutputType.DOCX,
         }
+    if output_mode is FlowOutputMode.SPEAKER_MAPPING:
+        return input_type is FlowInputType.TEXT and output_type is FlowOutputType.JSON
     if (
         output_mode is FlowOutputMode.PASS_THROUGH
         and input_type is FlowInputType.TEXT

@@ -420,3 +420,46 @@ def test_field_validation_errors_emit_machine_readable_code_and_context(
 
     assert exc_info.value.code == expected_code
     assert exc_info.value.context == expected_context
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        ["Anna", " Bo ", "Anna", "", "Cid"],
+        "Anna, Bo; Anna\nCid",
+    ],
+)
+def test_list_field_accepts_array_or_delimited_string(raw: object) -> None:
+    metadata = _metadata([{"name": "names", "type": "list", "required": True}])
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata, payload={"names": raw}
+    )
+
+    assert normalized == {"names": ["Anna", "Bo", "Cid"]}
+
+
+def test_list_field_rejects_non_string_items_and_non_list_values() -> None:
+    metadata = _metadata([{"name": "names", "type": "list"}])
+
+    with pytest.raises(BadRequestException) as value_error:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata, payload={"names": ["Anna", 1]}
+        )
+    assert value_error.value.code == "flow_input_invalid_list_value"
+
+    with pytest.raises(BadRequestException) as type_error:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata, payload={"names": {"a": 1}}
+        )
+    assert type_error.value.code == "flow_input_invalid_list_type"
+
+
+def test_required_list_field_rejects_empty_values() -> None:
+    metadata = _metadata([{"name": "names", "type": "list", "required": True}])
+
+    with pytest.raises(BadRequestException) as error:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata, payload={"names": " , ;"}
+        )
+    assert error.value.code == "flow_input_required_field_empty"

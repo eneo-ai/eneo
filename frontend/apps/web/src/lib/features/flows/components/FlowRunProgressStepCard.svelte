@@ -109,7 +109,9 @@
         </div>
         {#if focused && isRunning}
           <p class="text-muted mt-1 text-xs">
-            {m.flow_run_progress_active_step_hint()}
+            {step.speakerIdentification
+              ? m.flow_run_progress_transcribing_with_speakers_hint()
+              : m.flow_run_progress_active_step_hint()}
           </p>
         {:else if focused && step.status === "queued"}
           <p class="text-muted mt-1 text-xs">
@@ -194,7 +196,9 @@
           <div class="flex flex-col gap-3">
             <div class="text-secondary flex items-center gap-2 text-xs">
               <IconLoadingSpinner class="size-3.5 animate-spin" />
-              {m.flow_run_status_running()}
+              {step.speakerIdentification
+                ? m.flow_run_progress_transcribing_with_speakers()
+                : m.flow_run_status_running()}
             </div>
             <div class="flex flex-col gap-2">
               <div

@@ -7,7 +7,7 @@ type OutputMode = FlowStep["output_mode"];
 type OutputType = FlowStep["output_type"];
 
 export function outputModeUsesCompletionModel(mode: OutputMode): boolean {
-  return mode === "pass_through" || mode === "http_post";
+  return mode === "pass_through" || mode === "http_post" || mode === "speaker_mapping";
 }
 
 type OutputOption<TValue extends string> = {
@@ -50,6 +50,7 @@ const OUTPUT_MODE_LABELS: Record<OutputMode, () => string> = {
   pass_through: () => m.flow_output_mode_pass_through(),
   compose_text: () => m.flow_output_mode_compose_text(),
   transcribe_only: () => m.flow_output_mode_transcribe_only(),
+  speaker_mapping: () => m.flow_output_mode_speaker_mapping(),
   template_fill: () => m.flow_output_mode_template_fill(),
   render_verbatim: () => m.flow_output_mode_render_verbatim(),
   http_post: () => m.flow_output_mode_http_post()
@@ -59,6 +60,7 @@ const OUTPUT_MODE_ORDER: OutputMode[] = [
   "pass_through",
   "compose_text",
   "transcribe_only",
+  "speaker_mapping",
   "template_fill",
   "render_verbatim",
   "http_post"
@@ -78,6 +80,7 @@ export type OutputModeCompatibilityIssue =
   | "render_verbatim_requires_text_document"
   | "template_fill_requires_docx"
   | "transcribe_only_requires_audio_text"
+  | "speaker_mapping_requires_text_json"
   | "text_document_requires_render_verbatim";
 
 export type FlowStepLike = Pick<
@@ -383,7 +386,9 @@ export function getAvailableOutputTypes(
         ? ["docx"]
         : step.output_mode === "render_verbatim"
           ? ["pdf", "docx"]
-          : OUTPUT_TYPES.map((type) => type.value);
+          : step.output_mode === "speaker_mapping"
+            ? ["json"]
+            : OUTPUT_TYPES.map((type) => type.value);
 
   return OUTPUT_TYPES.filter(
     (type) => allowedTypes.includes(type.value) || type.value === step.output_type
@@ -394,7 +399,11 @@ export function getAvailableOutputTypes(
 }
 
 export function getAvailableOutputModes(params: {
-  step: Pick<FlowStep, "input_type" | "output_type" | "output_mode"> | null | undefined;
+  step:
+    | (Pick<FlowStep, "input_type" | "output_type" | "output_mode"> &
+        Partial<Pick<FlowStep, "input_source">>)
+    | null
+    | undefined;
   isAdvancedMode: boolean;
 }): SelectableOutputOption<OutputMode>[] {
   const { step, isAdvancedMode } = params;
@@ -409,6 +418,10 @@ export function getAvailableOutputModes(params: {
       return step.input_type === "text";
     }
     if (mode.value === "transcribe_only") return step.input_type === "audio";
+    if (mode.value === "speaker_mapping") {
+      // The mapping reads the previous step's diarized transcript.
+      return step.input_type === "text" && step.input_source === "previous_step";
+    }
     return true;
   }).map((mode) => ({
     ...mode,
@@ -436,6 +449,11 @@ export function getOutputModeCompatibilityIssue(
     return step.input_type === "audio" && step.output_type === "text"
       ? null
       : "transcribe_only_requires_audio_text";
+  }
+  if (step.output_mode === "speaker_mapping") {
+    return step.input_type === "text" && step.output_type === "json"
+      ? null
+      : "speaker_mapping_requires_text_json";
   }
   if (
     step.output_mode === "pass_through" &&

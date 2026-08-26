@@ -14,12 +14,16 @@ from eneo.flows.flow_run_input_envelope import (
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 
-from .transcription import LoadAudioPayload, resolve_and_transcribe_audio_for_step
+from .transcription import (
+    REDUCED_PRECISION_ALIGNMENTS,
+    FlowStepTranscriber,
+    LoadAudioPayload,
+    resolve_and_transcribe_audio_for_step,
+)
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
     from eneo.files.file_models import FileInfo
-    from eneo.files.transcriber import Transcriber
     from eneo.flows.domain.flow import FlowRun
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
     from eneo.model_providers.domain.provider_call_observer import (
@@ -35,6 +39,8 @@ class AudioRuntimeResolution:
     text: str
     transcription_metadata: dict[str, Any]
     near_inline_limit_message: str | None
+    diarization_skipped_message: str | None = None
+    diarization_reduced_precision_message: str | None = None
 
 
 class RuntimeAudioStep(Protocol):
@@ -58,11 +64,13 @@ class AudioRuntimeRequest:
     requested_ids: list[UUID]
     max_audio_files: int
     max_inline_text_bytes: int
+    # Diarization bound from the participants form field, when known.
+    max_speakers: int | None = None
 
 
 @dataclass(frozen=True)
 class AudioRuntimeDeps:
-    transcriber: "Transcriber"
+    transcriber: FlowStepTranscriber
     space_repo: "SpaceRepository"
     flow_run_repo: "FlowRunRepository"
     audit_service: "AuditService | None"
@@ -177,6 +185,7 @@ async def resolve_transcribe_and_attach_audio_input(
         max_inline_text_bytes=request.max_inline_text_bytes,
         load_audio_payload=deps.load_audio_payload,
         transcription_call_observer=deps.transcription_call_observer,
+        max_speakers=request.max_speakers,
     )
     metadata = transcription_result.to_metadata()
 
@@ -205,8 +214,28 @@ async def resolve_transcribe_and_attach_audio_input(
             max_inline_text_bytes=request.max_inline_text_bytes,
         )
 
+    diarization_message = None
+    if transcription_result.diarization and transcription_result.diarization.startswith(
+        "skipped"
+    ):
+        diarization_message = (
+            f"Step {request.step.step_order}: speaker identification was requested "
+            "but skipped; the transcription model did not provide word timestamps."
+        )
+
+    reduced_precision_message = None
+    if transcription_result.alignment in REDUCED_PRECISION_ALIGNMENTS:
+        reduced_precision_message = (
+            f"Step {request.step.step_order}: speakers were labelled per transcript "
+            f"segment ({transcription_result.alignment}) because the transcription "
+            "model gave no word timestamps; a speaker change inside a segment may be "
+            "misattributed."
+        )
+
     return AudioRuntimeResolution(
         text=transcription_result.text,
         transcription_metadata=metadata,
         near_inline_limit_message=near_limit_message,
+        diarization_skipped_message=diarization_message,
+        diarization_reduced_precision_message=reduced_precision_message,
     )

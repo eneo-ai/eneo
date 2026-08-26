@@ -8,6 +8,9 @@ from uuid import uuid4
 import pytest
 
 from eneo.files.transcriber import TranscribedAudio, Transcriber
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    AdapterTranscription,
+)
 
 
 def _file_service() -> AsyncMock:
@@ -161,7 +164,16 @@ async def test_transcribe_from_filepath_passes_language_to_adapter(
     monkeypatch, tmp_path, language
 ):
     transcriber = Transcriber(file_service=_file_service())
-    adapter = SimpleNamespace(get_text_from_file=AsyncMock(return_value="transcript"))
+    adapter = SimpleNamespace(
+        get_text_from_file=AsyncMock(
+            return_value=AdapterTranscription(
+                text="transcript",
+                words=None,
+                segments=None,
+                timestamps_degraded=False,
+            )
+        )
+    )
     transcriber._get_adapter = AsyncMock(return_value=adapter)
     wav_file = SimpleNamespace(name="converted.wav", duration=42.0)
 
@@ -180,7 +192,7 @@ async def test_transcribe_from_filepath_passes_language_to_adapter(
     # The decoded length reaches the caller with the text it paid for.
     assert result == TranscribedAudio(text="transcript", duration_seconds=42.0)
     adapter.get_text_from_file.assert_awaited_once_with(
-        wav_file, language=language, observer=None
+        wav_file, language=language, observer=None, want_words=False
     )
 
 

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import assert_never
+from typing import TYPE_CHECKING, assert_never
 from uuid import UUID
 
 from dependency_injector import providers
@@ -48,6 +48,7 @@ from eneo.flows.flow_runtime_policy import resolve_flow_runtime_policy
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
+from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
 from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from eneo.flows.runtime.flow_run_actor import (
     FlowRunActor,
@@ -56,6 +57,7 @@ from eneo.flows.runtime.flow_run_actor import (
 )
 from eneo.flows.runtime.flow_runtime_trace import FlowRunSpanContext, trace_flow_run
 from eneo.flows.runtime.flow_webhook_delivery import FlowWebhookDeliveryResult
+from eneo.flows.runtime.remote_transcription import build_remote_flow_transcriber
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
@@ -63,6 +65,10 @@ from eneo.main.request_context import clear_request_context, set_request_context
 from eneo.object_content.deployment_policy import load_upload_admission_snapshot
 from eneo.object_content.runtime import object_content_runtime
 from eneo.users.user_repo import UsersRepository
+
+if TYPE_CHECKING:
+    from eneo.files.transcriber import Transcriber
+    from eneo.flows.runtime.transcription import FlowStepTranscriber
 
 logger = get_logger(__name__)
 
@@ -337,8 +343,8 @@ async def _execute_flow_run_async_traced(
                 encryption_service=runtime_container.encryption_service(),
                 audit_service=runtime_container.audit_service(),
                 references_service=runtime_container.references_service(),
-                transcriber=runtime_container.transcriber(
-                    file_service=runtime_file_service
+                transcriber=_build_flow_transcriber(
+                    runtime_container.transcriber(file_service=runtime_file_service)
                 ),
                 config=FlowRunExecutorConfig.from_settings(
                     max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
@@ -790,3 +796,22 @@ async def deliver_flow_audit_outbox() -> dict[str, int | str]:
 async def deliver_flow_webhook_outbox() -> dict[str, int | str]:
     async with asyncio.timeout(FLOW_WEBHOOK_DELIVERY_CLAIM_TTL_SECONDS + 30):
         return await _deliver_flow_webhook_outbox()
+
+
+def _build_flow_transcriber(
+    registry_transcriber: "Transcriber",
+) -> "FlowStepTranscriber":
+    """Deployment-level engine choice for flow audio steps.
+
+    No external service: the model-registry engine. Service in ``full`` mode: it
+    replaces the engine (the flow's model stays the governance anchor). Service
+    in ``diarize`` mode: the registry engine transcribes and the service only
+    labels speakers.
+    """
+    settings = get_settings()
+    if not settings.flow_transcription_service_configured:
+        return registry_transcriber
+    remote = build_remote_flow_transcriber(settings)
+    if settings.flow_transcription_service_mode == "diarize":
+        return DiarizingFlowTranscriber(registry_transcriber, remote)
+    return remote

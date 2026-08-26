@@ -474,6 +474,14 @@ class SettingService:
             api_key_expiry_notifications=api_key_expiry_notifications,
             file_references_enabled=bool(file_reference_base_url(app_settings)),
             object_store_configured=self.object_content.object_store_configured,
+            flow_transcription_service_configured=(
+                app_settings.flow_transcription_service_configured
+            ),
+            flow_transcription_service_mode=(
+                app_settings.flow_transcription_service_mode
+                if app_settings.flow_transcription_service_configured
+                else None
+            ),
         )
 
     async def get_settings(self) -> SettingsPublic:

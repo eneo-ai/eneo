@@ -386,7 +386,7 @@ class FormFieldPublic(BaseModel):
     type: FlowFormFieldType = Field(
         description=(
             "Form control type clients should render. One of: text, number, "
-            "date, select, multiselect."
+            "date, select, multiselect, list."
         ),
     )
     label: str | None = Field(
@@ -399,7 +399,10 @@ class FormFieldPublic(BaseModel):
     )
     options: list[str] | None = Field(
         default=None,
-        description="Allowed choices for select and multiselect fields.",
+        description=(
+            "Allowed choices for select and multiselect fields. Absent for list "
+            "fields, which accept any strings."
+        ),
     )
     order: int | None = Field(
         default=None,

@@ -59,7 +59,10 @@ def test_parse_flow_step_review_policy_accepts_view_and_edit_modes() -> None:
     assert edit_policy.expires_after_seconds == FLOW_REVIEW_EXPIRY_MAX_SECONDS
 
 
-@pytest.mark.parametrize("output_mode", list(FlowOutputMode))
+@pytest.mark.parametrize(
+    "output_mode",
+    [mode for mode in FlowOutputMode if mode is not FlowOutputMode.SPEAKER_MAPPING],
+)
 def test_parse_flow_step_review_policy_allows_absent_policy_for_every_mode(
     output_mode: FlowOutputMode,
 ) -> None:
@@ -71,6 +74,25 @@ def test_parse_flow_step_review_policy_allows_absent_policy_for_every_mode(
         )
         is None
     )
+
+
+@pytest.mark.parametrize("raw_policy", [None, {"mode": "view"}])
+def test_speaker_mapping_requires_edit_review_policy(raw_policy: object) -> None:
+    # The mapping is a proposal; a person must always be able to correct it.
+    with pytest.raises(BadRequestException) as excinfo:
+        parse_flow_step_review_policy(
+            raw_policy=raw_policy,
+            output_mode=FlowOutputMode.SPEAKER_MAPPING,
+            output_type=FlowOutputType.JSON,
+        )
+    assert excinfo.value.code == FLOW_REVIEW_POLICY_INVALID
+
+    policy = parse_flow_step_review_policy(
+        raw_policy={"mode": "edit"},
+        output_mode=FlowOutputMode.SPEAKER_MAPPING,
+        output_type=FlowOutputType.JSON,
+    )
+    assert policy == FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT)
 
 
 def test_parse_flow_step_review_policy_accepts_canonical_policy_object() -> None:
@@ -205,6 +227,7 @@ def test_output_mode_outbound_delivery_predicate_classifies_every_mode() -> None
         FlowOutputMode.TRANSCRIBE_ONLY: False,
         FlowOutputMode.TEMPLATE_FILL: False,
         FlowOutputMode.RENDER_VERBATIM: False,
+        FlowOutputMode.SPEAKER_MAPPING: False,
     }
 
 

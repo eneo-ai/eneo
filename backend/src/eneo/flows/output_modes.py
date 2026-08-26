@@ -60,6 +60,28 @@ def compose_text_violation(
     return None
 
 
+def speaker_mapping_violation(
+    *,
+    step_order: int,
+    input_source: str | Enum,
+    input_type: str | Enum,
+    output_type: str | Enum,
+    output_mode: str | Enum,
+) -> str | None:
+    if _enum_value(output_mode) != "speaker_mapping":
+        return None
+    if _enum_value(input_source) != "previous_step":
+        return (
+            f"Step {step_order}: output_mode 'speaker_mapping' requires "
+            "input_source 'previous_step' (the transcript step)."
+        )
+    if _enum_value(input_type) != "text":
+        return f"Step {step_order}: output_mode 'speaker_mapping' requires input_type 'text'."
+    if _enum_value(output_type) != "json":
+        return f"Step {step_order}: output_mode 'speaker_mapping' requires output_type 'json'."
+    return None
+
+
 def text_document_pass_through_violation(
     *,
     step_order: int,

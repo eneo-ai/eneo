@@ -331,3 +331,30 @@ describe("flow step transition policy", () => {
     expect(result.review_policy).toBeNull();
   });
 });
+
+describe("applyOutputModeChange speaker_mapping", () => {
+  it("sets the whole shape and forces edit review in one patch", () => {
+    const next = applyOutputModeChange({
+      step: makeStep({ input_source: "flow_input", output_config: { citation_mode: "off" } }),
+      nextMode: "speaker_mapping",
+      runtimeInputConfig: makeRuntimeInputConfig(),
+      templateFillConfig: getTemplateFillOutputConfig(makeStep())
+    });
+    expect(next.input_source).toBe("previous_step");
+    expect(next.input_type).toBe("text");
+    expect(next.output_type).toBe("json");
+    expect(next.output_contract).toBeNull();
+    expect(next.review_policy).toEqual({ mode: "edit" });
+    expect(next.output_config).toMatchObject({
+      speaker_mapping: { participants_field: null, speaker_count_field: null }
+    });
+  });
+
+  it("leaves speaker_mapping when the output type stops being JSON", () => {
+    const next = applyOutputTypeChange({
+      step: makeStep({ output_mode: "speaker_mapping", output_type: "json" }),
+      nextType: "text"
+    });
+    expect(next.output_mode).toBe("pass_through");
+  });
+});

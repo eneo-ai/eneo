@@ -143,6 +143,7 @@ from eneo.flows.runtime.output_runtime import (
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_retrieval import RagRetrievalDeps, retrieve_rag_chunks
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
+from eneo.flows.runtime.speaker_mapping_runtime import resolve_max_speakers
 from eneo.flows.runtime.step_attempt_runtime import (
     build_generic_failure_plan,
     build_step_gate_decision,
@@ -165,6 +166,9 @@ from eneo.flows.runtime.step_handlers.compose_text import ComposeTextStepHandler
 from eneo.flows.runtime.step_handlers.http_post import HttpPostStepHandler
 from eneo.flows.runtime.step_handlers.pass_through import PassThroughStepHandler
 from eneo.flows.runtime.step_handlers.render_verbatim import RenderVerbatimStepHandler
+from eneo.flows.runtime.step_handlers.speaker_mapping import (
+    SpeakerMappingStepHandler,
+)
 from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
 from eneo.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
 from eneo.flows.runtime.step_input_resolution import (
@@ -182,6 +186,9 @@ from eneo.flows.runtime.step_result_builder import (
 )
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
+)
+from eneo.flows.runtime.transcription_runtime import (
+    persist_transcription_on_run_input,
 )
 from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableResolver
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -204,7 +211,7 @@ from eneo.spaces.space_repo import SpaceRepository
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.audit.application.audit_service import AuditService
-    from eneo.files.transcriber import Transcriber
+    from eneo.flows.runtime.transcription import FlowStepTranscriber
     from eneo.spaces.space import Space
 
 
@@ -467,7 +474,7 @@ class FlowRunExecutor:
         audit_service: AuditService | None = None,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
         references_service: ReferencesService | None = None,
-        transcriber: Transcriber | None = None,
+        transcriber: FlowStepTranscriber | None = None,
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
         config: FlowRunExecutorConfig | None = None,
@@ -508,6 +515,8 @@ class FlowRunExecutor:
         self.audit_service = audit_service
         self.references_service = references_service
         self.transcriber = transcriber
+        # Per-run diarization bound, derived from the run input once steps are known.
+        self.max_speakers_hint: int | None = None
         self.variable_resolver = FlowVariableResolver()
         self.http_request_timeout_seconds = resolved_config.http_request_timeout_seconds
         self.http_max_timeout_seconds = resolved_config.http_max_timeout_seconds
@@ -622,6 +631,7 @@ class FlowRunExecutor:
                 flow_version=version.version,
             )
             steps = published_definition.runtime_steps()
+            self.max_speakers_hint = resolve_max_speakers(steps, run.input_payload_json)
         except PublishedDefinitionChecksumMismatchError as exc:
             await self._terminalize_run(
                 run_id=run_id,
@@ -1156,7 +1166,21 @@ class FlowRunExecutor:
                 return RenderVerbatimStepHandler(
                     prepare_assistant_step=self._prepare_assistant_step
                 )
+            case FlowOutputMode.SPEAKER_MAPPING:
+                return SpeakerMappingStepHandler(
+                    preview_assistant_step=self._preview_assistant_step,
+                    activate_prepared_assistant_steps=(
+                        self._activate_prepared_assistant_steps
+                    ),
+                    activate_resolved_input_edges=self._activate_resolved_input_edges,
+                    persist_transcript=self._persist_run_transcript,
+                )
         assert_never(mode)
+
+    async def _persist_run_transcript(self, run: FlowRun, transcript: str) -> None:
+        await persist_transcription_on_run_input(
+            flow_run_repo=self.flow_run_repo, run=run, transcript=transcript
+        )
 
     def _template_fill_runtime_deps(self) -> TemplateFillRuntimeDeps:
         return TemplateFillRuntimeDeps(
@@ -2131,6 +2155,7 @@ class FlowRunExecutor:
             max_inline_text_bytes=self.max_inline_text_bytes,
             logger=logger,
             transcription_call_observer=transcription_call_observer,
+            max_speakers_hint=self.max_speakers_hint,
         )
         return await resolve_step_input_runtime(
             step=step,
