@@ -109,6 +109,11 @@ class FileIconBackfillCampaign(BaseWithTableName):
         TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
     )
     halt_reason: Mapped[str | None] = mapped_column(String(512))
+    resume_revision: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=text("0"),
+        nullable=False,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -127,6 +132,10 @@ class FileIconBackfillCampaign(BaseWithTableName):
         CheckConstraint(
             "halt_reason IS NULL OR char_length(halt_reason) <= 512",
             name="ck_file_icon_backfill_campaign_halt_reason",
+        ),
+        CheckConstraint(
+            "resume_revision >= 0",
+            name="ck_file_icon_backfill_campaign_resume_revision",
         ),
         Index(
             "uq_file_icon_backfill_campaign_singleton",
