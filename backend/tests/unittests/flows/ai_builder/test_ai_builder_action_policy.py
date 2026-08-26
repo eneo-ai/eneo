@@ -261,7 +261,7 @@ def test_commit_grade_truth_table(slot: ResolvedSlot, expected: bool) -> None:
     assert slot.is_commit_grade is expected
 
 
-def test_vague_purpose_question_precedes_terminal_output_core_gap() -> None:
+def test_vague_purpose_question_precedes_primary_input_and_terminal_output() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
         selected_discovery_question_ids=("post_processing_goal",),
@@ -269,8 +269,99 @@ def test_vague_purpose_question_precedes_terminal_output_core_gap() -> None:
 
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == (
-        "primary_runtime_input",
         "post_processing_goal",
+        "primary_runtime_input",
+        "terminal_output",
+    )
+
+
+def test_vague_purpose_question_precedes_selected_terminal_output() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "document_material_scope",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(
+            "terminal_output",
+            "post_processing_goal",
+        ),
+    )
+
+    assert policy.allowed_ask_question_targets == (
+        "post_processing_goal",
+        "terminal_output",
+    )
+
+
+def test_vague_purpose_question_precedes_structured_io_contract() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(
+            "structured_io_contract",
+            "post_processing_goal",
+        ),
+    )
+
+    assert policy.allowed_ask_question_targets == (
+        "post_processing_goal",
+        "structured_io_contract",
+    )
+
+
+def test_commit_grade_purpose_keeps_existing_core_question_order() -> None:
+    state = _state_with_resolved_slots("post_processing_goal")
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=("post_processing_goal",),
+    )
+
+    assert policy.allowed_ask_question_targets == (
+        "primary_runtime_input",
+        "terminal_output",
+    )
+
+
+def test_confidently_inferred_purpose_skipped_by_discovery_keeps_core_order() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        source="heuristic",
+        confidence="high",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_ask_question_targets == (
+        "primary_runtime_input",
+        "terminal_output",
+    )
+
+
+def test_blocking_discovery_question_still_precedes_vague_purpose() -> None:
+    policy = build_planner_action_policy(
+        session_state=PlanningState.empty(),
+        selected_discovery_question_ids=(
+            "flow_input_architecture",
+            "post_processing_goal",
+        ),
+    )
+
+    assert policy.allowed_ask_question_targets == (
+        "flow_input_architecture",
+        "post_processing_goal",
+        "primary_runtime_input",
         "terminal_output",
     )
 
@@ -341,7 +432,7 @@ def test_policy_keeps_selected_comparison_question_askable() -> None:
     assert policy.allowed_ask_question_targets == ("comparison_scope",)
 
 
-def test_policy_prioritizes_missing_core_without_reordering_discovery() -> None:
+def test_policy_keeps_earlier_discovery_ahead_of_purpose_first_repositioning() -> None:
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
         selected_discovery_question_ids=(
@@ -351,10 +442,10 @@ def test_policy_prioritizes_missing_core_without_reordering_discovery() -> None:
     )
 
     assert policy.allowed_ask_question_targets == (
-        "primary_runtime_input",
-        "terminal_output",
         "runtime_metadata_fields",
         "post_processing_goal",
+        "primary_runtime_input",
+        "terminal_output",
     )
 
 

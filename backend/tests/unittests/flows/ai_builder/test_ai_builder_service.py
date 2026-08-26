@@ -1755,7 +1755,7 @@ class TestSendMessageToolCall:
         )
 
     @pytest.mark.anyio
-    async def test_backend_discovery_prioritizes_unresolved_core_input_after_partial_classification(
+    async def test_backend_discovery_prioritizes_unresolved_purpose_after_partial_classification(
         self,
     ):
         user = _make_user()
@@ -1836,7 +1836,7 @@ class TestSendMessageToolCall:
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
         assert len(question_events) == 1
         assert json.loads(question_events[0]["data"])["question_id"] == (
-            "primary_runtime_input"
+            "post_processing_goal"
         )
 
     @pytest.mark.anyio
@@ -2566,6 +2566,7 @@ class TestSendMessageStructuredQuestion:
         assert len(question_events) == 1
         data = json.loads(question_events[0]["data"])
         assert data["question_id"] in {
+            "post_processing_goal",
             "primary_runtime_input",
             "document_material_scope",
             "terminal_output",

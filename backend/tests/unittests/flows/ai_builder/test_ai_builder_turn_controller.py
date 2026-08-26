@@ -246,6 +246,18 @@ def test_ask_question_carries_the_rest_of_the_queue_it_was_taken_from() -> None:
     assert decision.planned_remaining == 2
 
 
+def test_unresolved_purpose_is_asked_before_primary_input() -> None:
+    decision = _decision(
+        state=PlanningState.empty(),
+        ui_language="en",
+        selected_discovery_question_ids=("post_processing_goal",),
+    )
+
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "post_processing_goal"
+    assert decision.planned_remaining == 2
+
+
 @pytest.mark.parametrize(
     "runtime_metadata_state",
     ["basic_runtime_metadata", "detailed_runtime_metadata"],
