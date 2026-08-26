@@ -3,7 +3,8 @@ import {
   SHAREPOINT_FIXTURE_QUERY_PARAMETER,
   assertSharePointFixtureEnvelope,
   isSharePointFixtureModeRequested,
-  parseSharePointFixtureScenario
+  parseSharePointFixtureScenario,
+  withSharePointFixtureIntegration
 } from "./fixtureMode";
 
 describe("SharePoint fixture mode", () => {
@@ -31,6 +32,50 @@ describe("SharePoint fixture mode", () => {
 
     expect(isSharePointFixtureModeRequested(params)).toBe(true);
     expect(parseSharePointFixtureScenario(params)).toBeNull();
+  });
+
+  it.each(["user_oauth", "tenant_app"] as const)(
+    "offers a connected fixture integration for %s spaces without Microsoft configuration",
+    (authType) => {
+      const params = new URLSearchParams({
+        [SHAREPOINT_FIXTURE_QUERY_PARAMETER]: "representative"
+      });
+
+      const integrations = withSharePointFixtureIntegration([], params, authType);
+
+      expect(integrations).toEqual([
+        expect.objectContaining({
+          name: "SharePoint test data",
+          integration_type: "sharepoint",
+          connected: true,
+          auth_type: authType,
+          tenant_app_configured: false
+        })
+      ]);
+    }
+  );
+
+  it("does not expose or duplicate the fixture integration outside its explicit request", () => {
+    const connectedSharePoint = {
+      id: "00000000-0000-4000-8000-000000000010",
+      name: "SharePoint",
+      description: "Connected SharePoint",
+      integration_type: "sharepoint" as const,
+      tenant_integration_id: "00000000-0000-4000-8000-000000000011",
+      connected: true,
+      auth_type: "user_oauth"
+    };
+
+    expect(
+      withSharePointFixtureIntegration([connectedSharePoint], new URLSearchParams(), "user_oauth")
+    ).toEqual([connectedSharePoint]);
+    expect(
+      withSharePointFixtureIntegration(
+        [connectedSharePoint],
+        new URLSearchParams({ [SHAREPOINT_FIXTURE_QUERY_PARAMETER]: "empty" }),
+        "user_oauth"
+      )
+    ).toEqual([connectedSharePoint]);
   });
 
   it("rejects responses that are not explicitly marked as fixture data", () => {

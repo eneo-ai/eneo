@@ -204,6 +204,11 @@ def _set_app_version():
         return "DEV"
 
 
+_SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
+    {"development", "local", "dev", "test"}
+)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -217,6 +222,15 @@ class Settings(BaseSettings):
     # environment checks provide a second guard so fixture data cannot be
     # enabled in staging or production by setting this flag alone.
     sharepoint_fixture_mode_enabled: bool = False
+
+    @property
+    def sharepoint_fixture_mode_active(self) -> bool:
+        """Whether every safety guard for SharePoint fixture data is active."""
+        return (
+            self.sharepoint_fixture_mode_enabled
+            and self.environment.strip().lower()
+            in _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS
+        )
 
     # OpenAPI-only mode flag
     openapi_only_mode: bool = False

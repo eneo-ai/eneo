@@ -12,7 +12,6 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import NotFoundException
 from eneo.server.protocol import responses
 
-_ALLOWED_ENVIRONMENTS = frozenset({"development", "local", "dev", "test"})
 _fixture_service = SharePointFixtureService()
 
 
@@ -20,11 +19,7 @@ def require_sharepoint_fixture_mode(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
     """Hide the fixture API unless both explicit safety guards pass."""
-    environment = settings.environment.strip().lower()
-    if (
-        not settings.sharepoint_fixture_mode_enabled
-        or environment not in _ALLOWED_ENVIRONMENTS
-    ):
+    if not settings.sharepoint_fixture_mode_active:
         raise NotFoundException()
 
 

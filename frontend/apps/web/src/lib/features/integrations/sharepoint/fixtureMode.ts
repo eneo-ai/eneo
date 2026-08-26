@@ -1,4 +1,4 @@
-import type { Eneo, components } from "@eneo/eneo-js";
+import type { Eneo, UserIntegration, components } from "@eneo/eneo-js";
 
 export type SharePointFixtureScenario = components["schemas"]["SharePointFixtureScenario"];
 export type SharePointFixturePreviewResponse =
@@ -6,6 +6,11 @@ export type SharePointFixturePreviewResponse =
 export type SharePointFixtureTreeResponse = components["schemas"]["SharePointFixtureTreeResponse"];
 
 export const SHAREPOINT_FIXTURE_QUERY_PARAMETER = "sharepoint_fixture";
+
+const SHAREPOINT_FIXTURE_INTEGRATION_ID = "00000000-0000-4000-8000-000000000001";
+const SHAREPOINT_FIXTURE_TENANT_INTEGRATION_ID = "00000000-0000-4000-8000-000000000002";
+
+export type SharePointFixtureAuthType = "user_oauth" | "tenant_app";
 
 export function isSharePointFixtureModeRequested(
   searchParams: Pick<URLSearchParams, "has">
@@ -25,6 +30,46 @@ export function parseSharePointFixtureScenario(
     default:
       return null;
   }
+}
+
+export function createSharePointFixtureIntegration(
+  authType: SharePointFixtureAuthType
+): UserIntegration {
+  return {
+    id: SHAREPOINT_FIXTURE_INTEGRATION_ID,
+    name: "SharePoint test data",
+    description: "Development-only SharePoint fixture data",
+    integration_type: "sharepoint",
+    tenant_integration_id: SHAREPOINT_FIXTURE_TENANT_INTEGRATION_ID,
+    connected: true,
+    auth_type: authType,
+    tenant_app_id: null,
+    tenant_app_configured: false
+  };
+}
+
+/**
+ * Make the fixture picker reachable even when the tenant has no Microsoft
+ * provider configured. The returned integration only exists in page data and
+ * fixture mode prevents it from reaching the real import/Graph paths.
+ */
+export function withSharePointFixtureIntegration(
+  integrations: readonly UserIntegration[],
+  searchParams: Pick<URLSearchParams, "has">,
+  authType: SharePointFixtureAuthType
+): UserIntegration[] {
+  const availableIntegrations = [...integrations];
+  if (!isSharePointFixtureModeRequested(searchParams)) return availableIntegrations;
+
+  const hasConnectedSharePointIntegration = availableIntegrations.some(
+    (integration) =>
+      integration.integration_type === "sharepoint" &&
+      integration.connected &&
+      integration.auth_type === authType
+  );
+  if (hasConnectedSharePointIntegration) return availableIntegrations;
+
+  return [...availableIntegrations, createSharePointFixtureIntegration(authType)];
 }
 
 export function assertSharePointFixtureEnvelope(

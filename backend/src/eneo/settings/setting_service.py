@@ -391,6 +391,9 @@ class SettingService:
             api_key_expiry_notifications=api_key_expiry_notifications,
             file_references_enabled=bool(file_reference_base_url(app_settings)),
             object_store_configured=self.object_content.object_store_configured,
+            sharepoint_fixture_mode_available=(
+                app_settings.sharepoint_fixture_mode_active
+            ),
         )
 
     async def get_settings(self) -> SettingsPublic:

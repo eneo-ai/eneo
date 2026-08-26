@@ -17296,6 +17296,11 @@ export interface components {
        * @default false
        */
       object_store_configured?: boolean;
+      /**
+       * Sharepoint Fixture Mode Available
+       * @default false
+       */
+      sharepoint_fixture_mode_available?: boolean;
     };
     /** SharePointFixturePreviewResponse */
     SharePointFixturePreviewResponse: {

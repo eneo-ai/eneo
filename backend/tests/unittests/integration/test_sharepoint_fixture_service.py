@@ -33,15 +33,16 @@ def _walk(nodes: tuple[FixtureTreeNode, ...]) -> Iterator[FixtureTreeNode]:
 
 class TestSharePointFixtureSafety:
     def test_fixture_mode_requires_explicit_flag_and_safe_environment(self):
-        require_sharepoint_fixture_mode(
-            _settings(environment="development", enabled=True)
-        )
+        active_settings = _settings(environment="development", enabled=True)
+        assert active_settings.sharepoint_fixture_mode_active is True
+        require_sharepoint_fixture_mode(active_settings)
 
         for settings in (
             _settings(environment="development", enabled=False),
             _settings(environment="production", enabled=True),
             _settings(environment="staging", enabled=True),
         ):
+            assert settings.sharepoint_fixture_mode_active is False
             with pytest.raises(NotFoundException):
                 require_sharepoint_fixture_mode(settings)
 
