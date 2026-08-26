@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_canonicalization import (
     canonical_question_id,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    metadata_with_focused_slot_classification,
     requirements_summary_to_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery import (
@@ -22,10 +23,16 @@ from eneo.flows.ai_builder.ai_builder_discovery import (
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_discovery_defaults,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
+    FocusedSlotClassificationRuntime,
+    classify_question_slot_once,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
+    AIBuilderKnownProviderRejectionException,
+    AIBuilderProviderOutcomeUnknownException,
     build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
@@ -84,6 +91,7 @@ logger = get_logger(__name__)
 
 ServerDecisionKind = Literal[
     "ask_question",
+    "continue_proposal",
     "commit_architecture",
     "revise_architecture",
     "confirm_requirements",
@@ -116,6 +124,7 @@ class ServerDecisionDispatchRequest:
     schema_candidates: tuple[DeclaredSchemaCandidate, ...]
     schema_direction_pending: bool
     discovery_assumptions: tuple[str, ...] = ()
+    focused_classification_runtime: FocusedSlotClassificationRuntime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +138,7 @@ class ServerDecisionDispatchResult:
 @dataclass(frozen=True, slots=True)
 class ServerDecisionProposalContinuation:
     planning_state: PlanningState
+    new_messages_start: int
 
 
 async def dispatch_server_decision(
@@ -180,6 +190,81 @@ async def _dispatch_question(
     decision: AskCanonicalQuestion,
 ) -> ServerDecisionDispatchResult:
     question_id = decision.slot_name
+    runtime = request.focused_classification_runtime
+    if runtime is not None:
+        try:
+            focused = await classify_question_slot_once(
+                slot_name=question_id,
+                conversation=request.conversation,
+                flow=request.flow,
+                state=request.planning_state,
+                attachment_context=request.attachment_context,
+                ui_language=request.ui_language,
+                tenant_id=request.turn.tenant_id,
+                usage_tracker=request.telemetry.usage_tracker,
+                runtime=runtime,
+            )
+        except (
+            AIBuilderKnownProviderRejectionException,
+            AIBuilderProviderOutcomeUnknownException,
+        ):
+            focused = None
+        if focused is not None and focused.metadata is not None:
+            current_user_index, current_user_message = next(
+                (index, message)
+                for index, message in reversed(list(enumerate(request.conversation)))
+                if message.role == "user"
+            )
+            current_user_message.metadata = metadata_with_focused_slot_classification(
+                current_user_message.metadata,
+                focused.metadata,
+            )
+            request = replace(
+                request,
+                new_messages_start=min(
+                    request.new_messages_start,
+                    current_user_index,
+                ),
+            )
+        if focused is not None and focused.resolved:
+            turn_control = resolve_turn_control(
+                session_state=request.planning_state,
+                selected_discovery_question_ids=(
+                    request.selected_discovery_question_ids
+                ),
+                requirements_disclosure=build_requirements_disclosure(
+                    request.planning_state,
+                    ui_language=request.ui_language,
+                    discovery_assumptions=request.discovery_assumptions,
+                    is_edit_mode=request.flow is not None,
+                ),
+                confirmed_requirements_version=(request.confirmed_requirements_version),
+                ui_language=request.ui_language,
+                attachment_context=request.attachment_context,
+                schema_candidates=request.schema_candidates,
+                schema_direction_pending=request.schema_direction_pending,
+                requirements_confirmation_required=(
+                    request.requirements_confirmation_required
+                ),
+                is_edit_mode=request.flow is not None,
+            )
+            next_decision = turn_control.decision
+            if isinstance(next_decision, GenerateProposal):
+                return ServerDecisionDispatchResult(
+                    action_kind="continue_proposal",
+                    events=(),
+                    new_planning_state_version=(
+                        request.turn.base_planning_state_version
+                    ),
+                    proposal_continuation=ServerDecisionProposalContinuation(
+                        planning_state=request.planning_state,
+                        new_messages_start=request.new_messages_start,
+                    ),
+                )
+            return await dispatch_server_decision(
+                replace(request, decision=next_decision)
+            )
+
     followup = decision.question or build_registry_question_followup(
         question_id,
         request.conversation,
@@ -438,6 +523,9 @@ async def _dispatch_architecture_commit(
                     schema_candidates=request.schema_candidates,
                     schema_direction_pending=request.schema_direction_pending,
                     discovery_assumptions=request.discovery_assumptions,
+                    focused_classification_runtime=(
+                        request.focused_classification_runtime
+                    ),
                 )
             )
             events.extend(chained.events)
@@ -449,6 +537,7 @@ async def _dispatch_architecture_commit(
                 new_planning_state_version=new_version,
                 proposal_continuation=ServerDecisionProposalContinuation(
                     planning_state=session_state,
+                    new_messages_start=len(request.conversation),
                 ),
             )
         case CommitArchitecture() | ReviseArchitecture():

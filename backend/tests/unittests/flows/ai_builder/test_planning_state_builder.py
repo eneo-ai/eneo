@@ -692,6 +692,35 @@ class TestArchitectureCommitPreservation:
         assert rebuilt.architecture_commit is None
 
 
+class TestFocusedClassificationReplay:
+    def test_carries_attempt_but_not_model_evidence_across_rebuild(self) -> None:
+        persisted = _state()
+        persisted.focused_classification_attempted_slots = ["primary_runtime_input"]
+        persisted.resolved_slots["primary_runtime_input"] = ResolvedSlot(
+            name="primary_runtime_input",
+            value="documents",
+            source="model",
+            evidence=[
+                "model:primary_runtime_input:" + "a" * 64,
+                "quote:user_message:user-focused:The user uploads a CV.",
+            ],
+            confidence="high",
+            evidence_level="explicit",
+        )
+        rebuilt = _state()
+
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            PlanningState.model_validate_json(persisted.model_dump_json()),
+            attached_file_ids=set(),
+        )
+
+        assert rebuilt.focused_classification_attempted_slots == [
+            "primary_runtime_input"
+        ]
+        assert rebuilt.commit_grade_slot_value("primary_runtime_input") is None
+
+
 class TestAttachmentDerivedSlotPreservation:
     """Slots resolved from file bytes cannot be rebuilt from conversation.
 

@@ -5,9 +5,12 @@ from collections.abc import Callable, Mapping
 from typing import Iterable, Literal, cast
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    FOCUSED_SLOT_CLASSIFICATIONS_METADATA_KEY,
     SLOT_CLASSIFICATION_METADATA_KEY,
     ClassifierRetentionIdentity,
+    focused_slot_classifications_from_metadata,
     metadata_has_requirements_summary,
+    metadata_with_focused_slot_classification,
     metadata_with_slot_classification,
     named_content_fields_edit_from_metadata,
     question_interaction_id_from_metadata,
@@ -312,22 +315,34 @@ def _retain_latest_classifier_semantics(
     *,
     compaction_limits: frozenset[Literal["count", "bytes"]],
 ) -> list[ConversationMessage]:
-    selected_by_index: dict[int, frozenset[ClassifierRetentionIdentity]] = {}
+    selected_by_position: dict[
+        tuple[int, int], frozenset[ClassifierRetentionIdentity]
+    ] = {}
     seen: set[ClassifierRetentionIdentity] = set()
     for index in range(len(conversation) - 1, -1, -1):
-        classification = slot_classification_from_metadata(conversation[index].metadata)
-        if classification is None:
-            continue
-        selected = classification.effective_retention_identities() - seen
-        if selected:
-            selected_by_index[index] = frozenset(selected)
-            seen.update(selected)
+        classifications = (
+            slot_classification_from_metadata(conversation[index].metadata),
+            *focused_slot_classifications_from_metadata(conversation[index].metadata),
+        )
+        for classification_index in range(len(classifications) - 1, -1, -1):
+            classification = classifications[classification_index]
+            if classification is None:
+                continue
+            selected = classification.effective_retention_identities() - seen
+            if selected:
+                selected_by_position[(index, classification_index)] = frozenset(
+                    selected
+                )
+                seen.update(selected)
 
-    latest_selected_index = max(selected_by_index, default=None)
+    latest_selected_position = max(selected_by_position, default=None)
     retained: list[ConversationMessage] = []
     for index, message in enumerate(conversation):
-        classification = slot_classification_from_metadata(message.metadata)
-        if classification is None:
+        classifications = (
+            slot_classification_from_metadata(message.metadata),
+            *focused_slot_classifications_from_metadata(message.metadata),
+        )
+        if not any(classification is not None for classification in classifications):
             retained.append(message)
             continue
         metadata = (
@@ -336,17 +351,31 @@ def _retain_latest_classifier_semantics(
             else {}
         )
         metadata.pop(SLOT_CLASSIFICATION_METADATA_KEY, None)
-        selected = selected_by_index.get(index)
-        if selected:
+        metadata.pop(FOCUSED_SLOT_CLASSIFICATIONS_METADATA_KEY, None)
+        for classification_index, classification in enumerate(classifications):
+            if classification is None:
+                continue
+            position = (index, classification_index)
+            selected = selected_by_position.get(position)
+            if not selected:
+                continue
             projected = classification.retain_effective_semantics(
                 selected,
                 compaction_limits=(
-                    compaction_limits if index == latest_selected_index else frozenset()
+                    compaction_limits
+                    if position == latest_selected_position
+                    else frozenset()
                 ),
             )
-            metadata = (
-                metadata_with_slot_classification(metadata, projected) or metadata
-            )
+            if classification_index == 0:
+                metadata = (
+                    metadata_with_slot_classification(metadata, projected) or metadata
+                )
+            else:
+                metadata = (
+                    metadata_with_focused_slot_classification(metadata, projected)
+                    or metadata
+                )
         retained.append(message.model_copy(update={"metadata": metadata or None}))
     return retained
 
@@ -357,9 +386,14 @@ def _classifier_semantic_indices(
     return [
         index
         for index, message in enumerate(conversation)
-        if (classification := slot_classification_from_metadata(message.metadata))
-        is not None
-        and classification.effective_retention_identities()
+        if any(
+            classification.effective_retention_identities()
+            for classification in (
+                slot_classification_from_metadata(message.metadata),
+                *focused_slot_classifications_from_metadata(message.metadata),
+            )
+            if classification is not None
+        )
     ]
 
 

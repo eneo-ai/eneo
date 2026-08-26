@@ -125,6 +125,22 @@ class DiscoveryRuntimeResult:
     schema_direction_pending: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class FocusedSlotClassificationRuntime:
+    litellm_client: Any
+    completion_model_route: ResolvedCompletionModelRoute
+    max_input_tokens: int
+    max_output_tokens: int
+    budget_policy: AIBuilderBudgetPolicy
+    before_provider_call: Callable[[], Awaitable[None]] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FocusedSlotClassificationOutcome:
+    resolved: bool
+    metadata: SlotClassificationMetadata | None = None
+
+
 def _apply_example_output_schema_inference(
     state: PlanningState,
     attachment_context: AIBuilderAttachmentContext | None,
@@ -321,6 +337,116 @@ def build_slot_classification_input(
     return SlotClassificationInput(
         sources=tuple(sources),
         current_user_message_id=current_user_message_id,
+    )
+
+
+async def classify_question_slot_once(
+    *,
+    slot_name: str,
+    conversation: list[ConversationMessage],
+    flow: Flow | None,
+    state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+    ui_language: str | None,
+    tenant_id: UUID,
+    usage_tracker: ProposalTurnTelemetry,
+    runtime: FocusedSlotClassificationRuntime,
+) -> FocusedSlotClassificationOutcome:
+    if slot_name in state.focused_classification_attempted_slots:
+        return FocusedSlotClassificationOutcome(resolved=False)
+
+    allowed_values = llm_resolvable_slot_values_for_state(state)
+    if slot_name not in allowed_values:
+        return FocusedSlotClassificationOutcome(resolved=False)
+    if slot_name in slot_names_blocked_by_explicit_uncertainty(
+        conversation,
+        flow=flow,
+    ):
+        return FocusedSlotClassificationOutcome(resolved=False)
+
+    classification_input = build_slot_classification_input(
+        conversation,
+        attachment_context,
+    )
+    if not classification_input.sources:
+        return FocusedSlotClassificationOutcome(resolved=False)
+    state.focused_classification_attempted_slots.append(slot_name)
+    focused_values = {slot_name: allowed_values[slot_name]}
+    admitted_input = admit_slot_classification_input(
+        classification_input=classification_input,
+        attachment_context=attachment_context,
+        allowed_slot_values=focused_values,
+        schema_candidates=(),
+        active_checkpoint_producers=(),
+        ui_language=ui_language,
+        bias=None,
+        focused_slot_name=slot_name,
+        litellm_model=runtime.completion_model_route.litellm_model,
+        max_input_tokens=runtime.max_input_tokens,
+        max_output_tokens=runtime.max_output_tokens,
+        budget_policy=runtime.budget_policy,
+    )
+    provider = slot_classification_provider_identity(
+        provider_type=runtime.completion_model_route.provider_type,
+        litellm_kwargs=runtime.completion_model_route.litellm_kwargs,
+    )
+    prompt_hash = slot_classification_prompt_hash(
+        classification_input=admitted_input,
+        ui_language=ui_language,
+        allowed_slot_values=focused_values,
+        litellm_model=runtime.completion_model_route.litellm_model,
+        provider=provider,
+        supported_model_kwargs=runtime.completion_model_route.supported_model_kwargs,
+        focused_slot_name=slot_name,
+        max_input_tokens=runtime.max_input_tokens,
+        max_output_tokens=runtime.max_output_tokens,
+        safety_buffer_tokens=runtime.budget_policy.conversation_safety_buffer_tokens,
+    )
+    attempt = await classify_slots(
+        litellm_client=runtime.litellm_client,
+        completion_model_route=runtime.completion_model_route,
+        classification_input=admitted_input,
+        allowed_slot_values=focused_values,
+        tenant_id=tenant_id,
+        ui_language=ui_language,
+        focused_slot_name=slot_name,
+        usage_tracker=usage_tracker,
+        before_provider_call=runtime.before_provider_call,
+        max_input_tokens=runtime.max_input_tokens,
+        max_output_tokens=runtime.max_output_tokens,
+        budget_policy=runtime.budget_policy,
+    )
+    if attempt.outcome != "resolved":
+        return FocusedSlotClassificationOutcome(resolved=False)
+
+    result = attempt.result
+    assert result is not None
+    focused_result = SlotClassificationResult(
+        slots=tuple(slot for slot in result.slots if slot.slot_name == slot_name),
+        cached=result.cached,
+    )
+    freeform_text = aggregate_unprompted_user_text(conversation)
+    merge_llm_resolved_slots(
+        state,
+        focused_result,
+        prompt_hash=prompt_hash,
+        freeform_text=freeform_text,
+    )
+    resolve_docx_mode_from_template_evidence(state)
+    apply_policy_defaults_from_resolved_slots(
+        state,
+        freeform_text=freeform_text,
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=focused_result),
+        prompt_hash=prompt_hash,
+        classification_input=admitted_input,
+        model=runtime.completion_model_route.litellm_model,
+        provider=provider,
+    )
+    return FocusedSlotClassificationOutcome(
+        resolved=state.commit_grade_slot_value(slot_name) is not None,
+        metadata=metadata,
     )
 
 

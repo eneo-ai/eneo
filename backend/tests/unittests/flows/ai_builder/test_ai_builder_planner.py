@@ -2766,7 +2766,8 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
             events=(build_status_event(AIBuilderStatus.ARCHITECTURE_REVISED),),
             new_planning_state_version=9,
             proposal_continuation=ServerDecisionProposalContinuation(
-                planning_state=continuation_state
+                planning_state=continuation_state,
+                new_messages_start=0,
             ),
         )
 
@@ -2793,7 +2794,7 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
     assert [event["event"] for event in events] == ["status", "text", "done"]
     assert json.loads(events[0]["data"])["status"] == "architecture_revised"
     assert events[1]["data"] == '{"text":"proposal result"}'
-    assert captured["new_messages_start"] == 1
+    assert captured["new_messages_start"] == 0
     message_groups = cast(tuple[object, ...], captured["message_groups"])
     current_turn_groups = [
         group for group in message_groups if getattr(group, "kind") == "current_turn"
@@ -2834,7 +2835,8 @@ async def test_send_message_server_continuation_commits_the_exact_proposal_error
             events=(build_status_event(AIBuilderStatus.ARCHITECTURE_REVISED),),
             new_planning_state_version=9,
             proposal_continuation=ServerDecisionProposalContinuation(
-                planning_state=continuation_state
+                planning_state=continuation_state,
+                new_messages_start=1,
             ),
         )
 

@@ -53,6 +53,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     FlowInputFieldIntent,
     fold_named_result_location,
 )
+from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
+    LLM_RESOLVABLE_SLOT_NAMES,
+)
 from eneo.flows.enums import (
     FlowAuthoringInputType,
     FlowAuthoringOutputMode,
@@ -63,7 +66,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
 
 PLANNER_CONTRACT_VERSION: int = 1
-BUILDER_SCHEMA_VERSION: int = 21
+BUILDER_SCHEMA_VERSION: int = 22
 # One state can retain two independently assigned 128-KiB schemas. The persisted
 # envelope leaves the other half for provenance, file roles, slots, and future
 # state growth without coupling the per-schema ceiling to the state ceiling.
@@ -913,6 +916,10 @@ class PlanningState(_PlanningModel):
     resolved_slots: dict[str, ResolvedSlot] = Field(
         default_factory=dict[str, ResolvedSlot]
     )
+    focused_classification_attempted_slots: list[str] = Field(
+        default_factory=list[str],
+        max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
+    )
     file_roles: list[FileRoleEvidence] = Field(default_factory=list[FileRoleEvidence])
     checkpoint_intents: list[CheckpointIntent] = Field(
         default_factory=list[CheckpointIntent]
@@ -930,6 +937,18 @@ class PlanningState(_PlanningModel):
     )
     architecture_commit: ArchitectureCommit | None = None
     mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)
+
+    @field_validator("focused_classification_attempted_slots")
+    @classmethod
+    def validate_focused_classification_attempted_slots(
+        cls,
+        slot_names: list[str],
+    ) -> list[str]:
+        if len(slot_names) != len(set(slot_names)):
+            raise ValueError("focused classification attempts must be unique")
+        if not set(slot_names) <= LLM_RESOLVABLE_SLOT_NAMES:
+            raise ValueError("focused classification attempts require classifier slots")
+        return slot_names
 
     def commit_grade_slot_value(self, slot_name: str) -> str | None:
         """The slot's value when it can drive irreversible planner decisions.

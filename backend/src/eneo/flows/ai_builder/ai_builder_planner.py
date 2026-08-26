@@ -22,6 +22,9 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     requirements_confirmation_from_question_answer,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
+    FocusedSlotClassificationRuntime,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
@@ -546,6 +549,16 @@ class AIBuilderPlanner:
                                 discovery_assumptions=(
                                     planner_turn_request.discovery_analysis.assumptions
                                 ),
+                                focused_classification_runtime=(
+                                    FocusedSlotClassificationRuntime(
+                                        litellm_client=self.litellm_client,
+                                        completion_model_route=completion_model_route,
+                                        max_input_tokens=max_input_tokens,
+                                        max_output_tokens=max_output_tokens,
+                                        budget_policy=budget_policy,
+                                        before_provider_call=mark_provider_work_started,
+                                    )
+                                ),
                             )
                         )
                     except PlanningStatePayloadTooLargeError as error:
@@ -611,7 +624,9 @@ class AIBuilderPlanner:
                                 async for event in self._stream_proposal_events(
                                     turn=continuation_turn,
                                     conversation=conversation,
-                                    new_messages_start=len(conversation),
+                                    new_messages_start=(
+                                        dispatch_result.proposal_continuation.new_messages_start
+                                    ),
                                     proposal_request=proposal_request,
                                     completion_model_route=completion_model_route,
                                     request_id=request_id,

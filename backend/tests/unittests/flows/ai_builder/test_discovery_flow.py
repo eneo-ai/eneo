@@ -3716,7 +3716,7 @@ class TestPlannerDiscoveryQuestionDispatch:
             events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
-        assert planner.litellm_client.acompletion.await_count == 1
+        assert planner.litellm_client.acompletion.await_count == 2
         repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio

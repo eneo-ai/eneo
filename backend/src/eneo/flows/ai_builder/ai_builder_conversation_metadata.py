@@ -108,6 +108,7 @@ EDIT_CONTEXT_METADATA_KEY = "edit_context"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
+FOCUSED_SLOT_CLASSIFICATIONS_METADATA_KEY = "focused_slot_classifications"
 NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY = "named_content_fields_edit"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
 
@@ -1800,6 +1801,34 @@ def slot_classification_from_metadata(
         return None
 
 
+def focused_slot_classifications_from_metadata(
+    metadata: object,
+) -> tuple[SlotClassificationMetadata, ...]:
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return ()
+    raw_classifications = metadata_map.get(FOCUSED_SLOT_CLASSIFICATIONS_METADATA_KEY)
+    if not isinstance(raw_classifications, list):
+        return ()
+    classifications: list[SlotClassificationMetadata] = []
+    for raw_classification in cast(list[object], raw_classifications)[
+        : len(LLM_RESOLVABLE_SLOT_NAMES)
+    ]:
+        classification = _mapping_value(raw_classification)
+        if classification is None:
+            continue
+        try:
+            classifications.append(
+                SlotClassificationMetadata.model_validate(classification)
+            )
+        except ValidationError as error:
+            _warn_invalid_persisted_metadata(
+                FOCUSED_SLOT_CLASSIFICATIONS_METADATA_KEY,
+                error,
+            )
+    return tuple(classifications)
+
+
 def metadata_with_slot_classification(
     metadata: FlowPersistedJsonObject | None,
     classification: SlotClassificationMetadata | None,
@@ -1809,6 +1838,22 @@ def metadata_with_slot_classification(
     return {
         **(metadata or {}),
         **slot_classification_to_metadata(classification),
+    }
+
+
+def metadata_with_focused_slot_classification(
+    metadata: FlowPersistedJsonObject | None,
+    classification: SlotClassificationMetadata | None,
+) -> FlowPersistedJsonObject | None:
+    if classification is None:
+        return metadata
+    existing = focused_slot_classifications_from_metadata(metadata)
+    return {
+        **(metadata or {}),
+        FOCUSED_SLOT_CLASSIFICATIONS_METADATA_KEY: [
+            item.model_dump(mode="json", exclude_none=True)
+            for item in (*existing, classification)
+        ][: len(LLM_RESOLVABLE_SLOT_NAMES)],
     }
 
 

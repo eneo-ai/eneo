@@ -128,6 +128,7 @@ async def classify_slots(
     tenant_id: UUID,
     ui_language: str | None = None,
     bias: SlotClassificationBias | None = None,
+    focused_slot_name: str | None = None,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     max_input_tokens: int,
@@ -139,6 +140,8 @@ async def classify_slots(
     if max_output_tokens < 1:
         raise ValueError("Slot classification max output tokens must be positive")
     slot_values = normalize_slot_classification_values(allowed_slot_values)
+    if focused_slot_name is not None and tuple(slot_values) != (focused_slot_name,):
+        raise ValueError("Focused slot classification requires exactly its target slot")
     if not slot_classification_input_is_valid(classification_input):
         raise ValueError("Slot classification input must contain unique, valid sources")
     schema_candidate_fingerprints = tuple(
@@ -157,6 +160,7 @@ async def classify_slots(
         active_checkpoint_producers=active_checkpoint_producers,
         ui_language=ui_language,
         bias=bias,
+        focused_slot_name=focused_slot_name,
     )
     response_format = _slot_classification_response_format(
         slot_values,
@@ -172,11 +176,14 @@ async def classify_slots(
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
         bias=bias,
+        focused_slot_name=focused_slot_name,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
     )
-    cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
+    cached = (
+        _SLOT_CLASSIFICATION_CACHE.get(cache_key) if focused_slot_name is None else None
+    )
     if cached is not None:
         logger.info(
             "AI Builder slot classification cache hit",
@@ -271,7 +278,8 @@ async def classify_slots(
     if result is None:
         return SlotClassificationAttempt(outcome="parse_failed")
 
-    _remember_cache(cache_key, result)
+    if focused_slot_name is None:
+        _remember_cache(cache_key, result)
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     logger.info(
         "AI Builder slot classification completed",
@@ -341,6 +349,7 @@ def admit_slot_classification_input(
     active_checkpoint_producers: tuple[CheckpointProducerKind, ...],
     ui_language: str | None,
     bias: SlotClassificationBias | None,
+    focused_slot_name: str | None = None,
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
@@ -367,6 +376,7 @@ def admit_slot_classification_input(
                 active_checkpoint_producers=active_checkpoint_producers,
                 ui_language=ui_language,
                 bias=bias,
+                focused_slot_name=focused_slot_name,
             ),
             response_format=response_format,
             litellm_model=litellm_model,
@@ -587,6 +597,7 @@ def slot_classification_prompt_hash(
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     bias: SlotClassificationBias | None = None,
+    focused_slot_name: str | None = None,
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
     safety_buffer_tokens: int = 0,
@@ -606,6 +617,7 @@ def slot_classification_prompt_hash(
                 )
             ),
             bias=bias,
+            focused_slot_name=focused_slot_name,
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             safety_buffer_tokens=safety_buffer_tokens,
@@ -686,6 +698,7 @@ def _build_slot_classification_prompt(
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     bias: SlotClassificationBias | None = None,
+    focused_slot_name: str | None = None,
 ) -> list[dict[str, str]]:
     dimension_lines = [
         f"- {slot_name}: {', '.join(sorted(values))}"
@@ -879,8 +892,17 @@ def _build_slot_classification_prompt(
         "If still ambiguous, use value `unknown` with confidence `low` and explain "
         "what question should be asked in contradictions."
     )
+    focused_instruction = (
+        "This is a focused second-chance classification. Decide only whether "
+        f"the value of exactly slot `{focused_slot_name}` is stated in the "
+        "user's own words. Cite the exact quote or return that slot as unknown. "
+        "Leave every non-slot classification field empty or null.\n\n"
+        if focused_slot_name is not None
+        else ""
+    )
     user = (
         f"{language_hint}\n\n"
+        f"{focused_instruction}"
         f"{_bias_prompt_section(bias)}"
         "Typed evidence sources in conversation chronology, followed by stable "
         "file-id order:\n"
@@ -957,6 +979,7 @@ def _classification_cache_payload(
     provider: str,
     effective_optional_kwargs_fingerprint: str,
     bias: SlotClassificationBias | None = None,
+    focused_slot_name: str | None = None,
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
     safety_buffer_tokens: int = 0,
@@ -969,6 +992,7 @@ def _classification_cache_payload(
         active_checkpoint_producers=active_checkpoint_producers,
         ui_language=ui_language,
         bias=bias,
+        focused_slot_name=focused_slot_name,
     )
     payload: dict[str, object] = {
         "allowed_slot_values": {

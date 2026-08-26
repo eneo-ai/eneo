@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
+from litellm.exceptions import Timeout
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     canonical_architecture_commit_payload,
     finalize_architecture_commit,
@@ -22,6 +31,9 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
+    FocusedSlotClassificationRuntime,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     TargetKind,
@@ -50,6 +62,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
     SessionSendTurn,
 )
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     BuilderTurnDecision,
@@ -70,6 +83,8 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    carry_forward_persisted_planner_state,
+    carry_forward_turn_resolved_planner_state,
 )
 from eneo.flows.ai_builder.question_catalog import render_summary_label
 
@@ -102,6 +117,7 @@ def _request(
     attachment_context: AIBuilderAttachmentContext | None = None,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     schema_direction_pending: bool = False,
+    focused_classification_runtime: FocusedSlotClassificationRuntime | None = None,
 ) -> ServerDecisionDispatchRequest:
     return ServerDecisionDispatchRequest(
         repo=repo,
@@ -128,7 +144,101 @@ def _request(
         schema_candidates=schema_candidates,
         schema_direction_pending=schema_direction_pending,
         discovery_assumptions=discovery_assumptions,
+        focused_classification_runtime=focused_classification_runtime,
     )
+
+
+def _focused_runtime(
+    response_payload: dict[str, object],
+) -> tuple[FocusedSlotClassificationRuntime, MagicMock]:
+    message = MagicMock(content=json.dumps(response_payload))
+    response = MagicMock(choices=[MagicMock(message=message)])
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(return_value=response)
+    route = ResolvedCompletionModelRoute(
+        litellm_model="focused-test",
+        provider_type="openai",
+        litellm_kwargs={},
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True)
+        ),
+    )
+    return (
+        FocusedSlotClassificationRuntime(
+            litellm_client=litellm_client,
+            completion_model_route=route,
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=0,
+                minimum_conversation_budget_tokens=0,
+            ),
+        ),
+        litellm_client,
+    )
+
+
+def _focused_slot_response(*slots: dict[str, object]) -> dict[str, object]:
+    return {
+        "slots": list(slots),
+        "file_roles": [],
+        "checkpoint_updates": [],
+        "form_intake": None,
+        "named_result_evidence": None,
+        "example_output_constraints": None,
+        "schema_direction": None,
+        "secondary_obligations": [],
+        "assumptions": [],
+        "contradictions": [],
+    }
+
+
+def _rebuilding_commit_side_effect(
+    *,
+    persisted_conversation: list[ConversationMessage],
+    persisted_states: list[PlanningState],
+) -> object:
+    async def commit_turn(
+        *,
+        turn: SessionSendTurn,
+        new_messages: list[ConversationMessage],
+        flow: "Flow | None" = None,
+        planning_state: PlanningState,
+        architecture_commit: ArchitectureCommit | None = None,
+        **_: object,
+    ) -> int:
+        positions = {
+            message.message_id: index
+            for index, message in enumerate(persisted_conversation)
+        }
+        for message in new_messages:
+            index = positions.get(message.message_id)
+            if index is None:
+                positions[message.message_id] = len(persisted_conversation)
+                persisted_conversation.append(message.model_copy(deep=True))
+            else:
+                persisted_conversation[index] = message.model_copy(deep=True)
+        rebuilt = build_planning_state_from_conversation(
+            persisted_conversation,
+            flow=flow,
+        )
+        if architecture_commit is not None:
+            rebuilt.architecture_commit = architecture_commit
+        carry_forward_turn_resolved_planner_state(
+            rebuilt,
+            planning_state,
+            conversation=persisted_conversation,
+            attached_file_ids=set(),
+        )
+        carry_forward_persisted_planner_state(
+            rebuilt,
+            persisted_states[-1] if persisted_states else None,
+            attached_file_ids=set(),
+        )
+        persisted_states.append(rebuilt)
+        return turn.base_planning_state_version + 1
+
+    return commit_turn
 
 
 def _transcription_flow() -> "Flow":
@@ -343,6 +453,407 @@ async def test_server_question_preserves_prepared_file_roles_on_commit() -> None
 
     repo.commit_turn.assert_awaited_once()
     assert repo.commit_turn.await_args.kwargs["planning_state"] is state
+
+
+@pytest.mark.asyncio
+async def test_focused_classification_resolves_missed_slot_before_question() -> None:
+    quote = "The user uploads a CV and cover letter."
+    source_id = "user_message:user-focused"
+    runtime, litellm_client = _focused_runtime(
+        _focused_slot_response(
+            {
+                "slot_name": "primary_runtime_input",
+                "value": "documents",
+                "confidence": "high",
+                "reason": "The runtime material is uploaded documents.",
+                "evidence": [{"source_id": source_id, "quote": quote}],
+                "evidence_level": "explicit",
+            }
+        )
+    )
+    state = _confirmed_state()
+    del state.resolved_slots["primary_runtime_input"]
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=quote,
+            message_id="user-focused",
+        )
+    ]
+    request = _request(
+        repo=repo,
+        decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+        conversation=conversation,
+        planning_state=state,
+        focused_classification_runtime=runtime,
+    )
+
+    result = await dispatch_server_decision(request)
+
+    assert result.action_kind == "confirm_requirements"
+    assert all(not isinstance(event, AIBuilderQuestionEvent) for event in result.events)
+    resolved = state.resolved_slots["primary_runtime_input"]
+    assert resolved.value == "documents"
+    assert resolved.source == "model"
+    assert resolved.is_commit_grade is True
+    assert state.focused_classification_attempted_slots == ["primary_runtime_input"]
+    assert litellm_client.acompletion.await_count == 1
+    telemetry = request.telemetry.usage_tracker.build_planner_telemetry()
+    assert telemetry["auxiliary_llm_call_count"] == 1
+    assert [record["call_kind"] for record in telemetry["call_records"]] == [
+        "slot_classification"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_direct_proposal_persists_focused_evidence_for_repository_rebuild() -> (
+    None
+):
+    quote = "The user uploads a CV and cover letter."
+    runtime, _ = _focused_runtime(
+        _focused_slot_response(
+            {
+                "slot_name": "primary_runtime_input",
+                "value": "documents",
+                "confidence": "high",
+                "reason": "The runtime material is uploaded documents.",
+                "evidence": [
+                    {
+                        "source_id": "user_message:user-direct-proposal",
+                        "quote": quote,
+                    }
+                ],
+                "evidence_level": "explicit",
+            }
+        )
+    )
+    state = _confirmed_state()
+    del state.resolved_slots["primary_runtime_input"]
+    persisted_conversation: list[ConversationMessage] = []
+    persisted_states: list[PlanningState] = []
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = _rebuilding_commit_side_effect(
+        persisted_conversation=persisted_conversation,
+        persisted_states=persisted_states,
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=quote,
+            message_id="user-direct-proposal",
+        )
+    ]
+    request = _request(
+        repo=repo,
+        decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+        conversation=conversation,
+        planning_state=state,
+        requirements_confirmation_required=False,
+        focused_classification_runtime=runtime,
+    )
+
+    result = await dispatch_server_decision(request)
+
+    assert result.action_kind == "continue_proposal"
+    continuation = result.proposal_continuation
+    assert continuation is not None
+    await repo.commit_turn(
+        turn=request.turn,
+        new_messages=conversation[continuation.new_messages_start :],
+        planning_state=continuation.planning_state,
+    )
+    rebuilt = persisted_states[-1]
+    resolved = rebuilt.resolved_slots["primary_runtime_input"]
+    assert resolved.value == "documents"
+    assert resolved.source == "model"
+    assert any("user-direct-proposal" in evidence for evidence in resolved.evidence)
+
+
+@pytest.mark.asyncio
+async def test_newer_output_uncertainty_invalidates_persisted_focused_result() -> None:
+    quote = "The final output is a PDF document."
+    runtime, litellm_client = _focused_runtime(
+        _focused_slot_response(
+            {
+                "slot_name": "terminal_output",
+                "value": "pdf_document",
+                "confidence": "high",
+                "reason": "The final deliverable is explicitly a PDF.",
+                "evidence": [
+                    {
+                        "source_id": "user_message:user-focused-output",
+                        "quote": quote,
+                    }
+                ],
+                "evidence_level": "explicit",
+            }
+        )
+    )
+    repo = AsyncMock()
+    persisted_conversation: list[ConversationMessage] = []
+    persisted_states: list[PlanningState] = []
+    repo.commit_turn.side_effect = _rebuilding_commit_side_effect(
+        persisted_conversation=persisted_conversation,
+        persisted_states=persisted_states,
+    )
+    repo.load_planning_state.side_effect = lambda **_: persisted_states[-1]
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=quote,
+            message_id="user-focused-output",
+        )
+    ]
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+
+    await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="terminal_output"),
+            conversation=conversation,
+            planning_state=state,
+            requirements_confirmation_required=False,
+            focused_classification_runtime=runtime,
+        )
+    )
+    assert persisted_states[-1].commit_grade_slot_value("terminal_output") == (
+        "pdf_document"
+    )
+
+    uncertain_message = ConversationMessage(
+        role="user",
+        content=("I do not know exactly what format the final output should be yet."),
+        message_id="user-output-uncertain",
+    )
+    replay_conversation = [*persisted_conversation, uncertain_message]
+    replayed_state = build_planning_state_from_conversation(replay_conversation)
+    carry_forward_persisted_planner_state(
+        replayed_state,
+        persisted_states[-1],
+        attached_file_ids=set(),
+    )
+    second_repo = AsyncMock()
+    second_repo.commit_turn.return_value = 6
+    result = await dispatch_server_decision(
+        _request(
+            repo=second_repo,
+            decision=AskCanonicalQuestion(slot_name="terminal_output"),
+            conversation=replay_conversation,
+            planning_state=replayed_state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert replayed_state.commit_grade_slot_value("terminal_output") is None
+    assert result.action_kind == "ask_question"
+    assert any(isinstance(event, AIBuilderQuestionEvent) for event in result.events)
+    assert replayed_state.focused_classification_attempted_slots == ["terminal_output"]
+    assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_focused_provider_failure_asks_and_persisted_attempt_is_not_retried() -> (
+    None
+):
+    runtime, litellm_client = _focused_runtime(_focused_slot_response())
+    litellm_client.acompletion.side_effect = Timeout(
+        "provider timed out",
+        model="focused-test",
+        llm_provider="openai",
+    )
+    repo = AsyncMock()
+    persisted_conversation: list[ConversationMessage] = []
+    persisted_states: list[PlanningState] = []
+    repo.commit_turn.side_effect = _rebuilding_commit_side_effect(
+        persisted_conversation=persisted_conversation,
+        persisted_states=persisted_states,
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Build a useful flow.",
+            message_id="user-provider-failure",
+        )
+    ]
+    decision = AskCanonicalQuestion(slot_name="primary_runtime_input")
+
+    first_request = _request(
+        repo=repo,
+        decision=decision,
+        conversation=conversation,
+        planning_state=PlanningState.empty(),
+        focused_classification_runtime=runtime,
+    )
+    first = await dispatch_server_decision(first_request)
+    replayed_state = persisted_states[-1]
+    second_repo = AsyncMock()
+    second_repo.commit_turn.return_value = 6
+    second = await dispatch_server_decision(
+        _request(
+            repo=second_repo,
+            decision=decision,
+            conversation=persisted_conversation,
+            planning_state=replayed_state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert first.action_kind == "ask_question"
+    assert second.action_kind == "ask_question"
+    assert any(isinstance(event, AIBuilderQuestionEvent) for event in first.events)
+    assert any(isinstance(event, AIBuilderQuestionEvent) for event in second.events)
+    assert replayed_state.focused_classification_attempted_slots == [
+        "primary_runtime_input"
+    ]
+    assert litellm_client.acompletion.await_count == 1
+    telemetry = first_request.telemetry.usage_tracker.build_planner_telemetry()
+    assert telemetry["auxiliary_llm_call_count"] == 1
+    assert telemetry["call_records"][0]["provider_failure_kind"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_focused_request_budget_failure_asks_and_records_attempt() -> None:
+    base_runtime, litellm_client = _focused_runtime(_focused_slot_response())
+    runtime = FocusedSlotClassificationRuntime(
+        litellm_client=base_runtime.litellm_client,
+        completion_model_route=base_runtime.completion_model_route,
+        max_input_tokens=1,
+        max_output_tokens=1,
+        budget_policy=base_runtime.budget_policy,
+    )
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    state = PlanningState.empty()
+    request = _request(
+        repo=repo,
+        decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Build a useful flow.",
+                message_id="user-budget-failure",
+            )
+        ],
+        planning_state=state,
+        focused_classification_runtime=runtime,
+    )
+
+    result = await dispatch_server_decision(request)
+
+    assert result.action_kind == "ask_question"
+    assert state.focused_classification_attempted_slots == ["primary_runtime_input"]
+    assert repo.commit_turn.await_args.kwargs["planning_state"] is state
+    litellm_client.acompletion.assert_not_awaited()
+    telemetry = request.telemetry.usage_tracker.build_planner_telemetry()
+    assert telemetry["llm_calls_made"] == 0
+    assert telemetry["auxiliary_llm_call_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("confidence", "evidence"),
+    [
+        ("high", []),
+        (
+            "low",
+            [
+                {
+                    "source_id": "user_message:user-not-admitted",
+                    "quote": "The user uploads a CV.",
+                }
+            ],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_focused_classification_keeps_normal_admission_bar(
+    confidence: str,
+    evidence: list[dict[str, str]],
+) -> None:
+    runtime, litellm_client = _focused_runtime(
+        _focused_slot_response(
+            {
+                "slot_name": "primary_runtime_input",
+                "value": "documents",
+                "confidence": confidence,
+                "reason": "The runtime material may be documents.",
+                "evidence": evidence,
+                "evidence_level": "explicit",
+            }
+        )
+    )
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    state = PlanningState.empty()
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="The user uploads a CV.",
+                    message_id="user-not-admitted",
+                )
+            ],
+            planning_state=state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert result.action_kind == "ask_question"
+    assert any(isinstance(event, AIBuilderQuestionEvent) for event in result.events)
+    assert state.commit_grade_slot_value("primary_runtime_input") is None
+    assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_non_classifier_question_skips_focused_classification() -> None:
+    runtime, litellm_client = _focused_runtime(_focused_slot_response())
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    question = BackendQuestion(
+        question_data=StructuredQuestionPayload(
+            question_id="schema_direction",
+            question="Which schema direction?",
+            options=[
+                StructuredQuestionOptionPayload(
+                    id="input",
+                    label="Input",
+                    value="input",
+                )
+            ],
+            selection_mode="single",
+            allow_custom=False,
+            requires_confirm=True,
+        ),
+        assistant_text="Choose how the schema is used.",
+    )
+    state = PlanningState.empty()
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(
+                slot_name="schema_direction",
+                question=question,
+            ),
+            conversation=[ConversationMessage(role="user", content="Build a flow")],
+            planning_state=state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert result.action_kind == "ask_question"
+    assert any(isinstance(event, AIBuilderQuestionEvent) for event in result.events)
+    assert state.focused_classification_attempted_slots == []
+    litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
