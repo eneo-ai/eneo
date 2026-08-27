@@ -1,13 +1,14 @@
-"""add explicit File/Icon backfill resume revision
+"""add bounded File/Icon backfill resume state
 
 Revision ID: 202608261800
 Revises: 202608251400
 Create Date: 2026-08-26 18:00:00.000000
 
-The worker stores the last operator-provided resume revision on the campaign.
-A strictly higher value can requeue failed items once after the cause has been
-fixed, without allowing a stale environment value to create an infinite retry
-loop.
+The worker stores the last operator-provided resume revision and a durable
+ledger cursor on the campaign. Failed items record the revision in which they
+failed. A strictly higher value can therefore requeue the older failures in
+bounded batches without allowing a stale value or a repeated failure to create
+an infinite retry loop.
 """
 
 from collections.abc import Sequence
@@ -36,6 +37,26 @@ def upgrade() -> None:
         "ck_file_icon_backfill_campaign_resume_revision",
         "file_icon_backfill_campaign",
         "resume_revision >= 0",
+    )
+    op.add_column(
+        "file_icon_backfill_campaign",
+        sa.Column("resume_cursor_id", sa.BigInteger(), nullable=True),
+    )
+    op.create_check_constraint(
+        "ck_file_icon_backfill_campaign_resume_cursor",
+        "file_icon_backfill_campaign",
+        "resume_cursor_id IS NULL OR (resume_cursor_id >= 0 AND state = 'active')",
+    )
+    op.add_column(
+        "file_icon_backfill_items",
+        sa.Column("failure_revision", sa.BigInteger(), nullable=True),
+    )
+    op.create_check_constraint(
+        "ck_file_icon_backfill_items_failure_revision",
+        "file_icon_backfill_items",
+        "(state = 'failed') = (failure_revision IS NOT NULL) AND "
+        "(failure_revision IS NULL OR failure_revision >= 0)",
+        postgresql_not_valid=True,
     )
 
 

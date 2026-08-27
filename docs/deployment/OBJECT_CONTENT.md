@@ -736,7 +736,7 @@ or tenant policy:
 | `FILE_ICON_BACKFILL_BATCH_ROWS`            |     100 | Maximum ledger rows leased by one worker run                                                                                         |
 | `FILE_ICON_BACKFILL_BATCH_BYTES`           |  32 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded                         |
 | `FILE_ICON_BACKFILL_LEASE_SECONDS`         |     300 | Crash-recovery lease duration                                                                                                        |
-| `FILE_ICON_BACKFILL_RESUME_REVISION`       |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value requeues failed items once |
+| `FILE_ICON_BACKFILL_RESUME_REVISION`       |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value starts bounded retries of older failures |
 | `FILE_ICON_BACKFILL_MAX_ATTEMPTS`          |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure                                     |
 
 The worker reads these values at process startup. After changing
@@ -782,8 +782,11 @@ After correcting a halted campaign's stated cause, increase
 `FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env` and recreate the worker
 with the deployment's normal Compose files and profile. Do not reuse or lower a
 previous value. The worker records the accepted revision in PostgreSQL, requeues
-failed items once, and still refuses to resume if the Admin storage target
-differs from the campaign's frozen destination.
+older failed items in batches of at most `FILE_ICON_BACKFILL_BATCH_ROWS`, and
+still refuses to resume if the Admin storage target differs from the campaign's
+frozen destination. The durable cursor continues across worker restarts. An
+item that fails again is stamped with the accepted revision and waits for the
+next strictly higher value instead of retrying in a loop.
 Completion is terminal and cached by each worker process; manual campaign
 edits are unsupported and require a worker restart even during diagnosis.
 
@@ -860,6 +863,7 @@ SELECT campaign.target_kind,
        campaign.state AS campaign_state,
        campaign.halt_reason,
        campaign.resume_revision,
+       campaign.resume_cursor_id,
        count(*) FILTER (WHERE item.state = 'pending') AS pending_items,
        count(*) FILTER (WHERE item.state = 'leased') AS leased_items,
        count(*) FILTER (WHERE item.state = 'failed') AS failed_items,
@@ -878,7 +882,8 @@ LEFT JOIN file_icon_backfill_items AS item ON true
 GROUP BY campaign.target_kind,
          campaign.state,
          campaign.halt_reason,
-         campaign.resume_revision;
+         campaign.resume_revision,
+         campaign.resume_cursor_id;
 ```
 
 For a halted campaign, inspect at most the first 100 failed items before raising
@@ -890,6 +895,7 @@ SELECT owner_kind,
        variant,
        ordinal,
        attempts,
+       failure_revision,
        last_error_code,
        last_error_detail
 FROM file_icon_backfill_items

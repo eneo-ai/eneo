@@ -1275,6 +1275,153 @@ async def test_oversized_item_halts_after_other_items_finish(
 
 
 @pytest.mark.asyncio
+async def test_resume_requeues_failed_items_in_durable_bounded_batches(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    owner_ids = [
+        await _seed_legacy_text(
+            object_content_database,
+            payload=payload,
+        )
+        for payload in (b"poison", b"ok", b"ok", b"ok", b"ok")
+    ]
+    initial = _backfill(
+        object_content_database,
+        batch_rows=2,
+        inline_maximum_bytes=1,
+    )
+
+    assert (await initial.run_once()).state is FileIconBackfillState.ACTIVE
+    assert (await initial.run_once()).state is FileIconBackfillState.ACTIVE
+    assert (await initial.run_once()).state is FileIconBackfillState.HALTED
+
+    first_resume = await _backfill(
+        object_content_database,
+        batch_rows=2,
+        inline_maximum_bytes=2,
+        resume_revision=1,
+    ).run_once()
+
+    assert first_resume.state is FileIconBackfillState.ACTIVE
+    assert first_resume.claimed_count == 2
+    assert first_resume.completed_count == 1
+    assert first_resume.failed_count == 1
+    async with object_content_database.session() as session, session.begin():
+        rows = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT id, owner_id, state, failure_revision
+                    FROM file_icon_backfill_items
+                    ORDER BY id
+                    """
+                )
+            )
+        ).all()
+        campaign = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT state, resume_revision, resume_cursor_id
+                    FROM file_icon_backfill_campaign
+                    """
+                )
+            )
+        ).one()
+    assert [(row.owner_id, row.state, row.failure_revision) for row in rows] == [
+        (owner_ids[0], "failed", 1),
+        (owner_ids[1], "done", None),
+        (owner_ids[2], "failed", 0),
+        (owner_ids[3], "failed", 0),
+        (owner_ids[4], "failed", 0),
+    ]
+    assert campaign == ("active", 1, rows[1].id)
+
+    second_resume = await _backfill(
+        object_content_database,
+        batch_rows=2,
+        inline_maximum_bytes=2,
+        resume_revision=1,
+    ).run_once()
+
+    assert second_resume.state is FileIconBackfillState.ACTIVE
+    assert second_resume.claimed_count == 2
+    assert second_resume.completed_count == 2
+    async with object_content_database.session() as session, session.begin():
+        rows = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT id, owner_id, state, failure_revision
+                    FROM file_icon_backfill_items
+                    ORDER BY id
+                    """
+                )
+            )
+        ).all()
+        cursor = await session.scalar(
+            sa.text("SELECT resume_cursor_id FROM file_icon_backfill_campaign")
+        )
+    assert [(row.owner_id, row.state, row.failure_revision) for row in rows] == [
+        (owner_ids[0], "failed", 1),
+        (owner_ids[1], "done", None),
+        (owner_ids[2], "done", None),
+        (owner_ids[3], "done", None),
+        (owner_ids[4], "failed", 0),
+    ]
+    assert cursor == rows[3].id
+
+    final_resume = await _backfill(
+        object_content_database,
+        batch_rows=2,
+        inline_maximum_bytes=2,
+        resume_revision=1,
+    ).run_once()
+    unchanged = await _backfill(
+        object_content_database,
+        batch_rows=2,
+        inline_maximum_bytes=1024,
+        resume_revision=1,
+    ).run_once()
+
+    assert final_resume.state is FileIconBackfillState.HALTED
+    assert final_resume.claimed_count == 1
+    assert final_resume.completed_count == 1
+    assert unchanged.state is FileIconBackfillState.HALTED
+    assert unchanged.claimed_count == 0
+    async with object_content_database.session() as session, session.begin():
+        final_rows = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT owner_id, state, failure_revision
+                    FROM file_icon_backfill_items
+                    ORDER BY id
+                    """
+                )
+            )
+        ).all()
+        final_campaign = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT state, resume_revision, resume_cursor_id
+                    FROM file_icon_backfill_campaign
+                    """
+                )
+            )
+        ).one()
+    assert final_rows == [
+        (owner_ids[0], "failed", 1),
+        (owner_ids[1], "done", None),
+        (owner_ids[2], "done", None),
+        (owner_ids[3], "done", None),
+        (owner_ids[4], "done", None),
+    ]
+    assert final_campaign == ("halted", 1, None)
+
+
+@pytest.mark.asyncio
 async def test_empty_campaign_completes_without_claiming_work(
     object_content_database: DatabaseSessionManager,
 ) -> None:

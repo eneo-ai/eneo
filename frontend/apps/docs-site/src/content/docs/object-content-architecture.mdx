@@ -183,7 +183,10 @@ schedule cleanup when no references remain. An invalid source, integrity
 failure, or oversized payload fails its item immediately;
 interrupted attempts retry until their configured limit. Failed items halt the
 campaign with a stored reason and require a higher operator resume revision
-after correction.
+after correction. The campaign then requeues older failures through the normal
+row-bounded worker batches and stores its cursor in PostgreSQL. A worker restart
+continues from that cursor. An item that fails again waits for the next higher
+revision instead of looping within the current recovery attempt.
 
 Inline creation has no database/object-store crash gap: payload and intent share
 one transaction. For eligible new File and Icon object-store writes, Eneo

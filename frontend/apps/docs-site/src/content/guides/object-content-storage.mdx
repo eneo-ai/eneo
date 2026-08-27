@@ -447,7 +447,7 @@ No matching log line is not proof that an empty installation is complete. After
 a campaign starts, this on-demand query reports its durable state:
 
 ```sql
-SELECT target_kind, state, halt_reason, resume_revision
+SELECT target_kind, state, halt_reason, resume_revision, resume_cursor_id
 FROM file_icon_backfill_campaign;
 ```
 
@@ -485,6 +485,13 @@ worker with the same Compose files and profile used by the deployment:
 ```bash
 docker compose up -d --force-recreate --no-deps worker
 ```
+
+The worker records the new revision and a resume cursor in PostgreSQL. Each
+scheduled run requeues at most `FILE_ICON_BACKFILL_BATCH_ROWS` older failures,
+so a large failure set does not become one unbounded database update. A worker
+restart continues from the stored cursor. If an item fails again, it waits for
+the next strictly higher revision instead of retrying repeatedly in the same
+recovery attempt.
 
 Do not edit the campaign, ledger, or freeze trigger manually.
 

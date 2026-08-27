@@ -42,6 +42,7 @@ class FileIconBackfillItems(BaseWithTableName):
     lease_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     last_error_detail: Mapped[str | None] = mapped_column(String(512))
+    failure_revision: Mapped[int | None] = mapped_column(BigInteger)
     content_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("object_contents.id", ondelete="RESTRICT")
     )
@@ -79,6 +80,11 @@ class FileIconBackfillItems(BaseWithTableName):
             name="ck_file_icon_backfill_items_done_content",
         ),
         CheckConstraint(
+            "(state = 'failed') = (failure_revision IS NOT NULL) AND "
+            "(failure_revision IS NULL OR failure_revision >= 0)",
+            name="ck_file_icon_backfill_items_failure_revision",
+        ),
+        CheckConstraint(
             "last_error_detail IS NULL OR char_length(last_error_detail) <= 512",
             name="ck_file_icon_backfill_items_error_detail",
         ),
@@ -114,6 +120,7 @@ class FileIconBackfillCampaign(BaseWithTableName):
         server_default=text("0"),
         nullable=False,
     )
+    resume_cursor_id: Mapped[int | None] = mapped_column(BigInteger)
 
     __table_args__ = (
         CheckConstraint(
@@ -136,6 +143,10 @@ class FileIconBackfillCampaign(BaseWithTableName):
         CheckConstraint(
             "resume_revision >= 0",
             name="ck_file_icon_backfill_campaign_resume_revision",
+        ),
+        CheckConstraint(
+            "resume_cursor_id IS NULL OR (resume_cursor_id >= 0 AND state = 'active')",
+            name="ck_file_icon_backfill_campaign_resume_cursor",
         ),
         Index(
             "uq_file_icon_backfill_campaign_singleton",

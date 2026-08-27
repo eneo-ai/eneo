@@ -939,7 +939,8 @@ docker compose logs --since=30m worker \
   or wait for a compatible release.
 - `halted` means the destination changed, or an invalid, oversized, or
   retry-exhausted item needs action. Fix the logged cause before increasing the
-  resume revision.
+  resume revision. The worker retries older failures in bounded scheduled
+  batches; a repeated failure waits for the next higher revision.
 
 Do not edit the ledger or remove the database trigger. Existing legacy content
 remains readable while the worker waits or is stopped. See [Adopt legacy File

@@ -153,6 +153,7 @@ class _FileIconBackfillRepository:
                 policy_target = await self.policy_target()
                 if campaign.target_kind != policy_target.value:
                     campaign.state = FileIconBackfillState.HALTED.value
+                    campaign.resume_cursor_id = None
                     campaign.halt_reason = (
                         "The deployment storage target changed after the File/Icon "
                         "backfill campaign started"
@@ -164,23 +165,17 @@ class _FileIconBackfillRepository:
             ):
                 policy_target = await self.policy_target()
                 if campaign.target_kind == policy_target.value:
-                    await self._session.execute(
-                        sa.update(FileIconBackfillItems)
-                        .where(FileIconBackfillItems.state == "failed")
-                        .values(
-                            state="pending",
-                            attempts=0,
-                            last_error_code=None,
-                            last_error_detail=None,
-                            lease_owner=None,
-                            lease_expires_at=None,
-                            updated_at=sa.func.now(),
-                        )
-                    )
                     campaign.state = FileIconBackfillState.ACTIVE.value
                     campaign.halt_reason = None
                     campaign.resume_revision = settings.resume_revision
-                    await self._session.flush()
+                    campaign.resume_cursor_id = 0
+            if (
+                campaign.state == FileIconBackfillState.ACTIVE.value
+                and campaign.resume_cursor_id is not None
+                and not await self._has_actionable_items()
+            ):
+                await self._resume_failed_batch(campaign, settings.batch_rows)
+            await self._session.flush()
             return _Campaign(
                 state=FileIconBackfillState(campaign.state),
                 target_kind=StorageKind(campaign.target_kind),
@@ -332,6 +327,44 @@ class _FileIconBackfillRepository:
         await self._session.flush()
         return tuple(work)
 
+    async def _resume_failed_batch(
+        self,
+        campaign: FileIconBackfillCampaign,
+        batch_rows: int,
+    ) -> None:
+        candidates = (
+            await self._session.scalars(
+                sa.select(FileIconBackfillItems)
+                .where(
+                    FileIconBackfillItems.state == "failed",
+                    FileIconBackfillItems.lease_expires_at.is_(None),
+                    FileIconBackfillItems.failure_revision < campaign.resume_revision,
+                    FileIconBackfillItems.id > campaign.resume_cursor_id,
+                )
+                # Keep the constant lease key so the claim index supplies id order.
+                .order_by(
+                    FileIconBackfillItems.lease_expires_at,
+                    FileIconBackfillItems.id,
+                )
+                .limit(batch_rows + 1)
+                .with_for_update()
+            )
+        ).all()
+        batch = candidates[:batch_rows]
+        now = await self._database_now()
+        for item in batch:
+            item.state = "pending"
+            item.attempts = 0
+            item.last_error_code = None
+            item.last_error_detail = None
+            item.failure_revision = None
+            item.lease_owner = None
+            item.lease_expires_at = None
+            item.updated_at = now
+        campaign.resume_cursor_id = (
+            batch[-1].id if len(candidates) > batch_rows else None
+        )
+
     async def begin_attempt(self, item: _WorkItem) -> int:
         ledger = await self._leased_item(item)
         ledger.attempts += 1
@@ -414,6 +447,7 @@ class _FileIconBackfillRepository:
         ledger = await self._leased_item(item)
         ledger.state = "done"
         ledger.content_id = existing.content_id
+        ledger.failure_revision = None
         self._clear_lease(ledger)
         await self._session.flush()
         return None
@@ -434,6 +468,7 @@ class _FileIconBackfillRepository:
         if existing is not None and existing.state is ContentState.AVAILABLE:
             ledger.state = "done"
             ledger.content_id = existing.content_id
+            ledger.failure_revision = None
             self._clear_lease(ledger)
             await self._session.flush()
             return True
@@ -491,6 +526,7 @@ class _FileIconBackfillRepository:
 
         ledger.state = "done"
         ledger.content_id = prepared.id
+        ledger.failure_revision = None
         self._clear_lease(ledger)
         await self._session.flush()
         return True
@@ -502,10 +538,16 @@ class _FileIconBackfillRepository:
 
     async def fail(self, item: _WorkItem, *, code: str, detail: str) -> None:
         ledger = await self._leased_item(item)
+        failure_revision = (
+            await self._session.execute(
+                sa.select(FileIconBackfillCampaign.resume_revision)
+            )
+        ).scalar_one()
         ledger.state = "failed"
         ledger.content_id = None
         ledger.last_error_code = code
         ledger.last_error_detail = detail[:512]
+        ledger.failure_revision = failure_revision
         self._clear_lease(ledger)
         await self._session.flush()
 
@@ -515,16 +557,15 @@ class _FileIconBackfillRepository:
                 sa.select(FileIconBackfillCampaign).with_for_update()
             )
         ).one()
-        actionable = bool(
-            await self._session.scalar(
-                sa.select(
-                    sa.exists().where(
-                        FileIconBackfillItems.state.in_(("pending", "leased"))
-                    )
-                )
-            )
-        )
+        actionable = await self._has_actionable_items()
         if not actionable:
+            if campaign.resume_cursor_id is not None:
+                await self._session.flush()
+                return _Campaign(
+                    state=FileIconBackfillState(campaign.state),
+                    target_kind=StorageKind(campaign.target_kind),
+                    detail=campaign.halt_reason,
+                )
             failed = bool(
                 await self._session.scalar(
                     sa.select(
@@ -593,6 +634,17 @@ class _FileIconBackfillRepository:
             )
         )
         return int(required_bytes or 0)
+
+    async def _has_actionable_items(self) -> bool:
+        return bool(
+            await self._session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        FileIconBackfillItems.state.in_(("pending", "leased"))
+                    )
+                )
+            )
+        )
 
     async def _leased_item(self, item: _WorkItem) -> FileIconBackfillItems:
         row = await self._session.scalar(
@@ -697,6 +749,7 @@ class _FileIconBackfillRepository:
         item.content_id = None
         item.last_error_code = None
         item.last_error_detail = None
+        item.failure_revision = None
         cls._clear_lease(item)
 
     async def _database_now(self) -> datetime:
