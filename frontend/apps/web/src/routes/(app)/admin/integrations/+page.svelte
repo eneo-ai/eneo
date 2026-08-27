@@ -14,6 +14,7 @@
   import { m } from "$lib/paraglide/messages";
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
+  import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
 
   const { data }: PageProps = $props();
@@ -148,6 +149,10 @@
                               </DropdownMenu.Item>
                             </DropdownMenu.Content>
                           </DropdownMenu.Root>
+                        {/if}
+
+                        {#if data.settings.sharepoint_fixture_mode_available}
+                          <SharePointSetupFixtureLauncher />
                         {/if}
                       </div>
 

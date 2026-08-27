@@ -10,13 +10,16 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import { sharePointFixtureDelay } from "./fixtureMode";
 
   let {
     openController,
-    onDeleted
+    onDeleted,
+    simulate = false
   }: {
     openController: Writable<boolean>;
     onDeleted?: () => void;
+    simulate?: boolean;
   } = $props();
 
   const eneo = getEneo();
@@ -40,8 +43,13 @@
     isDeleting = true;
 
     try {
-      await eneo.client.fetch("/api/v1/admin/sharepoint/app", { method: "delete" });
-      toast.success(m.sharepoint_app_deleted());
+      if (simulate) {
+        await sharePointFixtureDelay();
+        toast.success(m.sharepoint_fixture_simulated_deleted());
+      } else {
+        await eneo.client.fetch("/api/v1/admin/sharepoint/app", { method: "delete" });
+        toast.success(m.sharepoint_app_deleted());
+      }
       dialogOpen = false;
       onDeleted?.();
     } catch (error) {

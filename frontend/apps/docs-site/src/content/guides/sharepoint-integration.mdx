@@ -301,6 +301,10 @@ Fixture mode is deliberately separate from the real integration:
 
 The deterministic catalog is owned by `backend/src/eneo/integration/sharepoint_fixture/catalog.py`; fixture behavior and real Graph behavior do not share a service path.
 
+### Admin setup demo
+
+With the same flags enabled, the admin **Integrations** page shows a flask icon next to the SharePoint card that opens a simulated setup walkthrough. It covers both authentication methods, a test-connection step, the configured read-only view, secret rotation, and the guarded deletion flow. Three scenarios are selectable in the test-mode banner: a fresh setup, an already configured tenant, and a realistic Microsoft Entra connection error. The demo runs entirely in the frontend and never calls the admin API.
+
 ---
 
 ## Webhooks and Real-time Synchronization

@@ -1,8 +1,14 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import type { Writable } from "svelte/store";
   import type { components } from "@eneo/eneo-js";
-  import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw } from "lucide-svelte";
+  import {
+    AlertTriangle,
+    CheckCircle2,
+    FlaskConical,
+    LoaderCircle,
+    RefreshCw
+  } from "lucide-svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -16,6 +22,14 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
+  import SharePointFixtureBanner from "./SharePointFixtureBanner.svelte";
+  import {
+    createSharePointSetupFixtureConfig,
+    isSharePointSetupFixtureScenario,
+    SHAREPOINT_SETUP_FIXTURE_TEST_ERROR,
+    sharePointFixtureDelay,
+    type SharePointSetupFixtureScenario
+  } from "./fixtureMode";
 
   type TenantSharePointAppPublic = components["schemas"]["TenantSharePointAppPublic"];
   type TenantSharePointAppCreate = components["schemas"]["TenantSharePointAppCreate"];
@@ -24,11 +38,15 @@
 
   let {
     openController,
-    onDeleteRequested
+    onDeleteRequested,
+    fixtureScenario: fixtureScenarioOverride
   }: {
     openController: Writable<boolean>;
     onDeleteRequested?: () => void;
+    fixtureScenario?: SharePointSetupFixtureScenario;
   } = $props();
+
+  const isFixtureSession = $derived(fixtureScenarioOverride !== undefined);
 
   const eneo = getEneo();
 
@@ -47,23 +65,69 @@
   let testResult = $state<TenantAppTestResult | null>(null);
   let isUpdatingSecret = $state(false);
   let newClientSecret = $state("");
+  let activeFixtureScenario = $state<SharePointSetupFixtureScenario>(
+    untrack(() => fixtureScenarioOverride ?? "fresh")
+  );
 
   let credentialsComplete = $derived(
     clientId.trim().length > 0 && clientSecret.trim().length > 0 && tenantDomain.trim().length > 0
   );
 
+  function getSetupScenarioLabel(scenario: SharePointSetupFixtureScenario): string {
+    switch (scenario) {
+      case "fresh":
+        return m.sharepoint_setup_fixture_scenario_fresh();
+      case "configured":
+        return m.sharepoint_setup_fixture_scenario_configured();
+      case "connection_error":
+        return m.sharepoint_setup_fixture_scenario_connection_error();
+    }
+  }
+
+  function applyExistingConfig(config: TenantSharePointAppPublic) {
+    existingConfig = config;
+    clientId = config.client_id;
+    tenantDomain = config.tenant_domain;
+    authMethod = config.auth_method === "service_account" ? "service_account" : "tenant_app";
+  }
+
+  function resetFormState() {
+    existingConfig = null;
+    configLoadFailed = false;
+    clientId = "";
+    clientSecret = "";
+    tenantDomain = "";
+    testResult = null;
+    authMethod = "service_account";
+    isUpdatingSecret = false;
+    newClientSecret = "";
+  }
+
+  function changeSetupScenario(value: string) {
+    if (!isSharePointSetupFixtureScenario(value) || value === activeFixtureScenario) return;
+    activeFixtureScenario = value;
+    resetFormState();
+    loadConfig();
+  }
+
+  function fixtureConnectionFailure(): TenantAppTestResult {
+    return { success: false, error_message: SHAREPOINT_SETUP_FIXTURE_TEST_ERROR };
+  }
+
   const loadConfig = createAsyncState(async () => {
     configLoadFailed = false;
 
+    if (isFixtureSession) {
+      await sharePointFixtureDelay(300);
+      if (activeFixtureScenario === "configured") {
+        applyExistingConfig(createSharePointSetupFixtureConfig({ authMethod: "service_account" }));
+      }
+      return;
+    }
+
     try {
       const data = await eneo.client.fetch("/api/v1/admin/sharepoint/app", { method: "get" });
-
-      if (data) {
-        existingConfig = data;
-        clientId = data.client_id;
-        tenantDomain = data.tenant_domain;
-        authMethod = data.auth_method === "service_account" ? "service_account" : "tenant_app";
-      }
+      if (data) applyExistingConfig(data);
     } catch (error) {
       configLoadFailed = true;
       toastError(error, m.sharepoint_config_load_error());
@@ -82,6 +146,15 @@
     if (!credentialsComplete) return;
     testResult = null;
 
+    if (isFixtureSession) {
+      await sharePointFixtureDelay();
+      testResult =
+        activeFixtureScenario === "connection_error"
+          ? fixtureConnectionFailure()
+          : { success: true, details: m.sharepoint_setup_fixture_test_success_details() };
+      return;
+    }
+
     try {
       testResult = await eneo.client.fetch("/api/v1/admin/sharepoint/app/test", {
         method: "post",
@@ -95,6 +168,25 @@
 
   const saveConfig = createAsyncState(async () => {
     if (!credentialsComplete) return;
+
+    if (isFixtureSession) {
+      await sharePointFixtureDelay();
+      if (activeFixtureScenario === "connection_error") {
+        testResult = fixtureConnectionFailure();
+        toast.error(m.connection_test_failed());
+        return;
+      }
+      applyExistingConfig(
+        createSharePointSetupFixtureConfig({
+          authMethod: "tenant_app",
+          clientId,
+          tenantDomain,
+          clientSecret
+        })
+      );
+      toast.success(m.sharepoint_fixture_simulated_saved());
+      return;
+    }
 
     try {
       existingConfig = await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
@@ -110,6 +202,18 @@
 
   const updateSecret = createAsyncState(async () => {
     if (!existingConfig || newClientSecret.trim().length === 0) return;
+
+    if (isFixtureSession) {
+      await sharePointFixtureDelay();
+      existingConfig = {
+        ...existingConfig,
+        client_secret_masked: `••••••••${newClientSecret.slice(-3)}`
+      };
+      toast.success(m.sharepoint_fixture_simulated_saved());
+      isUpdatingSecret = false;
+      newClientSecret = "";
+      return;
+    }
 
     try {
       existingConfig = await eneo.client.fetch("/api/v1/admin/sharepoint/app", {
@@ -132,6 +236,25 @@
 
   const startServiceAccountOAuth = createAsyncState(async () => {
     if (!credentialsComplete) return;
+
+    if (isFixtureSession) {
+      await sharePointFixtureDelay(700);
+      if (activeFixtureScenario === "connection_error") {
+        testResult = fixtureConnectionFailure();
+        toast.error(m.connection_test_failed());
+        return;
+      }
+      applyExistingConfig(
+        createSharePointSetupFixtureConfig({
+          authMethod: "service_account",
+          clientId,
+          tenantDomain,
+          clientSecret
+        })
+      );
+      toast.success(m.sharepoint_fixture_simulated_saved());
+      return;
+    }
 
     try {
       const result = await eneo.client.fetch(
@@ -163,15 +286,8 @@
 
   $effect(() => {
     if (!dialogOpen) {
-      existingConfig = null;
-      configLoadFailed = false;
-      clientId = "";
-      clientSecret = "";
-      tenantDomain = "";
-      testResult = null;
-      authMethod = "service_account";
-      isUpdatingSecret = false;
-      newClientSecret = "";
+      resetFormState();
+      activeFixtureScenario = fixtureScenarioOverride ?? "fresh";
     }
   });
 </script>
@@ -182,8 +298,34 @@
     closeLabel={m.close()}
   >
     <Dialog.Header class="shrink-0 border-b px-6 py-4 pr-12">
-      <Dialog.Title>{m.configure_sharepoint_app_title()}</Dialog.Title>
+      <Dialog.Title>
+        {isFixtureSession
+          ? m.sharepoint_setup_fixture_dialog_title()
+          : m.configure_sharepoint_app_title()}
+      </Dialog.Title>
+      {#if isFixtureSession}
+        <Dialog.Description>{m.sharepoint_setup_fixture_dialog_description()}</Dialog.Description>
+      {/if}
     </Dialog.Header>
+
+    {#if isFixtureSession}
+      <SharePointFixtureBanner
+        class="mx-6 mt-3 w-auto shrink-0"
+        scenarios={[
+          { value: "fresh", label: m.sharepoint_setup_fixture_scenario_fresh() },
+          { value: "configured", label: m.sharepoint_setup_fixture_scenario_configured() },
+          {
+            value: "connection_error",
+            label: m.sharepoint_setup_fixture_scenario_connection_error()
+          }
+        ]}
+        value={activeFixtureScenario}
+        triggerLabel={getSetupScenarioLabel(activeFixtureScenario)}
+        description={m.sharepoint_setup_fixture_banner_description()}
+        disabled={loadConfig.isLoading}
+        onValueChange={changeSetupScenario}
+      />
+    {/if}
 
     <div class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
       {#if loadConfig.isLoading}
@@ -443,8 +585,16 @@
         >
           {#if saveConfig.isLoading}
             <LoaderCircle class="animate-spin" aria-hidden="true" />
+          {:else if isFixtureSession}
+            <FlaskConical aria-hidden="true" />
           {/if}
-          {saveConfig.isLoading ? m.saving() : m.save()}
+          {#if saveConfig.isLoading}
+            {m.saving()}
+          {:else if isFixtureSession}
+            {m.sharepoint_fixture_simulate_save()}
+          {:else}
+            {m.save()}
+          {/if}
         </Button>
       {:else}
         <Button
@@ -454,8 +604,16 @@
         >
           {#if startServiceAccountOAuth.isLoading}
             <LoaderCircle class="animate-spin" aria-hidden="true" />
+          {:else if isFixtureSession}
+            <FlaskConical aria-hidden="true" />
           {/if}
-          {startServiceAccountOAuth.isLoading ? m.redirecting() : m.sign_in_with_microsoft()}
+          {#if startServiceAccountOAuth.isLoading}
+            {m.redirecting()}
+          {:else if isFixtureSession}
+            {m.sharepoint_fixture_simulate_sign_in()}
+          {:else}
+            {m.sign_in_with_microsoft()}
+          {/if}
         </Button>
       {/if}
     </Dialog.Footer>

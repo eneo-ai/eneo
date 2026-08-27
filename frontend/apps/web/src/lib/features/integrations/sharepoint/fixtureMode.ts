@@ -12,6 +12,52 @@ const SHAREPOINT_FIXTURE_TENANT_INTEGRATION_ID = "00000000-0000-4000-8000-000000
 
 export type SharePointFixtureAuthType = "user_oauth" | "tenant_app";
 
+export type SharePointSetupFixtureScenario = "fresh" | "configured" | "connection_error";
+
+export function isSharePointSetupFixtureScenario(
+  value: string
+): value is SharePointSetupFixtureScenario {
+  return value === "fresh" || value === "configured" || value === "connection_error";
+}
+
+// Mirrors the error Microsoft Entra returns for a bad client secret, so the
+// setup demo exercises the same long, untranslated message the real flow shows.
+export const SHAREPOINT_SETUP_FIXTURE_TEST_ERROR =
+  "AADSTS7000215: Invalid client secret provided. " +
+  "Ensure the secret being sent in the request is the client secret value, " +
+  "not the client secret ID.";
+
+export function createSharePointSetupFixtureConfig(options: {
+  authMethod: "tenant_app" | "service_account";
+  clientId?: string;
+  tenantDomain?: string;
+  clientSecret?: string;
+}): components["schemas"]["TenantSharePointAppPublic"] {
+  const clientId = options.clientId?.trim() || "12345678-1234-1234-1234-123456789012";
+  const tenantDomain = options.tenantDomain?.trim() || "kommunen.onmicrosoft.com";
+  const secret = options.clientSecret || "fixture-secret-3kQ";
+  return {
+    id: "00000000-0000-4000-8000-000000000101",
+    tenant_id: "00000000-0000-4000-8000-000000000102",
+    client_id: clientId,
+    client_secret_masked: `••••••••${secret.slice(-3)}`,
+    tenant_domain: tenantDomain,
+    is_active: true,
+    auth_method: options.authMethod,
+    service_account_email:
+      options.authMethod === "service_account" ? `eneo-tjanstekonto@${tenantDomain}` : null,
+    certificate_path: null,
+    created_by: null,
+    created_at: "2026-08-01T09:00:00.000Z",
+    updated_at: "2026-08-20T14:30:00.000Z"
+  };
+}
+
+// Keeps loading states visible in the simulated setup flow.
+export function sharePointFixtureDelay(ms = 450): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function isSharePointFixtureModeRequested(
   searchParams: Pick<URLSearchParams, "has">
 ): boolean {

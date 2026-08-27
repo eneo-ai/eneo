@@ -6,7 +6,6 @@
   import {
     Check,
     CheckCircle2,
-    ChevronDown,
     Cloud,
     FileText,
     FlaskConical,
@@ -19,7 +18,6 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import * as Command from "$lib/components/ui/command/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -33,6 +31,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
+  import SharePointFixtureBanner from "./SharePointFixtureBanner.svelte";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
   import { formatFileSize } from "./format";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
@@ -125,7 +124,6 @@
   let selectedItems = $state<SelectedImportItem[]>([]);
   let wrapperName = $state("");
   let wrapperNameTouched = $state(false);
-  let fixtureDetailsOpen = $state(false);
 
   onMount(() => openController.subscribe((value) => (dialogOpen = value)));
   $effect(() => {
@@ -284,7 +282,6 @@
 
   function resetFlow() {
     resetSelection();
-    fixtureDetailsOpen = false;
     fixtureScenario =
       fixtureScenarioOverride ?? parseSharePointFixtureScenario(page.url.searchParams);
   }
@@ -504,69 +501,21 @@
     </Dialog.Header>
 
     {#if isFixtureSession}
-      <Alert.Root class="border-caution bg-caution mx-4 mt-3 w-auto shrink-0 sm:mx-6">
-        <FlaskConical class="text-caution!" aria-hidden="true" />
-        <Collapsible.Root bind:open={fixtureDetailsOpen} class="col-start-2 min-w-0">
-          <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-            <div class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
-              <Alert.Title class="text-caution">
-                {m.sharepoint_fixture_compact_title()}
-              </Alert.Title>
-              <span class="text-muted-foreground text-xs">
-                {m.sharepoint_fixture_compact_status()}
-              </span>
-            </div>
-
-            <div class="flex min-w-0 items-center gap-1.5">
-              <span id="sharepoint-fixture-scenario-label" class="sr-only">
-                {m.sharepoint_fixture_scenario_label()}
-              </span>
-              <Select.Root
-                type="single"
-                value={fixtureScenario ?? ""}
-                onValueChange={changeFixtureScenario}
-                disabled={loadPreview.isLoading}
-              >
-                <Select.Trigger
-                  class="h-8 min-w-0 flex-1 sm:w-56 sm:flex-none"
-                  aria-labelledby="sharepoint-fixture-scenario-label"
-                >
-                  {fixtureScenario
-                    ? getFixtureScenarioLabel(fixtureScenario)
-                    : m.sharepoint_fixture_scenario_invalid()}
-                </Select.Trigger>
-                <Select.Content>
-                  <Select.Item
-                    value="representative"
-                    label={m.sharepoint_fixture_scenario_representative()}
-                  />
-                  <Select.Item
-                    value="large_tenant"
-                    label={m.sharepoint_fixture_scenario_large_tenant()}
-                  />
-                  <Select.Item value="empty" label={m.sharepoint_fixture_scenario_empty()} />
-                </Select.Content>
-              </Select.Root>
-
-              <Collapsible.Trigger
-                class="hover:bg-muted inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium"
-              >
-                {m.details()}
-                <ChevronDown
-                  class="size-3.5 transition-transform {fixtureDetailsOpen ? 'rotate-180' : ''}"
-                  aria-hidden="true"
-                />
-              </Collapsible.Trigger>
-            </div>
-          </div>
-
-          <Collapsible.Content>
-            <Alert.Description class="border-caution/25 text-muted-foreground mt-2 border-t pt-2">
-              {m.sharepoint_fixture_banner_description()}
-            </Alert.Description>
-          </Collapsible.Content>
-        </Collapsible.Root>
-      </Alert.Root>
+      <SharePointFixtureBanner
+        class="mx-4 mt-3 w-auto shrink-0 sm:mx-6"
+        scenarios={[
+          { value: "representative", label: m.sharepoint_fixture_scenario_representative() },
+          { value: "large_tenant", label: m.sharepoint_fixture_scenario_large_tenant() },
+          { value: "empty", label: m.sharepoint_fixture_scenario_empty() }
+        ]}
+        value={fixtureScenario ?? ""}
+        triggerLabel={fixtureScenario
+          ? getFixtureScenarioLabel(fixtureScenario)
+          : m.sharepoint_fixture_scenario_invalid()}
+        description={m.sharepoint_fixture_banner_description()}
+        disabled={loadPreview.isLoading}
+        onValueChange={changeFixtureScenario}
+      />
     {/if}
 
     <ol
