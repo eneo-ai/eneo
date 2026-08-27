@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from time import monotonic, sleep
 from uuid import uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
@@ -19,6 +22,7 @@ _POSTGRES_13_IMAGE = (
 )
 _PREVIOUS_REVISION = "202607240310"
 _EXPAND_REVISION = "202607231700"
+_INVENTORY_REVISION = "202607231745"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -66,6 +70,30 @@ def migration_database() -> Generator[tuple[str, Config], None, None]:
 
 def _connect(database_url: str):
     return psycopg2.connect(database_url.replace("+psycopg2", ""))
+
+
+def _wait_until_inventory_is_blocked(database_url: str) -> None:
+    deadline = monotonic() + 10
+    while monotonic() < deadline:
+        with _connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND pid <> pg_backend_pid()
+                      AND state = 'active'
+                      AND wait_event_type = 'Lock'
+                      AND query ~ 'INSERT[[:space:]]+INTO[[:space:]]+'
+                                  'file_icon_backfill_items'
+                )
+                """
+            )
+            if cursor.fetchone() == (True,):
+                return
+        sleep(0.05)
+    raise AssertionError("inventory migration did not wait on the expected lock")
 
 
 def _seed_legacy_owners(database_url: str) -> dict[str, str]:
@@ -146,13 +174,92 @@ def _seed_legacy_owners(database_url: str) -> dict[str, str]:
     return ids
 
 
-def test_expand_inventories_without_copying_or_dropping_bytes(
+def test_staged_inventory_is_online_resumable_and_preserves_legacy_bytes(
     migration_database: tuple[str, Config],
 ) -> None:
     database_url, config = migration_database
     ids = _seed_legacy_owners(database_url)
 
     command.upgrade(config, _EXPAND_REVISION)
+
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM file_icon_backfill_items")
+        assert cursor.fetchone() == (0,)
+        cursor.execute(
+            """
+            CREATE FUNCTION fail_test_file_icon_inventory()
+            RETURNS trigger
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                RAISE EXCEPTION 'test inventory interruption';
+            END;
+            $$;
+
+            CREATE TRIGGER fail_test_file_icon_inventory
+            BEFORE INSERT ON file_icon_backfill_items
+            FOR EACH ROW
+            WHEN (NEW.variant = 'transcription')
+            EXECUTE FUNCTION fail_test_file_icon_inventory();
+            """
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with _connect(database_url) as blocker, blocker.cursor() as blocker_cursor:
+            blocker_cursor.execute(
+                "LOCK TABLE file_icon_backfill_items IN ACCESS EXCLUSIVE MODE"
+            )
+            upgrade = executor.submit(command.upgrade, config, _INVENTORY_REVISION)
+            _wait_until_inventory_is_blocked(database_url)
+
+            with _connect(database_url) as reader, reader.cursor() as cursor:
+                cursor.execute("SET LOCAL lock_timeout = '500ms'")
+                cursor.execute(
+                    "SELECT name FROM files WHERE id = %s",
+                    (ids["image"],),
+                )
+                assert cursor.fetchone() == ("legacy.png",)
+
+            with _connect(database_url) as writer, writer.cursor() as cursor:
+                cursor.execute("SET LOCAL lock_timeout = '500ms'")
+                with pytest.raises(
+                    psycopg2.errors.ObjectNotInPrerequisiteState,
+                    match="legacy payload",
+                ):
+                    cursor.execute(
+                        "UPDATE files SET blob = %s WHERE id = %s",
+                        (b"changed", ids["image"]),
+                    )
+
+        with pytest.raises(DBAPIError, match="test inventory interruption"):
+            upgrade.result(timeout=30)
+
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT version_num FROM alembic_version")
+        assert cursor.fetchone() == (_EXPAND_REVISION,)
+        cursor.execute(
+            """
+            SELECT variant, count(*)
+            FROM file_icon_backfill_items
+            GROUP BY variant
+            ORDER BY variant
+            """
+        )
+        assert cursor.fetchall() == [
+            ("derived_page", 1),
+            ("extracted_text", 1),
+            ("legacy_image", 1),
+            ("original", 2),
+        ]
+        cursor.execute(
+            """
+            DROP TRIGGER fail_test_file_icon_inventory
+            ON file_icon_backfill_items;
+            DROP FUNCTION fail_test_file_icon_inventory();
+            """
+        )
+
+    command.upgrade(config, _INVENTORY_REVISION)
 
     with _connect(database_url) as connection, connection.cursor() as cursor:
         cursor.execute(

@@ -5,9 +5,10 @@ Revises: 202607240310
 Create Date: 2026-07-23 17:00:00.000000
 
 This revision replaces the unreleased offline normalization at the same
-revision ID. It inventories legacy payloads without copying their bytes,
-retains every legacy column, and freezes those payload facts for an online,
-resumable backfill.
+revision ID. It prepares a ledger without copying payload bytes, retains every
+legacy column, and freezes those payload facts for an online, resumable
+backfill. The following revision populates the ledger after this schema change
+has committed.
 
 An environment that already applied the former version of revision
 ``202607231700`` must restore its pre-upgrade backup before using this chain.
@@ -219,92 +220,6 @@ def _install_legacy_freeze() -> None:
     )
 
 
-def _inventory_legacy_payloads() -> None:
-    op.execute(
-        """
-        INSERT INTO file_icon_backfill_items (
-            owner_kind,
-            owner_id,
-            variant,
-            ordinal,
-            tenant_id,
-            payload_size_estimate
-        )
-        SELECT
-            'file',
-            file.id,
-            CASE
-                WHEN file.file_type = 'text' THEN 'extracted_text'
-                WHEN file.file_type = 'audio' THEN 'original'
-                WHEN file.parent_file_id IS NOT NULL THEN 'derived_page'
-                ELSE 'legacy_image'
-            END,
-            0,
-            file.tenant_id,
-            file.size::bigint
-        FROM files AS file
-        WHERE CASE
-                  WHEN file.file_type = 'text' THEN file.text IS NOT NULL
-                  ELSE file.blob IS NOT NULL
-              END
-          AND NOT EXISTS (
-              SELECT 1
-              FROM file_content_references AS reference
-              WHERE reference.file_id = file.id
-                AND reference.variant = CASE
-                    WHEN file.file_type = 'text' THEN 'extracted_text'
-                    WHEN file.file_type = 'audio' THEN 'original'
-                    WHEN file.parent_file_id IS NOT NULL THEN 'derived_page'
-                    ELSE 'legacy_image'
-                END
-                AND reference.ordinal = 0
-          )
-
-        UNION ALL
-
-        SELECT 'file', file.id, 'original', 0, file.tenant_id,
-               pg_column_size(file.blob)::bigint
-        FROM files AS file
-        WHERE file.file_type = 'text'
-          AND file.blob IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1
-              FROM file_content_references AS reference
-              WHERE reference.file_id = file.id
-                AND reference.variant = 'original'
-                AND reference.ordinal = 0
-          )
-
-        UNION ALL
-
-        SELECT 'file', file.id, 'transcription', 0, file.tenant_id,
-               pg_column_size(file.transcription)::bigint
-        FROM files AS file
-        WHERE file.transcription IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1
-              FROM file_content_references AS reference
-              WHERE reference.file_id = file.id
-                AND reference.variant = 'transcription'
-                AND reference.ordinal = 0
-          )
-
-        UNION ALL
-
-        SELECT 'icon', icon.id, 'primary', 0, icon.tenant_id,
-               icon.size::bigint
-        FROM icons AS icon
-        WHERE icon.blob IS NOT NULL
-          AND NOT EXISTS (
-              SELECT 1
-              FROM icon_content_references AS reference
-              WHERE reference.icon_id = icon.id
-                AND reference.variant = 'primary'
-          );
-        """
-    )
-
-
 def upgrade() -> None:
     op.drop_constraint(
         "ck_file_content_references_variant",
@@ -324,7 +239,6 @@ def upgrade() -> None:
 
     _create_backfill_tables()
     _install_legacy_freeze()
-    _inventory_legacy_payloads()
 
 
 def downgrade() -> None:

@@ -672,15 +672,18 @@ store-generation fence, which pre-upgrade code does not, so never change
 destination while any pre-upgrade process is running. The old columns are
 dropped by a separate migration in a later release.
 
-The File/Icon expand revision does schema and inventory work only. It installs a
-database trigger that freezes legacy payload columns, records one resumable
-ledger item per legacy variant without reading every payload, and keeps every
-legacy byte and integrity column. Existing logical sizes are reused where
-available; `pg_column_size` provides a stored-byte estimate for variants that
-have no legacy logical-size fact. The revision does not copy or hash payloads,
-contact object storage, take an `ACCESS EXCLUSIVE` fence for a byte scan, or
-drop the old columns. Normal reads prefer object-content references and fall
-back to the frozen legacy variant only while its reference is missing.
+The File/Icon schema and inventory revisions do metadata work only. The first
+revision installs a database trigger that freezes legacy payload columns and
+commits that fence. The following revision records one resumable ledger item per
+legacy variant in separately committed, idempotent groups. Inventory can run
+without retaining the schema revision's exclusive locks on `files` or `icons`.
+Both revisions keep every legacy byte and integrity column. Existing logical
+sizes are reused where available; `pg_column_size` provides a stored-byte
+estimate for variants that have no legacy logical-size fact. They do not copy or
+hash payloads, contact object storage, hold an `ACCESS EXCLUSIVE` fence during
+the owner scan, or drop the old columns. Normal reads prefer object-content
+references and fall back to the frozen legacy variant only while its reference
+is missing.
 
 PostgreSQL inline remains the complete destination when no S3-compatible store
 is configured. Choosing inline still needs capacity for the second verified
@@ -695,7 +698,7 @@ development environment that already completed the former revision must restore
 its pre-upgrade database backup before using the new chain. Alembic cannot tell
 the two implementations apart from the shared revision ID.
 
-After this expand revision, recovery is forward: keep the legacy source frozen,
+After these revisions, recovery is forward: keep the legacy source frozen,
 retry failed work, and resume from the ledger. A rollback to an older image is a
 coordinated restore of its matching pre-upgrade database backup. Do not Alembic
 stamp past the revision, attempt `alembic downgrade`, drop the trigger, edit
