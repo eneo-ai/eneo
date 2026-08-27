@@ -915,9 +915,11 @@ curl -fsS https://eneo.example.eu/api/readyz \
 
 ### Check online File and Icon adoption
 
-`db-init` expands the schema and inventories legacy File/Icon variants; it does
-not copy payload bytes. The new worker adopts them online in bounded batches.
-Follow its state after the deployment:
+`db-init` runs two consecutive revisions for this change. The first installs
+the schema and write fence and commits. The second inventories legacy File/Icon
+variants in resumable, idempotent groups without retaining the first revision's
+exclusive table locks. Neither revision copies payload bytes. The new worker
+adopts them online in bounded batches. Follow its state after the deployment:
 
 ```bash
 docker compose logs --since=30m worker \

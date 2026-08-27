@@ -392,8 +392,10 @@ entire object; a range verifies only the chunks that cover that response.
 Upgrading from a release that stored File and Icon payloads directly on product
 rows has two separate phases:
 
-1. Alembic expands the schema, inventories the legacy variants, and prevents old
-   code from changing those payloads. It does not copy or hash the payload bytes.
+1. Two consecutive Alembic revisions expand the schema. The first creates the
+   ledger and write fence and commits. The second inventories legacy variants in
+   resumable, idempotent groups. It does not retain the schema revision's
+   exclusive table locks or copy and hash the payload bytes.
 2. The new worker adopts the frozen payloads into object content in bounded,
    resumable batches while Eneo stays available.
 
@@ -404,7 +406,8 @@ after that deployment has no actionable legacy item left.
 
 ```mermaid
 flowchart LR
-  expand["Schema expansion\ninventory · write fence"] --> readable["Eneo starts\nlegacy content remains readable"]
+  fence["Schema expansion\nwrite fence · commit"] --> inventory["Inventory\nresumable metadata groups"]
+  inventory --> readable["Eneo starts\nlegacy content remains readable"]
   readable --> worker["Online worker\nbounded copy · SHA-256"]
   worker --> adopted["Verified object-content reference"]
   adopted --> contract["Later contract release\nremove legacy schema"]
@@ -465,6 +468,9 @@ contains payload-free preflight, progress-count, and failed-item queries.
 
 Waiting is not an upgrade failure. The application keeps serving the frozen
 legacy bytes and resumes from durable ledger state after the operator acts.
+If an item already has a reference whose content is marked failed, the worker
+atomically replaces that reference from the frozen legacy source and schedules
+normal cleanup when no references to the failed content remain.
 
 To leave `waiting_for_object_store`, either wait for a compatible release or
 select PostgreSQL inline. Selecting inline changes the deployment-wide target
