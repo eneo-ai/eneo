@@ -58,6 +58,7 @@ async def test_file_icon_backfill_task_returns_sanitized_progress() -> None:
         return_value=FileIconBackfillResult(
             state=FileIconBackfillState.ACTIVE,
             target_kind=StorageKind.POSTGRES_INLINE,
+            admitted_count=4,
             claimed_count=3,
             completed_count=2,
             cancelled_count=1,
@@ -71,6 +72,7 @@ async def test_file_icon_backfill_task_returns_sanitized_progress() -> None:
     assert summary == {
         "state": "active",
         "target_kind": "postgres_inline",
+        "admitted_count": 4,
         "claimed_count": 3,
         "completed_count": 2,
         "cancelled_count": 1,

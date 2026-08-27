@@ -61,10 +61,12 @@ or provider-specific product branch.
 File and Icon are the first adopted product owners. Existing legacy bytes stay
 readable while a staged, resumable backfill creates and verifies concrete typed
 references. The old columns remain the recovery source until a later contract
-release confirms that no legacy item remains. Eligible new File and Icon writes
-use the target selected in **Admin > Storage**. InfoBlob generations and Flow
-artifacts remain separate follow-up work. A target change affects new writes
-only; moving existing content remains a separate migration workflow.
+release passes both the campaign-completion and locked live-reference checks
+defined in [Close the recovery window and reclaim
+disk](#close-the-recovery-window-and-reclaim-disk). Eligible new File and Icon
+writes use the target selected in **Admin > Storage**. InfoBlob generations and
+Flow artifacts remain separate follow-up work. A target change affects new
+writes only; moving existing content remains a separate migration workflow.
 
 ## Choose the endpoint
 
@@ -696,19 +698,26 @@ campaign starts leaves adoption waiting; it does not avoid the inline copy. A
 later remote adapter must change the backup contract from the first
 authoritative remote payload onward.
 
-The worker adopts inline legacy variants in resumable batches after startup.
-Each item is leased, captured, and hashed once per processing attempt, then
-committed with its content row, inline payload, exact File/Icon reference, and
-completed ledger state in one short transaction. Crash recovery can read and
-hash an item again after its lease expires. Owner deletion cancels only that
-item. An invalid or oversized payload marks the item failed; the worker
-continues other pending or leased items and halts the campaign when no
-actionable item remains. The frozen legacy source stays untouched for operator
-recovery.
+The worker first finalizes campaign admission in metadata-only batches. It locks
+owners and existing references in a stable order, cancels deleted owners, marks
+still-available references complete, and moves only source-bearing rows to
+`ready`. The inline capacity estimate is frozen only after no `pending` row
+remains, so a reference that fails before admission cannot bypass the capacity
+gate. Owner deletion triggers also cancel unfinished rows while the worker waits,
+allowing both capacity and object-store waits to converge when no owner remains.
 
-By default, an inline campaign starts automatically when its remaining estimate
-is at most 5 GiB. Above that size, calculate PostgreSQL payload, WAL, backup,
-replica, and safety headroom first, then set
+The worker then adopts ready inline legacy variants in resumable batches after
+startup. Each item is leased, captured, and hashed once per processing attempt,
+then committed with its content row, inline payload, exact File/Icon reference,
+and completed ledger state in one short transaction. Crash recovery can read
+and hash an item again after its lease expires. Owner deletion cancels only
+that item. An invalid or oversized payload marks the item failed; the worker
+continues other ready or leased items and halts the campaign when no actionable
+item remains. The frozen legacy source stays untouched for operator recovery.
+
+By default, an inline campaign starts automatically when its stable ready-set
+estimate is at most 5 GiB. Above that size, calculate PostgreSQL payload, WAL,
+backup, replica, and safety headroom first, then set
 `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` in `env_backend.env` to at least the
 reported exact byte estimate and recreate the worker. The
 acknowledgement does not reserve disk and the estimate is not peak allocation;
@@ -729,15 +738,15 @@ and every scheduled tick.
 Large installations can tune bounded throughput without changing application
 or tenant policy:
 
-| Variable                                   | Default | Meaning                                                                                                                              |
-| ------------------------------------------ | ------: | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES` |   5 GiB | Largest estimate that may start inline without an explicit capacity acknowledgement                                                  |
-| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`   |       0 | Accepted inline estimate in bytes; must cover the current remaining estimate                                                         |
-| `FILE_ICON_BACKFILL_BATCH_ROWS`            |     100 | Maximum ledger rows leased by one worker run                                                                                         |
-| `FILE_ICON_BACKFILL_BATCH_BYTES`           |  32 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded                         |
-| `FILE_ICON_BACKFILL_LEASE_SECONDS`         |     300 | Crash-recovery lease duration                                                                                                        |
+| Variable                                   | Default | Meaning                                                                                                                                            |
+| ------------------------------------------ | ------: | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES` |   5 GiB | Largest estimate that may start inline without an explicit capacity acknowledgement                                                                |
+| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`   |       0 | Accepted inline estimate in bytes; must cover the current remaining estimate                                                                       |
+| `FILE_ICON_BACKFILL_BATCH_ROWS`            |     100 | Maximum ledger rows leased by one worker run                                                                                                       |
+| `FILE_ICON_BACKFILL_BATCH_BYTES`           |  32 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded                                       |
+| `FILE_ICON_BACKFILL_LEASE_SECONDS`         |     300 | Crash-recovery lease duration                                                                                                                      |
 | `FILE_ICON_BACKFILL_RESUME_REVISION`       |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value starts bounded retries of older failures |
-| `FILE_ICON_BACKFILL_MAX_ATTEMPTS`          |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure                                     |
+| `FILE_ICON_BACKFILL_MAX_ATTEMPTS`          |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure                                                   |
 
 The worker reads these values at process startup. After changing
 `env_backend.env`, recreate it with the same Compose files and profile used by
@@ -761,7 +770,7 @@ The worker logs structured batch counts after every non-empty run and logs the
 estimate and required action while a campaign waits for capacity or is halted.
 Completion runs `ANALYZE` once on the new content, payload, and reference tables
 before the campaign is marked done.
-A PostgreSQL 13 integration benchmark compared these defaults with 200 rows and
+A PostgreSQL 16 integration benchmark compared these defaults with 200 rows and
 128 MiB at 1 GiB, then validated the larger candidate with 10 GiB of
 incompressible legacy payloads. The candidate reduced scheduled batches from 33
 to 9 per GiB without changing active throughput or WAL per payload byte. It is
@@ -813,7 +822,13 @@ and structured worker logs for completed, failed, cancelled, and remaining
 estimated work:
 
 ```sql
-WITH actionable_pending AS (
+WITH source_bearing AS (
+    SELECT payload_size_estimate
+    FROM file_icon_backfill_items
+    WHERE state = 'ready'
+
+    UNION ALL
+
     SELECT item.payload_size_estimate
     FROM file_icon_backfill_items AS item
     JOIN files AS file
@@ -845,12 +860,12 @@ WITH actionable_pending AS (
             AND content.state = 'available'
       )
 )
-SELECT count(*) AS pending_items,
+SELECT count(*) AS estimated_source_items,
        coalesce(sum(payload_size_estimate), 0)::bigint
            AS estimated_payload_bytes,
        pg_size_pretty(coalesce(sum(payload_size_estimate), 0)::bigint)
            AS estimated_payload_size
-FROM actionable_pending;
+FROM source_bearing;
 ```
 
 After the campaign starts, this query reports its frozen destination, recovery
@@ -865,6 +880,7 @@ SELECT campaign.target_kind,
        campaign.resume_revision,
        campaign.resume_cursor_id,
        count(*) FILTER (WHERE item.state = 'pending') AS pending_items,
+       count(*) FILTER (WHERE item.state = 'ready') AS ready_items,
        count(*) FILTER (WHERE item.state = 'leased') AS leased_items,
        count(*) FILTER (WHERE item.state = 'failed') AS failed_items,
        count(*) FILTER (WHERE item.state = 'done') AS done_items,
@@ -903,6 +919,52 @@ WHERE state = 'failed'
 ORDER BY id
 LIMIT 100;
 ```
+
+### Close the recovery window and reclaim disk
+
+Do not remove frozen legacy bytes when the online campaign first reports
+`complete`. Keep the current release for the deployment's verification period,
+exercise representative old File and Icon downloads, and restore-test a current
+backup. Inline-only deployments need a tested PostgreSQL backup; deployments
+with any object-store authority need a matching PostgreSQL and object-store
+backup pair. Retain the pre-upgrade recovery point until that restore succeeds
+and the deployment's retention rules allow its removal.
+
+Install the later contract release only after the campaign is `complete` and
+the ledger has no `pending`, `ready`, `leased`, or `failed` row. Its migration
+must treat that as a necessary but insufficient precondition. In the same
+transaction that drops legacy columns, it must lock and recheck that every
+surviving ledger key has its matching File or Icon reference and that the
+referenced object content is still `available`. A missing or failed reference
+must abort before any legacy column is dropped. Do not drop the columns
+manually. Installing that release closes direct rollback to the old image;
+recovery remains forward or through the retained coordinated backup.
+
+After the contract release, measure the remaining relations before deciding
+whether filesystem reclamation is worth the operational cost:
+
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('files')) AS files_total,
+       pg_size_pretty(pg_total_relation_size('icons')) AS icons_total;
+```
+
+Use one tested maintenance method:
+
+- Prefer [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
+  when minimizing blocking matters. It requires the extension and client,
+  temporary free disk of roughly twice the target tables and indexes, and a
+  short final lock. Validate its version and exact command against a restored
+  production-size database first.
+- For the simpler offline option, stop APIs and workers and run
+  `VACUUM (FULL, ANALYZE) files;` followed by
+  `VACUUM (FULL, ANALYZE) icons;`. Each command rewrites and exclusively locks
+  its table and requires temporary space.
+
+Ordinary `VACUUM` generally makes dead space reusable inside PostgreSQL but does
+not return this table storage to the filesystem. Physical reclamation therefore
+stays an explicit operator job, never hidden inside Alembic or application
+startup. See the
+[PostgreSQL VACUUM documentation](https://www.postgresql.org/docs/16/sql-vacuum.html).
 
 The later range-verification revision uses the same maintenance window. It
 backfills at most 10,000 unexpected pre-production object descriptors in one

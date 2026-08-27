@@ -27,15 +27,21 @@ fence, and commits. The second inventories stored-size estimates in resumable,
 idempotent groups without copying or hashing payload bytes. It never inherits
 the schema revision's exclusive table locks. New code reads a verified
 object-content reference when present and otherwise reads the frozen legacy
-source. A scheduled worker then adopts each variant in bounded, resumable
-PostgreSQL-inline transactions. The later contract must refuse to remove the
-legacy schema until no actionable ledger item remains.
+source. A scheduled worker first finalizes a bounded admission set: it locks
+owners, accepts still-available references, cancels deleted owners, and marks
+only source-bearing rows ready. The capacity decision is frozen after admission,
+then the worker adopts each ready variant in bounded, resumable
+PostgreSQL-inline transactions. The later contract applies the fail-closed
+completion and live-reference recheck described in
+[Finish adoption](/guides/object-content-storage#finish-adoption-and-reclaim-disk)
+before it removes the legacy schema.
 
 ```mermaid
 flowchart LR
   fence["Expand\nschema · write fence · commit"] --> inventory["Inventory\nresumable metadata groups"]
   inventory --> fallback["Read fallback\nlegacy remains authoritative"]
-  fallback --> backfill["Online backfill\nbounded lease · SHA-256 · reference flip"]
+  fallback --> admission["Admission\nowner lock · reference recheck"]
+  admission --> backfill["Online backfill\nbounded lease · SHA-256 · reference flip"]
   backfill --> complete["Campaign complete\none object-content path"]
   complete --> contract["Contract\npreflight · short fence · legacy removal"]
 ```
@@ -173,9 +179,12 @@ product reference disappears; they are not duplicated as File-identity rules.
 Legacy File/Icon adoption commits one item at a time. Its durable ledger and
 expiring lease make a worker crash resumable; a PostgreSQL advisory transaction
 lock prevents replicas from overlapping batches. The database trigger keeps the
-legacy payload immutable, while the per-item transaction locks the owner and
-rechecks whether another path already published the same variant before it
-creates the inline payload and reference atomically. A deleted owner is
+legacy payload immutable. Before campaign admission, bounded set-based queries
+lock owners and references and durably separate rows that are already complete
+from rows that may require copied bytes. The capacity gate sums only that stable
+ready set. A delete trigger cancels owner rows even while the campaign is waiting.
+During adoption, the per-item transaction rechecks the owner and reference before
+it creates the inline payload and reference atomically. A deleted owner is
 cancelled, not recreated. If a reference exists but its content is unavailable,
 the same transaction creates a verified replacement, switches the reference,
 and lets the normal lifecycle decrement the failed content's reference count and
@@ -319,6 +328,12 @@ commands.
   safety headroom.
 - Removing legacy columns later does not by itself return PostgreSQL table
   storage to the filesystem; physical reclamation is separate maintenance.
+- The later contract migration must fail closed until legacy adoption is
+  complete, then lock and recheck every surviving File/Icon reference as
+  `available` in the same transaction that drops legacy columns. Operators
+  choose when to close that recovery window.
+- Physical reclamation stays outside Alembic and startup because `pg_repack` or
+  `VACUUM FULL` has deployment-specific lock, time, and free-space costs.
 - If object-store rows exist, PostgreSQL and the object store must share one
   backup and restore point.
 - The stable deployment ID and internal marker must survive restoration.

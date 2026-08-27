@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
@@ -53,9 +53,11 @@ async def _seed_legacy_text(
     *,
     payload: bytes,
     estimate: int | None = None,
+    file_id: UUID | None = None,
+    parent_file_id: UUID | None = None,
 ) -> UUID:
     tenant_id, user_id = await _tenant_and_user(database)
-    file_id = uuid4()
+    file_id = file_id or uuid4()
     async with database.session() as session, session.begin():
         await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
         await session.execute(
@@ -66,7 +68,8 @@ async def _seed_legacy_text(
                     transcription, user_id, tenant_id, parent_file_id
                 ) VALUES (
                     :file_id, 'legacy.txt', :text, NULL, :checksum, :size,
-                    'text/plain', 'text', NULL, :user_id, :tenant_id, NULL
+                    'text/plain', 'text', NULL, :user_id, :tenant_id,
+                    :parent_file_id
                 )
                 """
             ),
@@ -77,6 +80,7 @@ async def _seed_legacy_text(
                 "size": len(payload),
                 "user_id": user_id,
                 "tenant_id": tenant_id,
+                "parent_file_id": parent_file_id,
             },
         )
         await session.execute(
@@ -522,6 +526,123 @@ async def test_large_inline_campaign_waits_for_capacity_acknowledgement(
 
 
 @pytest.mark.asyncio
+async def test_reference_failure_before_admission_requires_inline_capacity(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    await _seed_legacy_text(
+        object_content_database,
+        payload=b"x",
+        estimate=1,
+    )
+    referenced_file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=b"legacy source that still needs capacity",
+        estimate=2048,
+    )
+    referenced_content_id = await _attach_existing_inline_reference(
+        object_content_database,
+        file_id=referenced_file_id,
+    )
+    backfill = _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+        batch_rows=1,
+    )
+
+    preparing = await backfill.run_once()
+
+    assert preparing.state is FileIconBackfillState.ACTIVE
+    assert preparing.completed_count == 0
+    async with object_content_database.session() as session, session.begin():
+        await ObjectContentRepository(session).mark_backend_failure(
+            content_id=referenced_content_id,
+            failure_code=ContentFailureCode.BACKEND_CORRUPT,
+        )
+
+    waiting = await backfill.run_once()
+
+    assert waiting.state is FileIconBackfillState.WAITING_FOR_CAPACITY
+    assert waiting.completed_count == 0
+    async with object_content_database.session() as session, session.begin():
+        states = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT state
+                    FROM file_icon_backfill_items
+                    ORDER BY id
+                    """
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        content_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(sa.table("object_contents"))
+        )
+    assert states == ["ready", "ready"]
+    assert content_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("target", "waiting_state"),
+    [
+        (StorageKind.POSTGRES_INLINE, FileIconBackfillState.WAITING_FOR_CAPACITY),
+        (StorageKind.OBJECT_STORE, FileIconBackfillState.WAITING_FOR_OBJECT_STORE),
+    ],
+)
+async def test_waiting_campaign_completes_when_last_owner_is_deleted(
+    object_content_database: DatabaseSessionManager,
+    target: StorageKind,
+    waiting_state: FileIconBackfillState,
+) -> None:
+    file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=b"delete while waiting",
+        estimate=2048,
+    )
+    backfill = _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+    )
+    try:
+        await _set_policy_target(object_content_database, target.value)
+
+        waiting = await backfill.run_once()
+
+        assert waiting.state is waiting_state
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                sa.text("DELETE FROM files WHERE id = :file_id"),
+                {"file_id": file_id},
+            )
+
+        completed = await backfill.run_once()
+
+        assert completed.state is FileIconBackfillState.COMPLETE
+        async with object_content_database.session() as session, session.begin():
+            item_state = await session.scalar(
+                sa.text(
+                    """
+                    SELECT state
+                    FROM file_icon_backfill_items
+                    WHERE owner_id = :file_id
+                    """
+                ),
+                {"file_id": file_id},
+            )
+        assert item_state == "cancelled"
+    finally:
+        await _set_policy_target(
+            object_content_database,
+            StorageKind.POSTGRES_INLINE.value,
+        )
+
+
+@pytest.mark.asyncio
 async def test_expired_lease_resumes_without_duplicate_content(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -595,7 +716,7 @@ async def test_deleted_owner_is_cancelled_without_creating_content(
     ).run_once()
 
     assert result.state is FileIconBackfillState.COMPLETE
-    assert result.cancelled_count == 1
+    assert result.cancelled_count == 0
     async with object_content_database.session() as session, session.begin():
         item = (
             await session.execute(
@@ -614,6 +735,39 @@ async def test_deleted_owner_is_cancelled_without_creating_content(
         )
     assert item == ("cancelled", None)
     assert content_count == 0
+
+
+@pytest.mark.asyncio
+async def test_deleted_icon_is_cancelled_by_the_database_fence(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    icon_id = await _seed_legacy_icon(
+        object_content_database,
+        payload=b"<svg>deleted</svg>",
+    )
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            sa.text("DELETE FROM icons WHERE id = :icon_id"),
+            {"icon_id": icon_id},
+        )
+
+    result = await _backfill(object_content_database).run_once()
+
+    assert result.state is FileIconBackfillState.COMPLETE
+    async with object_content_database.session() as session, session.begin():
+        item = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT state, content_id
+                    FROM file_icon_backfill_items
+                    WHERE owner_id = :icon_id
+                    """
+                ),
+                {"icon_id": icon_id},
+            )
+        ).one()
+    assert item == ("cancelled", None)
 
 
 @pytest.mark.asyncio
@@ -862,7 +1016,7 @@ async def test_failed_icon_reference_is_replaced_by_available_legacy_content(
 
 
 @pytest.mark.asyncio
-async def test_owner_deleted_during_existing_reference_shortcut_is_cancelled(
+async def test_owner_delete_waits_for_existing_reference_admission_fence(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -876,47 +1030,52 @@ async def test_owner_deleted_during_existing_reference_shortcut_is_cancelled(
     )
     reference_seen = asyncio.Event()
     continue_processing = asyncio.Event()
-    original_existing_reference = (
+    original_lock_references = (
         file_icon_backfill_module._FileIconBackfillRepository.__dict__[
-            "_existing_reference"
+            "_lock_admission_references"
         ]
     )
 
     async def pause_after_reference_discovery(
         repository: file_icon_backfill_module._FileIconBackfillRepository,
-        item: file_icon_backfill_module._WorkItem,
-        *,
-        lock: bool = False,
-    ) -> file_icon_backfill_module._ExistingReference | None:
-        existing = await original_existing_reference(
-            repository,
-            item,
-            lock=lock,
-        )
-        if existing is not None and not reference_seen.is_set():
-            reference_seen.set()
-            await continue_processing.wait()
-        return existing
+        items: Sequence[file_icon_backfill_module.FileIconBackfillItems],
+    ) -> dict[
+        tuple[str, UUID, str, int],
+        file_icon_backfill_module._ExistingReference,
+    ]:
+        references = await original_lock_references(repository, items)
+        reference_seen.set()
+        await continue_processing.wait()
+        return references
 
     monkeypatch.setattr(
         file_icon_backfill_module._FileIconBackfillRepository,
-        "_existing_reference",
+        "_lock_admission_references",
         pause_after_reference_discovery,
     )
     running = asyncio.create_task(_backfill(object_content_database).run_once())
-    try:
-        await asyncio.wait_for(reference_seen.wait(), timeout=5)
+    deleting: asyncio.Task[None] | None = None
+
+    async def delete_owner() -> None:
         async with object_content_database.session() as session, session.begin():
             await session.execute(
                 sa.text("DELETE FROM files WHERE id = :file_id"),
                 {"file_id": file_id},
             )
+
+    try:
+        await asyncio.wait_for(reference_seen.wait(), timeout=5)
+        deleting = asyncio.create_task(delete_owner())
+        await asyncio.sleep(0.1)
+        assert not deleting.done()
     finally:
         continue_processing.set()
     result = await running
+    assert deleting is not None
+    await deleting
 
     assert result.state is FileIconBackfillState.COMPLETE
-    assert result.cancelled_count == 1
+    assert result.completed_count == 1
     async with object_content_database.session() as session, session.begin():
         item = (
             await session.execute(
@@ -930,7 +1089,87 @@ async def test_owner_deleted_during_existing_reference_shortcut_is_cancelled(
                 {"file_id": file_id},
             )
         ).one()
+        reference_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FileContentReferences)
+            .where(FileContentReferences.file_id == file_id)
+        )
     assert item == ("cancelled", None)
+    assert reference_count == 0
+
+
+@pytest.mark.asyncio
+async def test_admission_retries_instead_of_deadlocking_with_parent_delete(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    parent_id = UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    child_id = UUID("00000000-0000-0000-0000-000000000001")
+    assert child_id < parent_id
+    await _seed_legacy_text(
+        object_content_database,
+        payload=b"parent",
+        file_id=parent_id,
+    )
+    await _seed_legacy_text(
+        object_content_database,
+        payload=b"child",
+        file_id=child_id,
+        parent_file_id=parent_id,
+    )
+    parent_locked = asyncio.Event()
+    allow_delete = asyncio.Event()
+
+    async def delete_family() -> None:
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                sa.text("SELECT id FROM files WHERE id = :file_id FOR UPDATE"),
+                {"file_id": parent_id},
+            )
+            parent_locked.set()
+            await allow_delete.wait()
+            await session.execute(
+                sa.text("DELETE FROM files WHERE id = :file_id"),
+                {"file_id": parent_id},
+            )
+
+    deleting = asyncio.create_task(delete_family())
+    try:
+        await asyncio.wait_for(parent_locked.wait(), timeout=5)
+        contended = await asyncio.wait_for(
+            _backfill(object_content_database).run_once(), timeout=5
+        )
+    finally:
+        allow_delete.set()
+    await asyncio.wait_for(deleting, timeout=5)
+
+    assert contended.state is FileIconBackfillState.ACTIVE
+    assert contended.admitted_count == 0
+    assert contended.claimed_count == 0
+    assert contended.detail is not None
+    assert "will retry" in contended.detail
+
+    completed = await _backfill(object_content_database).run_once()
+
+    assert completed.state is FileIconBackfillState.COMPLETE
+    async with object_content_database.session() as session, session.begin():
+        states = (
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT state
+                    FROM file_icon_backfill_items
+                    WHERE owner_id IN (:parent_id, :child_id)
+                    ORDER BY owner_id
+                    """
+                    ),
+                    {"parent_id": parent_id, "child_id": child_id},
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert states == ["cancelled", "cancelled"]
 
 
 @pytest.mark.asyncio
@@ -1291,9 +1530,15 @@ async def test_resume_requeues_failed_items_in_durable_bounded_batches(
         inline_maximum_bytes=1,
     )
 
-    assert (await initial.run_once()).state is FileIconBackfillState.ACTIVE
-    assert (await initial.run_once()).state is FileIconBackfillState.ACTIVE
-    assert (await initial.run_once()).state is FileIconBackfillState.HALTED
+    initial_states = [(await initial.run_once()).state for _ in range(5)]
+
+    assert initial_states == [
+        FileIconBackfillState.ACTIVE,
+        FileIconBackfillState.ACTIVE,
+        FileIconBackfillState.ACTIVE,
+        FileIconBackfillState.ACTIVE,
+        FileIconBackfillState.HALTED,
+    ]
 
     first_resume = await _backfill(
         object_content_database,
@@ -1595,7 +1840,10 @@ async def test_campaign_never_silently_changes_its_frozen_destination(
     )
     try:
         await _set_policy_target(object_content_database, "object_store")
+        preparing = await backfill.run_once()
         waiting = await backfill.run_once()
+        assert preparing.state is FileIconBackfillState.ACTIVE
+        assert preparing.target_kind is None
         assert waiting.state is FileIconBackfillState.WAITING_FOR_OBJECT_STORE
         assert waiting.claimed_count == 0
 

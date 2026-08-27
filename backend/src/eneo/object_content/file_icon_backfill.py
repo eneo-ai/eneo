@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.affected_rows import affected_row_count
@@ -46,6 +47,15 @@ _MEBIBYTE = 1024 * 1024
 _GIBIBYTE = 1024 * _MEBIBYTE
 _ADVISORY_LOCK_CLASS = 1_162_757_455  # ASCII "ENEO"
 _ADVISORY_LOCK_ID = 1_179_206_214  # ASCII "FIBF"
+_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
+
+
+def _is_lock_not_available(error: DBAPIError) -> bool:
+    original = error.orig
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    return sqlstate == _LOCK_NOT_AVAILABLE_SQLSTATE or (
+        _LOCK_NOT_AVAILABLE_SQLSTATE in str(original)
+    )
 
 
 class FileIconBackfillSettings(BaseSettings):
@@ -78,6 +88,7 @@ class FileIconBackfillState(StrEnum):
 class FileIconBackfillResult:
     state: FileIconBackfillState
     target_kind: StorageKind | None
+    admitted_count: int
     claimed_count: int
     completed_count: int
     cancelled_count: int
@@ -90,6 +101,14 @@ class _Campaign:
     state: FileIconBackfillState
     target_kind: StorageKind | None
     detail: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _Admission:
+    terminal: bool
+    inspected_count: int
+    completed_count: int
+    cancelled_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +149,10 @@ class _LegacySourceMissing(Exception):
 
 
 class _LeaseLost(Exception):
+    pass
+
+
+class _AdmissionContended(Exception):
     pass
 
 
@@ -182,7 +205,7 @@ class _FileIconBackfillRepository:
                 detail=campaign.halt_reason,
             )
 
-        if not await self.has_ledger_items():
+        if not await self.has_source_items():
             return await self._insert_campaign(
                 state=FileIconBackfillState.COMPLETE,
                 resume_revision=settings.resume_revision,
@@ -264,12 +287,191 @@ class _FileIconBackfillRepository:
             )
         )
 
-    async def has_ledger_items(self) -> bool:
+    async def has_source_items(self) -> bool:
         return bool(
             await self._session.scalar(
-                sa.select(sa.exists().where(FileIconBackfillItems.id.is_not(None)))
+                sa.select(
+                    sa.exists().where(
+                        FileIconBackfillItems.state.in_(("pending", "ready", "leased"))
+                    )
+                )
             )
         )
+
+    async def admit(self, settings: FileIconBackfillSettings) -> _Admission:
+        candidates = (
+            await self._session.scalars(
+                sa.select(FileIconBackfillItems)
+                .where(
+                    FileIconBackfillItems.state == "pending",
+                    FileIconBackfillItems.lease_expires_at.is_(None),
+                )
+                .order_by(
+                    FileIconBackfillItems.lease_expires_at,
+                    FileIconBackfillItems.id,
+                )
+                .limit(settings.batch_rows + 1)
+            )
+        ).all()
+        candidate_batch = candidates[: settings.batch_rows]
+        if not candidate_batch:
+            return _Admission(
+                terminal=True,
+                inspected_count=0,
+                completed_count=0,
+                cancelled_count=0,
+            )
+        try:
+            owners = await self._lock_admission_owners(candidate_batch)
+            references = await self._lock_admission_references(candidate_batch)
+        except DBAPIError as error:
+            if not _is_lock_not_available(error):
+                raise
+            raise _AdmissionContended from error
+        batch = (
+            await self._session.scalars(
+                sa.select(FileIconBackfillItems)
+                .where(
+                    FileIconBackfillItems.id.in_(
+                        [candidate.id for candidate in candidate_batch]
+                    ),
+                    FileIconBackfillItems.state == "pending",
+                )
+                .order_by(FileIconBackfillItems.id)
+                .with_for_update()
+            )
+        ).all()
+        completed_count = 0
+        cancelled_count = 0
+        now = await self._database_now()
+        for row in batch:
+            item = self._work_item(row, lease_owner="")
+            if (item.owner_kind, item.owner_id) not in owners:
+                self._cancel(row)
+                cancelled_count += 1
+                continue
+            existing = references.get(
+                (item.owner_kind, item.owner_id, item.variant, item.ordinal)
+            )
+            if existing is not None and existing.state is ContentState.AVAILABLE:
+                row.state = "done"
+                row.content_id = existing.content_id
+                row.failure_revision = None
+                self._clear_lease(row)
+                completed_count += 1
+                continue
+            row.state = "ready"
+            row.updated_at = now
+        await self._session.flush()
+        return _Admission(
+            terminal=len(candidates) <= settings.batch_rows,
+            inspected_count=len(batch),
+            completed_count=completed_count,
+            cancelled_count=cancelled_count,
+        )
+
+    async def _lock_admission_owners(
+        self,
+        items: Sequence[FileIconBackfillItems],
+    ) -> set[tuple[str, UUID]]:
+        file_ids = {item.owner_id for item in items if item.owner_kind == "file"}
+        icon_ids = {item.owner_id for item in items if item.owner_kind == "icon"}
+        owners: set[tuple[str, UUID]] = set()
+        if file_ids:
+            locked_file_ids = await self._session.scalars(
+                sa.select(Files.id)
+                .where(Files.id.in_(file_ids))
+                .order_by(Files.id)
+                .with_for_update(nowait=True)
+            )
+            owners.update(("file", owner_id) for owner_id in locked_file_ids)
+        if icon_ids:
+            locked_icon_ids = await self._session.scalars(
+                sa.select(Icons.id)
+                .where(Icons.id.in_(icon_ids))
+                .order_by(Icons.id)
+                .with_for_update(nowait=True)
+            )
+            owners.update(("icon", owner_id) for owner_id in locked_icon_ids)
+        return owners
+
+    async def _lock_admission_references(
+        self,
+        items: Sequence[FileIconBackfillItems],
+    ) -> dict[tuple[str, UUID, str, int], _ExistingReference]:
+        references: dict[tuple[str, UUID, str, int], _ExistingReference] = {}
+        file_keys = [
+            (item.owner_id, item.variant, item.ordinal)
+            for item in items
+            if item.owner_kind == "file"
+        ]
+        if file_keys:
+            rows = await self._session.execute(
+                sa.select(
+                    FileContentReferences.file_id,
+                    FileContentReferences.variant,
+                    FileContentReferences.ordinal,
+                    FileContentReferences.content_id,
+                    ObjectContents.state,
+                    FileContentReferences.page_number,
+                    FileContentReferences.width,
+                    FileContentReferences.height,
+                    FileContentReferences.duration_ms,
+                )
+                .join(
+                    ObjectContents,
+                    ObjectContents.id == FileContentReferences.content_id,
+                )
+                .where(
+                    sa.tuple_(
+                        FileContentReferences.file_id,
+                        FileContentReferences.variant,
+                        FileContentReferences.ordinal,
+                    ).in_(file_keys)
+                )
+                .order_by(
+                    FileContentReferences.file_id,
+                    FileContentReferences.variant,
+                    FileContentReferences.ordinal,
+                )
+                .with_for_update(nowait=True)
+            )
+            for row in rows:
+                references[("file", row.file_id, row.variant, row.ordinal)] = (
+                    _ExistingReference(
+                        content_id=row.content_id,
+                        state=ContentState(row.state),
+                        page_number=row.page_number,
+                        width=row.width,
+                        height=row.height,
+                        duration_ms=row.duration_ms,
+                    )
+                )
+        icon_ids = {item.owner_id for item in items if item.owner_kind == "icon"}
+        if icon_ids:
+            rows = await self._session.execute(
+                sa.select(
+                    IconContentReferences.icon_id,
+                    IconContentReferences.content_id,
+                    ObjectContents.state,
+                )
+                .join(
+                    ObjectContents,
+                    ObjectContents.id == IconContentReferences.content_id,
+                )
+                .where(
+                    IconContentReferences.icon_id.in_(icon_ids),
+                    IconContentReferences.variant == "primary",
+                )
+                .order_by(IconContentReferences.icon_id)
+                .with_for_update(nowait=True)
+            )
+            for row in rows:
+                references[("icon", row.icon_id, "primary", 0)] = _ExistingReference(
+                    content_id=row.content_id,
+                    state=ContentState(row.state),
+                )
+        return references
 
     async def claim(
         self,
@@ -281,7 +483,7 @@ class _FileIconBackfillRepository:
                 sa.select(FileIconBackfillItems)
                 .where(
                     sa.or_(
-                        FileIconBackfillItems.state == "pending",
+                        FileIconBackfillItems.state == "ready",
                         sa.and_(
                             FileIconBackfillItems.state == "leased",
                             FileIconBackfillItems.lease_expires_at <= now,
@@ -312,18 +514,7 @@ class _FileIconBackfillRepository:
             item.last_error_code = None
             item.last_error_detail = None
             item.updated_at = now
-            work.append(
-                _WorkItem(
-                    id=item.id,
-                    owner_kind=item.owner_kind,
-                    owner_id=item.owner_id,
-                    variant=item.variant,
-                    ordinal=item.ordinal,
-                    tenant_id=item.tenant_id,
-                    payload_size_estimate=item.payload_size_estimate,
-                    lease_owner=lease_owner,
-                )
-            )
+            work.append(self._work_item(item, lease_owner=lease_owner))
         await self._session.flush()
         return tuple(work)
 
@@ -353,7 +544,7 @@ class _FileIconBackfillRepository:
         batch = candidates[:batch_rows]
         now = await self._database_now()
         for item in batch:
-            item.state = "pending"
+            item.state = "ready"
             item.attempts = 0
             item.last_error_code = None
             item.last_error_detail = None
@@ -590,48 +781,13 @@ class _FileIconBackfillRepository:
         )
 
     async def capacity_required_bytes(self) -> int:
-        available_file_reference = sa.exists(
-            sa.select(FileContentReferences.content_id)
-            .join(ObjectContents, ObjectContents.id == FileContentReferences.content_id)
-            .where(
-                FileContentReferences.file_id == FileIconBackfillItems.owner_id,
-                FileContentReferences.variant == FileIconBackfillItems.variant,
-                FileContentReferences.ordinal == FileIconBackfillItems.ordinal,
-                ObjectContents.state == ContentState.AVAILABLE.value,
-            )
-        )
-        available_icon_reference = sa.exists(
-            sa.select(IconContentReferences.content_id)
-            .join(ObjectContents, ObjectContents.id == IconContentReferences.content_id)
-            .where(
-                IconContentReferences.icon_id == FileIconBackfillItems.owner_id,
-                IconContentReferences.variant == FileIconBackfillItems.variant,
-                ObjectContents.state == ContentState.AVAILABLE.value,
-            )
-        )
         required_bytes = await self._session.scalar(
             sa.select(
                 sa.func.coalesce(
-                    sa.func.sum(FileIconBackfillItems.payload_size_estimate).filter(
-                        FileIconBackfillItems.state.not_in(("done", "cancelled"))
-                    ),
+                    sa.func.sum(FileIconBackfillItems.payload_size_estimate),
                     0,
                 )
-            ).where(
-                FileIconBackfillItems.state.not_in(("done", "cancelled")),
-                sa.or_(
-                    sa.and_(
-                        FileIconBackfillItems.owner_kind == "file",
-                        sa.exists().where(Files.id == FileIconBackfillItems.owner_id),
-                        ~available_file_reference,
-                    ),
-                    sa.and_(
-                        FileIconBackfillItems.owner_kind == "icon",
-                        sa.exists().where(Icons.id == FileIconBackfillItems.owner_id),
-                        ~available_icon_reference,
-                    ),
-                ),
-            )
+            ).where(FileIconBackfillItems.state == "ready")
         )
         return int(required_bytes or 0)
 
@@ -640,7 +796,7 @@ class _FileIconBackfillRepository:
             await self._session.scalar(
                 sa.select(
                     sa.exists().where(
-                        FileIconBackfillItems.state.in_(("pending", "leased"))
+                        FileIconBackfillItems.state.in_(("ready", "leased"))
                     )
                 )
             )
@@ -757,6 +913,23 @@ class _FileIconBackfillRepository:
             await self._session.execute(sa.select(sa.func.clock_timestamp()))
         ).scalar_one()
 
+    @staticmethod
+    def _work_item(
+        item: FileIconBackfillItems,
+        *,
+        lease_owner: str,
+    ) -> _WorkItem:
+        return _WorkItem(
+            id=item.id,
+            owner_kind=item.owner_kind,
+            owner_id=item.owner_id,
+            variant=item.variant,
+            ordinal=item.ordinal,
+            tenant_id=item.tenant_id,
+            payload_size_estimate=item.payload_size_estimate,
+            lease_owner=lease_owner,
+        )
+
     async def _analyze_targets(self) -> None:
         await self._session.execute(
             sa.text(
@@ -791,7 +964,14 @@ class FileIconBackfill:
                 policy_target = (
                     None if campaign_exists else await repository.policy_target()
                 )
-            if not campaign_exists and policy_target is StorageKind.POSTGRES_INLINE:
+                source_items = (
+                    False if campaign_exists else await repository.has_source_items()
+                )
+            if (
+                not campaign_exists
+                and source_items
+                and policy_target is StorageKind.POSTGRES_INLINE
+            ):
                 return self._waiting_capacity_result
             self._waiting_capacity_result = None
 
@@ -818,16 +998,55 @@ class FileIconBackfill:
         return result
 
     async def _run_once(self) -> FileIconBackfillResult:
-        async with self._database.session() as session, session.begin():
-            repository = _FileIconBackfillRepository(session)
-            campaign = await repository.campaign_or_start(self._settings)
-            if campaign.state is not FileIconBackfillState.ACTIVE:
-                return self._result(campaign)
-            if campaign.target_kind is not StorageKind.POSTGRES_INLINE:
-                raise ObjectContentStateError(
-                    "The inline File/Icon backfill cannot process another target"
+        admission = _Admission(
+            terminal=True,
+            inspected_count=0,
+            completed_count=0,
+            cancelled_count=0,
+        )
+        try:
+            async with self._database.session() as session, session.begin():
+                repository = _FileIconBackfillRepository(session)
+                if not await repository.has_campaign():
+                    admission = await repository.admit(self._settings)
+                    if not admission.terminal:
+                        return self._result(
+                            _Campaign(
+                                state=FileIconBackfillState.ACTIVE,
+                                target_kind=None,
+                                detail=(
+                                    "Finalizing File/Icon backfill admission before "
+                                    "the destination capacity decision"
+                                ),
+                            ),
+                            admitted_count=admission.inspected_count,
+                            completed_count=admission.completed_count,
+                            cancelled_count=admission.cancelled_count,
+                        )
+                campaign = await repository.campaign_or_start(self._settings)
+                if campaign.state is not FileIconBackfillState.ACTIVE:
+                    return self._result(
+                        campaign,
+                        admitted_count=admission.inspected_count,
+                        completed_count=admission.completed_count,
+                        cancelled_count=admission.cancelled_count,
+                    )
+                if campaign.target_kind is not StorageKind.POSTGRES_INLINE:
+                    raise ObjectContentStateError(
+                        "The inline File/Icon backfill cannot process another target"
+                    )
+                work = await repository.claim(self._settings)
+        except _AdmissionContended:
+            return self._result(
+                _Campaign(
+                    state=FileIconBackfillState.ACTIVE,
+                    target_kind=None,
+                    detail=(
+                        "A File/Icon owner or reference is changing; admission "
+                        "will retry on the next worker run"
+                    ),
                 )
-            work = await repository.claim(self._settings)
+            )
 
         completed_count = 0
         cancelled_count = 0
@@ -919,9 +1138,10 @@ class FileIconBackfill:
             campaign = await repository.finish_campaign()
         return self._result(
             campaign,
+            admitted_count=admission.inspected_count,
             claimed_count=len(work),
-            completed_count=completed_count,
-            cancelled_count=cancelled_count,
+            completed_count=completed_count + admission.completed_count,
+            cancelled_count=cancelled_count + admission.cancelled_count,
             failed_count=failed_count,
         )
 
@@ -977,6 +1197,7 @@ class FileIconBackfill:
     def _result(
         campaign: _Campaign,
         *,
+        admitted_count: int = 0,
         claimed_count: int = 0,
         completed_count: int = 0,
         cancelled_count: int = 0,
@@ -985,6 +1206,7 @@ class FileIconBackfill:
         return FileIconBackfillResult(
             state=campaign.state,
             target_kind=campaign.target_kind,
+            admitted_count=admitted_count,
             claimed_count=claimed_count,
             completed_count=completed_count,
             cancelled_count=cancelled_count,

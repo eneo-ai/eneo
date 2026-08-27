@@ -23,6 +23,7 @@ class ObjectContentReconciliationSummary(TypedDict):
 class FileIconBackfillSummary(TypedDict):
     state: str
     target_kind: str | None
+    admitted_count: int
     claimed_count: int
     completed_count: int
     cancelled_count: int
@@ -57,13 +58,14 @@ async def backfill_file_icon_content_task(
         "target_kind": (
             None if result.target_kind is None else result.target_kind.value
         ),
+        "admitted_count": result.admitted_count,
         "claimed_count": result.claimed_count,
         "completed_count": result.completed_count,
         "cancelled_count": result.cancelled_count,
         "failed_count": result.failed_count,
         "detail": result.detail,
     }
-    if result.claimed_count:
+    if result.admitted_count or result.claimed_count:
         logger.info("File/Icon legacy backfill progress", extra=summary)
     elif result.state in {
         FileIconBackfillState.WAITING_FOR_CAPACITY,

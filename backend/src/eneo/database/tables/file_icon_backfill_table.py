@@ -67,7 +67,7 @@ class FileIconBackfillItems(BaseWithTableName):
             name="ck_file_icon_backfill_items_payload_size",
         ),
         CheckConstraint(
-            "state IN ('pending', 'leased', 'failed', 'done', 'cancelled')",
+            "state IN ('pending', 'ready', 'leased', 'failed', 'done', 'cancelled')",
             name="ck_file_icon_backfill_items_state",
         ),
         CheckConstraint("attempts >= 0", name="ck_file_icon_backfill_items_attempts"),

@@ -1,6 +1,6 @@
 """Opt-in benchmark for the staged File/Icon PostgreSQL-inline backfill.
 
-The benchmark uses the real PostgreSQL 13 integration container and the real
+The benchmark uses the real PostgreSQL 16 integration container and the real
 ``FileIconBackfill`` implementation. It is skipped unless explicitly enabled:
 
     ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1 \
@@ -119,6 +119,7 @@ class _BackfillMetrics:
     batch_seconds_p95: float
     batch_seconds_max: float
     projected_minute_cron_seconds: float
+    admitted_count: int
     claimed_count: int
     completed_count: int
 
@@ -341,6 +342,7 @@ async def _run_backfill(
     )
     durations: list[float] = []
     completed_count = 0
+    admitted_count = 0
     claimed_count = 0
     started_at = time.perf_counter()
     final_state = FileIconBackfillState.ACTIVE
@@ -350,6 +352,7 @@ async def _run_backfill(
         result = await backfill.run_once()
         durations.append(time.perf_counter() - batch_started_at)
         completed_count += result.completed_count
+        admitted_count += result.admitted_count
         claimed_count += result.claimed_count
         final_state = result.state
         if result.state is not FileIconBackfillState.ACTIVE:
@@ -367,6 +370,7 @@ async def _run_backfill(
             batch_seconds_p95=_percentile(durations, 0.95),
             batch_seconds_max=max(durations),
             projected_minute_cron_seconds=projected_cron_seconds,
+            admitted_count=admitted_count,
             claimed_count=claimed_count,
             completed_count=completed_count,
         ),
@@ -456,9 +460,15 @@ async def test_file_icon_inline_backfill_benchmark(
         1,
         config.batch_mib * _MEBIBYTE // config.item_bytes,
     )
-    expected_batch_count = (
+    expected_copy_batch_count = (
         config.item_count + min(config.batch_rows, batch_items_by_bytes) - 1
     ) // min(config.batch_rows, batch_items_by_bytes)
+    expected_admission_batch_count = (
+        config.item_count + config.batch_rows - 1
+    ) // config.batch_rows
+    expected_batch_count = (
+        expected_admission_batch_count + expected_copy_batch_count - 1
+    )
     report = {
         "config": asdict(config),
         "environment": {
@@ -505,6 +515,7 @@ async def test_file_icon_inline_backfill_benchmark(
 
     assert final_state is FileIconBackfillState.COMPLETE
     assert seeded_count == config.item_count
+    assert backfill.admitted_count == config.item_count
     assert backfill.claimed_count == config.item_count
     assert backfill.completed_count == config.item_count
     assert backfill.batch_count == expected_batch_count

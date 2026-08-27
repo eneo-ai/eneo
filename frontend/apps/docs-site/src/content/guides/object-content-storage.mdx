@@ -22,17 +22,18 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## Start here
 
-| I want to…                                        | Go to                                                         |
-| ------------------------------------------------- | ------------------------------------------------------------- |
-| Run the simplest supported deployment             | [PostgreSQL only](#set-up-your-choice)                        |
-| Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)                      |
-| Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)                      |
-| Understand ownership and RAG                      | [How content flows](#how-content-flows)                       |
-| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file)            |
-| Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service)  |
-| Upgrade legacy File and Icon content              | [Online legacy adoption](#adopt-legacy-file-and-icon-content) |
-| Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)                       |
-| Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)             |
+| I want to…                                          | Go to                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| Run the simplest supported deployment               | [PostgreSQL only](#set-up-your-choice)                        |
+| Use the bundled private reference store             | [Bundled SeaweedFS](#set-up-your-choice)                      |
+| Connect MinIO or another compatible service         | [External endpoint](#set-up-your-choice)                      |
+| Understand ownership and RAG                        | [How content flows](#how-content-flows)                       |
+| Download a processed file or recover its original   | [Download or recover](#download-or-recover-a-file)            |
+| Move to another S3-compatible service               | [Change destination](#move-to-another-s3-compatible-service)  |
+| Upgrade legacy File and Icon content                | [Online legacy adoption](#adopt-legacy-file-and-icon-content) |
+| Close the recovery window and reclaim database disk | [Finish adoption](#finish-adoption-and-reclaim-disk)          |
+| Plan backup, recovery, and failure handling         | [Operate it safely](#operate-it-safely)                       |
+| Review lifecycle and integrity implementation       | [Architecture](/docs/object-content-architecture)             |
 
 ## How content flows
 
@@ -396,21 +397,26 @@ rows has two separate phases:
    ledger and write fence and commits. The second inventories legacy variants in
    resumable, idempotent groups. It does not retain the schema revision's
    exclusive table locks or copy and hash the payload bytes.
-2. The new worker adopts the frozen payloads into object content in bounded,
-   resumable batches while Eneo stays available.
+2. The new worker first classifies ledger rows in bounded metadata-only batches:
+   deleted owners are cancelled, available references are accepted, and only
+   rows that still need legacy bytes become ready. After that set is complete,
+   Eneo freezes the capacity decision and adopts the ready payloads into object
+   content in bounded, resumable batches while Eneo stays available.
 
 Existing Files and Icons remain readable through the legacy source until their
 new reference is available. The worker verifies the content before switching
-each reference. A later contract release may remove the legacy columns only
-after that deployment has no actionable legacy item left.
+each reference. A later contract release applies the fail-closed completion and
+live-reference checks in [Finish adoption](#finish-adoption-and-reclaim-disk)
+before removing the legacy columns.
 
 ```mermaid
 flowchart LR
   fence["Schema expansion\nwrite fence · commit"] --> inventory["Inventory\nresumable metadata groups"]
   inventory --> readable["Eneo starts\nlegacy content remains readable"]
-  readable --> worker["Online worker\nbounded copy · SHA-256"]
+  readable --> admission["Bounded admission\nowner lock · reference recheck"]
+  admission --> worker["Online worker\nbounded copy · SHA-256"]
   worker --> adopted["Verified object-content reference"]
-  adopted --> contract["Later contract release\nremove legacy schema"]
+  adopted --> contract["Later contract release\nlock · recheck · remove legacy schema"]
 ```
 
 <Callout type="info">
@@ -458,16 +464,20 @@ contains payload-free preflight, progress-count, and failed-item queries.
 
 ### Understand the worker state
 
-| State                      | Meaning and action                                                                                                                                                  |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `active`                   | The worker is adopting bounded batches. Keep it running and monitor foreground latency, database I/O, WAL, and free disk.                                           |
-| `waiting_for_capacity`     | Eneo is available, but the estimated inline copy is above the automatic threshold. Reserve payload, WAL, replica, backup, and safety headroom, then acknowledge it. |
-| `waiting_for_object_store` | The selected target is remote, but this release only adopts legacy bytes inline. Choose the action below.                                                           |
-| `halted`                   | The destination changed, or an invalid, oversized, or retry-exhausted item needs operator action. Correct the stored cause before explicitly resuming.              |
-| `complete`                 | Every remaining item is adopted or was safely cancelled because its File or Icon was deleted.                                                                       |
+| State                      | Meaning and action                                                                                                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `active`                   | The worker is finalizing bounded admission batches or adopting bounded byte batches. Keep it running and monitor foreground latency, database I/O, WAL, and free disk. |
+| `waiting_for_capacity`     | Eneo is available, but the estimated inline copy is above the automatic threshold. Reserve payload, WAL, replica, backup, and safety headroom, then acknowledge it.    |
+| `waiting_for_object_store` | The selected target is remote, but this release only adopts legacy bytes inline. Choose the action below.                                                              |
+| `halted`                   | The destination changed, or an invalid, oversized, or retry-exhausted item needs operator action. Correct the stored cause before explicitly resuming.                 |
+| `complete`                 | Every remaining item is adopted or was safely cancelled because its File or Icon was deleted.                                                                          |
 
 Waiting is not an upgrade failure. The application keeps serving the frozen
 legacy bytes and resumes from durable ledger state after the operator acts.
+The capacity decision is made only after every ledger row is durably classified.
+If an unfinished File or Icon is deleted, a database trigger cancels its ledger
+row. A wait therefore completes instead of remaining stuck when no source-bearing
+owner remains.
 If an item already has a reference whose content is marked failed, the worker
 atomically replaces that reference from the frozen legacy source and schedules
 normal cleanup when no references to the failed content remain.
@@ -497,10 +507,13 @@ Do not edit the campaign, ledger, or freeze trigger manually.
 
 ### Plan PostgreSQL capacity
 
-The relevant number is the estimated legacy File and Icon payload size, not the
-total database size. Inline adoption stores a second copy of those payloads in
-PostgreSQL. Both copies remain until the later contract release and physical
-table maintenance.
+The relevant number is the estimated payload size of ledger rows that still need
+legacy bytes, not the total database size. The worker freezes that set only
+after its bounded admission phase has locked and rechecked owners and existing
+references. A reference that fails before its row is admitted therefore enters
+the estimate instead of bypassing the capacity gate. Inline adoption stores a
+second copy of those payloads in PostgreSQL. Both copies remain until the later
+contract release and physical table maintenance.
 
 For example, a 200 GB database that contains 10 GB of legacy File/Icon payloads
 needs roughly 10 GB for the new payload copy, plus WAL, indexes, replicas,
@@ -547,7 +560,8 @@ recreate the worker for them to take effect.
 Stopping the worker pauses this adoption and every other background job. An
 in-flight bounded batch may finish; after an abrupt stop, unfinished leases
 become claimable again after the configured lease duration. Completed items stay
-committed, pending items stay in the ledger, and legacy content remains readable.
+committed, pending or ready items stay in the ledger, and legacy content remains
+readable.
 Restarting the same release resumes rather than restarting the copy.
 
 If the new release must be abandoned, stop traffic and restore the complete
@@ -555,6 +569,77 @@ pre-upgrade recovery point with the matching old image. Do not use Alembic
 `stamp`, run `downgrade`, remove the trigger, or start the old application
 against the expanded database. After new-version writes have been accepted,
 recovery is either forward on the new schema or a coordinated restore.
+
+### Finish adoption and reclaim disk
+
+Eneo deliberately does not delete the frozen legacy bytes when the online
+worker reports `complete`. They remain a recovery source until you choose to
+close the verification period by installing the later contract release. Use
+this checklist:
+
+| Step                                 | Who starts it?                                  | Safety boundary                                                     |
+| ------------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------- |
+| Online adoption and verification     | Eneo's bounded worker                           | Legacy bytes remain readable and unchanged                          |
+| Remove the legacy schema             | Operator installs the later contract release    | Migration locks and rechecks every surviving reference as available |
+| Return table space to the filesystem | Operator schedules `pg_repack` or `VACUUM FULL` | Restore-tested backup, capacity check, and an explicit work window  |
+
+1. Confirm that the campaign is `complete` and that no `pending`, `ready`,
+   `leased`, or `failed` ledger row remains. This is necessary but not the
+   final proof: a `done` row's referenced content can fail later. `cancelled`
+   rows belong to Files or Icons that were deleted safely.
+
+   ```sql
+   SELECT state, halt_reason FROM file_icon_backfill_campaign;
+
+   SELECT state, count(*)
+   FROM file_icon_backfill_items
+   GROUP BY state
+   ORDER BY state;
+   ```
+
+2. Keep the current release during your organization's verification period.
+   Download representative old Files and Icons and confirm the workflows that
+   use them. Do not edit the ledger or legacy columns.
+3. Create and restore-test a current backup. PostgreSQL is sufficient when all
+   authoritative bytes are inline. If any content is in object storage, test a
+   matching PostgreSQL and object-store backup pair. Keep the pre-upgrade backup
+   until this restore succeeds and your retention rules allow its removal.
+4. When the contract release is available, install it in a planned deployment.
+   In the same transaction that removes the legacy schema, its migration must
+   lock and recheck that every surviving ledger key has its matching File or
+   Icon reference and that the referenced object content is still `available`.
+   Campaign and ledger completion alone are not sufficient. A missing or failed
+   reference must abort before any legacy column is dropped. Installing that
+   release closes direct rollback to the old image; recovery remains forward or
+   through the retained coordinated backup.
+5. After the contract release, measure whether filesystem space actually needs
+   to be returned:
+
+   ```sql
+   SELECT pg_size_pretty(pg_total_relation_size('files')) AS files_total,
+          pg_size_pretty(pg_total_relation_size('icons')) AS icons_total;
+   ```
+
+6. If reclaim is needed, schedule and test **one** physical rewrite. Prefer
+   [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
+   for a production system that must minimize blocking; it still requires the
+   extension, a short final lock, and temporary free disk of roughly twice the
+   target tables and indexes. The simpler alternative is a maintenance window
+   with APIs and workers stopped:
+
+   ```sql
+   VACUUM (FULL, ANALYZE) files;
+   VACUUM (FULL, ANALYZE) icons;
+   ```
+
+   `VACUUM FULL` takes an exclusive table lock and needs space for the rewrite.
+   Ordinary `VACUUM` can make space reusable inside PostgreSQL but normally does
+   not shrink these table files. See the
+   [PostgreSQL VACUUM documentation](https://www.postgresql.org/docs/16/sql-vacuum.html).
+
+Physical reclamation stays manual because its duration, temporary capacity, and
+acceptable downtime differ by deployment. It must not run as hidden work in
+Alembic or application startup.
 
 ## Operate it safely
 
@@ -883,6 +968,20 @@ content to object storage. A future direct legacy-to-object-store adapter would
 need the same resumable worker guarantees; it still would not belong in
 `db-init`.
 
+### What happens to new uploads while legacy adoption runs?
+
+New File and Icon uploads use object content immediately. The deployment policy
+stores their bytes in PostgreSQL inline by default or in the configured object
+store when that destination is selected and ready. New code does not write
+payloads back to the legacy File and Icon columns; the database fence rejects
+such writes.
+
+Only content that existed before the upgrade uses the temporary legacy read
+fallback. Users can continue uploading while the online worker handles that
+older content. If an object-store target is selected but unavailable, remote
+writes fail explicitly instead of silently falling back to inline or legacy
+storage.
+
 ### Can we pause legacy adoption safely?
 
 Yes. Committed progress and legacy readability survive a worker stop, but
@@ -896,6 +995,21 @@ the total database size. If those payloads themselves occupy 200 GB, the new
 inline payload data can approach another 200 GB before later cleanup, plus WAL
 and operational headroom. See [Plan PostgreSQL capacity](#plan-postgresql-capacity)
 for the worked example and acknowledgement process.
+
+### Are legacy bytes deleted and is disk space reclaimed automatically?
+
+No. Successful online adoption keeps the frozen legacy columns as a recovery
+source until the later contract release passes the fail-closed checks in
+[Finish adoption](#finish-adoption-and-reclaim-disk). That release can drop the
+old columns, but PostgreSQL treats the drop as a metadata change and does not
+immediately return their physical table storage to the filesystem.
+
+Plan a separate tested `pg_repack` or `VACUUM FULL` maintenance operation when
+filesystem reclamation matters. `pg_repack` reduces blocking but needs temporary
+capacity; `VACUUM FULL` rewrites and locks the table. Ordinary `VACUUM` does not
+perform this shrink. Follow [Finish adoption and reclaim
+disk](#finish-adoption-and-reclaim-disk) before closing the recovery window.
+This concerns disk space, not application memory.
 
 ### Why does the browser not upload directly to S3?
 
