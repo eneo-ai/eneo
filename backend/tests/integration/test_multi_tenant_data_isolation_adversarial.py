@@ -459,7 +459,7 @@ async def test_user_login_rejects_wrong_tenant_credentials(
 
     # Create user in Tenant A
     user_a_email = f"alice@tenant-a-{uuid4().hex[:4]}.example.com"
-    user_a_password = "AlicePass123!"
+    user_a_password = "AlicePassword123!"
     await _create_user(
         client,
         super_admin_token,

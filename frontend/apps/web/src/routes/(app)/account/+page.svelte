@@ -10,8 +10,12 @@
     setPreferredAssistantCopyFormat
   } from "$lib/features/chat/copyAssistantAnswer";
   import UpdateUserName from "./UpdateUserName.svelte";
+  import ChangePasswordDialog from "./ChangePasswordDialog.svelte";
   import { m } from "$lib/paraglide/messages";
   import { Input } from "@eneo/ui";
+  import type { PageData } from "./$types";
+
+  let { data } = $props<{ data: PageData }>();
   const {
     user,
     settings,
@@ -93,6 +97,28 @@
     <div class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-1 border-b py-4 pr-4 pl-2">
       <h3 class="font-medium">{m.email()}</h3>
       <pre class="">{user.email}</pre>
+    </div>
+    <div
+      class="border-dimmer hover:bg-hover-dimmer flex flex-col items-start gap-4 border-b py-4 pr-4 pl-2 sm:flex-row sm:items-center"
+    >
+      <div class="min-w-0 flex-1">
+        <h3 class="font-medium">{m.password()}</h3>
+        <p class="text-secondary text-sm">
+          {#if data.passwordChangeCapability.source === "external"}
+            {m.password_managed_externally()}
+          {:else if data.passwordChangeCapability.source === "unavailable"}
+            {m.password_capability_unavailable()}
+          {:else}
+            {m.password_settings_description()}
+          {/if}
+        </p>
+      </div>
+      {#if data.passwordChangeCapability.source === "eneo" || data.passwordChangeCapability.source === "zitadel"}
+        <ChangePasswordDialog
+          capability={data.passwordChangeCapability}
+          username={user.username ?? user.email}
+        />
+      {/if}
     </div>
     <div
       class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-2 border-b pt-4 pr-4 pb-2 pl-2"

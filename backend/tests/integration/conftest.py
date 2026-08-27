@@ -424,7 +424,7 @@ async def setup_database(test_settings: Settings):
         quota_limit=1000000,
         user_name="test_user",
         user_email="test@example.com",
-        user_password="test_password",
+        user_password="IntegrationPass123!",
     )
 
     # Create required feature flags for initial setup
@@ -550,7 +550,7 @@ async def cleanup_database(
         quota_limit=1000000,
         user_name="test_user",
         user_email="test@example.com",
-        user_password="password",
+        user_password="IntegrationPass123!",
     )
 
     # Add using_templates feature flag (not handled by add_tenant_user)
@@ -952,7 +952,11 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
                 datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            credential_version=getattr(user, "credential_version", 0),
+        )
         payload = {
             **JWTPayload(
                 **jwt_meta.model_dump(), **jwt_creds.model_dump()

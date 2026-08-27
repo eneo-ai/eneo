@@ -27,6 +27,7 @@ class Users(BasePublic):
     email_verified: Mapped[bool] = mapped_column(server_default="False")
     salt: Mapped[Optional[str]] = mapped_column()
     password: Mapped[Optional[str]] = mapped_column()
+    credential_version: Mapped[int] = mapped_column(nullable=False, server_default="0")
     is_active: Mapped[bool] = mapped_column(server_default="True")
     state: Mapped[str] = mapped_column()
     used_tokens: Mapped[int] = mapped_column(default=0)

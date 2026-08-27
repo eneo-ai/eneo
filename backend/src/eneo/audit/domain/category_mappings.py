@@ -105,6 +105,9 @@ CATEGORY_MAPPINGS = {
     ActionType.MODULE_AUTH_TICKET_ISSUED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_EXCHANGED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_REFRESHED.value: "security_events",
+    ActionType.PASSWORD_CHANGED.value: "security_events",
+    ActionType.PASSWORD_CHANGE_FAILED.value: "security_events",
+    ActionType.SESSIONS_INVALIDATED.value: "security_events",
     # File Operations (4 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",

@@ -604,6 +604,19 @@
           >
             {m.logout_success()}
           </div>{/if}
+        {#if message === "password_changed"}
+          <div
+            class="bg-positive-dimmer text-positive-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            {m.password_changed_login_again()}
+          </div>
+        {:else if message === "password_changed_sessions_remain"}
+          <div
+            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
+          >
+            {m.password_changed_sessions_remain()}
+          </div>
+        {/if}
         {#if message === "expired"}
           <div
             class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"

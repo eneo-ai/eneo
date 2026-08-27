@@ -80,14 +80,6 @@ async def test_invalid_token_content_raises_error(
             algorithms=[JWT_ALGORITHM],
         )
 
-        token = auth_service.create_access_token_for_user(
-            user=TEST_USER, secret_key=str(JWT_SECRET)
-        )
-        username = auth_service.get_username_from_token(
-            token=token, secret_key=str(JWT_SECRET)
-        )
-        assert username == TEST_USER.username
-
 
 @pytest.mark.parametrize(
     "secret, wrong_token",
@@ -112,7 +104,10 @@ async def test_error_when_token_or_secret_is_wrong(
     with pytest.raises(
         AuthenticationException, match="Could not validate token credentials."
     ):
-        auth_service.get_username_from_token(token=wrong_token, secret_key=str(secret))
+        auth_service.get_jwt_payload_with_claims(
+            token=wrong_token,
+            key=str(secret),
+        )
 
 
 def test_validate_openid_jwt(auth_service: AuthService):

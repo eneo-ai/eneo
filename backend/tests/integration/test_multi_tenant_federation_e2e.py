@@ -559,7 +559,7 @@ async def test_federation_callback_enforces_allowed_domains(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     token_email_map = {
@@ -650,7 +650,7 @@ async def test_federation_callback_rejects_tampered_state(
         super_admin_token,
         tenant["id"],
         f"user@{slug}.gov",
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -751,7 +751,7 @@ async def test_federation_callback_accepts_future_iat_within_leeway(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     state_payload = await _initiate(client, tenant["slug"])
@@ -840,7 +840,7 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     state_payload = await _initiate(client, tenant["slug"])
@@ -900,7 +900,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(
@@ -1037,7 +1037,7 @@ async def test_federation_callback_allows_recent_config_change_within_grace(
         super_admin_token,
         tenant["id"],
         allowed_email,
-        password="ValidPassw0rd!",
+        password="ValidPassw0rd123!",
     )
 
     monkeypatch.setattr(

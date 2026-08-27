@@ -550,6 +550,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/me/password/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change Current User'S Local Password
+     * @description Change the authenticated user's local Eneo password and invalidate previously issued Eneo sessions.
+     */
+    post: operations["Change_current_user_s_local_password_api_v1_users_me_password__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/users/me/sessions/invalidate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Invalidate Current User'S Eneo Sessions
+     * @description Invalidate previously issued Eneo sessions after a provider-managed credential change.
+     */
+    post: operations["Invalidate_current_user_s_Eneo_sessions_api_v1_users_me_sessions_invalidate__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/tenant/": {
     parameters: {
       query?: never;
@@ -8234,6 +8274,9 @@ export interface components {
       | "module_auth_ticket_issued"
       | "module_auth_token_exchanged"
       | "module_auth_token_refreshed"
+      | "password_changed"
+      | "password_change_failed"
+      | "sessions_invalidated"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -12150,6 +12193,15 @@ export interface components {
        */
       is_org_enabled?: boolean | null;
     };
+    /** EneoPasswordChangeCapabilityPublic */
+    EneoPasswordChangeCapabilityPublic: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      source: "eneo";
+      policy?: components["schemas"]["LocalPasswordPolicyPublic"];
+    };
     /**
      * EntityType
      * @description Categorize what type of entity was affected
@@ -12247,7 +12299,11 @@ export interface components {
       | 9053
       | 9054
       | 9055
-      | 9056;
+      | 9056
+      | 9057
+      | 9058
+      | 9059
+      | 9060;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -12426,6 +12482,16 @@ export interface components {
        * Format: date-time
        */
       expires_at: string;
+    };
+    /** ExternalPasswordChangeCapabilityPublic */
+    ExternalPasswordChangeCapabilityPublic: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      source: "external";
+      /** Policy */
+      policy?: null;
     };
     /**
      * FavoriteProvidersUpdate
@@ -13336,6 +13402,19 @@ export interface components {
     Limits: {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
+    };
+    /** LocalPasswordPolicyPublic */
+    LocalPasswordPolicyPublic: {
+      /**
+       * Min Length
+       * @default 15
+       */
+      min_length?: number;
+      /**
+       * Max Bytes
+       * @default 72
+       */
+      max_bytes?: number;
     };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -15826,6 +15905,21 @@ export interface components {
        * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. Set to null to disable space-level retention. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
+    };
+    /** PasswordChangeRequest */
+    PasswordChangeRequest: {
+      /**
+       * Current Password
+       * Format: password
+       * @description Current local Eneo password.
+       */
+      current_password: string;
+      /**
+       * New Password
+       * Format: password
+       * @description New local password. The active constraints are returned in UserPublic.password_change.policy.
+       */
+      new_password: string;
     };
     /**
      * PatchFederationRequest
@@ -19713,8 +19807,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description User password (minimum 7 characters)
-       * @example SecurePassword123!
+       * @description New local password. Must contain at least 15 characters and be at most 72 UTF-8 bytes.
+       * @example Correct horse battery staple
        */
       password?: string | null;
       /**
@@ -19748,8 +19842,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description User password (minimum 7 characters)
-       * @example SecurePassword123!
+       * @description New local password. Must contain at least 15 characters and be at most 72 UTF-8 bytes.
+       * @example Correct horse battery staple
        */
       password?: string | null;
       /**
@@ -19865,6 +19959,11 @@ export interface components {
       state: components["schemas"]["UserState"];
       /** Quota Limit */
       quota_limit?: number | null;
+      /**
+       * Credential Version
+       * @default 0
+       */
+      credential_version?: number;
       /**
        * User Groups
        * @default []
@@ -20039,6 +20138,11 @@ export interface components {
       /** Quota Limit */
       quota_limit?: number | null;
       /**
+       * Credential Version
+       * @default 0
+       */
+      credential_version?: number;
+      /**
        * User Groups
        * @default []
        */
@@ -20146,6 +20250,10 @@ export interface components {
       roles: components["schemas"]["RolePublic"][];
       /** User Groups */
       user_groups: components["schemas"]["UserGroupRead"][];
+      /** Password Change */
+      password_change:
+        | components["schemas"]["EneoPasswordChangeCapabilityPublic"]
+        | components["schemas"]["ExternalPasswordChangeCapabilityPublic"];
     };
     /** UserPublicBase */
     UserPublicBase: {
@@ -20339,8 +20447,8 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New password (minimum 7 characters)
-       * @example NewSecurePassword456!
+       * @description New local password. Must contain at least 15 characters and be at most 72 UTF-8 bytes.
+       * @example Another correct horse battery staple
        */
       password?: string | null;
       /**
@@ -23501,6 +23609,127 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["UserPublic"];
         };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Change_current_user_s_local_password_api_v1_users_me_password__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordChangeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  Invalidate_current_user_s_Eneo_sessions_api_v1_users_me_sessions_invalidate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Forbidden */
       403: {
