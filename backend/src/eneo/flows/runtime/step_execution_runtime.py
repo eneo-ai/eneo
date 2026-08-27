@@ -58,6 +58,10 @@ from eneo.flows.runtime.output_formats.base import append_output_format_instruct
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_retrieval import RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
+from eneo.flows.runtime.run_cancellation import (
+    FlowStepCancelledError,
+    run_cancel_probe_scope,
+)
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     enforce_inline_input_cap,
@@ -276,10 +280,6 @@ class BuildProviderCallObserverFn(Protocol):
 
 class BuildTranscriptionCallObserverFn(Protocol):
     def __call__(self) -> ProviderCallObserver: ...
-
-
-class FlowStepCancelledError(Exception):
-    pass
 
 
 @dataclass
@@ -1063,21 +1063,33 @@ async def prepare_step_execution(
         "used_question_binding": False,
     }
     if step_input_override is None:
-        try:
-            step_input = await deps.resolve_step_input(
-                step=step,
-                context=context,
-                run=run,
-                prior_results=state.prior_results,
-                state=state,
-                version_metadata=version_metadata,
-                requested_file_ids=requested_file_ids,
-                transcription_call_observer=(
-                    deps.build_transcription_call_observer()
-                    if deps.build_transcription_call_observer is not None
-                    else None
-                ),
+        # Input resolution can wait minutes on an external transcription job;
+        # publish the run's cancellation probe so that wait can be cut short.
+        async def run_cancelled() -> bool:
+            if deps.run_cancelled is None:
+                return False
+            return await deps.run_cancelled(
+                run_id=run.id, flow_id=run.flow_id, tenant_id=run.tenant_id
             )
+
+        try:
+            with run_cancel_probe_scope(
+                run_cancelled if deps.run_cancelled is not None else None
+            ):
+                step_input = await deps.resolve_step_input(
+                    step=step,
+                    context=context,
+                    run=run,
+                    prior_results=state.prior_results,
+                    state=state,
+                    version_metadata=version_metadata,
+                    requested_file_ids=requested_file_ids,
+                    transcription_call_observer=(
+                        deps.build_transcription_call_observer()
+                        if deps.build_transcription_call_observer is not None
+                        else None
+                    ),
+                )
         except TypedIOValidationException as exc:
             raise attach_typed_failure_context(
                 exc,

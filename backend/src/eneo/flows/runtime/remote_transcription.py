@@ -11,7 +11,9 @@ chunking or timestamp headers.
 Configured through deployment settings (``flow_transcription_service_url`` and
 friends); unset means flows use the model-registry transcription path. Polling
 is a plain idle await: flow execution runs on its own dedicated ARQ worker, so
-a waiting job holds nothing but its job slot.
+a waiting job holds nothing but its job slot. A job eneo stops waiting for
+(run cancelled, worker interrupted, poll deadline) is cancelled service-side
+so it does not keep burning GPU time for a result nobody will read.
 """
 
 from __future__ import annotations
@@ -38,6 +40,11 @@ from tenacity import (
 
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.transcriber import TranscribedAudio
+from eneo.flows.runtime.run_cancellation import (
+    FlowStepCancelledError,
+    RunCancelProbe,
+    current_run_cancel_probe,
+)
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     OpenAIException,
@@ -80,10 +87,44 @@ _MAX_CONSECUTIVE_POLL_FAILURES = 5
 
 _TERMINAL_COMPLETED = "completed"
 _TERMINAL_FAILED = "failed"
+_TERMINAL_CANCELLED = "cancelled"
+
+# Cancelling a job is best effort and must not hold up the caller's own
+# cancellation for long.
+_CANCEL_TIMEOUT_SECONDS = 10.0
 
 # Job kinds the service accepts: transcribe end to end, or label speakers on a
 # transcript the caller produced (words with absolute timestamps).
 JobTask = Literal["transcribe", "diarize"]
+
+
+class RemoteTranscriptionCancelledException(OpenAIException):
+    """The service reported the job cancelled before it produced a result."""
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteJobStatus:
+    """One poll of ``GET /v1/jobs/{id}``."""
+
+    status: str
+    stage: str | None = None
+    queue_position: int | None = None
+
+    def describe(self) -> str:
+        if self.queue_position is not None:
+            return f"{self.status} (position {self.queue_position})"
+        if self.stage is not None and self.stage != self.status:
+            return f"{self.status}/{self.stage}"
+        return self.status
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteServiceReadiness:
+    """Authenticated ``GET /v1/health/ready`` outcome for this client."""
+
+    ready: bool
+    accepting_jobs: bool
+    detail: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,22 +255,41 @@ class RemoteTranscriptionClient:
             return job_id
         self._raise_for_submit_status(response)
 
-    async def wait_for_result(self, job_id: str) -> RemoteTranscriptionResult:
-        """Poll the job until terminal, then fetch its structured result."""
+    async def wait_for_result(
+        self,
+        job_id: str,
+        *,
+        run_cancelled: RunCancelProbe | None = None,
+    ) -> RemoteTranscriptionResult:
+        """Poll the job until terminal, then fetch its structured result.
+
+        ``run_cancelled`` is asked once per poll tick; when it answers true the
+        job is cancelled service-side and ``FlowStepCancelledError`` is raised
+        so the executor records the step as cancelled rather than failed.
+        """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.poll_timeout_seconds
         consecutive_failures = 0
+        last_seen: RemoteJobStatus | None = None
 
         async with self._http_client(timeout=self.result_timeout_seconds) as client:
             while True:
                 if loop.time() >= deadline:
+                    await self.cancel(job_id, client=client)
                     raise OpenAIException(
                         litellm_transport.PROVIDER_ERROR_MESSAGE,
                         code="provider_error",
                         details={"reason": "provider_error", "retryable": True},
                     )
+                if run_cancelled is not None and await _probe_quietly(
+                    run_cancelled, job_id=job_id
+                ):
+                    await self.cancel(job_id, client=client)
+                    raise FlowStepCancelledError(
+                        "Run was cancelled while waiting for transcription."
+                    )
                 try:
-                    status = await self._poll_once(client, job_id)
+                    seen = await self._poll_once(client, job_id)
                 except (
                     APIKeyNotConfiguredException,
                     ProviderRejectedRequestException,
@@ -251,12 +311,19 @@ class RemoteTranscriptionClient:
                     continue
 
                 consecutive_failures = 0
-                if status == _TERMINAL_COMPLETED:
+                if seen != last_seen:
+                    logger.info(
+                        "remote_transcription.progress job_id=%s state=%s",
+                        job_id,
+                        seen.describe(),
+                    )
+                    last_seen = seen
+                if seen.status == _TERMINAL_COMPLETED:
                     result = await self._fetch_result(client, job_id)
                     if result is not None:
                         return result
                     # A raced 409: the status flapped; keep polling.
-                elif status == _TERMINAL_FAILED:
+                elif seen.status == _TERMINAL_FAILED:
                     raise ProviderRejectedRequestException(
                         litellm_transport.INVALID_REQUEST_MESSAGE,
                         code="provider_rejected_request",
@@ -265,21 +332,117 @@ class RemoteTranscriptionClient:
                             "retryable": False,
                         },
                     )
+                elif seen.status == _TERMINAL_CANCELLED:
+                    # Cancelled service-side (operator, retention, or a cancel
+                    # eneo sent that raced this poll). No result will come; the
+                    # audio was not transcribed, so a re-run is reasonable.
+                    raise RemoteTranscriptionCancelledException(
+                        litellm_transport.PROVIDER_ERROR_MESSAGE,
+                        code="provider_error",
+                        details={"reason": "provider_cancelled", "retryable": True},
+                    )
                 await asyncio.sleep(self.poll_interval_seconds)
 
-    async def _poll_once(self, client: httpx.AsyncClient, job_id: str) -> str:
+    async def cancel(
+        self, job_id: str, *, client: httpx.AsyncClient | None = None
+    ) -> None:
+        """Ask the service to stop a job eneo will not wait for.
+
+        Best effort and idempotent on the service side (202 for an active job,
+        200 for one already terminal, 404 for one it no longer knows). Nothing
+        here raises: the caller is already on its way out and the worst case
+        is the job running to completion unread, which is what happened before
+        cancellation existed.
+        """
+
+        async def _send(http: httpx.AsyncClient) -> None:
+            response = await http.delete(
+                f"{self.base_url}/v1/jobs/{job_id}", headers=self._headers
+            )
+            logger.info(
+                "remote_transcription.cancel job_id=%s status_code=%s",
+                job_id,
+                response.status_code,
+            )
+
+        try:
+            async with asyncio.timeout(_CANCEL_TIMEOUT_SECONDS):
+                if client is not None:
+                    await _send(client)
+                else:
+                    async with self._http_client(
+                        timeout=_CANCEL_TIMEOUT_SECONDS
+                    ) as own:
+                        await _send(own)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "remote_transcription.cancel_failed job_id=%s", job_id, exc_info=True
+            )
+
+    async def check_readiness(self) -> RemoteServiceReadiness:
+        """Authenticated pre-flight: is the service up, and would it admit a job?
+
+        503 means the service is down. 200 with ``queue_accepting_jobs`` false
+        means a submit would be refused with 429 (the check is scoped to this
+        client's token, so it also reflects this client's active-job limit).
+        Transport failures are reported as not ready rather than raised; only
+        bad credentials raise, since that is a configuration error.
+        """
+        try:
+            async with self._http_client(timeout=self.result_timeout_seconds) as client:
+                response = await client.get(
+                    f"{self.base_url}/v1/health/ready", headers=self._headers
+                )
+        except Exception as exc:
+            return RemoteServiceReadiness(
+                ready=False, accepting_jobs=False, detail=f"unreachable: {exc!r}"
+            )
+        if response.status_code == 401:
+            self._raise_bad_credentials()
+        if response.status_code != 200:
+            return RemoteServiceReadiness(
+                ready=False,
+                accepting_jobs=False,
+                detail=f"http {response.status_code}",
+            )
+        body = _json_object(response)
+        accepting = body.get("queue_accepting_jobs")
+        accepting_jobs = accepting if isinstance(accepting, bool) else True
+        return RemoteServiceReadiness(
+            ready=True,
+            accepting_jobs=accepting_jobs,
+            detail="accepting jobs" if accepting_jobs else "queue not accepting jobs",
+        )
+
+    async def _poll_once(
+        self, client: httpx.AsyncClient, job_id: str
+    ) -> RemoteJobStatus:
         response = await client.get(
             f"{self.base_url}/v1/jobs/{job_id}", headers=self._headers
         )
         if response.status_code == 200:
-            status = _json_object(response).get("status")
+            body = _json_object(response)
+            status = body.get("status")
             if not isinstance(status, str):
                 raise OpenAIException(
                     litellm_transport.PROVIDER_ERROR_MESSAGE,
                     code="provider_error",
                     details={"reason": "provider_error", "retryable": True},
                 )
-            return status
+            stage = body.get("stage")
+            queue_position = body.get("queue_position")
+            return RemoteJobStatus(
+                status=status,
+                stage=stage if isinstance(stage, str) else None,
+                queue_position=(
+                    queue_position
+                    if isinstance(queue_position, int)
+                    and not isinstance(queue_position, bool)
+                    else None
+                ),
+            )
         if response.status_code == 401:
             self._raise_bad_credentials()
         if response.status_code == 404:
@@ -520,10 +683,20 @@ class RemoteFlowTranscriber:
                     temp_file_path.unlink()
 
         try:
-            result = await self.client.wait_for_result(job_id)
+            result = await self.client.wait_for_result(
+                job_id, run_cancelled=current_run_cancel_probe()
+            )
         except asyncio.CancelledError:
-            # No cancel endpoint exists: the service runs the job to
-            # completion regardless, so the outcome is genuinely unknown.
+            # The worker is going away; tell the service to stop the job so it
+            # does not finish work nobody will collect. Shielded so the cancel
+            # already delivered to this task cannot interrupt the request.
+            await asyncio.shield(self.client.cancel(job_id))
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
+        except (FlowStepCancelledError, RemoteTranscriptionCancelledException):
+            # The job was stopped, by eneo or by the service; the audio was not
+            # transcribed and nothing was billed.
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
@@ -656,6 +829,48 @@ def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber
             ),
         )
     )
+
+
+async def log_remote_transcription_readiness(settings: "Settings") -> None:
+    """Startup diagnostic: can this deployment's token submit jobs right now?
+
+    Logs only; a service that is down at worker start may be up by the time a
+    flow runs, and each submit still handles refusal on its own.
+    """
+    if not settings.flow_transcription_service_configured:
+        return
+    transcriber = build_remote_flow_transcriber(settings)
+    try:
+        readiness = await transcriber.client.check_readiness()
+    except APIKeyNotConfiguredException:
+        logger.error(
+            "remote_transcription.readiness url=%s credentials rejected",
+            transcriber.client.base_url,
+        )
+        return
+    log = (
+        logger.info if readiness.ready and readiness.accepting_jobs else logger.warning
+    )
+    log(
+        "remote_transcription.readiness url=%s ready=%s accepting_jobs=%s detail=%s",
+        transcriber.client.base_url,
+        readiness.ready,
+        readiness.accepting_jobs,
+        readiness.detail,
+    )
+
+
+async def _probe_quietly(probe: RunCancelProbe, *, job_id: str) -> bool:
+    """A failed cancellation probe must not fail the job; keep waiting."""
+    try:
+        return await probe()
+    except Exception:
+        logger.warning(
+            "remote_transcription.cancel_probe_failed job_id=%s",
+            job_id,
+            exc_info=True,
+        )
+        return False
 
 
 def _json_object(response: httpx.Response) -> dict[str, object]:

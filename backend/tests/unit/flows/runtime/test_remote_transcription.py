@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -10,8 +11,13 @@ import pytest
 from eneo.flows.runtime import remote_transcription
 from eneo.flows.runtime.remote_transcription import (
     RemoteFlowTranscriber,
+    RemoteTranscriptionCancelledException,
     RemoteTranscriptionClient,
     build_remote_flow_transcriber,
+)
+from eneo.flows.runtime.run_cancellation import (
+    FlowStepCancelledError,
+    run_cancel_probe_scope,
 )
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
@@ -44,10 +50,14 @@ class ScriptedService:
         submit_responses: list[httpx.Response] | None = None,
         status_responses: list[httpx.Response] | None = None,
         result_responses: list[httpx.Response] | None = None,
+        cancel_responses: list[httpx.Response] | None = None,
+        ready_responses: list[httpx.Response] | None = None,
     ) -> None:
         self.submit_responses = submit_responses or []
         self.status_responses = status_responses or []
         self.result_responses = result_responses or []
+        self.cancel_responses = cancel_responses or []
+        self.ready_responses = ready_responses or []
         self.requests: list[httpx.Request] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -59,6 +69,14 @@ class ScriptedService:
             return self.status_responses.pop(0)
         if request.method == "GET" and path == f"/v1/jobs/{JOB_ID}/result":
             return self.result_responses.pop(0)
+        if request.method == "DELETE" and path == f"/v1/jobs/{JOB_ID}":
+            if self.cancel_responses:
+                return self.cancel_responses.pop(0)
+            return httpx.Response(
+                202, json={"job_id": JOB_ID, "cancellation_requested": True}
+            )
+        if request.method == "GET" and path == "/v1/health/ready":
+            return self.ready_responses.pop(0)
         raise AssertionError(f"unexpected request: {request.method} {path}")
 
     @property
@@ -69,13 +87,28 @@ class ScriptedService:
             if request.method == "POST" and request.url.path == "/v1/jobs"
         )
 
+    @property
+    def cancel_count(self) -> int:
+        return sum(1 for request in self.requests if request.method == "DELETE")
+
 
 def accepted() -> httpx.Response:
     return httpx.Response(202, json={"job_id": JOB_ID, "status": "queued"})
 
 
-def status(value: str) -> httpx.Response:
-    return httpx.Response(200, json={"job_id": JOB_ID, "status": value})
+def status(value: str, *, queue_position: int | None = None) -> httpx.Response:
+    # Mirrors the service contract: stage and queue_position are always
+    # present, the latter only set while queued.
+    stage = "transcribing" if value == "running" else value
+    return httpx.Response(
+        200,
+        json={
+            "job_id": JOB_ID,
+            "status": value,
+            "stage": stage,
+            "queue_position": queue_position,
+        },
+    )
 
 
 def make_client(
@@ -365,10 +398,10 @@ async def test_failed_job_is_rejected_and_recorded() -> None:
     assert service.submit_count == 1
 
 
-async def test_poll_deadline_is_unknown_outcome_without_resubmit() -> None:
+async def test_poll_deadline_cancels_job_and_is_unknown_outcome() -> None:
     service = ScriptedService(
         submit_responses=[accepted()],
-        status_responses=[status("queued") for _ in range(50)],
+        status_responses=[status("queued", queue_position=3) for _ in range(50)],
     )
     transcriber = RemoteFlowTranscriber(make_client(service, poll_timeout_seconds=0.01))
     observer = RecordingObserver()
@@ -378,6 +411,128 @@ async def test_poll_deadline_is_unknown_outcome_without_resubmit() -> None:
 
     assert [reason for _, reason in observer.unknown_calls] == ["provider_error"]
     assert service.submit_count == 1
+    # The job is stopped service-side instead of running unread to completion.
+    assert service.cancel_count == 1
+
+
+async def test_cancelled_job_is_terminal_and_recorded_as_cancelled() -> None:
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("running"), status("cancelled")],
+    )
+    transcriber = RemoteFlowTranscriber(make_client(service))
+    observer = RecordingObserver()
+
+    with pytest.raises(RemoteTranscriptionCancelledException) as excinfo:
+        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+
+    assert excinfo.value.details == {"reason": "provider_cancelled", "retryable": True}
+    assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
+    assert observer.rejected_calls == []
+    # Already terminal: nothing to cancel, and the status endpoint was left alone
+    # once the terminal state was seen.
+    assert service.cancel_count == 0
+    assert service.status_responses == []
+
+
+async def test_run_cancellation_stops_polling_and_cancels_job() -> None:
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("queued", queue_position=1) for _ in range(50)],
+    )
+    transcriber = RemoteFlowTranscriber(make_client(service))
+    observer = RecordingObserver()
+    answers = iter([False, False, True])
+
+    async def run_cancelled() -> bool:
+        return next(answers)
+
+    with run_cancel_probe_scope(run_cancelled):
+        with pytest.raises(FlowStepCancelledError):
+            await transcriber.transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
+
+    assert service.cancel_count == 1
+    assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
+    assert len(service.status_responses) > 40
+
+
+async def test_failing_cancellation_probe_keeps_waiting() -> None:
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("queued"), status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    client = make_client(service)
+
+    async def broken_probe() -> bool:
+        raise RuntimeError("db pool exhausted")
+
+    result = await client.wait_for_result(JOB_ID, run_cancelled=broken_probe)
+
+    assert result.text == RESULT_BODY["text"]
+    assert service.cancel_count == 0
+
+
+async def test_worker_cancellation_cancels_job_service_side() -> None:
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("running") for _ in range(50)],
+    )
+    transcriber = RemoteFlowTranscriber(
+        make_client(service, poll_interval_seconds=0.05)
+    )
+    observer = RecordingObserver()
+
+    task = asyncio.create_task(
+        transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+    )
+    while service.submit_count == 0:
+        await asyncio.sleep(0.001)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert service.cancel_count == 1
+    assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
+
+
+async def test_cancel_is_best_effort() -> None:
+    service = ScriptedService(cancel_responses=[httpx.Response(500)])
+    client = make_client(service)
+
+    await client.cancel(JOB_ID)
+
+    assert service.cancel_count == 1
+
+
+@pytest.mark.parametrize(
+    ("response", "ready", "accepting"),
+    [
+        (httpx.Response(200, json={"queue_accepting_jobs": True}), True, True),
+        (httpx.Response(200, json={"queue_accepting_jobs": False}), True, False),
+        (httpx.Response(503), False, False),
+    ],
+)
+async def test_readiness_reports_service_and_admission_state(
+    response: httpx.Response, ready: bool, accepting: bool
+) -> None:
+    service = ScriptedService(ready_responses=[response])
+    client = make_client(service)
+
+    readiness = await client.check_readiness()
+
+    assert (readiness.ready, readiness.accepting_jobs) == (ready, accepting)
+    assert service.requests[0].headers["authorization"] == "Bearer devtoken"
+
+
+async def test_readiness_rejected_credentials_are_a_configuration_error() -> None:
+    service = ScriptedService(ready_responses=[httpx.Response(401)])
+    client = make_client(service)
+
+    with pytest.raises(APIKeyNotConfiguredException):
+        await client.check_readiness()
 
 
 async def test_poll_tolerates_transient_failures() -> None:
@@ -530,6 +685,27 @@ async def test_flow_audio_step_runs_through_remote_transcriber() -> None:
     assert result.text == RESULT_BODY["text"]
     assert result.audio_seconds == 123.5
     assert result.model_name == "anchor-model"
+
+    cancelled = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("queued") for _ in range(5)],
+    )
+
+    async def run_cancelled() -> bool:
+        return True
+
+    with run_cancel_probe_scope(run_cancelled):
+        with pytest.raises(FlowStepCancelledError):
+            await transcribe_audio_input(
+                files=[file_info],
+                transcriber=RemoteFlowTranscriber(make_client(cancelled)),
+                transcription_model=SimpleNamespace(id=new_id(), name="anchor-model"),
+                language="auto",
+                step_order=1,
+                max_files=3,
+                max_inline_text_bytes=1_048_576,
+                load_audio_payload=load_audio_payload,
+            )
 
     failing = ScriptedService(submit_responses=[httpx.Response(422)])
     with pytest.raises(TypedIOValidationException) as excinfo:

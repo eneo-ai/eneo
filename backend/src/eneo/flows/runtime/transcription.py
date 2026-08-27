@@ -15,6 +15,7 @@ from eneo.flows.domain.speaker_labels import (
     renumber_speaker_labels,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
@@ -330,7 +331,12 @@ async def transcribe_audio_input(
                 )
             finally:
                 del audio_file
-        except (TypedIOValidationException, ProviderCallObserverError):
+        except (
+            TypedIOValidationException,
+            ProviderCallObserverError,
+            FlowStepCancelledError,
+        ):
+            # A cancelled run is the executor's outcome, not a step failure.
             # A failure to record what a request did is not a transcription
             # fault, and the executor already reports it as the evidence gap it
             # is. Flattening it here would hide which request went unrecorded.

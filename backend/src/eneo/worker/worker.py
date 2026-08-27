@@ -281,6 +281,12 @@ class Worker:
         settings = get_settings()
         _log_startup_diagnostics(settings)
 
+        from eneo.flows.runtime.remote_transcription import (
+            log_remote_transcription_readiness,
+        )
+
+        await log_remote_transcription_readiness(settings)
+
         # Start crawl feeder as background task if enabled
         # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
         # Uses leader election to ensure only ONE feeder runs across all workers
