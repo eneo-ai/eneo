@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import {
   mkdir,
+  readdir,
   readFile,
   readlink,
   rmdir,
@@ -18,19 +19,34 @@ const frontendRoot = resolve(dirname(scriptPath), "..");
 const runtimeRoot = join(frontendRoot, "node_modules", ".cache", "eneo");
 const lockDirectory = join(runtimeRoot, "frontend-dev.lock");
 const lockOwnerPath = join(lockDirectory, "owner");
-const frontendUrl = "http://localhost:3000";
-const frontendPort = 3000;
+const configuredTestPort = Number(
+  process.env.NODE_ENV === "test"
+    ? process.env.ENEO_FRONTEND_DEV_TEST_PORT
+    : undefined,
+);
+const frontendPort =
+  Number.isInteger(configuredTestPort) && configuredTestPort > 0
+    ? configuredTestPort
+    : 3000;
+const frontendUrl = `http://localhost:${frontendPort}`;
 const shutdownTimeoutMs = 5_000;
+const processGroupArguments = {
+  build: "run --cwd packages/ui build:dev",
+  ui: "run --cwd packages/ui dev",
+  web: "run --cwd apps/web dev",
+};
+const processGroupKinds = new Set(Object.keys(processGroupArguments));
 
 export function parseProcessTable(output) {
   return output
     .split("\n")
-    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/))
+    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/))
     .filter((match) => match !== null)
     .map((match) => ({
       pid: Number(match[1]),
       parentPid: Number(match[2]),
-      command: match[3],
+      processGroupId: Number(match[3]),
+      command: match[4],
     }));
 }
 
@@ -49,6 +65,21 @@ export function isSameCheckoutViteProcess(processRecord, workspaceRoot) {
   );
 }
 
+export function isSameCheckoutUiWatcherProcess(processRecord, workspaceRoot) {
+  const watcherEntrypoint = join(
+    workspaceRoot,
+    "packages",
+    "ui",
+    "node_modules",
+    ".bin",
+    "svelte-package",
+  );
+  return (
+    processRecord.command.includes(watcherEntrypoint) &&
+    /(?:^|\s)--watch(?:\s|$)/.test(processRecord.command)
+  );
+}
+
 export function isControllerProcess(processRecord, workspaceRoot) {
   const absoluteScriptPath = join(workspaceRoot, "scripts", "frontend-dev.mjs");
   const runsController =
@@ -57,10 +88,75 @@ export function isControllerProcess(processRecord, workspaceRoot) {
   return runsController && processRecord.cwd === workspaceRoot;
 }
 
+function isExpectedProcessGroupLeader(
+  processRecord,
+  processGroup,
+  workspaceRoot,
+) {
+  if (
+    processRecord.pid !== processGroup.id ||
+    processRecord.processGroupId !== processGroup.id ||
+    processRecord.cwd !== workspaceRoot
+  ) {
+    return false;
+  }
+
+  return processRecord.command.includes(
+    processGroupArguments[processGroup.kind],
+  );
+}
+
+function inferProcessGroupKind(processRecord) {
+  if (processRecord.pid !== processRecord.processGroupId) return undefined;
+  return Object.entries(processGroupArguments).find(([, expectedArguments]) =>
+    processRecord.command.includes(expectedArguments),
+  )?.[0];
+}
+
+export function discoverOwnedProcessGroups(processes, workspaceRoot) {
+  return processes
+    .map((processRecord) => ({
+      processRecord,
+      kind: inferProcessGroupKind(processRecord),
+    }))
+    .filter(
+      ({ processRecord, kind }) => kind && processRecord.cwd === workspaceRoot,
+    )
+    .map(({ processRecord, kind }) => ({
+      kind,
+      id: processRecord.processGroupId,
+    }));
+}
+
+export function isOwnedProcessGroup(processGroup, processes, workspaceRoot) {
+  const groupProcesses = processes.filter(
+    (processRecord) => processRecord.processGroupId === processGroup.id,
+  );
+  if (
+    groupProcesses.some((processRecord) =>
+      isExpectedProcessGroupLeader(processRecord, processGroup, workspaceRoot),
+    )
+  ) {
+    return true;
+  }
+  if (processGroup.kind === "web") {
+    return groupProcesses.some((processRecord) =>
+      isSameCheckoutViteProcess(processRecord, workspaceRoot),
+    );
+  }
+  if (processGroup.kind === "ui") {
+    return groupProcesses.some((processRecord) =>
+      isSameCheckoutUiWatcherProcess(processRecord, workspaceRoot),
+    );
+  }
+  return false;
+}
+
 export function classifyFrontendStatus({
   portOpen,
   processes,
   controllerPid,
+  processGroups = [],
   workspaceRoot,
 }) {
   const vitePids = processes
@@ -68,12 +164,50 @@ export function classifyFrontendStatus({
       isSameCheckoutViteProcess(processRecord, workspaceRoot),
     )
     .map((processRecord) => processRecord.pid);
+  const uiWatcherPids = processes
+    .filter((processRecord) =>
+      isSameCheckoutUiWatcherProcess(processRecord, workspaceRoot),
+    )
+    .map((processRecord) => processRecord.pid);
 
-  if (vitePids.length > 0) {
-    return { kind: "running", vitePids, controllerPid };
+  if (
+    vitePids.length > 0 ||
+    processGroups.some((processGroup) => processGroup.kind === "web")
+  ) {
+    return {
+      kind: "running",
+      vitePids,
+      uiWatcherPids,
+      controllerPid,
+      processGroups,
+    };
   }
-  if (portOpen) return { kind: "conflict" };
-  if (controllerPid) return { kind: "starting", controllerPid };
+  if (portOpen) {
+    return {
+      kind: "conflict",
+      controllerPid,
+      processGroups,
+      uiWatcherPids,
+      vitePids,
+    };
+  }
+  if (controllerPid) {
+    return {
+      kind: "starting",
+      controllerPid,
+      processGroups,
+      uiWatcherPids,
+      vitePids,
+    };
+  }
+  if (processGroups.length > 0 || uiWatcherPids.length > 0) {
+    return {
+      kind: "orphaned",
+      processGroups,
+      uiWatcherPids,
+      vitePids,
+    };
+  }
   return { kind: "stopped" };
 }
 
@@ -85,6 +219,38 @@ async function readLockOwner() {
     if (error?.code === "ENOENT") return null;
     throw error;
   }
+}
+
+function processGroupPath(processGroup) {
+  return join(lockDirectory, `group-${processGroup.kind}-${processGroup.id}`);
+}
+
+async function readRecordedProcessGroups() {
+  let entries;
+  try {
+    entries = await readdir(lockDirectory);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+
+  return entries
+    .map((entry) => entry.match(/^group-([a-z]+)-(\d+)$/))
+    .filter(
+      (match) =>
+        match !== null &&
+        processGroupKinds.has(match[1]) &&
+        Number(match[2]) > 0,
+    )
+    .map((match) => ({ kind: match[1], id: Number(match[2]) }));
+}
+
+async function readLockState() {
+  const [controllerPid, processGroups] = await Promise.all([
+    readLockOwner(),
+    readRecordedProcessGroups(),
+  ]);
+  return { controllerPid, processGroups };
 }
 
 async function readProcessCwd(pid) {
@@ -112,19 +278,31 @@ async function readProcessCwd(pid) {
   }
 }
 
-async function readProcesses(controllerPid) {
+async function readProcesses(lockState) {
   const { stdout } = await execFileAsync(
     "ps",
-    ["-axo", "pid=,ppid=,command="],
+    ["-axo", "pid=,ppid=,pgid=,command="],
     {
       maxBuffer: 4 * 1024 * 1024,
     },
   );
   const processes = parseProcessTable(stdout);
-  const controller = processes.find(
-    (processRecord) => processRecord.pid === controllerPid,
+  const cwdPids = new Set(
+    [
+      lockState.controllerPid,
+      ...lockState.processGroups.map((processGroup) => processGroup.id),
+    ].filter(Boolean),
   );
-  if (controller) controller.cwd = await readProcessCwd(controller.pid);
+  for (const processRecord of processes) {
+    if (inferProcessGroupKind(processRecord)) cwdPids.add(processRecord.pid);
+  }
+  await Promise.all(
+    processes
+      .filter((processRecord) => cwdPids.has(processRecord.pid))
+      .map(async (processRecord) => {
+        processRecord.cwd = await readProcessCwd(processRecord.pid);
+      }),
+  );
   return processes;
 }
 
@@ -146,12 +324,21 @@ async function isPortOpen() {
 }
 
 async function clearLock(expectedPid) {
-  const owner = await readLockOwner();
-  if (expectedPid && owner !== expectedPid) return;
+  const lockState = await readLockState();
+  if (expectedPid && lockState.controllerPid !== expectedPid) return;
+  let entries;
   try {
-    await unlink(lockOwnerPath);
+    entries = await readdir(lockDirectory);
   } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  for (const entry of entries) {
+    try {
+      await unlink(join(lockDirectory, entry));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
   }
   try {
     await rmdir(lockDirectory);
@@ -160,23 +347,82 @@ async function clearLock(expectedPid) {
   }
 }
 
+async function removeLockOwner(expectedPid) {
+  if ((await readLockOwner()) !== expectedPid) return;
+  try {
+    await unlink(lockOwnerPath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+async function recordProcessGroup(kind, child) {
+  if (!child.pid) throw new Error(`Could not determine ${kind} process PID.`);
+  if ((await readLockOwner()) !== process.pid) {
+    throw new Error("Frontend controller lost ownership of its lock.");
+  }
+  const processGroup = { kind, id: child.pid };
+  await writeFile(processGroupPath(processGroup), `${child.pid}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
+  return processGroup;
+}
+
+async function removeRecordedProcessGroup(processGroup) {
+  try {
+    await unlink(processGroupPath(processGroup));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
 async function snapshotFrontendStatus() {
-  const lockOwner = await readLockOwner();
+  const lockState = await readLockState();
   const [processes, portOpen] = await Promise.all([
-    readProcesses(lockOwner),
+    readProcesses(lockState),
     isPortOpen(),
   ]);
   const controller = processes.find(
     (processRecord) =>
-      processRecord.pid === lockOwner &&
+      processRecord.pid === lockState.controllerPid &&
       isControllerProcess(processRecord, frontendRoot),
   );
-  if (lockOwner && !controller) await clearLock(lockOwner);
+  const processGroups = lockState.processGroups.filter((processGroup) =>
+    isOwnedProcessGroup(processGroup, processes, frontendRoot),
+  );
+  const recordedGroupIds = new Set(
+    processGroups.map((processGroup) => processGroup.id),
+  );
+  processGroups.push(
+    ...discoverOwnedProcessGroups(processes, frontendRoot).filter(
+      (processGroup) => !recordedGroupIds.has(processGroup.id),
+    ),
+  );
+
+  if (!controller && lockState.controllerPid) {
+    await removeLockOwner(lockState.controllerPid);
+  }
+  if (!controller) {
+    const ownedGroupPaths = new Set(processGroups.map(processGroupPath));
+    await Promise.all(
+      lockState.processGroups
+        .filter(
+          (processGroup) =>
+            !ownedGroupPaths.has(processGroupPath(processGroup)),
+        )
+        .map(removeRecordedProcessGroup),
+    );
+    if (lockState.controllerPid || lockState.processGroups.length > 0) {
+      if (processGroups.length === 0) await clearLock();
+    }
+  }
 
   return classifyFrontendStatus({
     portOpen,
     processes,
     controllerPid: controller?.pid,
+    processGroups,
     workspaceRoot: frontendRoot,
   });
 }
@@ -192,13 +438,21 @@ function printStatus(status) {
       );
       if (!status.controllerPid) {
         console.log(
-          '[eneo] Run "bun run dev:restart" to restart it with the UI watcher under management.',
+          '[eneo] Frontend workers are running without their controller. Run "bun run dev:restart" to recover them.',
         );
       }
       return;
     case "starting":
       console.log(
         `[eneo] Frontend is starting (controller PID ${status.controllerPid}).`,
+      );
+      return;
+    case "orphaned":
+      console.log(
+        "[eneo] Frontend workers are running without their controller.",
+      );
+      console.log(
+        '[eneo] Run "bun run dev:stop" or "bun run dev:restart" to recover them.',
       );
       return;
     case "conflict":
@@ -214,7 +468,7 @@ function printStatus(status) {
 
 async function acquireLock() {
   await mkdir(runtimeRoot, { recursive: true });
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       await mkdir(lockDirectory);
       await writeFile(lockOwnerPath, `${process.pid}\n`, {
@@ -224,8 +478,11 @@ async function acquireLock() {
       return true;
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
-      const status = await snapshotFrontendStatus();
-      if (status.kind === "starting" || status.controllerPid) return false;
+      let status = await snapshotFrontendStatus();
+      if (status.kind !== "stopped") return false;
+      await delay(50);
+      status = await snapshotFrontendStatus();
+      if (status.kind !== "stopped") return false;
       await clearLock();
     }
   }
@@ -291,11 +548,15 @@ async function runDevelopmentStack() {
   const initialStatus = await snapshotFrontendStatus();
   if (initialStatus.kind !== "stopped") {
     printStatus(initialStatus);
-    return initialStatus.kind === "conflict" ? 1 : 0;
+    return initialStatus.kind === "conflict" ||
+      initialStatus.kind === "orphaned"
+      ? 1
+      : 0;
   }
   if (!(await acquireLock())) {
-    printStatus(await snapshotFrontendStatus());
-    return 0;
+    const status = await snapshotFrontendStatus();
+    printStatus(status);
+    return status.kind === "conflict" || status.kind === "orphaned" ? 1 : 0;
   }
 
   const children = new Set();
@@ -313,8 +574,10 @@ async function runDevelopmentStack() {
     console.log("[eneo] Building the UI package for development...");
     const build = spawnBun(["run", "--cwd", "packages/ui", "build:dev"]);
     children.add(build);
+    const buildGroup = await recordProcessGroup("build", build);
     const buildExit = await waitForChild(build);
     children.delete(build);
+    await removeRecordedProcessGroup(buildGroup);
     if (requestedSignal) return requestedSignal === "SIGINT" ? 130 : 143;
     if (buildExit.error || buildExit.code !== 0) {
       console.error(
@@ -331,9 +594,11 @@ async function runDevelopmentStack() {
 
     console.log("[eneo] Starting the UI watcher and web frontend...");
     const ui = spawnBun(["run", "--cwd", "packages/ui", "dev"]);
-    const web = spawnBun(["run", "--cwd", "apps/web", "dev"]);
     children.add(ui);
+    await recordProcessGroup("ui", ui);
+    const web = spawnBun(["run", "--cwd", "apps/web", "dev"]);
     children.add(web);
+    await recordProcessGroup("web", web);
     const firstExit = await Promise.race([
       waitForChild(ui).then((exit) => ({ name: "UI watcher", exit })),
       waitForChild(web).then((exit) => ({ name: "web frontend", exit })),
@@ -352,11 +617,32 @@ async function runDevelopmentStack() {
   }
 }
 
-async function waitForStop() {
+function hasCheckoutProcesses(status) {
+  return Boolean(
+    status.controllerPid ||
+    status.processGroups?.length ||
+    status.vitePids?.length ||
+    status.uiWatcherPids?.length,
+  );
+}
+
+function signalCheckoutProcesses(status, signal, controllerOnly = false) {
+  if (status.controllerPid) {
+    signalProcess(status.controllerPid, signal);
+    if (controllerOnly) return;
+  }
+  for (const processGroup of status.processGroups ?? []) {
+    signalProcess(processGroup.id, signal, true);
+  }
+  for (const pid of status.vitePids ?? []) signalProcess(pid, signal);
+  for (const pid of status.uiWatcherPids ?? []) signalProcess(pid, signal);
+}
+
+async function waitForCheckoutStop() {
   const deadline = Date.now() + shutdownTimeoutMs;
   while (Date.now() < deadline) {
     const status = await snapshotFrontendStatus();
-    if (status.kind === "stopped") return status;
+    if (!hasCheckoutProcesses(status)) return status;
     await delay(100);
   }
   return await snapshotFrontendStatus();
@@ -364,7 +650,7 @@ async function waitForStop() {
 
 async function stopDevelopmentStack() {
   let status = await snapshotFrontendStatus();
-  if (status.kind === "conflict") {
+  if (status.kind === "conflict" && !hasCheckoutProcesses(status)) {
     printStatus(status);
     return 1;
   }
@@ -377,21 +663,26 @@ async function stopDevelopmentStack() {
     console.log(
       `[eneo] Stopping frontend controller PID ${status.controllerPid}...`,
     );
-    signalProcess(status.controllerPid, "SIGTERM");
+    signalCheckoutProcesses(status, "SIGTERM", true);
   } else {
-    console.log(
-      `[eneo] Stopping same-checkout Vite process ${status.vitePids.join(", ")}...`,
+    const groupIds = (status.processGroups ?? []).map(
+      (processGroup) => processGroup.id,
     );
-    for (const pid of status.vitePids) signalProcess(pid, "SIGTERM");
+    console.log(
+      `[eneo] Stopping checkout-owned frontend workers ${[
+        ...groupIds,
+        ...(status.vitePids ?? []),
+        ...(status.uiWatcherPids ?? []),
+      ].join(", ")}...`,
+    );
+    signalCheckoutProcesses(status, "SIGTERM");
   }
 
-  status = await waitForStop();
-  if (status.kind === "running") {
-    for (const pid of status.vitePids) signalProcess(pid, "SIGKILL");
-  } else if (status.kind === "starting") {
-    signalProcess(status.controllerPid, "SIGKILL");
+  status = await waitForCheckoutStop();
+  if (hasCheckoutProcesses(status)) {
+    signalCheckoutProcesses(status, "SIGKILL");
   }
-  status = await waitForStop();
+  status = await waitForCheckoutStop();
   if (status.kind !== "stopped") {
     printStatus(status);
     return 1;
