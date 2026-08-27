@@ -2,6 +2,7 @@
 
 <script context="module" lang="ts">
   import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
   import { m } from "$lib/paraglide/messages";
 
   export type StatusIcon = {
@@ -16,21 +17,21 @@
   ): StatusIcon[] {
     const icons: StatusIcon[] = [];
 
-    if ("deprecation_date" in model && model.deprecation_date) {
-      const today = new Date().toISOString().slice(0, 10);
-      if (model.deprecation_date <= today) {
+    if ("deprecation_date" in model) {
+      const deprecation = getDeprecationStatus(model);
+      if (deprecation.kind === "deprecated") {
         icons.push({
           icon: "deprecated",
-          tooltip: m.model_tooltip_deprecated({ date: model.deprecation_date }),
+          tooltip: m.model_tooltip_deprecated({ date: deprecation.date }),
           color: "text-negative-default",
           ariaLabel: m.model_label_deprecated()
         });
-      } else {
+      } else if (deprecation.kind === "retiring") {
         icons.push({
           icon: "retiring",
-          tooltip: m.model_tooltip_retiring({ date: model.deprecation_date }),
+          tooltip: m.model_tooltip_retiring({ date: deprecation.date }),
           color: "text-warning-stronger",
-          ariaLabel: m.model_label_retiring({ date: model.deprecation_date })
+          ariaLabel: m.model_label_retiring({ date: deprecation.date })
         });
       }
     }
