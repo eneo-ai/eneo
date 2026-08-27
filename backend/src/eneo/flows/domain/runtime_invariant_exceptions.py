@@ -12,7 +12,7 @@ class FlowRuntimeInvariantError(FlowInvariantError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowPublishedDefinitionWithoutExecutableStepsError(FlowRuntimeInvariantError):
     flow_id: UUID
     flow_version: int

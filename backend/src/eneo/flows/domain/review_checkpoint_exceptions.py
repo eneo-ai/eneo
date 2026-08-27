@@ -25,22 +25,22 @@ class FlowReviewCheckpointRuntimeInvariantError(Exception):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointNotFoundError(FlowReviewCheckpointLifecycleError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewRunNotAwaitingReviewError(FlowReviewCheckpointLifecycleError):
     status: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewRunNoLongerAwaitingReviewError(FlowReviewCheckpointLifecycleError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointExpiredError(FlowReviewCheckpointLifecycleError):
     checkpoint_id: UUID
     state: str
@@ -48,43 +48,43 @@ class FlowReviewCheckpointExpiredError(FlowReviewCheckpointLifecycleError):
     expired_at: datetime | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointStaleRevisionError(FlowReviewCheckpointLifecycleError):
     expected_checkpoint_revision: int
     current_checkpoint_revision: int
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointNotActiveError(FlowReviewCheckpointLifecycleError):
     state: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewEditStepResultMissingError(FlowReviewCheckpointLifecycleError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointAlreadyResumedError(FlowReviewCheckpointLifecycleError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointRejectedError(FlowReviewCheckpointLifecycleError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointCancelledError(FlowReviewCheckpointLifecycleError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointNotApprovedError(FlowReviewCheckpointLifecycleError):
     state: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowReviewCheckpointRunNotRunningError(FlowReviewCheckpointRuntimeInvariantError):
     status: str | None = None
 

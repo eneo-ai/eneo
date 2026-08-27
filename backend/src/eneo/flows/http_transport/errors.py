@@ -24,7 +24,7 @@ class HttpTemplateInterpolationError(Exception):
     """Raised when authored HTTP template interpolation cannot resolve a value."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class AuthoredSecretEncryptionUnavailableError(Exception):
     """Raised when a plaintext authored secret cannot be encrypted before storage.
 

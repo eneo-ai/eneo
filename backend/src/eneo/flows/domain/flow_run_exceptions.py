@@ -9,14 +9,14 @@ class FlowRunConcurrencyLimitReachedError(Exception):
     max_concurrent_runs: int
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowRunNotFoundError(Exception):
     run_id: UUID
     tenant_id: UUID
     flow_id: UUID | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowRunPersistenceInvariantError(RuntimeError):
     operation: str
     run_id: UUID | None = None

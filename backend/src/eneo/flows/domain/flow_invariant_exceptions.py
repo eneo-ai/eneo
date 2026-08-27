@@ -8,12 +8,12 @@ class FlowInvariantError(Exception):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowPersistedIdMissingError(FlowInvariantError):
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False)
 class FlowPublishedDefinitionInvalidError(FlowInvariantError):
     flow_id: UUID
     flow_version: int
