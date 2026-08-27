@@ -152,8 +152,9 @@ async def test_file_and_icon_legacy_fallbacks_execute_against_postgres(
             repository = FileRepository(session)
             text_metadata = await repository.get_by_id(text_id)
             image_metadata = await repository.get_by_id(image_id)
+            audio_metadata = await repository.get_by_id(audio_id)
             loaded = await FileContentLoader(repository, object_content).load(
-                [text_metadata, image_metadata]
+                [text_metadata, image_metadata, audio_metadata]
             )
             info = (await repository.get_infos_by_ids([text_id]))[0]
 
@@ -166,6 +167,7 @@ async def test_file_and_icon_legacy_fallbacks_execute_against_postgres(
         assert loaded_text.original_available is True
         assert loaded[image_id].blob == image
         assert loaded[image_id].checksum == sha256(image).hexdigest()
+        assert loaded[audio_id].original_available is True
         assert info.checksum == sha256(original).hexdigest()
         assert info.size == len(extracted)
         object_content.open_content.assert_not_called()
@@ -189,6 +191,15 @@ async def test_file_and_icon_legacy_fallbacks_execute_against_postgres(
                 assert download.sha256 == sha256(audio).digest()
             finally:
                 await download.aclose()
+
+            original_download = await audio_service.get_original_download_no_auth(
+                audio_id,
+                expected_tenant_id=tenant_id,
+            )
+            try:
+                assert await _read_chunks(original_download.chunks) == audio
+            finally:
+                await original_download.aclose()
 
         async with object_content_database.session() as session:
             icon_service = IconService(

@@ -686,7 +686,8 @@ class FileRepository:
                     else row.mimetype or "application/octet-stream"
                 ),
                 original_available=(
-                    FileType(row.file_type) is FileType.TEXT and row.original_available
+                    FileType(row.file_type) in (FileType.TEXT, FileType.AUDIO)
+                    and row.original_available
                 ),
                 transcription_available=row.transcription_available,
             )

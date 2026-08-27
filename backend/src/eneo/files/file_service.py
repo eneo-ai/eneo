@@ -703,22 +703,14 @@ class FileService:
         metadata = await self.repo.get_by_id(file_id=file_id)
         self._require_owner(metadata, action="read")
         references = await self.repo.get_content_references([file_id])
-        if (
-            metadata.file_type is FileType.AUDIO
-            and self._first_reference(references, FileContentVariant.ORIGINAL) is None
-        ):
-            if not await self._legacy_audio_info(metadata.id):
-                raise FileOriginalNotFoundError()
+        if self._first_reference(references, FileContentVariant.ORIGINAL) is not None:
             return metadata
-        legacy_content = (
-            []
-            if self._first_reference(references, FileContentVariant.ORIGINAL)
-            is not None
-            else await self.repo.get_legacy_content(
-                {file_id: {FileContentVariant.ORIGINAL}}
-            )
+        legacy_original_available = any(
+            info.original_available
+            for info in await self.repo.get_legacy_infos([file_id])
         )
-        self._original_content(references, legacy_content)
+        if not legacy_original_available:
+            raise FileOriginalNotFoundError()
         return metadata
 
     async def get_original_download_no_auth(

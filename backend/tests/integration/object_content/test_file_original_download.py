@@ -366,6 +366,78 @@ async def test_legacy_image_is_not_exposed_as_an_exact_original(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_legacy_original_mint_does_not_read_payload(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    payload = b"legacy exact original"
+    file_id = uuid4()
+    async with db_container() as container:
+        user = container.user()
+        session = container.session()
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO files (
+                    id, name, text, blob, checksum, size, mimetype, file_type,
+                    transcription, user_id, tenant_id, parent_file_id
+                ) VALUES (
+                    :id, 'legacy.pdf', 'legacy text', :payload, :checksum,
+                    :size, 'application/pdf', 'text', NULL,
+                    :user_id, :tenant_id, NULL
+                )
+                """
+            ),
+            {
+                "id": file_id,
+                "payload": payload,
+                "checksum": sha256(payload).hexdigest(),
+                "size": len(payload),
+                "user_id": user.id,
+                "tenant_id": user.tenant_id,
+            },
+        )
+        assert session.bind is not None
+        engine = session.bind.sync_engine
+
+    payload_queries: list[str] = []
+
+    def capture_payload_query(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if "select files.id, files.mimetype, files.blob" in normalized:
+            payload_queries.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", capture_payload_query)
+    try:
+        signed = await client.post(
+            f"/api/v1/files/{file_id}/original/signed-url/",
+            json={},
+            headers={"X-API-Key": admin_user_api_key.key},
+        )
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", capture_payload_query)
+
+    assert signed.status_code == 200, signed.text
+    assert payload_queries == []
+
+    parsed = urlsplit(signed.json()["url"])
+    download = await client.get(f"{parsed.path}?{parsed.query}")
+
+    assert download.status_code == 200
+    assert download.content == payload
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_original_mint_does_not_read_payload_and_corruption_fails_before_headers(
     client,
     db_container,
