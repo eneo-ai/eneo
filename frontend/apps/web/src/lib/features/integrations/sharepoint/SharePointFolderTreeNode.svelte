@@ -13,6 +13,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { formatFileSize, formatModifiedDate } from "./format";
   import { buildSharePointSelectionKey } from "./selectionKey";
   import {
     hasSelectedSharePointDescendant,
@@ -39,19 +40,6 @@
     onToggleExpanded,
     onRetryLoad
   }: Props = $props();
-
-  function formatSize(bytes?: number): string {
-    if (bytes == null) return "";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  function formatDate(dateStr?: string): string {
-    if (!dateStr) return "";
-    const date = new Date(dateStr);
-    return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-  }
 
   const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "svg", "bmp", "webp", "ico", "tiff"];
   const AUDIO_EXTENSIONS = ["mp3", "wav", "ogg", "flac", "aac", "wma", "m4a"];
@@ -133,7 +121,7 @@
           </span>
           {#if currentNode.modified}
             <span class="text-muted-foreground hidden shrink-0 text-xs tabular-nums lg:inline">
-              {formatDate(currentNode.modified)}
+              {formatModifiedDate(currentNode.modified)}
             </span>
           {/if}
         </Button>
@@ -172,12 +160,12 @@
           </span>
           {#if currentNode.size != null}
             <span class="text-muted-foreground hidden shrink-0 text-xs tabular-nums md:inline">
-              {formatSize(currentNode.size)}
+              {formatFileSize(currentNode.size)}
             </span>
           {/if}
           {#if currentNode.modified}
             <span class="text-muted-foreground hidden shrink-0 text-xs tabular-nums lg:inline">
-              {formatDate(currentNode.modified)}
+              {formatModifiedDate(currentNode.modified)}
             </span>
           {/if}
         </label>

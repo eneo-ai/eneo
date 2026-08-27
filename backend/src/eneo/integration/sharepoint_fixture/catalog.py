@@ -299,7 +299,7 @@ STANDARD_TREE: tuple[FixtureTreeNode, ...] = (
     ),
     FixtureTreeNode(
         id="fixture-folder-empty",
-        name="Tom mapp",
+        name="Mallar",
         item_type="folder",
         modified=_modified(2025, 12, 31),
     ),

@@ -4,6 +4,7 @@
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import type { EmbeddingModel, IntegrationKnowledgePreview } from "@eneo/eneo-js";
   import {
+    Check,
     CheckCircle2,
     ChevronDown,
     Cloud,
@@ -33,6 +34,7 @@
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import SharePointFolderTree from "./SharePointFolderTree.svelte";
+  import { formatFileSize } from "./format";
   import { buildSharePointSelectionKey, normalizeSharePointPath } from "./selectionKey";
   import {
     fetchSharePointFixturePreview,
@@ -113,13 +115,16 @@
   );
   let isFixtureSession = $derived(fixtureModeRequested || loadedPreviewSource === "fixture");
   let fixtureTreeScenario = $derived(fixtureScenario ?? loadedFixtureScenario);
-  let currentStepNumber = $derived(activeStep === "source" ? 1 : activeStep === "content" ? 2 : 3);
+  let currentStepNumber = $derived(
+    activeStep === "source" ? 1 : activeStep === "content" ? 2 : activeStep === "review" ? 3 : 4
+  );
 
   let sourceFilter = $state("");
   let selectedSite = $state<CategorizedIntegrationKnowledgePreview | null>(null);
   let selectedEmbeddingModel = $state<{ id: string } | null>(null);
   let selectedItems = $state<SelectedImportItem[]>([]);
   let wrapperName = $state("");
+  let wrapperNameTouched = $state(false);
   let fixtureDetailsOpen = $state(false);
 
   onMount(() => openController.subscribe((value) => (dialogOpen = value)));
@@ -274,6 +279,7 @@
     selectedSite = null;
     selectedItems = [];
     wrapperName = "";
+    wrapperNameTouched = false;
   }
 
   function resetFlow() {
@@ -374,6 +380,7 @@
 
   let requiresWrapperName = $derived(dedupedSelection.effectiveEntries.length > 1);
   let wrapperNameMissing = $derived(requiresWrapperName && wrapperName.trim().length === 0);
+  let showWrapperNameError = $derived(wrapperNameMissing && wrapperNameTouched);
   let reviewReady = $derived(
     selectedSite !== null &&
       dedupedSelection.effectiveEntries.length > 0 &&
@@ -408,13 +415,6 @@
 
   function selectEmbeddingModel(id: string) {
     if (embeddingModels.some((model) => model.id === id)) selectedEmbeddingModel = { id };
-  }
-
-  function formatSize(bytes?: number): string {
-    if (bytes == null) return "";
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   function simulateImport() {
@@ -504,8 +504,8 @@
     </Dialog.Header>
 
     {#if isFixtureSession}
-      <Alert.Root class="border-caution/35 bg-caution/8 mx-4 mt-3 w-auto shrink-0 sm:mx-6">
-        <FlaskConical class="text-caution" aria-hidden="true" />
+      <Alert.Root class="border-caution bg-caution mx-4 mt-3 w-auto shrink-0 sm:mx-6">
+        <FlaskConical class="text-caution!" aria-hidden="true" />
         <Collapsible.Root bind:open={fixtureDetailsOpen} class="col-start-2 min-w-0">
           <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
             <div class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
@@ -574,18 +574,32 @@
       aria-label={m.sharepoint_import_progress()}
     >
       {#each steps as step (step.number)}
+        {@const stepStatus =
+          currentStepNumber === step.number
+            ? "active"
+            : currentStepNumber > step.number
+              ? "completed"
+              : "upcoming"}
         <li
-          class="text-muted-foreground flex min-w-0 items-center gap-2 text-xs sm:text-sm"
-          class:text-foreground={currentStepNumber >= step.number}
-          aria-current={currentStepNumber === step.number ? "step" : undefined}
+          class="flex min-w-0 items-center gap-2 text-xs sm:text-sm {stepStatus === 'upcoming'
+            ? 'text-muted-foreground'
+            : 'text-foreground'}"
+          class:font-medium={stepStatus === "active"}
+          aria-current={stepStatus === "active" ? "step" : undefined}
         >
           <span
-            class="border-border flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold"
-            class:bg-accent-default={currentStepNumber >= step.number}
-            class:border-accent-default={currentStepNumber >= step.number}
-            class:text-on-fill={currentStepNumber >= step.number}
+            class="flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold {stepStatus ===
+            'active'
+              ? 'border-accent-default bg-accent-default text-on-fill'
+              : stepStatus === 'completed'
+                ? 'border-positive-default bg-positive-default/10 text-positive-stronger'
+                : 'border-stronger bg-muted text-muted-foreground'}"
           >
-            {step.number}
+            {#if stepStatus === "completed"}
+              <Check class="size-3.5" aria-hidden="true" />
+            {:else}
+              {step.number}
+            {/if}
           </span>
           <span class="truncate">{step.label()}</span>
         </li>
@@ -721,7 +735,7 @@
           {/if}
 
           {#if requiresWrapperName}
-            <Field.Field data-invalid={wrapperNameMissing || undefined}>
+            <Field.Field data-invalid={showWrapperNameError || undefined}>
               <Field.Label for="sharepoint-wrapper-name">
                 {m.sharepoint_wrapper_name_label()}
               </Field.Label>
@@ -729,10 +743,11 @@
                 id="sharepoint-wrapper-name"
                 bind:value={wrapperName}
                 placeholder={m.sharepoint_wrapper_name_placeholder()}
-                aria-invalid={wrapperNameMissing}
+                aria-invalid={showWrapperNameError}
                 aria-describedby="sharepoint-wrapper-description"
+                onblur={() => (wrapperNameTouched = true)}
               />
-              {#if wrapperNameMissing}
+              {#if showWrapperNameError}
                 <Field.Error id="sharepoint-wrapper-description">
                   {m.sharepoint_wrapper_name_missing_hint()}
                 </Field.Error>
@@ -825,7 +840,7 @@
                     {selection.item.path}
                   </span>
                   {#if selection.item.size != null}
-                    <span class="shrink-0">{formatSize(selection.item.size)}</span>
+                    <span class="shrink-0">{formatFileSize(selection.item.size)}</span>
                   {/if}
                 </div>
               </article>

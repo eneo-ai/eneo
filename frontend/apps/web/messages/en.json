@@ -869,7 +869,7 @@
   "entire_onedrive": "entire OneDrive",
   "import_knowledge_from_sharepoint": "Import knowledge from SharePoint / OneDrive",
   "sharepoint_fixture_banner_description": "No data is fetched from Microsoft. Navigation and selection use local fixture data, and the simulated import saves nothing.",
-  "sharepoint_fixture_open": "Test SharePoint",
+  "sharepoint_fixture_open": "SharePoint demo",
   "sharepoint_fixture_dialog_title": "Test SharePoint import",
   "sharepoint_fixture_dialog_description": "Walk through the complete import flow using local test data. Nothing is fetched from Microsoft or saved to Eneo.",
   "sharepoint_fixture_compact_title": "Test mode",

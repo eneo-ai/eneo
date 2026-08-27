@@ -866,7 +866,7 @@
   "entire_onedrive": "hela OneDrive",
   "import_knowledge_from_sharepoint": "Importera kunskap från SharePoint / OneDrive",
   "sharepoint_fixture_banner_description": "Ingen data hämtas från Microsoft. Navigering och val använder lokal testdata, och den simulerade importen sparar ingenting.",
-  "sharepoint_fixture_open": "Testa SharePoint",
+  "sharepoint_fixture_open": "SharePoint-demo",
   "sharepoint_fixture_dialog_title": "Testa SharePoint-import",
   "sharepoint_fixture_dialog_description": "Gå igenom hela importflödet med lokal testdata. Ingenting hämtas från Microsoft eller sparas i Eneo.",
   "sharepoint_fixture_compact_title": "Testläge",
