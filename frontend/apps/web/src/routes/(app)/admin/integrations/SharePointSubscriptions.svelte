@@ -1,37 +1,18 @@
 <script lang="ts">
-  import { Button } from "@eneo/ui";
+  import { SvelteSet } from "svelte/reactivity";
+  import { LoaderCircle } from "lucide-svelte";
+  import type { Eneo, components } from "@eneo/eneo-js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Table from "$lib/components/ui/table/index.js";
+  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import { formatDateTime } from "$lib/features/integrations/sharepoint/format";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
-  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { Eneo } from "@eneo/eneo-js";
-  import dayjs from "dayjs";
 
-  interface SharePointSubscription {
-    id: string;
-    user_integration_id: string;
-    site_id: string;
-    subscription_id: string;
-    drive_id: string;
-    expires_at: string;
-    created_at: string;
-    is_expired: boolean;
-    expires_in_hours: number;
-    consecutive_renewal_failures?: number;
-    last_renewal_failed_at?: string | null;
-    last_renewal_error?: string | null;
-    last_webhook_received_at?: string | null;
-    owner_email?: string | null;
-    owner_type: string;
-  }
-
-  interface SubscriptionRenewalResult {
-    total_subscriptions: number;
-    expired_count: number;
-    recreated?: number;
-    failed?: number;
-    errors?: string[];
-  }
+  type SharePointSubscription = components["schemas"]["SharePointSubscriptionPublic"];
+  type SubscriptionRenewalResult = components["schemas"]["SubscriptionRenewalResult"];
 
   interface Props {
     eneo: Eneo;
@@ -40,32 +21,23 @@
   const { eneo }: Props = $props();
 
   let subscriptions = $state<SharePointSubscription[]>([]);
-  let loading = $state(false);
   let renewingAll = $state(false);
-  let renewingSubscriptionIds = $state<Set<string>>(new Set());
+  const renewingSubscriptionIds = new SvelteSet<string>();
 
-  // Load subscriptions
   const loadSubscriptions = createAsyncState(async () => {
-    loading = true;
     try {
       const response = await eneo.integrations.admin.sharepoint.listSubscriptions();
-      // Backend returns array directly, not wrapped in object
       subscriptions = Array.isArray(response) ? response : [];
     } catch (error) {
-      console.error("Failed to load SharePoint subscriptions:", error);
       toastError(error, m.sharepoint_subscriptions_load_error());
       subscriptions = [];
-    } finally {
-      loading = false;
     }
   });
 
-  // Load on mount
   $effect(() => {
     loadSubscriptions();
   });
 
-  // Renew all expired subscriptions
   async function renewAllExpired() {
     renewingAll = true;
     try {
@@ -73,11 +45,7 @@
         await eneo.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
       if ((result.recreated ?? 0) > 0 && (result.failed ?? 0) === 0) {
-        toast.success(
-          m.sharepoint_subscriptions_renewed_success({
-            count: result.recreated ?? 0
-          })
-        );
+        toast.success(m.sharepoint_subscriptions_renewed_success({ count: result.recreated ?? 0 }));
       } else if ((result.failed ?? 0) > 0) {
         toast.error(
           m.sharepoint_subscriptions_renewed_partial({
@@ -89,56 +57,38 @@
         toast.info(m.sharepoint_subscriptions_none_expired());
       }
 
-      // Reload subscriptions
       await loadSubscriptions();
     } catch (error) {
-      console.error("Failed to renew expired subscriptions:", error);
       toastError(error, m.sharepoint_subscriptions_renew_error());
     } finally {
       renewingAll = false;
     }
   }
 
-  // Renew a single subscription
   async function renewSubscription(subscription: SharePointSubscription) {
     renewingSubscriptionIds.add(subscription.id);
-    renewingSubscriptionIds = renewingSubscriptionIds; // Trigger reactivity
 
     try {
       await eneo.integrations.admin.sharepoint.recreateSubscription({ id: subscription.id });
       toast.success(m.sharepoint_subscription_renewed_success());
-
-      // Reload subscriptions
       await loadSubscriptions();
     } catch (error) {
-      console.error(`Failed to renew subscription ${subscription.id}:`, error);
       toastError(error, m.sharepoint_subscription_renew_error());
     } finally {
       renewingSubscriptionIds.delete(subscription.id);
-      renewingSubscriptionIds = renewingSubscriptionIds; // Trigger reactivity
     }
   }
 
-  // Get status badge class
   function getStatusBadgeClass(subscription: SharePointSubscription): string {
-    if (subscription.is_expired) {
-      return "bg-negative-dimmer text-negative-stronger";
-    } else if (subscription.expires_in_hours <= 48) {
-      return "bg-warning-dimmer text-warning-stronger";
-    } else {
-      return "bg-positive-dimmer text-positive-stronger";
-    }
+    if (subscription.is_expired) return "bg-negative-dimmer text-negative-stronger";
+    if (subscription.expires_in_hours <= 48) return "bg-caution text-caution";
+    return "bg-positive-dimmer text-positive-stronger";
   }
 
-  // Get status label
   function getStatusLabel(subscription: SharePointSubscription): string {
-    if (subscription.is_expired) {
-      return m.sharepoint_webhook_expired();
-    } else if (subscription.expires_in_hours <= 48) {
-      return m.sharepoint_webhook_expiring_soon();
-    } else {
-      return m.sharepoint_webhook_active();
-    }
+    if (subscription.is_expired) return m.sharepoint_webhook_expired();
+    if (subscription.expires_in_hours <= 48) return m.sharepoint_webhook_expiring_soon();
+    return m.sharepoint_webhook_active();
   }
 
   function getRenewalFailureCount(subscription: SharePointSubscription): number {
@@ -150,13 +100,9 @@
   }
 
   function getHealthBadgeClass(subscription: SharePointSubscription): string {
-    if (hasRenewalFailures(subscription)) {
-      return "bg-negative-dimmer text-negative-stronger";
-    } else if (!subscription.last_webhook_received_at) {
-      return "bg-warning-dimmer text-warning-stronger";
-    } else {
-      return "bg-positive-dimmer text-positive-stronger";
-    }
+    if (hasRenewalFailures(subscription)) return "bg-negative-dimmer text-negative-stronger";
+    if (!subscription.last_webhook_received_at) return "bg-caution text-caution";
+    return "bg-positive-dimmer text-positive-stronger";
   }
 
   function getHealthLabel(subscription: SharePointSubscription): string {
@@ -164,64 +110,47 @@
       return m.sharepoint_subscription_health_failing({
         count: getRenewalFailureCount(subscription)
       });
-    } else if (!subscription.last_webhook_received_at) {
-      return m.sharepoint_subscription_health_waiting();
-    } else {
-      return m.sharepoint_subscription_health_ok();
     }
+    if (!subscription.last_webhook_received_at) return m.sharepoint_subscription_health_waiting();
+    return m.sharepoint_subscription_health_ok();
   }
 
   function getHealthDetail(subscription: SharePointSubscription): string {
     if (hasRenewalFailures(subscription)) {
-      return `${m.sharepoint_subscription_last_failure()}: ${formatOptionalDate(
+      return `${m.sharepoint_subscription_last_failure()}: ${formatOptionalDateTime(
         subscription.last_renewal_failed_at
       )}`;
     }
-
-    return `${m.sharepoint_subscription_last_webhook()}: ${formatOptionalDate(
+    return `${m.sharepoint_subscription_last_webhook()}: ${formatOptionalDateTime(
       subscription.last_webhook_received_at
     )}`;
   }
 
-  // Format date
-  function formatDate(dateString: string): string {
-    const d = dayjs(dateString);
-    return d.isValid() ? d.format("YYYY-MM-DD HH:mm") : dateString;
+  function formatOptionalDateTime(dateString?: string | null): string {
+    return dateString ? formatDateTime(dateString) : m.sharepoint_subscription_never();
   }
 
-  function formatOptionalDate(dateString?: string | null): string {
-    return dateString ? formatDate(dateString) : m.sharepoint_subscription_never();
-  }
-
-  // Format time duration
   function formatTimeDuration(hours: number): string {
-    if (hours < 24) {
-      return `${hours}h`;
-    }
-
+    if (hours < 24) return `${hours}h`;
     const days = Math.floor(hours / 24);
     const remainingHours = hours % 24;
-
-    if (remainingHours === 0) {
-      return `${days}d`;
-    }
-
-    return `${days}d ${remainingHours}h`;
+    return remainingHours === 0 ? `${days}d` : `${days}d ${remainingHours}h`;
   }
 
-  // Count expired subscriptions
   let expiredCount = $derived(subscriptions.filter((s) => s.is_expired).length);
 </script>
 
-<div class="space-y-4">
-  <!-- Header with bulk action -->
-  <div class="flex items-center justify-between">
+<div class="flex flex-col gap-4">
+  <div class="flex flex-wrap items-center justify-between gap-3">
     <h3 class="text-lg font-medium">
       {m.sharepoint_subscriptions_title()}
     </h3>
 
     {#if expiredCount > 0}
-      <Button variant="primary" onclick={renewAllExpired} disabled={renewingAll || loading}>
+      <Button onclick={renewAllExpired} disabled={renewingAll || loadSubscriptions.isLoading}>
+        {#if renewingAll}
+          <LoaderCircle class="animate-spin" aria-hidden="true" />
+        {/if}
         {renewingAll
           ? m.sharepoint_subscriptions_renewing()
           : m.sharepoint_subscriptions_renew_all_expired({ count: expiredCount })}
@@ -229,98 +158,58 @@
     {/if}
   </div>
 
-  <!-- Description -->
-  <p class="text-secondary text-sm">
+  <p class="text-muted-foreground text-sm">
     {m.sharepoint_subscriptions_description()}
   </p>
 
-  <!-- Loading state -->
-  {#if loading && subscriptions.length === 0}
-    <div class="border-border bg-background rounded-lg border p-8 text-center">
-      <p class="text-secondary text-sm">{m.loading()}</p>
+  {#if loadSubscriptions.isLoading && subscriptions.length === 0}
+    <div
+      class="border-border text-muted-foreground flex items-center justify-center gap-2 rounded-lg border p-8 text-sm"
+      role="status"
+    >
+      <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+      {m.loading()}
     </div>
   {:else if subscriptions.length === 0}
-    <!-- Empty state -->
-    <div class="border-border bg-background rounded-lg border p-8 text-center">
-      <p class="text-secondary text-sm">
-        {m.sharepoint_subscriptions_empty()}
-      </p>
+    <div class="border-border text-muted-foreground rounded-lg border p-8 text-center text-sm">
+      {m.sharepoint_subscriptions_empty()}
     </div>
   {:else}
-    <!-- Subscriptions table -->
     <div class="border-border overflow-x-auto rounded-lg border">
-      <table class="divide-border w-full divide-y">
-        <thead class="bg-muted">
-          <tr>
-            <th
-              scope="col"
-              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
-            >
-              {m.sharepoint_subscription_status()}
-            </th>
-            <th
-              scope="col"
-              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
-            >
-              {m.sharepoint_subscription_health()}
-            </th>
-            <th
-              scope="col"
-              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
-            >
-              {m.sharepoint_subscription_owner()}
-            </th>
-            <th
-              scope="col"
-              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
-            >
-              {m.sharepoint_subscription_site()}
-            </th>
-            <th
-              scope="col"
-              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
-            >
-              {m.sharepoint_subscription_expires()}
-            </th>
-            <th
-              scope="col"
-              class="text-foreground px-3 py-2 text-left text-xs font-medium tracking-wider uppercase"
-            >
-              {m.sharepoint_subscription_created()}
-            </th>
-            <th scope="col" class="bg-muted sticky right-0 px-3 py-2">
+      <Table.Root>
+        <Table.Header>
+          <Table.Row>
+            <Table.Head>{m.sharepoint_subscription_status()}</Table.Head>
+            <Table.Head>{m.sharepoint_subscription_health()}</Table.Head>
+            <Table.Head>{m.sharepoint_subscription_owner()}</Table.Head>
+            <Table.Head>{m.sharepoint_subscription_site()}</Table.Head>
+            <Table.Head>{m.sharepoint_subscription_expires()}</Table.Head>
+            <Table.Head>{m.sharepoint_subscription_created()}</Table.Head>
+            <Table.Head class="bg-background sticky right-0">
               <span class="sr-only">{m.actions()}</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody class="divide-border bg-background divide-y">
+            </Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
           {#each subscriptions as subscription (subscription.id)}
-            <tr class="hover:bg-muted/50 transition-colors">
-              <td class="px-3 py-3 whitespace-nowrap">
-                <div class="flex items-center gap-1">
-                  <span
-                    class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {getStatusBadgeClass(
-                      subscription
-                    )}"
-                  >
+            <Table.Row>
+              <Table.Cell class="whitespace-nowrap">
+                <div class="flex items-center gap-1.5">
+                  <Badge class="border-transparent {getStatusBadgeClass(subscription)}">
                     {getStatusLabel(subscription)}
-                  </span>
-                  <span class="text-secondary text-xs">
+                  </Badge>
+                  <span class="text-muted-foreground text-xs">
                     ({formatTimeDuration(subscription.expires_in_hours)})
                   </span>
                 </div>
-              </td>
-              <td class="px-3 py-3">
+              </Table.Cell>
+              <Table.Cell>
                 <div class="flex max-w-[220px] flex-col gap-1">
-                  <span
-                    class="inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-medium {getHealthBadgeClass(
-                      subscription
-                    )}"
-                  >
+                  <Badge class="w-fit border-transparent {getHealthBadgeClass(subscription)}">
                     {getHealthLabel(subscription)}
-                  </span>
+                  </Badge>
                   <span
-                    class="text-secondary truncate text-xs"
+                    class="text-muted-foreground truncate text-xs"
                     title={getHealthDetail(subscription)}
                   >
                     {getHealthDetail(subscription)}
@@ -334,63 +223,60 @@
                     </span>
                   {/if}
                 </div>
-              </td>
-              <td class="px-3 py-3 whitespace-nowrap">
+              </Table.Cell>
+              <Table.Cell class="whitespace-nowrap">
                 {#if subscription.owner_type === "organization"}
-                  <span
-                    class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
-                  >
+                  <Badge class="bg-accent-dimmer text-accent-stronger border-transparent">
                     {m.sharepoint_subscription_owner_organization()}
-                  </span>
+                  </Badge>
                 {:else}
                   <span
-                    class="text-foreground block max-w-[150px] truncate text-sm"
+                    class="block max-w-[150px] truncate text-sm"
                     title={subscription.owner_email || ""}
                   >
                     {subscription.owner_email || m.sharepoint_subscription_owner_unknown()}
                   </span>
                 {/if}
-              </td>
-              <td class="px-3 py-3">
-                <div
-                  class="text-foreground max-w-[200px] truncate text-sm"
-                  title={subscription.site_id}
-                >
+              </Table.Cell>
+              <Table.Cell>
+                <div class="max-w-[200px] truncate text-sm" title={subscription.site_id}>
                   {subscription.site_id}
                 </div>
                 <div
-                  class="text-secondary max-w-[200px] truncate text-xs"
+                  class="text-muted-foreground max-w-[200px] truncate text-xs"
                   title={subscription.drive_id}
                 >
                   {m.sharepoint_drive_label()}: {subscription.drive_id}
                 </div>
-              </td>
-              <td class="text-secondary px-3 py-3 text-xs whitespace-nowrap">
-                {formatDate(subscription.expires_at)}
-              </td>
-              <td class="text-secondary px-3 py-3 text-xs whitespace-nowrap">
-                {formatDate(subscription.created_at)}
-              </td>
-              <td class="bg-background sticky right-0 px-3 py-3 text-right whitespace-nowrap">
+              </Table.Cell>
+              <Table.Cell class="text-muted-foreground text-xs whitespace-nowrap">
+                {formatDateTime(subscription.expires_at)}
+              </Table.Cell>
+              <Table.Cell class="text-muted-foreground text-xs whitespace-nowrap">
+                {formatDateTime(subscription.created_at)}
+              </Table.Cell>
+              <Table.Cell class="bg-background sticky right-0 text-right whitespace-nowrap">
                 <Button
-                  variant="outlined"
+                  variant="outline"
                   size="sm"
                   onclick={() => renewSubscription(subscription)}
                   disabled={renewingSubscriptionIds.has(subscription.id) || renewingAll}
                 >
+                  {#if renewingSubscriptionIds.has(subscription.id)}
+                    <LoaderCircle class="animate-spin" aria-hidden="true" />
+                  {/if}
                   {renewingSubscriptionIds.has(subscription.id)
                     ? m.sharepoint_subscription_renewing()
                     : m.sharepoint_subscription_renew()}
                 </Button>
-              </td>
-            </tr>
+              </Table.Cell>
+            </Table.Row>
           {/each}
-        </tbody>
-      </table>
+        </Table.Body>
+      </Table.Root>
     </div>
 
-    <!-- Summary -->
-    <div class="text-secondary text-sm">
+    <div class="text-muted-foreground text-sm">
       {m.sharepoint_subscriptions_summary({
         total: subscriptions.length,
         expired: expiredCount,

@@ -17,3 +17,13 @@ export function formatModifiedDate(dateStr?: string): string {
     day: "numeric"
   });
 }
+
+export function formatDateTime(dateStr?: string | null): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return new Intl.DateTimeFormat(getLocale() === "sv" ? "sv-SE" : "en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+}

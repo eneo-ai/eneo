@@ -1,58 +1,58 @@
 <script lang="ts">
+  import { writable } from "svelte/store";
+  import { Info, MoreVertical, RefreshCw, Trash2, Webhook } from "lucide-svelte";
   import { Page, Settings } from "$lib/components/layout";
   import type { PageProps } from "./$types";
   import IntegrationCard from "$lib/features/integrations/components/IntegrationCard.svelte";
   import IntegrationGrid from "$lib/features/integrations/components/IntegrationGrid.svelte";
-  import { Button } from "@eneo/ui";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import type { TenantIntegration } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
-  import { writable } from "svelte/store";
 
   const { data }: PageProps = $props();
 
-  let tenantIntegrations = $derived.by(() => {
-    // Filter out integrations that are not yet ready (e.g., Confluence)
-    let integrations = $state(
-      data.tenantIntegrations.filter((i) => i.integration_type === "sharepoint")
-    );
-    return integrations;
-  });
+  let tenantIntegrations = $derived(
+    data.tenantIntegrations.filter((i) => i.integration_type === "sharepoint")
+  );
 
-  // SharePoint app configuration dialog
   let showSharePointConfigDialog = writable(false);
   let showDeleteAppDialog = writable(false);
-  let sharePointConfigStatus = $state<"loading" | "configured" | "not_configured">("loading");
+  let sharePointConfigStatus = $state<"loading" | "configured" | "not_configured" | "error">(
+    "loading"
+  );
   let showWebhookManagement = $state(false);
 
-  // Load SharePoint config status
   const loadSharePointStatus = createAsyncState(async () => {
+    sharePointConfigStatus = "loading";
     try {
       const config = await data.eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "get"
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped admin endpoint not in OpenAPI spec
-      } as any);
+      });
       sharePointConfigStatus = config ? "configured" : "not_configured";
-    } catch (error) {
-      console.error("Failed to load SharePoint config status:", error);
-      sharePointConfigStatus = "not_configured";
+    } catch {
+      sharePointConfigStatus = "error";
     }
   });
 
-  // Load status on mount
   $effect(() => {
     loadSharePointStatus();
   });
 
-  // Reload status when dialog closes
   $effect(() => {
-    if (!$showSharePointConfigDialog) {
-      loadSharePointStatus();
-    }
+    if (!$showSharePointConfigDialog) loadSharePointStatus();
   });
+
+  function handleAppDeleted() {
+    showWebhookManagement = false;
+    loadSharePointStatus();
+  }
 
   function isSharePoint(integration: TenantIntegration): boolean {
     return integration.integration_type === "sharepoint";
@@ -81,69 +81,84 @@
                 {#snippet action()}
                   <div class="flex flex-col gap-2">
                     {#if isSharePoint(integration)}
-                      <!-- SharePoint: Show config status and configure button -->
-                      {#if sharePointConfigStatus === "loading"}
-                        <span
-                          class="bg-secondary text-secondary inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
-                        >
-                          {m.integration_status_loading()}
-                        </span>
-                      {:else if sharePointConfigStatus === "configured"}
-                        <span
-                          class="bg-positive-dimmer text-positive-stronger inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
-                        >
-                          {m.integration_status_configured()}
-                        </span>
-                      {:else}
-                        <span
-                          class="bg-secondary text-secondary inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
-                        >
-                          {m.integration_status_not_configured()}
-                        </span>
-                      {/if}
+                      <div class="flex items-center gap-2">
+                        {#if sharePointConfigStatus === "loading"}
+                          <Badge variant="secondary">{m.integration_status_loading()}</Badge>
+                        {:else if sharePointConfigStatus === "configured"}
+                          <Badge
+                            class="bg-positive-dimmer text-positive-stronger border-transparent"
+                          >
+                            {m.integration_status_configured()}
+                          </Badge>
+                        {:else if sharePointConfigStatus === "error"}
+                          <Badge variant="destructive">{m.integration_status_error()}</Badge>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={m.retry()}
+                            onclick={() => loadSharePointStatus()}
+                          >
+                            <RefreshCw aria-hidden="true" />
+                          </Button>
+                        {:else}
+                          <Badge variant="outline">{m.integration_status_not_configured()}</Badge>
+                        {/if}
+                      </div>
 
-                      <Button
-                        variant={sharePointConfigStatus === "configured" ? "outlined" : "primary"}
-                        onclick={() => ($showSharePointConfigDialog = true)}
-                      >
+                      <div class="flex items-center gap-2">
+                        <Button
+                          variant={sharePointConfigStatus === "configured" ? "outline" : "default"}
+                          class="flex-1"
+                          disabled={sharePointConfigStatus === "loading"}
+                          onclick={() => ($showSharePointConfigDialog = true)}
+                        >
+                          {sharePointConfigStatus === "configured"
+                            ? m.update_configuration()
+                            : m.configure_sharepoint_app()}
+                        </Button>
+
+                        {#if sharePointConfigStatus === "configured"}
+                          <DropdownMenu.Root>
+                            <DropdownMenu.Trigger>
+                              {#snippet child({ props })}
+                                <Button
+                                  {...props}
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={m.actions()}
+                                >
+                                  <MoreVertical aria-hidden="true" />
+                                </Button>
+                              {/snippet}
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Content align="end">
+                              <DropdownMenu.Item
+                                onclick={() => (showWebhookManagement = !showWebhookManagement)}
+                              >
+                                <Webhook aria-hidden="true" />
+                                {showWebhookManagement ? m.hide_webhooks() : m.manage_webhooks()}
+                              </DropdownMenu.Item>
+                              <DropdownMenu.Separator />
+                              <DropdownMenu.Item
+                                variant="destructive"
+                                onclick={() => ($showDeleteAppDialog = true)}
+                              >
+                                <Trash2 aria-hidden="true" />
+                                {m.delete_sharepoint_app()}
+                              </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Root>
+                        {/if}
+                      </div>
+
+                      <p class="text-muted-foreground text-xs">
                         {sharePointConfigStatus === "configured"
-                          ? m.update_configuration()
-                          : m.configure_sharepoint_app()}
-                      </Button>
-
-                      {#if sharePointConfigStatus === "configured"}
-                        <Button
-                          variant="outlined"
-                          onclick={() => (showWebhookManagement = !showWebhookManagement)}
-                        >
-                          {showWebhookManagement ? m.hide_webhooks() : m.manage_webhooks()}
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          onclick={() => {
-                            console.log("Delete button clicked");
-                            $showDeleteAppDialog = true;
-                            console.log("showDeleteAppDialog set to:", $showDeleteAppDialog);
-                          }}
-                        >
-                          {m.delete_sharepoint_app()}
-                        </Button>
-                        <p class="text-secondary mt-1 text-xs">
-                          {m.organization_access_enabled()}
-                        </p>
-                      {:else}
-                        <p class="text-secondary mt-1 text-xs">
-                          {m.configure_azure_ad_app()}
-                        </p>
-                      {/if}
+                          ? m.organization_access_enabled()
+                          : m.configure_azure_ad_app()}
+                      </p>
                     {:else}
-                      <!-- Other integrations: Coming soon -->
-                      <span
-                        class="bg-secondary text-secondary inline-flex items-center rounded-md px-2 py-1 text-xs font-medium"
-                      >
-                        {m.coming_soon()}
-                      </span>
-                      <p class="text-secondary mt-1 text-xs">
+                      <Badge variant="secondary">{m.coming_soon()}</Badge>
+                      <p class="text-muted-foreground text-xs">
                         {m.configuration_options_available_soon()}
                       </p>
                     {/if}
@@ -153,7 +168,6 @@
             {/each}
           </IntegrationGrid>
 
-          <!-- SharePoint Webhook Management (expanded when button clicked) -->
           {#if showWebhookManagement && sharePointConfigStatus === "configured"}
             <div class="border-border bg-background mt-6 rounded-lg border p-6">
               <SharePointSubscriptions eneo={data.eneo} />
@@ -161,38 +175,30 @@
           {/if}
         </Settings.Row>
 
-        <!-- Information about personal vs organization integrations -->
         <Settings.Row
           fullWidth
           title={m.personal_integrations()}
           description={m.personal_integrations_description()}
         >
-          <div class="border-accent-default bg-accent-dimmer rounded-md border p-4">
-            <div class="flex items-start gap-3">
-              <div class="flex-shrink-0">
-                <svg class="text-accent-default h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fill-rule="evenodd"
-                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z"
-                    clip-rule="evenodd"
-                  />
-                </svg>
-              </div>
-              <div class="flex-1 text-sm">
-                <h3 class="text-accent-stronger font-medium">{m.how_integrations_work()}</h3>
-                <ul class="text-accent-default mt-2 list-inside list-disc space-y-1">
-                  <li>{m.personal_spaces_description()}</li>
-                  <li>{m.shared_spaces_description()}</li>
-                  <li>{m.no_person_dependency_description()}</li>
-                </ul>
-              </div>
-            </div>
-          </div>
+          <Alert.Root>
+            <Info aria-hidden="true" />
+            <Alert.Title>{m.how_integrations_work()}</Alert.Title>
+            <Alert.Description>
+              <ul class="list-inside list-disc space-y-1">
+                <li>{m.personal_spaces_description()}</li>
+                <li>{m.shared_spaces_description()}</li>
+                <li>{m.no_person_dependency_description()}</li>
+              </ul>
+            </Alert.Description>
+          </Alert.Root>
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>
   </Page.Main>
 </Page.Root>
 
-<SharePointAppConfigDialog openController={showSharePointConfigDialog} />
-<SharePointAppDeleteDialog openController={showDeleteAppDialog} />
+<SharePointAppConfigDialog
+  openController={showSharePointConfigDialog}
+  onDeleteRequested={() => ($showDeleteAppDialog = true)}
+/>
+<SharePointAppDeleteDialog openController={showDeleteAppDialog} onDeleted={handleAppDeleted} />

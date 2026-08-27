@@ -5,8 +5,8 @@ import SharepointImportDialog from "./SharepointImportDialog.svelte";
 export const SharepointIntegrationData: IntegrationData = {
   logo: sharepointImgUrl,
   descriptionKey: "sharepoint_integration_description",
-  displayName: "Sharepoint",
-  importHint: "Import a site from Sharepoint",
+  displayName: "SharePoint",
+  importHint: "Import a site from SharePoint",
   ImportDialog: SharepointImportDialog,
   previewLinkLabel: "open_in_sharepoint"
 };
