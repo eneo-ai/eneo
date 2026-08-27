@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+from dotenv import dotenv_values
 from pydantic import ValidationError
 
 from eneo.object_content.file_icon_backfill import FileIconBackfillSettings
@@ -9,6 +12,18 @@ def test_file_icon_backfill_settings_use_measured_safe_defaults() -> None:
 
     assert settings.batch_rows == 200
     assert settings.batch_bytes == 128 * 1024 * 1024
+
+
+def test_file_icon_backfill_template_matches_runtime_defaults() -> None:
+    template = dotenv_values(Path(__file__).resolve().parents[3] / ".env.template")
+    batch_rows = template["FILE_ICON_BACKFILL_BATCH_ROWS"]
+    batch_bytes = template["FILE_ICON_BACKFILL_BATCH_BYTES"]
+    settings = FileIconBackfillSettings()
+
+    assert batch_rows is not None
+    assert batch_bytes is not None
+    assert int(batch_rows) == settings.batch_rows
+    assert int(batch_bytes) == settings.batch_bytes
 
 
 def test_file_icon_backfill_settings_use_the_operator_runbook_names(

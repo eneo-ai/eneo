@@ -1,7 +1,8 @@
-"""Opt-in benchmark for the staged File/Icon PostgreSQL-inline backfill.
+"""Benchmark coverage for the staged File/Icon PostgreSQL-inline backfill.
 
 The benchmark uses the real PostgreSQL 13 object-content container and the real
-``FileIconBackfill`` implementation. It is skipped unless explicitly enabled:
+``FileIconBackfill`` implementation. The resource benchmark is skipped unless
+explicitly enabled; the focused lifecycle regression runs in the normal suite:
 
     ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1 \
     uv run pytest -s \
@@ -62,13 +63,7 @@ _INLINE_MAXIMUM_BYTES = 200 * _MEBIBYTE
 _INLINE_IO_CHUNK_BYTES = 256 * 1024
 _RUN_BENCHMARK = os.getenv("ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK") == "1"
 
-pytestmark = [
-    pytest.mark.asyncio,
-    pytest.mark.skipif(
-        not _RUN_BENCHMARK,
-        reason="set ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1 to run",
-    ),
-]
+pytestmark = pytest.mark.asyncio
 
 
 @dataclass(frozen=True, slots=True)
@@ -626,6 +621,10 @@ async def test_one_row_batches_complete_admission_and_copy_lifecycle(
     assert metrics.batch_count == 7
 
 
+@pytest.mark.skipif(
+    not _RUN_BENCHMARK,
+    reason="set ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1 to run",
+)
 async def test_file_icon_inline_backfill_benchmark(
     object_content_database: DatabaseSessionManager,
 ) -> None:
