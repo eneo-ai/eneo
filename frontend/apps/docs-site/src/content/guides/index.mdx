@@ -6,14 +6,15 @@ matters.
 
 ## Start here
 
-| If you need to…                   | Start with                                               |
-| --------------------------------- | -------------------------------------------------------- |
-| Deploy or upgrade Eneo            | [Deploy Eneo](/guides/deployment)                        |
-| Choose where durable bytes live   | [Choose Content Storage](/guides/object-content-storage) |
-| Configure login and access        | [Authentication & OIDC](/guides/authentication)          |
-| Connect an AI provider            | [AI Provider Configuration](/guides/ai-providers)        |
-| Add documents to a knowledge base | [Document Processing](/guides/document-processing)       |
-| Connect SharePoint or OneDrive    | [SharePoint Integration](/guides/sharepoint-integration) |
+| If you need to…                   | Start with                                                       |
+| --------------------------------- | ---------------------------------------------------------------- |
+| Deploy Eneo                       | [Deploy Eneo](/guides/deployment)                                |
+| Upgrade legacy File/Icon storage  | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade) |
+| Choose where durable bytes live   | [Choose Content Storage](/guides/object-content-storage)         |
+| Configure login and access        | [Authentication & OIDC](/guides/authentication)                  |
+| Connect an AI provider            | [AI Provider Configuration](/guides/ai-providers)                |
+| Add documents to a knowledge base | [Document Processing](/guides/document-processing)               |
+| Connect SharePoint or OneDrive    | [SharePoint Integration](/guides/sharepoint-integration)         |
 
 ## All guides
 
@@ -70,6 +71,15 @@ Deploy Eneo in production environments:
 - Reverse proxy configuration (Traefik, Nginx)
 - SSL/TLS certificates with Let's Encrypt
 - Environment configuration best practices
+
+### [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)
+
+Run the one-time legacy content adoption safely:
+
+- Understand why it is required without S3
+- Estimate PostgreSQL disk and wall time
+- Pause or restore when capacity runs low
+- Verify, close the recovery window, and reclaim disk
 
 ### [Choose Content Storage](/guides/object-content-storage)
 

@@ -33,7 +33,7 @@ only source-bearing rows ready. The capacity decision is frozen after admission,
 then the worker adopts each ready variant in bounded, resumable
 PostgreSQL-inline transactions. The later contract applies the fail-closed
 completion and live-reference recheck described in
-[Finish adoption](/guides/object-content-storage#finish-adoption-and-reclaim-disk)
+[Verify and clean up](/guides/file-icon-storage-upgrade#verify-and-clean-up)
 before it removes the legacy schema.
 
 ```mermaid
@@ -184,12 +184,19 @@ lock owners and references and durably separate rows that are already complete
 from rows that may require copied bytes. The capacity gate sums only that stable
 ready set. A delete trigger cancels owner rows even while the campaign is waiting.
 During adoption, the per-item transaction rechecks the owner and reference before
-it creates the inline payload and reference atomically. A deleted owner is
-cancelled, not recreated. If a reference exists but its content is unavailable,
-the same transaction creates a verified replacement, switches the reference,
-and lets the normal lifecycle decrement the failed content's reference count and
-schedule cleanup when no references remain. An invalid source, integrity
-failure, or oversized payload fails its item immediately;
+PostgreSQL reads the exact logical size. Oversized content is rejected before the
+more expensive SHA-256 and copy. The content repository then verifies the
+expected size and digest while copying accepted frozen bytes directly into the
+inline payload table. The Python worker coordinates the transaction but never
+materializes those bytes. Payload, content control, reference, and ledger
+completion commit atomically. Legacy text requires PostgreSQL `server_encoding`
+`UTF8`, which makes the raw text byte length an exact, non-converting preflight;
+other encodings fail before byte production. A deleted owner is cancelled, not
+recreated. If a reference exists but its content is unavailable, the same
+transaction creates a verified replacement, switches the reference, and lets
+the normal lifecycle decrement the failed content's reference count and schedule
+cleanup when no references remain. An invalid source, integrity failure, or
+oversized payload fails its item immediately;
 interrupted attempts retry until their configured limit. Failed items halt the
 campaign with a stored reason and require a higher operator resume revision
 after correction. The campaign then requeues older failures through the normal

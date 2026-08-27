@@ -840,9 +840,9 @@ replicas, let the old worker drain its executable knowledge jobs, then stop all
 old workers before starting `db-init`. The schema expansion installs a database
 write fence because old File/Icon code still changes legacy payload columns.
 
-Follow the exact job query and recovery sequence in [Upgrade, restore, and
-rollback](/guides/object-content-storage#upgrade-restore-and-rollback). Keep the
-API closed until the new migration and same-release worker are ready.
+Follow the [File and Icon storage upgrade
+checklist](/guides/file-icon-storage-upgrade#before-you-upgrade). Keep the API
+closed until the new migration and same-release worker are ready.
 
 ### Take the stopped-writer recovery point
 
@@ -943,10 +943,9 @@ docker compose logs --since=30m worker \
   batches; a repeated failure waits for the next higher revision.
 
 Do not edit the ledger or remove the database trigger. Existing legacy content
-remains readable while the worker waits or is stopped. See [Adopt legacy File
-and Icon
-content](/guides/object-content-storage#adopt-legacy-file-and-icon-content) for
-capacity examples, the state query, pause behavior, and recovery rules.
+remains readable while the worker waits or is stopped. See [Upgrade File & Icon
+Storage](/guides/file-icon-storage-upgrade) for capacity examples, realistic
+duration, state queries, pause behavior, rollback, and cleanup.
 
 ### Clean up old images
 

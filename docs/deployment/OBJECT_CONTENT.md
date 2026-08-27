@@ -636,6 +636,11 @@ matching PostgreSQL backup.
 
 ## Upgrade and rollback
 
+Start with the concise [File and Icon storage upgrade
+guide](https://docs.eneo.ai/guides/file-icon-storage-upgrade) for its operator
+checklist, disk and duration estimates, pause/rollback decisions, and cleanup.
+This section is the detailed SQL and recovery reference.
+
 Before an Eneo or object-store upgrade, take a paired backup and retain the old
 image digests. Upgrade the byte plane without changing endpoint semantics,
 credentials, bucket, or deployment ID. Verify liveness, readiness, single and
@@ -707,13 +712,23 @@ gate. Owner deletion triggers also cancel unfinished rows while the worker waits
 allowing both capacity and object-store waits to converge when no owner remains.
 
 The worker then adopts ready inline legacy variants in resumable batches after
-startup. Each item is leased, captured, and hashed once per processing attempt,
-then committed with its content row, inline payload, exact File/Icon reference,
-and completed ledger state in one short transaction. Crash recovery can read
-and hash an item again after its lease expires. Owner deletion cancels only
-that item. An invalid or oversized payload marks the item failed; the worker
-continues other ready or leased items and halts the campaign when no actionable
-item remains. The frozen legacy source stays untouched for operator recovery.
+startup. For each leased item, PostgreSQL reads the exact logical size before
+the more expensive SHA-256 and copy. An oversized item is therefore rejected
+without hashing its payload. For an accepted item, the content repository
+verifies the expected size and digest while copying the frozen bytes directly
+into the inline payload table. Python owns the lease, transaction, content
+control, File/Icon reference, and ledger state, but never materializes the
+payload. The guarded copy, reference flip, and completed ledger state commit
+together. Crash recovery can process an item again after its lease expires.
+Owner deletion cancels only that item. An invalid or oversized payload marks
+the item failed; the worker continues other ready or leased items and halts the
+campaign when no actionable item remains. The frozen legacy source stays
+untouched for operator recovery.
+
+Legacy text is canonically encoded as UTF-8. Verify `SHOW server_encoding;`
+returns `UTF8` on an external PostgreSQL deployment before upgrading. The worker
+uses raw text length for the cheap ceiling check and refuses a non-UTF-8 database
+before producing converted bytes.
 
 By default, an inline campaign starts automatically when its stable ready-set
 estimate is at most 5 GiB. Above that size, calculate PostgreSQL payload, WAL,
@@ -742,8 +757,8 @@ or tenant policy:
 | ------------------------------------------ | ------: | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES` |   5 GiB | Largest estimate that may start inline without an explicit capacity acknowledgement                                                                |
 | `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`   |       0 | Accepted inline estimate in bytes; must cover the current remaining estimate                                                                       |
-| `FILE_ICON_BACKFILL_BATCH_ROWS`            |     100 | Maximum ledger rows leased by one worker run                                                                                                       |
-| `FILE_ICON_BACKFILL_BATCH_BYTES`           |  32 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded                                       |
+| `FILE_ICON_BACKFILL_BATCH_ROWS`            |     200 | Maximum ledger rows leased by one worker run                                                                                                       |
+| `FILE_ICON_BACKFILL_BATCH_BYTES`           | 128 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded                                       |
 | `FILE_ICON_BACKFILL_LEASE_SECONDS`         |     300 | Crash-recovery lease duration                                                                                                                      |
 | `FILE_ICON_BACKFILL_RESUME_REVISION`       |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value starts bounded retries of older failures |
 | `FILE_ICON_BACKFILL_MAX_ATTEMPTS`          |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure                                                   |
@@ -770,23 +785,28 @@ The worker logs structured batch counts after every non-empty run and logs the
 estimate and required action while a campaign waits for capacity or is halted.
 Completion runs `ANALYZE` once on the new content, payload, and reference tables
 before the campaign is marked done.
-A PostgreSQL 16 integration benchmark compared these defaults with 200 rows and
-128 MiB at 1 GiB, then validated the larger candidate with 10 GiB of
-incompressible legacy payloads. The candidate reduced scheduled batches from 33
-to 9 per GiB without changing active throughput or WAL per payload byte. It is
-not the default because the benchmark did not include concurrent application
-traffic. The startup run and once-per-minute schedule deliberately limit
-database load while the application remains online; they are not intended to
-maximize migration throughput. Before increasing the batch limits, run a canary under
-representative traffic and monitor foreground p95/p99 latency, errors, database
-CPU and I/O, WAL/checkpoints, and batch duration. Restore the defaults if that
-traffic regresses.
+A PostgreSQL 13 integration benchmark validated the defaults with 10 GiB of
+incompressible legacy payloads across 16,384 items. Active work completed in
+331 seconds at 31.0 MiB/s. Worker peak RSS was about 140 MiB, PostgreSQL stayed
+near 170-217 MiB for that workload, WAL was 11.0 GiB, database allocation grew
+about 10.4 GiB, no PostgreSQL temporary files were written, and a separate
+verification pass found no stored-payload digest mismatch. A concurrent metadata
+query measured p95 6.3 ms and p99 14.5 ms. At the once-per-minute schedule, the
+163 bounded runs project to about
+2 hours 42 minutes. The schedule deliberately limits database load while the
+application remains online; it is not intended to maximize migration
+throughput. Before changing the batch limits, run a canary under representative
+traffic and monitor foreground p95/p99 latency, errors, database CPU and I/O,
+WAL/checkpoints, and batch duration. Restore the defaults if that traffic
+regresses.
 Only one worker replica may run a batch at a time. A PostgreSQL advisory lock
 prevents minute jobs from overlapping and multiplying the configured byte and
-memory bounds. Plan worst-case worker memory at roughly three times
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`, plus an equally large temporary-file
-allowance; measure the exact peak on the deployment's Python, asyncpg, and
-PostgreSQL versions before raising that ceiling.
+memory bounds. Memory is bounded by one item rather than the campaign or batch
+byte total. A separate five-item benchmark at the 200 MiB inline ceiling kept
+worker RSS near 140 MiB but briefly raised PostgreSQL to about 620 MiB while it
+hashed and copied one large `bytea`. Treat the inline ceiling as a database
+memory-safety bound and measure the exact peak on the deployment's PostgreSQL
+version before raising it.
 After correcting a halted campaign's stated cause, increase
 `FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env` and recreate the worker
 with the deployment's normal Compose files and profile. Do not reuse or lower a
