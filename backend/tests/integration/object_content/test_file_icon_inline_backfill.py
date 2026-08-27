@@ -8,6 +8,8 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy import Select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.object_content_table import (
@@ -19,14 +21,18 @@ from eneo.database.tables.users_table import Users
 from eneo.object_content import file_icon_backfill as file_icon_backfill_module
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import (
-    CapturedContent,
     ContentAccessClass,
+    ContentFacts,
     ContentFailureCode,
     ContentIntent,
     ContentState,
+    ObjectContentStateError,
     StorageKind,
 )
-from eneo.object_content.content_repository import ObjectContentRepository
+from eneo.object_content.content_repository import (
+    ObjectContentRepository,
+    PreparedContent,
+)
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.file_icon_backfill import (
     FileIconBackfill,
@@ -440,6 +446,214 @@ async def test_inline_backfill_adopts_one_legacy_variant_atomically(
     assert row.variant == "extracted_text"
     assert row.text == payload.decode()
     assert campaign == ("postgres_inline", None, "complete", None)
+
+
+@pytest.mark.asyncio
+async def test_inline_backfill_copies_unicode_text_without_python_capture(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = "åäö😀 kommuntext".encode()
+    file_id = await _seed_legacy_text(object_content_database, payload=payload)
+    backfill = _backfill(object_content_database)
+
+    def unexpected_capture(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("PostgreSQL-inline adoption must not capture bytes")
+
+    monkeypatch.setattr(
+        ObjectContentService,
+        "capture_for_target",
+        unexpected_capture,
+    )
+
+    result = await backfill.run_once()
+
+    assert result.state is FileIconBackfillState.COMPLETE
+    async with object_content_database.session() as session, session.begin():
+        row = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT content.sha256, content.size_bytes, inline.payload
+                    FROM file_icon_backfill_items AS item
+                    JOIN object_contents AS content ON content.id = item.content_id
+                    JOIN inline_content_payloads AS inline
+                      ON inline.content_id = content.id
+                    WHERE item.owner_id = :file_id
+                    """
+                ),
+                {"file_id": file_id},
+            )
+        ).one()
+
+    assert row.sha256 == sha256(payload).digest()
+    assert row.size_bytes == len(payload)
+    assert row.payload == payload
+
+
+@pytest.mark.parametrize("payload", (b"", b"four"))
+@pytest.mark.asyncio
+async def test_inline_backfill_accepts_empty_and_exact_limit_text(
+    object_content_database: DatabaseSessionManager,
+    payload: bytes,
+) -> None:
+    file_id = await _seed_legacy_text(object_content_database, payload=payload)
+
+    result = await _backfill(
+        object_content_database,
+        inline_maximum_bytes=4,
+    ).run_once()
+
+    assert result.state is FileIconBackfillState.COMPLETE
+    async with object_content_database.session() as session, session.begin():
+        row = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT content.sha256, content.size_bytes, inline.payload
+                    FROM file_icon_backfill_items AS item
+                    JOIN object_contents AS content ON content.id = item.content_id
+                    JOIN inline_content_payloads AS inline
+                      ON inline.content_id = content.id
+                    WHERE item.owner_id = :file_id
+                    """
+                ),
+                {"file_id": file_id},
+            )
+        ).one()
+
+    assert row.sha256 == sha256(payload).digest()
+    assert row.size_bytes == len(payload)
+    assert row.payload == payload
+
+
+@pytest.mark.asyncio
+async def test_inline_select_writer_rejects_payload_that_does_not_match_facts(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    tenant_id, user_id = await _tenant_and_user(object_content_database)
+    expected = b"expected"
+    service = ObjectContentService(
+        ObjectContentCoreSettings(
+            inline_maximum_bytes=1024,
+            inline_io_chunk_bytes=256,
+        ),
+        object_content_database,
+    )
+
+    async with object_content_database.session() as session:
+        transaction = await session.begin()
+        try:
+            with pytest.raises(
+                ObjectContentStateError,
+                match="Selected inline payload does not match content facts",
+            ):
+                await service.prepare_inline_from_select_in_transaction(
+                    session,
+                    intent=ContentIntent(
+                        tenant_id=tenant_id,
+                        created_by_user_id=user_id,
+                        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                        idempotency_key="test:mismatched-inline-select",
+                        producer_receipt="test:mismatched-inline-select",
+                    ),
+                    content=ContentFacts(
+                        sha256=sha256(expected).digest(),
+                        size_bytes=len(expected),
+                        declared_media_type="application/octet-stream",
+                        verified_media_type="application/octet-stream",
+                    ),
+                    payload_select=sa.select(sa.literal(b"tampered").label("payload")),
+                )
+        finally:
+            await transaction.rollback()
+
+    async with object_content_database.session() as session, session.begin():
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(sa.table("object_contents"))
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(
+                    sa.table("inline_content_payloads")
+                )
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_inline_backfill_rolls_back_if_frozen_bytes_change_before_copy(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"frozen source"
+    file_id = await _seed_legacy_text(object_content_database, payload=payload)
+    original_prepare = ObjectContentService.prepare_inline_from_select_in_transaction
+
+    async def mutate_before_copy(
+        service: ObjectContentService,
+        session: AsyncSession,
+        *,
+        intent: ContentIntent,
+        content: ContentFacts,
+        payload_select: Select[tuple[bytes]],
+    ) -> PreparedContent:
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.text("UPDATE files SET text = :text WHERE id = :file_id"),
+            {"file_id": file_id, "text": "changed source"},
+        )
+        return await original_prepare(
+            service,
+            session,
+            intent=intent,
+            content=content,
+            payload_select=payload_select,
+        )
+
+    monkeypatch.setattr(
+        ObjectContentService,
+        "prepare_inline_from_select_in_transaction",
+        mutate_before_copy,
+    )
+
+    result = await _backfill(object_content_database).run_once()
+
+    assert result.state is FileIconBackfillState.HALTED
+    assert result.failed_count == 1
+    async with object_content_database.session() as session, session.begin():
+        row = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT item.state, item.last_error_code,
+                           item.last_error_detail, file.text
+                    FROM file_icon_backfill_items AS item
+                    JOIN files AS file ON file.id = item.owner_id
+                    WHERE item.owner_id = :file_id
+                    """
+                ),
+                {"file_id": file_id},
+            )
+        ).one()
+        content_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(sa.table("object_contents"))
+        )
+        reference_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(sa.table("file_content_references"))
+        )
+
+    assert row.state == "failed"
+    assert row.last_error_code == "legacy_source_invalid"
+    assert "does not match content facts" in row.last_error_detail
+    assert row.text == payload.decode()
+    assert content_count == 0
+    assert reference_count == 0
 
 
 @pytest.mark.asyncio
@@ -1173,27 +1387,34 @@ async def test_admission_retries_instead_of_deadlocking_with_parent_delete(
 
 
 @pytest.mark.asyncio
-async def test_owner_deleted_after_capture_is_cancelled_at_the_atomic_flip(
+async def test_owner_deleted_before_the_atomic_flip_is_cancelled(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     file_id = await _seed_legacy_text(
         object_content_database,
-        payload=b"delete during capture",
+        payload=b"delete before flip",
+    )
+    original_complete_inline = (
+        file_icon_backfill_module._FileIconBackfillRepository.complete_inline
     )
 
-    async def delete_owner_after_yield(payload: bytes) -> AsyncIterator[bytes]:
-        yield payload
+    async def delete_owner_before_flip(
+        repository: file_icon_backfill_module._FileIconBackfillRepository,
+        item: file_icon_backfill_module._WorkItem,
+        object_content: ObjectContentService,
+    ) -> bool:
         async with object_content_database.session() as session, session.begin():
             await session.execute(
                 sa.text("DELETE FROM files WHERE id = :file_id"),
                 {"file_id": file_id},
             )
+        return await original_complete_inline(repository, item, object_content)
 
     monkeypatch.setattr(
-        file_icon_backfill_module,
-        "_one_chunk",
-        delete_owner_after_yield,
+        file_icon_backfill_module._FileIconBackfillRepository,
+        "complete_inline",
+        delete_owner_before_flip,
     )
 
     result = await _backfill(object_content_database).run_once()
@@ -1223,11 +1444,17 @@ async def test_worker_that_loses_its_lease_leaves_the_new_owner_untouched(
 ) -> None:
     file_id = await _seed_legacy_text(
         object_content_database,
-        payload=b"lease changed during capture",
+        payload=b"lease changed before flip",
+    )
+    original_complete_inline = (
+        file_icon_backfill_module._FileIconBackfillRepository.complete_inline
     )
 
-    async def replace_lease_after_yield(payload: bytes) -> AsyncIterator[bytes]:
-        yield payload
+    async def replace_lease_before_flip(
+        repository: file_icon_backfill_module._FileIconBackfillRepository,
+        item: file_icon_backfill_module._WorkItem,
+        object_content: ObjectContentService,
+    ) -> bool:
         async with object_content_database.session() as session, session.begin():
             await session.execute(
                 sa.text(
@@ -1243,11 +1470,12 @@ async def test_worker_that_loses_its_lease_leaves_the_new_owner_untouched(
                     "lease_expires_at": datetime.now(UTC) + timedelta(minutes=5),
                 },
             )
+        return await original_complete_inline(repository, item, object_content)
 
     monkeypatch.setattr(
-        file_icon_backfill_module,
-        "_one_chunk",
-        replace_lease_after_yield,
+        file_icon_backfill_module._FileIconBackfillRepository,
+        "complete_inline",
+        replace_lease_before_flip,
     )
 
     result = await _backfill(object_content_database).run_once()
@@ -1303,17 +1531,13 @@ async def test_repeated_unclassified_error_becomes_a_visible_terminal_failure(
     async def fail_during_poison_flip(
         repository: file_icon_backfill_module._FileIconBackfillRepository,
         item: file_icon_backfill_module._WorkItem,
-        created_by_user_id: UUID | None,
-        captured: CapturedContent,
         object_content: ObjectContentService,
     ) -> bool:
         if item.owner_id == poison_id:
-            raise OSError("temporary directory is full")
+            raise OSError("database connection reset during inline adoption")
         return await original_complete_inline(
             repository,
             item,
-            created_by_user_id,
-            captured,
             object_content,
         )
 
@@ -1327,7 +1551,7 @@ async def test_repeated_unclassified_error_becomes_a_visible_terminal_failure(
         max_attempts=1,
     )
 
-    with pytest.raises(OSError, match="temporary directory is full"):
+    with pytest.raises(OSError, match="database connection reset"):
         await backfill.run_once()
 
     async with object_content_database.session() as session, session.begin():
@@ -1410,26 +1634,33 @@ async def test_concurrent_runs_share_one_cluster_wide_batch_bound(
         object_content_database,
         payload=b"hold the first run",
     )
-    entered_capture = asyncio.Event()
-    release_capture = asyncio.Event()
+    entered_flip = asyncio.Event()
+    release_flip = asyncio.Event()
+    original_complete_inline = (
+        file_icon_backfill_module._FileIconBackfillRepository.complete_inline
+    )
 
-    async def pause_during_capture(payload: bytes) -> AsyncIterator[bytes]:
-        entered_capture.set()
-        await release_capture.wait()
-        yield payload
+    async def pause_during_flip(
+        repository: file_icon_backfill_module._FileIconBackfillRepository,
+        item: file_icon_backfill_module._WorkItem,
+        object_content: ObjectContentService,
+    ) -> bool:
+        entered_flip.set()
+        await release_flip.wait()
+        return await original_complete_inline(repository, item, object_content)
 
     monkeypatch.setattr(
-        file_icon_backfill_module,
-        "_one_chunk",
-        pause_during_capture,
+        file_icon_backfill_module._FileIconBackfillRepository,
+        "complete_inline",
+        pause_during_flip,
     )
     backfill = _backfill(object_content_database)
     first = asyncio.create_task(backfill.run_once())
     try:
-        await asyncio.wait_for(entered_capture.wait(), timeout=5)
+        await asyncio.wait_for(entered_flip.wait(), timeout=5)
         overlapping = await asyncio.wait_for(backfill.run_once(), timeout=5)
     finally:
-        release_capture.set()
+        release_flip.set()
     completed = await first
 
     assert overlapping.state is FileIconBackfillState.ACTIVE
@@ -1510,7 +1741,46 @@ async def test_oversized_item_halts_after_other_items_finish(
                 {"owner_id": oversized_id},
             )
         ).one()
-    assert retry == ("done", 1, 1)
+        assert retry == ("done", 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_oversized_item_is_rejected_before_postgres_produces_payload(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    await _seed_legacy_text(
+        object_content_database,
+        payload=b"too-large",
+    )
+    async with object_content_database.session() as session:
+        assert session.bind is not None
+        engine = session.bind.sync_engine
+    payload_statements: list[str] = []
+
+    def capture_payload_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: object,
+    ) -> None:
+        normalized = statement.lower()
+        if "sha256(" in normalized or "convert_to(" in normalized:
+            payload_statements.append(statement)
+
+    sa.event.listen(engine, "before_cursor_execute", capture_payload_statement)
+    try:
+        result = await _backfill(
+            object_content_database,
+            inline_maximum_bytes=4,
+        ).run_once()
+    finally:
+        sa.event.remove(engine, "before_cursor_execute", capture_payload_statement)
+
+    assert result.state is FileIconBackfillState.HALTED
+    assert result.failed_count == 1
+    assert payload_statements == []
 
 
 @pytest.mark.asyncio

@@ -4,10 +4,11 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from uuid import UUID
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import Select, func, literal, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContentHolds,
@@ -17,6 +18,7 @@ from eneo.database.tables.object_content_table import (
 from eneo.object_content.content import (
     CapturedContent,
     ContentAccessClass,
+    ContentFacts,
     ContentFailureCode,
     ContentIntent,
     ContentReadGrant,
@@ -195,11 +197,92 @@ class ObjectContentRepository:
             created=created,
         )
 
+    async def prepare_inline_from_select(
+        self,
+        *,
+        intent: ContentIntent,
+        content: ContentFacts,
+        payload_select: Select[tuple[bytes]],
+        request_fingerprint: bytes,
+    ) -> PreparedContent:
+        row, created = await self._prepare_control(
+            intent=intent,
+            content=content,
+            storage_kind=StorageKind.POSTGRES_INLINE,
+            state=ContentState.AVAILABLE,
+            request_fingerprint=request_fingerprint,
+        )
+        if created:
+            source = payload_select.subquery()
+            matching_source = (
+                select(source.c.payload)
+                .where(
+                    func.octet_length(source.c.payload) == content.size_bytes,
+                    func.sha256(source.c.payload) == content.sha256,
+                )
+                .subquery()
+            )
+            inserted = await self._session.execute(
+                insert(InlineContentPayloads).from_select(
+                    ("content_id", "storage_kind", "payload"),
+                    select(
+                        literal(row.id),
+                        literal(StorageKind.POSTGRES_INLINE.value),
+                        matching_source.c.payload,
+                    ),
+                )
+            )
+            if affected_row_count(inserted) != 1:
+                raise ObjectContentStateError(
+                    "Selected inline payload does not match content facts"
+                )
+        else:
+            if row.state == ContentState.TOMBSTONED.value:
+                payload_exists = bool(
+                    await self._session.scalar(
+                        select(
+                            select(InlineContentPayloads.content_id)
+                            .where(InlineContentPayloads.content_id == row.id)
+                            .exists()
+                        )
+                    )
+                )
+                if payload_exists:
+                    raise ObjectContentStateError(
+                        "Inline content tombstone still owns payload bytes"
+                    )
+            else:
+                payload_matches = bool(
+                    await self._session.scalar(
+                        select(
+                            select(InlineContentPayloads.content_id)
+                            .where(
+                                InlineContentPayloads.content_id == row.id,
+                                func.octet_length(InlineContentPayloads.payload)
+                                == content.size_bytes,
+                                func.sha256(InlineContentPayloads.payload)
+                                == content.sha256,
+                            )
+                            .exists()
+                        )
+                    )
+                )
+                if not payload_matches:
+                    raise ObjectContentIdempotencyConflictError(
+                        "The idempotency key is bound to different inline bytes"
+                    )
+        return PreparedContent(
+            id=row.id,
+            storage_kind=StorageKind(row.storage_kind),
+            state=ContentState(row.state),
+            created=created,
+        )
+
     async def _prepare_control(
         self,
         *,
         intent: ContentIntent,
-        content: CapturedContent,
+        content: ContentFacts,
         storage_kind: StorageKind,
         state: ContentState,
         request_fingerprint: bytes,

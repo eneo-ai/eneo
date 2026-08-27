@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -10,9 +10,11 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Select
+from sqlalchemy.dialects.postgresql import BYTEA, insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import DatabaseSessionManager, sessionmanager
@@ -31,13 +33,12 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.object_content.content import (
-    CapturedContent,
     ContentAccessClass,
+    ContentFacts,
     ContentIntent,
     ContentState,
     ContentTooLargeError,
     ObjectContentIdempotencyConflictError,
-    ObjectContentIntegrityError,
     ObjectContentStateError,
     StorageKind,
 )
@@ -69,8 +70,8 @@ class FileIconBackfillSettings(BaseSettings):
 
     auto_inline_max_bytes: int = Field(default=5 * _GIBIBYTE, ge=0)
     inline_capacity_ack: int = Field(default=0, ge=0)
-    batch_rows: int = Field(default=100, ge=1, le=1000)
-    batch_bytes: int = Field(default=32 * _MEBIBYTE, ge=1)
+    batch_rows: int = Field(default=200, ge=1, le=1000)
+    batch_bytes: int = Field(default=128 * _MEBIBYTE, ge=1)
     lease_seconds: int = Field(default=300, ge=1)
     resume_revision: int = Field(default=0, ge=0)
     max_attempts: int = Field(default=3, ge=1)
@@ -125,9 +126,9 @@ class _WorkItem:
 
 @dataclass(frozen=True, slots=True)
 class _LegacySource:
-    payload: bytes | None
-    media_type: str
+    content: ContentFacts
     created_by_user_id: UUID | None
+    payload_select: Select[tuple[bytes]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,10 +155,6 @@ class _LeaseLost(Exception):
 
 class _AdmissionContended(Exception):
     pass
-
-
-async def _one_chunk(payload: bytes) -> AsyncIterator[bytes]:
-    yield payload
 
 
 class _FileIconBackfillRepository:
@@ -563,97 +560,172 @@ class _FileIconBackfillRepository:
         await self._session.flush()
         return ledger.attempts
 
-    async def legacy_source(self, item: _WorkItem) -> _LegacySource:
+    @staticmethod
+    def _legacy_payload_expressions(
+        item: _WorkItem,
+    ) -> tuple[ColumnElement[bytes], ColumnElement[int], str | None, bool]:
         if item.owner_kind == "file":
             if item.variant == "transcription":
-                payload_column = Files.legacy_transcription
+                size_expression = sa.func.octet_length(Files.legacy_transcription)
+                payload_expression = sa.func.convert_to(
+                    Files.legacy_transcription,
+                    "UTF8",
+                )
                 media_type = "text/plain"
             elif item.variant == "original":
-                payload_column = Files.legacy_blob
+                payload_expression = Files.legacy_blob
+                size_expression = sa.func.octet_length(payload_expression)
                 media_type = None
             elif item.variant == "extracted_text":
-                payload_column = Files.legacy_text
+                size_expression = sa.func.octet_length(Files.legacy_text)
+                payload_expression = sa.func.convert_to(Files.legacy_text, "UTF8")
                 media_type = "text/plain"
             elif item.variant in {"derived_page", "legacy_image"}:
-                payload_column = Files.legacy_blob
+                payload_expression = Files.legacy_blob
+                size_expression = sa.func.octet_length(payload_expression)
                 media_type = None
             else:
                 raise _LegacySourceMissing
+            return (
+                sa.type_coerce(payload_expression, BYTEA),
+                size_expression,
+                media_type,
+                item.variant in {"transcription", "extracted_text"},
+            )
+        if item.owner_kind == "icon" and item.variant == "primary":
+            return (
+                sa.type_coerce(Icons.legacy_blob, BYTEA),
+                sa.func.octet_length(Icons.legacy_blob),
+                None,
+                False,
+            )
+        raise _LegacySourceMissing
+
+    async def legacy_source_size(self, item: _WorkItem) -> int:
+        _, size_expression, _, requires_utf8 = self._legacy_payload_expressions(item)
+        if item.owner_kind == "file":
+            row = (
+                await self._session.execute(
+                    sa.select(
+                        Files.tenant_id,
+                        size_expression.label("size_bytes"),
+                        sa.func.getdatabaseencoding().label("database_encoding"),
+                    ).where(Files.id == item.owner_id)
+                )
+            ).one_or_none()
+            if row is None:
+                raise _OwnerDeleted
+        else:
+            row = (
+                await self._session.execute(
+                    sa.select(
+                        Icons.tenant_id,
+                        size_expression.label("size_bytes"),
+                        sa.func.getdatabaseencoding().label("database_encoding"),
+                    ).where(Icons.id == item.owner_id)
+                )
+            ).one_or_none()
+            if row is None:
+                raise _OwnerDeleted
+        if row.tenant_id != item.tenant_id or row.size_bytes is None:
+            raise _LegacySourceMissing
+        if requires_utf8 and row.database_encoding != "UTF8":
+            raise ObjectContentStateError(
+                "File/Icon text adoption requires UTF8 PostgreSQL encoding"
+            )
+        return int(row.size_bytes)
+
+    async def legacy_source(self, item: _WorkItem) -> _LegacySource:
+        payload_expression, _, fixed_media_type, _ = self._legacy_payload_expressions(
+            item
+        )
+        if item.owner_kind == "file":
             row = (
                 await self._session.execute(
                     sa.select(
                         Files.user_id,
                         Files.tenant_id,
                         Files.mimetype,
-                        payload_column.label("payload"),
+                        sa.func.sha256(payload_expression).label("sha256"),
+                        sa.func.octet_length(payload_expression).label("size_bytes"),
                     ).where(Files.id == item.owner_id)
                 )
             ).one_or_none()
             if row is None:
                 raise _OwnerDeleted
-            if row.tenant_id != item.tenant_id:
+            if (
+                row.tenant_id != item.tenant_id
+                or row.sha256 is None
+                or row.size_bytes is None
+            ):
                 raise _LegacySourceMissing
-            payload = row.payload
-            if isinstance(payload, str):
-                payload = payload.encode("utf-8")
+            resolved_media_type = (
+                fixed_media_type or row.mimetype or "application/octet-stream"
+            )
+            content = ContentFacts(
+                sha256=bytes(row.sha256),
+                size_bytes=int(row.size_bytes),
+                declared_media_type=resolved_media_type,
+                verified_media_type=resolved_media_type,
+            )
+            payload_select = sa.select(payload_expression.label("payload")).where(
+                Files.id == item.owner_id,
+                Files.tenant_id == item.tenant_id,
+            )
             return _LegacySource(
-                payload=payload,
-                media_type=media_type or row.mimetype or "application/octet-stream",
+                content=content,
                 created_by_user_id=row.user_id,
+                payload_select=payload_select,
             )
 
-        if item.owner_kind == "icon" and item.variant == "primary":
+        if item.owner_kind == "icon":
             row = (
                 await self._session.execute(
                     sa.select(
                         Icons.tenant_id,
-                        Icons.legacy_blob,
                         Icons.legacy_mimetype,
+                        sa.func.sha256(payload_expression).label("sha256"),
+                        sa.func.octet_length(payload_expression).label("size_bytes"),
                     ).where(Icons.id == item.owner_id)
                 )
             ).one_or_none()
             if row is None:
                 raise _OwnerDeleted
-            if row.tenant_id != item.tenant_id:
+            if (
+                row.tenant_id != item.tenant_id
+                or row.sha256 is None
+                or row.size_bytes is None
+            ):
                 raise _LegacySourceMissing
+            media_type = row.legacy_mimetype or "application/octet-stream"
+            content = ContentFacts(
+                sha256=bytes(row.sha256),
+                size_bytes=int(row.size_bytes),
+                declared_media_type=media_type,
+                verified_media_type=media_type,
+            )
+            payload_select = sa.select(payload_expression.label("payload")).where(
+                Icons.id == item.owner_id,
+                Icons.tenant_id == item.tenant_id,
+            )
             return _LegacySource(
-                payload=row.legacy_blob,
-                media_type=row.legacy_mimetype or "application/octet-stream",
+                content=content,
                 created_by_user_id=None,
+                payload_select=payload_select,
             )
         raise _LegacySourceMissing
-
-    async def source_or_complete(
-        self,
-        item: _WorkItem,
-    ) -> _LegacySource | None:
-        existing = await self._existing_reference(item)
-        if existing is None or existing.state is not ContentState.AVAILABLE:
-            return await self.legacy_source(item)
-        if not await self._lock_owner(item):
-            raise _OwnerDeleted
-        existing = await self._existing_reference(item, lock=True)
-        if existing is None or existing.state is not ContentState.AVAILABLE:
-            return await self.legacy_source(item)
-        ledger = await self._leased_item(item)
-        ledger.state = "done"
-        ledger.content_id = existing.content_id
-        ledger.failure_revision = None
-        self._clear_lease(ledger)
-        await self._session.flush()
-        return None
 
     async def complete_inline(
         self,
         item: _WorkItem,
-        created_by_user_id: UUID | None,
-        captured: CapturedContent,
         object_content: ObjectContentService,
     ) -> bool:
-        ledger = await self._leased_item(item)
         if not await self._lock_owner(item):
+            ledger = await self._leased_item(item)
             self._cancel(ledger)
+            await self._session.flush()
             return False
+        ledger = await self._leased_item(item)
 
         existing = await self._existing_reference(item, lock=True)
         if existing is not None and existing.state is ContentState.AVAILABLE:
@@ -664,6 +736,10 @@ class _FileIconBackfillRepository:
             await self._session.flush()
             return True
 
+        source_size = await self.legacy_source_size(item)
+        object_content.ensure_inline_size(source_size)
+        source = await self.legacy_source(item)
+        ledger.payload_size_estimate = source.content.size_bytes
         owner_intent_key = (
             f"file:{item.owner_id}:{item.variant}:{item.ordinal}"
             if item.owner_kind == "file"
@@ -674,11 +750,11 @@ class _FileIconBackfillRepository:
             if existing is None
             else f"{owner_intent_key}:replace:{existing.content_id}"
         )
-        prepared = await object_content.prepare_in_transaction(
+        prepared = await object_content.prepare_inline_from_select_in_transaction(
             self._session,
             intent=ContentIntent(
                 tenant_id=item.tenant_id,
-                created_by_user_id=created_by_user_id,
+                created_by_user_id=source.created_by_user_id,
                 access_class=(
                     ContentAccessClass.PRIVATE_RESOURCE
                     if item.owner_kind == "file"
@@ -687,8 +763,8 @@ class _FileIconBackfillRepository:
                 idempotency_key=intent_key,
                 producer_receipt=intent_key,
             ),
-            content=captured,
-            storage_kind=StorageKind.POSTGRES_INLINE,
+            content=source.content,
+            payload_select=source.payload_select,
         )
         if prepared.state is not ContentState.AVAILABLE:
             raise ObjectContentStateError(
@@ -1072,37 +1148,16 @@ class FileIconBackfill:
                 continue
             try:
                 async with self._database.session() as session, session.begin():
-                    source = await _FileIconBackfillRepository(
+                    completed = await _FileIconBackfillRepository(
                         session
-                    ).source_or_complete(item)
-                if source is None:
+                    ).complete_inline(
+                        item,
+                        self._object_content,
+                    )
+                if completed:
                     completed_count += 1
-                    continue
-                if source.payload is None:
-                    raise _LegacySourceMissing
-                payload = source.payload
-                media_type = source.media_type
-                created_by_user_id = source.created_by_user_id
-                source_stream = _one_chunk(payload)
-                async with self._object_content.capture_for_target(
-                    source_stream,
-                    storage_kind=StorageKind.POSTGRES_INLINE,
-                    declared_media_type=media_type,
-                    verified_media_type=media_type,
-                ) as captured:
-                    async with self._database.session() as session, session.begin():
-                        completed = await _FileIconBackfillRepository(
-                            session
-                        ).complete_inline(
-                            item,
-                            created_by_user_id,
-                            captured,
-                            self._object_content,
-                        )
-                    if completed:
-                        completed_count += 1
-                    else:
-                        cancelled_count += 1
+                else:
+                    cancelled_count += 1
             except _OwnerDeleted:
                 try:
                     async with self._database.session() as session, session.begin():
@@ -1123,7 +1178,6 @@ class FileIconBackfill:
             except (
                 _LegacySourceMissing,
                 ObjectContentIdempotencyConflictError,
-                ObjectContentIntegrityError,
                 ObjectContentStateError,
             ) as error:
                 recorded = await self._record_failure(

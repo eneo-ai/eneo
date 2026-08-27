@@ -214,12 +214,16 @@ def verification_chunk_window(
 
 
 @dataclass(frozen=True, slots=True)
-class CapturedContent:
-    file: BinaryIO
+class ContentFacts:
     sha256: bytes
     size_bytes: int
     declared_media_type: str
     verified_media_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedContent(ContentFacts):
+    file: BinaryIO
     part_sha256: tuple[bytes, ...]
     part_size_bytes: int
 
@@ -274,7 +278,7 @@ class ContentRead:
 
 def content_request_fingerprint(
     intent: ContentIntent,
-    content: CapturedContent,
+    content: ContentFacts,
     storage_kind: StorageKind,
 ) -> bytes:
     """Bind idempotency to owner intent, byte authority, and content facts."""

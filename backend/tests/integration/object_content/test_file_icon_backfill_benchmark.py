@@ -1,6 +1,6 @@
 """Opt-in benchmark for the staged File/Icon PostgreSQL-inline backfill.
 
-The benchmark uses the real PostgreSQL 16 integration container and the real
+The benchmark uses the real PostgreSQL 13 object-content container and the real
 ``FileIconBackfill`` implementation. It is skipped unless explicitly enabled:
 
     ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1 \
@@ -28,12 +28,16 @@ presence. The focused integration suite owns exact inline-payload byte behavior.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import platform
 import resource
 import secrets
 import statistics
+import subprocess
+import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -107,6 +111,35 @@ class _DatabaseSnapshot:
     checkpoint_completion_target: str
     wal_compression: str
     synchronous_commit: str
+    blocks_read: int
+    blocks_hit: int
+    temp_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ProcessSnapshot:
+    user_seconds: float
+    system_seconds: float
+    max_rss_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkerProcessMetrics:
+    backfill: _BackfillMetrics
+    state: str
+    process_before: _ProcessSnapshot
+    process_after: _ProcessSnapshot
+    current_rss_bytes_before: int
+    current_rss_bytes_after: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ForegroundLatency:
+    sample_count: int
+    seconds_p50: float
+    seconds_p95: float
+    seconds_p99: float
+    seconds_max: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +155,8 @@ class _BackfillMetrics:
     admitted_count: int
     claimed_count: int
     completed_count: int
+    batch_max_rss_bytes: tuple[int, ...]
+    batch_current_rss_bytes: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,12 +197,12 @@ def _benchmark_config() -> _BenchmarkConfig:
         ),
         batch_rows=_positive_env(
             "ENEO_FILE_ICON_BENCHMARK_BATCH_ROWS",
-            100,
+            200,
             maximum=1000,
         ),
         batch_mib=_positive_env(
             "ENEO_FILE_ICON_BENCHMARK_BATCH_MIB",
-            32,
+            128,
             maximum=10 * 1024,
         ),
     )
@@ -287,6 +322,11 @@ async def _database_snapshot(database: DatabaseSessionManager) -> _DatabaseSnaps
                             AS checkpoint_completion_target,
                         current_setting('wal_compression') AS wal_compression,
                         current_setting('synchronous_commit') AS synchronous_commit
+                        , stats.blks_read AS blocks_read
+                        , stats.blks_hit AS blocks_hit
+                        , stats.temp_bytes AS temp_bytes
+                    FROM pg_stat_database AS stats
+                    WHERE stats.datname = current_database()
                     """
                 )
             )
@@ -305,6 +345,9 @@ async def _database_snapshot(database: DatabaseSessionManager) -> _DatabaseSnaps
         checkpoint_completion_target=str(row.checkpoint_completion_target),
         wal_compression=str(row.wal_compression),
         synchronous_commit=str(row.synchronous_commit),
+        blocks_read=int(row.blocks_read),
+        blocks_hit=int(row.blocks_hit),
+        temp_bytes=int(row.temp_bytes),
     )
 
 
@@ -313,11 +356,57 @@ def _max_rss_bytes() -> int:
     return int(value if platform.system() == "Darwin" else value * 1024)
 
 
+def _current_rss_bytes() -> int:
+    if platform.system() == "Linux":
+        resident_pages = int(Path("/proc/self/statm").read_text().split()[1])
+        return resident_pages * os.sysconf("SC_PAGE_SIZE")
+    if platform.system() == "Darwin":
+        output = subprocess.check_output(
+            ("ps", "-o", "rss=", "-p", str(os.getpid())),
+            text=True,
+        )
+        return int(output.strip()) * 1024
+    return _max_rss_bytes()
+
+
+def _process_snapshot() -> _ProcessSnapshot:
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    return _ProcessSnapshot(
+        user_seconds=usage.ru_utime,
+        system_seconds=usage.ru_stime,
+        max_rss_bytes=_max_rss_bytes(),
+    )
+
+
 def _percentile(values: list[float], percentile: float) -> float:
     if len(values) == 1:
         return values[0]
     position = round((len(values) - 1) * percentile)
     return sorted(values)[position]
+
+
+async def _measure_foreground_latency(
+    database: DatabaseSessionManager,
+    stop: asyncio.Event,
+) -> _ForegroundLatency:
+    durations: list[float] = []
+    statement = sa.text("SELECT id, name FROM files ORDER BY id LIMIT 20")
+    while not stop.is_set():
+        started_at = time.perf_counter()
+        async with database.session() as session, session.begin():
+            await session.execute(statement)
+        durations.append(time.perf_counter() - started_at)
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=0.05)
+        except TimeoutError:
+            pass
+    return _ForegroundLatency(
+        sample_count=len(durations),
+        seconds_p50=_percentile(durations, 0.50),
+        seconds_p95=_percentile(durations, 0.95),
+        seconds_p99=_percentile(durations, 0.99),
+        seconds_max=max(durations),
+    )
 
 
 async def _run_backfill(
@@ -341,16 +430,20 @@ async def _run_backfill(
         database,
     )
     durations: list[float] = []
+    batch_max_rss_bytes: list[int] = []
+    batch_current_rss_bytes: list[int] = []
     completed_count = 0
     admitted_count = 0
     claimed_count = 0
     started_at = time.perf_counter()
     final_state = FileIconBackfillState.ACTIVE
-    maximum_runs = config.item_count + 1
+    maximum_runs = 2 * config.item_count
     for _ in range(maximum_runs):
         batch_started_at = time.perf_counter()
         result = await backfill.run_once()
         durations.append(time.perf_counter() - batch_started_at)
+        batch_max_rss_bytes.append(_max_rss_bytes())
+        batch_current_rss_bytes.append(_current_rss_bytes())
         completed_count += result.completed_count
         admitted_count += result.admitted_count
         claimed_count += result.claimed_count
@@ -373,9 +466,91 @@ async def _run_backfill(
             admitted_count=admitted_count,
             claimed_count=claimed_count,
             completed_count=completed_count,
+            batch_max_rss_bytes=tuple(batch_max_rss_bytes),
+            batch_current_rss_bytes=tuple(batch_current_rss_bytes),
         ),
         final_state,
     )
+
+
+async def _run_isolated_worker(
+    database: DatabaseSessionManager,
+    config: _BenchmarkConfig,
+) -> _WorkerProcessMetrics:
+    async with database.session() as session:
+        database_url = session.get_bind().url.render_as_string(hide_password=False)
+
+    backend_dir = Path(__file__).resolve().parents[3]
+    environment = os.environ.copy()
+    environment["ENEO_FILE_ICON_BENCHMARK_CHILD_DATABASE_URL"] = database_url
+    environment["ENEO_FILE_ICON_BENCHMARK_CHILD_CONFIG"] = json.dumps(asdict(config))
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(
+            None,
+            (str(backend_dir / "src"), existing_pythonpath),
+        )
+    )
+
+    with tempfile.TemporaryDirectory(prefix="eneo-file-icon-benchmark-") as temp_dir:
+        output_path = Path(temp_dir) / "worker.json"
+        environment["ENEO_FILE_ICON_BENCHMARK_CHILD_OUTPUT"] = str(output_path)
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            (sys.executable, str(Path(__file__).resolve())),
+            cwd=backend_dir,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                "isolated File/Icon benchmark worker failed: "
+                f"{completed.stderr[-2000:]}"
+            )
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    return _WorkerProcessMetrics(
+        backfill=_BackfillMetrics(**payload["backfill"]),
+        state=str(payload["state"]),
+        process_before=_ProcessSnapshot(**payload["process_before"]),
+        process_after=_ProcessSnapshot(**payload["process_after"]),
+        current_rss_bytes_before=int(payload["current_rss_bytes_before"]),
+        current_rss_bytes_after=int(payload["current_rss_bytes_after"]),
+    )
+
+
+async def _isolated_worker_main() -> None:
+    database_url = os.environ["ENEO_FILE_ICON_BENCHMARK_CHILD_DATABASE_URL"]
+    config = _BenchmarkConfig(
+        **json.loads(os.environ["ENEO_FILE_ICON_BENCHMARK_CHILD_CONFIG"])
+    )
+    output_path = Path(os.environ["ENEO_FILE_ICON_BENCHMARK_CHILD_OUTPUT"])
+    database = DatabaseSessionManager()
+    database.init(database_url)
+    try:
+        process_before = _process_snapshot()
+        current_rss_bytes_before = _current_rss_bytes()
+        backfill, state = await _run_backfill(database, config)
+        current_rss_bytes_after = _current_rss_bytes()
+        process_after = _process_snapshot()
+        output_path.write_text(
+            json.dumps(
+                {
+                    "backfill": asdict(backfill),
+                    "state": state.value,
+                    "process_before": asdict(process_before),
+                    "process_after": asdict(process_after),
+                    "current_rss_bytes_before": current_rss_bytes_before,
+                    "current_rss_bytes_after": current_rss_bytes_after,
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+    finally:
+        await database.close()
 
 
 async def _verify_result(
@@ -395,6 +570,8 @@ async def _verify_result(
                         COALESCE(SUM(content.size_bytes), 0) AS content_bytes,
                         COUNT(*) FILTER (
                             WHERE content.sha256 IS DISTINCT FROM :sha256
+                               OR sha256(payload.payload)
+                                  IS DISTINCT FROM content.sha256
                         ) AS digest_mismatch_count,
                         COUNT(*) FILTER (WHERE file.blob IS NOT NULL)
                             AS preserved_legacy_count,
@@ -425,6 +602,30 @@ async def _verify_result(
     )
 
 
+async def test_one_row_batches_complete_admission_and_copy_lifecycle(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    config = _BenchmarkConfig(
+        total_mib=1,
+        item_kib=256,
+        seed_rows_per_transaction=4,
+        batch_rows=1,
+        batch_mib=1,
+    )
+    seeded_count, _, _ = await _seed_legacy_payloads(
+        object_content_database,
+        config,
+    )
+
+    metrics, state = await _run_backfill(object_content_database, config)
+
+    assert seeded_count == 4
+    assert state is FileIconBackfillState.COMPLETE
+    assert metrics.admitted_count == 4
+    assert metrics.completed_count == 4
+    assert metrics.batch_count == 7
+
+
 async def test_file_icon_inline_backfill_benchmark(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -434,11 +635,32 @@ async def test_file_icon_inline_backfill_benchmark(
         config,
     )
     before = await _database_snapshot(object_content_database)
-    rss_before = _max_rss_bytes()
+    foreground_stop = asyncio.Event()
+    foreground_task = (
+        asyncio.create_task(
+            _measure_foreground_latency(object_content_database, foreground_stop)
+        )
+        if os.getenv("ENEO_FILE_ICON_BENCHMARK_FOREGROUND_PROBE") == "1"
+        else None
+    )
+    foreground: _ForegroundLatency | None = None
 
-    backfill, final_state = await _run_backfill(object_content_database, config)
+    try:
+        worker = await _run_isolated_worker(object_content_database, config)
+    finally:
+        foreground_stop.set()
+        if foreground_task is not None:
+            foreground = await foreground_task
 
-    rss_after = _max_rss_bytes()
+    backfill = worker.backfill
+    final_state = FileIconBackfillState(worker.state)
+    process_user_seconds = (
+        worker.process_after.user_seconds - worker.process_before.user_seconds
+    )
+    process_system_seconds = (
+        worker.process_after.system_seconds - worker.process_before.system_seconds
+    )
+    process_cpu_seconds = process_user_seconds + process_system_seconds
     after = await _database_snapshot(object_content_database)
     verification = await _verify_result(
         object_content_database,
@@ -469,6 +691,7 @@ async def test_file_icon_inline_backfill_benchmark(
     expected_batch_count = (
         expected_admission_batch_count + expected_copy_batch_count - 1
     )
+    worker_rss_growth_limit_bytes = max(64 * _MEBIBYTE, config.item_bytes)
     report = {
         "config": asdict(config),
         "environment": {
@@ -493,10 +716,23 @@ async def test_file_icon_inline_backfill_benchmark(
             "mib_per_second": config.seeded_bytes / _MEBIBYTE / seed_seconds,
         },
         "backfill": asdict(backfill),
+        "foreground_latency": (None if foreground is None else asdict(foreground)),
         "resources": {
             "wal_bytes": wal_bytes,
-            "max_rss_bytes_before": rss_before,
-            "max_rss_bytes_after": rss_after,
+            "process_user_seconds": process_user_seconds,
+            "process_system_seconds": process_system_seconds,
+            "process_cpu_seconds": process_cpu_seconds,
+            "process_cpu_utilization_percent": (
+                process_cpu_seconds / backfill.active_seconds * 100
+            ),
+            "worker_current_rss_bytes_before": worker.current_rss_bytes_before,
+            "worker_current_rss_bytes_after": worker.current_rss_bytes_after,
+            "worker_max_rss_bytes_before": worker.process_before.max_rss_bytes,
+            "worker_max_rss_bytes_after": worker.process_after.max_rss_bytes,
+            "worker_rss_growth_limit_bytes": worker_rss_growth_limit_bytes,
+            "postgres_blocks_read": after.blocks_read - before.blocks_read,
+            "postgres_blocks_hit": after.blocks_hit - before.blocks_hit,
+            "postgres_temp_bytes": after.temp_bytes - before.temp_bytes,
             "database_bytes_before": before.database_bytes,
             "database_bytes_after": after.database_bytes,
             "files_bytes_before": before.files_bytes,
@@ -519,6 +755,10 @@ async def test_file_icon_inline_backfill_benchmark(
     assert backfill.claimed_count == config.item_count
     assert backfill.completed_count == config.item_count
     assert backfill.batch_count == expected_batch_count
+    assert (
+        worker.current_rss_bytes_after
+        <= worker.current_rss_bytes_before + worker_rss_growth_limit_bytes
+    )
     assert verification == _VerificationResult(
         done_count=config.item_count,
         failed_count=0,
@@ -529,3 +769,7 @@ async def test_file_icon_inline_backfill_benchmark(
         preserved_legacy_count=config.item_count,
         campaign_state=FileIconBackfillState.COMPLETE.value,
     )
+
+
+if __name__ == "__main__":
+    asyncio.run(_isolated_worker_main())

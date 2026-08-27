@@ -4,6 +4,13 @@ from pydantic import ValidationError
 from eneo.object_content.file_icon_backfill import FileIconBackfillSettings
 
 
+def test_file_icon_backfill_settings_use_measured_safe_defaults() -> None:
+    settings = FileIconBackfillSettings()
+
+    assert settings.batch_rows == 200
+    assert settings.batch_bytes == 128 * 1024 * 1024
+
+
 def test_file_icon_backfill_settings_use_the_operator_runbook_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
