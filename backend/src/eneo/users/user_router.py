@@ -908,8 +908,8 @@ async def change_current_user_password(
     response_model=None,
     name="Invalidate current user's Eneo sessions",
     description=(
-        "Invalidate previously issued Eneo sessions after a provider-managed "
-        "credential change."
+        "Invalidate previously issued Eneo sessions at the authenticated "
+        "user's request."
     ),
     responses=responses.get_responses([403, 404]),
 )
@@ -920,7 +920,7 @@ async def invalidate_current_user_sessions(
     ],
     _session_guard: None = Depends(require_session_auth),
 ) -> Response:
-    """Revoke older Eneo JWTs after a provider-managed credential change."""
+    """Invalidate previously issued Eneo sessions at the user's request."""
 
     current_user = container.user()
     updated_user = await container.user_service().invalidate_sessions(
@@ -932,10 +932,10 @@ async def invalidate_current_user_sessions(
         action=ActionType.SESSIONS_INVALIDATED,
         entity_type=EntityType.USER,
         entity_id=updated_user.id,
-        description="Invalidated Eneo sessions after an external credential change",
+        description="Invalidated Eneo sessions at the user's request",
         metadata=AuditMetadata.authentication(
             actor=updated_user,
-            method="external_password_change",
+            method="user_session_invalidation",
             success=True,
         ),
     )

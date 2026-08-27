@@ -1,6 +1,7 @@
 """HTTP/PostgreSQL coverage for the local password-change lifecycle."""
 
 import asyncio
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -108,6 +109,45 @@ async def test_password_change_rotates_login_and_rejects_prior_session(
         "source": "eneo",
         "policy": {"min_length": 15, "max_bytes": 72},
     }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_session_invalidation_audit_does_not_claim_external_password_change(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+):
+    email, current_password = await _create_local_user(client, super_admin_token)
+    login = await _login(client, email=email, password=current_password)
+    assert login.status_code == 200, login.text
+    auth_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    with patch(
+        "eneo.audit.application.audit_service.job_manager.enqueue",
+        new_callable=AsyncMock,
+    ) as enqueue_audit:
+        response = await client.post(
+            "/api/v1/users/me/sessions/invalidate/",
+            headers=auth_headers,
+        )
+
+    assert response.status_code == 204, response.text
+    enqueue_audit.assert_awaited_once()
+    assert enqueue_audit.await_args is not None
+    audit_params = enqueue_audit.await_args.args[2]
+    assert audit_params["action"] == "sessions_invalidated"
+    assert audit_params["description"] == (
+        "Invalidated Eneo sessions at the user's request"
+    )
+    assert audit_params["metadata"]["authentication_method"] == (
+        "user_session_invalidation"
+    )
+    assert audit_params["metadata"]["success"] is True
+    rendered_audit = repr(audit_params).lower()
+    assert "external" not in rendered_audit
+    assert "password_change" not in rendered_audit
 
 
 @pytest.mark.integration

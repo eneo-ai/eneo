@@ -581,7 +581,7 @@ export interface paths {
     put?: never;
     /**
      * Invalidate Current User'S Eneo Sessions
-     * @description Invalidate previously issued Eneo sessions after a provider-managed credential change.
+     * @description Invalidate previously issued Eneo sessions at the authenticated user's request.
      */
     post: operations["Invalidate_current_user_s_Eneo_sessions_api_v1_users_me_sessions_invalidate__post"];
     delete?: never;
