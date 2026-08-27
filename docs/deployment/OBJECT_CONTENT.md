@@ -738,6 +738,17 @@ counts after every non-empty run and logs the estimate and required action while
 a campaign waits for capacity or is halted. Completion runs `ANALYZE` once on
 the new content, payload, and reference tables before the campaign is marked
 done.
+A PostgreSQL 13 integration benchmark compared these defaults with 200 rows and
+128 MiB at 1 GiB, then validated the larger candidate with 10 GiB of
+incompressible legacy payloads. The candidate reduced scheduled batches from 33
+to 9 per GiB without changing active throughput or WAL per payload byte. It is
+not the default because the benchmark did not include concurrent application
+traffic. The once-per-minute cadence deliberately limits database load while
+the application remains online; it is not intended to maximize migration
+throughput. Before increasing the batch limits, run a canary under
+representative traffic and monitor foreground p95/p99 latency, errors, database
+CPU and I/O, WAL/checkpoints, and batch duration. Restore the defaults if that
+traffic regresses.
 Only one worker replica may run a batch at a time. A PostgreSQL advisory lock
 prevents minute jobs from overlapping and multiplying the configured byte and
 memory bounds. Plan worst-case worker memory at roughly three times
