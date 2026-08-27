@@ -612,14 +612,15 @@ class FileRepository:
                     else Files.legacy_blob
                 )
             )
-            rows = (
-                await self.session.execute(
-                    sa.select(Files.id, Files.mimetype, payload_column).where(
-                        Files.id.in_(file_ids),
-                        payload_column.is_not(None),
-                    )
+            query = sa.select(Files.id, Files.mimetype, payload_column).where(
+                Files.id.in_(file_ids),
+                payload_column.is_not(None),
+            )
+            if variant is FileContentVariant.ORIGINAL:
+                query = query.where(
+                    Files.file_type.in_((FileType.TEXT.value, FileType.AUDIO.value))
                 )
-            ).all()
+            rows = (await self.session.execute(query)).all()
             for file_id, mimetype, payload in rows:
                 is_text = variant in (
                     FileContentVariant.EXTRACTED_TEXT,

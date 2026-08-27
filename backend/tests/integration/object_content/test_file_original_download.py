@@ -301,6 +301,71 @@ async def test_missing_original_is_typed_and_never_falls_back(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_legacy_image_is_not_exposed_as_an_exact_original(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    payload = b"legacy processing image"
+    file_id = uuid4()
+    async with db_container() as container:
+        user = container.user()
+        session = container.session()
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO files (
+                    id, name, text, blob, checksum, size, mimetype, file_type,
+                    transcription, user_id, tenant_id, parent_file_id
+                ) VALUES (
+                    :id, 'legacy.png', NULL, :payload, :checksum, :size,
+                    'image/png', 'image', NULL, :user_id, :tenant_id, NULL
+                )
+                """
+            ),
+            {
+                "id": file_id,
+                "payload": payload,
+                "checksum": sha256(payload).hexdigest(),
+                "size": len(payload),
+                "user_id": user.id,
+                "tenant_id": user.tenant_id,
+            },
+        )
+
+    headers = {"X-API-Key": admin_user_api_key.key}
+    processing = await _signed_download(
+        client,
+        headers,
+        file_id,
+        original=False,
+    )
+    signed_original = await client.post(
+        f"/api/v1/files/{file_id}/original/signed-url/",
+        json={},
+        headers=headers,
+    )
+    forged_original_token = generate_file_original_download_token(
+        file_id=file_id,
+        expires_at=int(time.time()) + 60,
+        content_disposition=ContentDisposition.ATTACHMENT,
+    )
+    original_download = await client.get(
+        f"/api/v1/files/{file_id}/original/download/",
+        params={"token": forged_original_token},
+    )
+
+    assert processing.status_code == 200
+    assert processing.content == payload
+    assert signed_original.status_code == 404
+    assert signed_original.json()["code"] == "file_original_not_found"
+    assert original_download.status_code == 404
+    assert original_download.json()["code"] == "file_original_not_found"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_original_mint_does_not_read_payload_and_corruption_fails_before_headers(
     client,
     db_container,
