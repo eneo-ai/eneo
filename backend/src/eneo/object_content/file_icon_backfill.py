@@ -13,6 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import DatabaseSessionManager, sessionmanager
 from eneo.database.tables.file_icon_backfill_table import (
     FileIconBackfillCampaign,
@@ -108,6 +109,16 @@ class _LegacySource:
     payload: bytes | None
     media_type: str
     created_by_user_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ExistingReference:
+    content_id: UUID
+    state: ContentState
+    page_number: int | None = None
+    width: int | None = None
+    height: int | None = None
+    duration_ms: int | None = None
 
 
 class _OwnerDeleted(Exception):
@@ -393,16 +404,16 @@ class _FileIconBackfillRepository:
         item: _WorkItem,
     ) -> _LegacySource | None:
         existing = await self._existing_reference(item)
-        if existing is None:
+        if existing is None or existing.state is not ContentState.AVAILABLE:
             return await self.legacy_source(item)
         if not await self._lock_owner(item):
             raise _OwnerDeleted
         existing = await self._existing_reference(item, lock=True)
-        if existing is None:
+        if existing is None or existing.state is not ContentState.AVAILABLE:
             return await self.legacy_source(item)
         ledger = await self._leased_item(item)
         ledger.state = "done"
-        ledger.content_id = existing
+        ledger.content_id = existing.content_id
         self._clear_lease(ledger)
         await self._session.flush()
         return None
@@ -420,17 +431,22 @@ class _FileIconBackfillRepository:
             return False
 
         existing = await self._existing_reference(item, lock=True)
-        if existing is not None:
+        if existing is not None and existing.state is ContentState.AVAILABLE:
             ledger.state = "done"
-            ledger.content_id = existing
+            ledger.content_id = existing.content_id
             self._clear_lease(ledger)
             await self._session.flush()
             return True
 
-        intent_key = (
+        owner_intent_key = (
             f"file:{item.owner_id}:{item.variant}:{item.ordinal}"
             if item.owner_kind == "file"
             else f"icon:{item.owner_id}:primary"
+        )
+        intent_key = (
+            owner_intent_key
+            if existing is None
+            else f"{owner_intent_key}:replace:{existing.content_id}"
         )
         prepared = await object_content.prepare_in_transaction(
             self._session,
@@ -448,12 +464,23 @@ class _FileIconBackfillRepository:
             content=captured,
             storage_kind=StorageKind.POSTGRES_INLINE,
         )
+        if prepared.state is not ContentState.AVAILABLE:
+            raise ObjectContentStateError(
+                "Legacy backfill replacement content is not available"
+            )
+        if existing is not None:
+            await self._delete_reference(item, content_id=existing.content_id)
         if item.owner_kind == "file":
             reference = FileContentReferences()
             reference.file_id = item.owner_id
             reference.content_id = prepared.id
             reference.variant = item.variant
             reference.ordinal = item.ordinal
+            if existing is not None:
+                reference.page_number = existing.page_number
+                reference.width = existing.width
+                reference.height = existing.height
+                reference.duration_ms = existing.duration_ms
             self._session.add(reference)
         else:
             reference = IconContentReferences()
@@ -589,10 +616,17 @@ class _FileIconBackfillRepository:
         item: _WorkItem,
         *,
         lock: bool = False,
-    ) -> UUID | None:
+    ) -> _ExistingReference | None:
         if item.owner_kind == "file":
             statement = (
-                sa.select(FileContentReferences.content_id)
+                sa.select(
+                    FileContentReferences.content_id,
+                    ObjectContents.state,
+                    FileContentReferences.page_number,
+                    FileContentReferences.width,
+                    FileContentReferences.height,
+                    FileContentReferences.duration_ms,
+                )
                 .join(
                     ObjectContents,
                     ObjectContents.id == FileContentReferences.content_id,
@@ -601,24 +635,55 @@ class _FileIconBackfillRepository:
                     FileContentReferences.file_id == item.owner_id,
                     FileContentReferences.variant == item.variant,
                     FileContentReferences.ordinal == item.ordinal,
-                    ObjectContents.state == ContentState.AVAILABLE.value,
                 )
             )
             if lock:
-                statement = statement.with_for_update(of=FileContentReferences)
-            return await self._session.scalar(statement)
-        statement = (
-            sa.select(IconContentReferences.content_id)
-            .join(ObjectContents, ObjectContents.id == IconContentReferences.content_id)
-            .where(
+                statement = statement.with_for_update()
+        else:
+            statement = (
+                sa.select(IconContentReferences.content_id, ObjectContents.state)
+                .join(
+                    ObjectContents,
+                    ObjectContents.id == IconContentReferences.content_id,
+                )
+                .where(
+                    IconContentReferences.icon_id == item.owner_id,
+                    IconContentReferences.variant == "primary",
+                )
+            )
+            if lock:
+                statement = statement.with_for_update()
+        row = (await self._session.execute(statement)).one_or_none()
+        if row is None:
+            return None
+        return _ExistingReference(
+            content_id=row.content_id,
+            state=ContentState(row.state),
+            page_number=row.page_number if item.owner_kind == "file" else None,
+            width=row.width if item.owner_kind == "file" else None,
+            height=row.height if item.owner_kind == "file" else None,
+            duration_ms=row.duration_ms if item.owner_kind == "file" else None,
+        )
+
+    async def _delete_reference(self, item: _WorkItem, *, content_id: UUID) -> None:
+        if item.owner_kind == "file":
+            statement = sa.delete(FileContentReferences).where(
+                FileContentReferences.file_id == item.owner_id,
+                FileContentReferences.variant == item.variant,
+                FileContentReferences.ordinal == item.ordinal,
+                FileContentReferences.content_id == content_id,
+            )
+        else:
+            statement = sa.delete(IconContentReferences).where(
                 IconContentReferences.icon_id == item.owner_id,
                 IconContentReferences.variant == "primary",
-                ObjectContents.state == ContentState.AVAILABLE.value,
+                IconContentReferences.content_id == content_id,
             )
-        )
-        if lock:
-            statement = statement.with_for_update(of=IconContentReferences)
-        return await self._session.scalar(statement)
+        deleted = await self._session.execute(statement)
+        if affected_row_count(deleted) != 1:
+            raise ObjectContentStateError(
+                "Existing File/Icon content reference changed during legacy adoption"
+            )
 
     @staticmethod
     def _clear_lease(item: FileIconBackfillItems) -> None:

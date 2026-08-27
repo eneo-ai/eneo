@@ -10,16 +10,23 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.database import DatabaseSessionManager
-from eneo.database.tables.object_content_table import FileContentReferences
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    IconContentReferences,
+    ObjectContents,
+)
 from eneo.database.tables.users_table import Users
 from eneo.object_content import file_icon_backfill as file_icon_backfill_module
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import (
     CapturedContent,
     ContentAccessClass,
+    ContentFailureCode,
     ContentIntent,
+    ContentState,
     StorageKind,
 )
+from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.file_icon_backfill import (
     FileIconBackfill,
@@ -97,6 +104,11 @@ async def _attach_existing_inline_reference(
     *,
     file_id: UUID,
     payload: bytes = b"already adopted",
+    variant: str = "extracted_text",
+    page_number: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    duration_ms: int | None = None,
 ) -> UUID:
     tenant_id, user_id = await _tenant_and_user(database)
     service = ObjectContentService(
@@ -123,8 +135,8 @@ async def _attach_existing_inline_reference(
                     tenant_id=tenant_id,
                     created_by_user_id=user_id,
                     access_class=ContentAccessClass.PRIVATE_RESOURCE,
-                    idempotency_key=f"existing:{file_id}:extracted_text:0",
-                    producer_receipt=f"existing:{file_id}:extracted_text:0",
+                    idempotency_key=f"existing:{file_id}:{variant}:0",
+                    producer_receipt=f"existing:{file_id}:{variant}:0",
                 ),
                 content=captured,
                 storage_kind=StorageKind.POSTGRES_INLINE,
@@ -133,8 +145,102 @@ async def _attach_existing_inline_reference(
                 FileContentReferences(
                     file_id=file_id,
                     content_id=prepared.id,
-                    variant="extracted_text",
+                    variant=variant,
                     ordinal=0,
+                    page_number=page_number,
+                    width=width,
+                    height=height,
+                    duration_ms=duration_ms,
+                )
+            )
+        return prepared.id
+
+
+async def _seed_legacy_icon(
+    database: DatabaseSessionManager,
+    *,
+    payload: bytes,
+) -> UUID:
+    tenant_id, _ = await _tenant_and_user(database)
+    icon_id = uuid4()
+    async with database.session() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO icons (id, blob, mimetype, size, tenant_id)
+                VALUES (:icon_id, :payload, 'image/svg+xml', :size, :tenant_id)
+                """
+            ),
+            {
+                "icon_id": icon_id,
+                "payload": payload,
+                "size": len(payload),
+                "tenant_id": tenant_id,
+            },
+        )
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO file_icon_backfill_items (
+                    owner_kind, owner_id, variant, ordinal, tenant_id,
+                    payload_size_estimate
+                ) VALUES (
+                    'icon', :icon_id, 'primary', 0, :tenant_id, :size
+                )
+                """
+            ),
+            {
+                "icon_id": icon_id,
+                "tenant_id": tenant_id,
+                "size": len(payload),
+            },
+        )
+    return icon_id
+
+
+async def _attach_existing_inline_icon_reference(
+    database: DatabaseSessionManager,
+    *,
+    icon_id: UUID,
+    payload: bytes,
+) -> UUID:
+    tenant_id, _ = await _tenant_and_user(database)
+    service = ObjectContentService(
+        ObjectContentCoreSettings(
+            inline_maximum_bytes=1024,
+            inline_io_chunk_bytes=256,
+        ),
+        database,
+    )
+
+    async def source() -> AsyncIterator[bytes]:
+        yield payload
+
+    async with service.capture_for_target(
+        source(),
+        storage_kind=StorageKind.POSTGRES_INLINE,
+        declared_media_type="image/svg+xml",
+        verified_media_type="image/svg+xml",
+    ) as captured:
+        async with database.session() as session, session.begin():
+            prepared = await service.prepare_in_transaction(
+                session,
+                intent=ContentIntent(
+                    tenant_id=tenant_id,
+                    created_by_user_id=None,
+                    access_class=ContentAccessClass.PUBLIC_IMMUTABLE,
+                    idempotency_key=f"existing:{icon_id}:primary",
+                    producer_receipt=f"existing:{icon_id}:primary",
+                ),
+                content=captured,
+                storage_kind=StorageKind.POSTGRES_INLINE,
+            )
+            session.add(
+                IconContentReferences(
+                    icon_id=icon_id,
+                    content_id=prepared.id,
+                    variant="primary",
                 )
             )
         return prepared.id
@@ -548,6 +654,214 @@ async def test_existing_reference_does_not_require_phantom_inline_capacity(
 
 
 @pytest.mark.asyncio
+async def test_failed_existing_reference_is_replaced_by_available_legacy_content(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"authoritative legacy source"
+    file_id = await _seed_legacy_text(object_content_database, payload=payload)
+    failed_content_id = await _attach_existing_inline_reference(
+        object_content_database,
+        file_id=file_id,
+        payload=b"untrusted durable content",
+        page_number=2,
+        width=640,
+        height=480,
+        duration_ms=1200,
+    )
+    async with object_content_database.session() as session, session.begin():
+        await ObjectContentRepository(session).mark_backend_failure(
+            content_id=failed_content_id,
+            failure_code=ContentFailureCode.BACKEND_CORRUPT,
+        )
+
+    original_delete_reference = (
+        file_icon_backfill_module._FileIconBackfillRepository.__dict__[
+            "_delete_reference"
+        ]
+    )
+
+    async def fail_after_delete(
+        repository: file_icon_backfill_module._FileIconBackfillRepository,
+        item: file_icon_backfill_module._WorkItem,
+        *,
+        content_id: UUID,
+    ) -> None:
+        await original_delete_reference(
+            repository,
+            item,
+            content_id=content_id,
+        )
+        raise OSError("injected failure after reference delete")
+
+    monkeypatch.setattr(
+        file_icon_backfill_module._FileIconBackfillRepository,
+        "_delete_reference",
+        fail_after_delete,
+    )
+    with pytest.raises(OSError, match="injected failure"):
+        await _backfill(object_content_database).run_once()
+
+    async with object_content_database.session() as session, session.begin():
+        rolled_back_reference_id = await session.scalar(
+            sa.select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id == file_id,
+                FileContentReferences.variant == "extracted_text",
+                FileContentReferences.ordinal == 0,
+            )
+        )
+        rolled_back_item = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT state, content_id, lease_owner
+                    FROM file_icon_backfill_items
+                    WHERE owner_id = :file_id
+                    """
+                ),
+                {"file_id": file_id},
+            )
+        ).one()
+        content_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(ObjectContents)
+        )
+        assert rolled_back_reference_id == failed_content_id
+        assert rolled_back_item[0] == "leased"
+        assert rolled_back_item[1] is None
+        assert rolled_back_item[2] is not None
+        assert content_count == 1
+        await session.execute(
+            sa.text(
+                """
+                UPDATE file_icon_backfill_items
+                SET lease_expires_at = :expired
+                WHERE owner_id = :file_id
+                """
+            ),
+            {
+                "file_id": file_id,
+                "expired": datetime.now(UTC) - timedelta(seconds=1),
+            },
+        )
+
+    monkeypatch.setattr(
+        file_icon_backfill_module._FileIconBackfillRepository,
+        "_delete_reference",
+        original_delete_reference,
+    )
+    result = await _backfill(object_content_database).run_once()
+
+    assert result.state is FileIconBackfillState.COMPLETE
+    assert result.completed_count == 1
+    assert result.failed_count == 0
+    async with object_content_database.session() as session, session.begin():
+        reference = (
+            await session.execute(
+                sa.select(
+                    FileContentReferences.content_id,
+                    FileContentReferences.page_number,
+                    FileContentReferences.width,
+                    FileContentReferences.height,
+                    FileContentReferences.duration_ms,
+                ).where(
+                    FileContentReferences.file_id == file_id,
+                    FileContentReferences.variant == "extracted_text",
+                    FileContentReferences.ordinal == 0,
+                )
+            )
+        ).one()
+        reference_content_id = reference.content_id
+        assert reference_content_id is not None
+        replacement = await session.get(ObjectContents, reference_content_id)
+        failed = await session.get(ObjectContents, failed_content_id)
+        item = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT state, content_id
+                    FROM file_icon_backfill_items
+                    WHERE owner_id = :file_id
+                    """
+                ),
+                {"file_id": file_id},
+            )
+        ).one()
+        assert reference_content_id != failed_content_id
+        assert reference.page_number == 2
+        assert reference.width == 640
+        assert reference.height == 480
+        assert reference.duration_ms == 1200
+        assert replacement is not None
+        assert replacement.state == ContentState.AVAILABLE.value
+        assert replacement.sha256 == sha256(payload).digest()
+        assert replacement.reference_count == 1
+        assert failed is not None
+        assert failed.state == ContentState.FAILED.value
+        assert failed.failure_code == ContentFailureCode.BACKEND_CORRUPT.value
+        assert failed.reference_count == 0
+        assert failed.delete_requested_at is not None
+        assert failed.next_attempt_at is not None
+        assert item == ("done", reference_content_id)
+
+
+@pytest.mark.asyncio
+async def test_failed_icon_reference_is_replaced_by_available_legacy_content(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    payload = b"<svg>authoritative legacy icon</svg>"
+    icon_id = await _seed_legacy_icon(object_content_database, payload=payload)
+    failed_content_id = await _attach_existing_inline_icon_reference(
+        object_content_database,
+        icon_id=icon_id,
+        payload=b"<svg>untrusted durable icon</svg>",
+    )
+    async with object_content_database.session() as session, session.begin():
+        await ObjectContentRepository(session).mark_backend_failure(
+            content_id=failed_content_id,
+            failure_code=ContentFailureCode.BACKEND_CORRUPT,
+        )
+
+    result = await _backfill(object_content_database).run_once()
+
+    assert result.state is FileIconBackfillState.COMPLETE
+    assert result.completed_count == 1
+    assert result.failed_count == 0
+    async with object_content_database.session() as session, session.begin():
+        replacement_id = await session.scalar(
+            sa.select(IconContentReferences.content_id).where(
+                IconContentReferences.icon_id == icon_id,
+                IconContentReferences.variant == "primary",
+            )
+        )
+        assert replacement_id is not None
+        replacement = await session.get(ObjectContents, replacement_id)
+        failed = await session.get(ObjectContents, failed_content_id)
+        item = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT state, content_id
+                    FROM file_icon_backfill_items
+                    WHERE owner_id = :icon_id
+                    """
+                ),
+                {"icon_id": icon_id},
+            )
+        ).one()
+        assert replacement_id != failed_content_id
+        assert replacement is not None
+        assert replacement.state == ContentState.AVAILABLE.value
+        assert replacement.sha256 == sha256(payload).digest()
+        assert replacement.reference_count == 1
+        assert failed is not None
+        assert failed.state == ContentState.FAILED.value
+        assert failed.reference_count == 0
+        assert failed.delete_requested_at is not None
+        assert failed.next_attempt_at is not None
+        assert item == ("done", replacement_id)
+
+
+@pytest.mark.asyncio
 async def test_owner_deleted_during_existing_reference_shortcut_is_cancelled(
     object_content_database: DatabaseSessionManager,
     monkeypatch: pytest.MonkeyPatch,
@@ -573,16 +887,16 @@ async def test_owner_deleted_during_existing_reference_shortcut_is_cancelled(
         item: file_icon_backfill_module._WorkItem,
         *,
         lock: bool = False,
-    ) -> UUID | None:
-        content_id = await original_existing_reference(
+    ) -> file_icon_backfill_module._ExistingReference | None:
+        existing = await original_existing_reference(
             repository,
             item,
             lock=lock,
         )
-        if content_id is not None and not reference_seen.is_set():
+        if existing is not None and not reference_seen.is_set():
             reference_seen.set()
             await continue_processing.wait()
-        return content_id
+        return existing
 
     monkeypatch.setattr(
         file_icon_backfill_module._FileIconBackfillRepository,
