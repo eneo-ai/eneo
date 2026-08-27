@@ -180,22 +180,16 @@ minutes ≈ ceil(items / 200)
         + max(ceil(payload MiB / 128), ceil(items / 200))
 ```
 
-This is mainly a scheduling estimate, not an SSD or CPU benchmark. For example,
-1 GiB and 1,600 items need about 8 admission runs plus 8 adoption runs: roughly
-16 minutes. The 10 GiB example needs about 82 admission runs plus 82 adoption
-runs: roughly 2 hours 45 minutes.
-
 | Example legacy set                           | Approximate online worker time |
 | -------------------------------------------- | ------------------------------ |
 | 1 GiB in about 1,600 items                   | About 16 minutes               |
 | 5 GiB in about 8,000 similarly sized items   | About 1 hour 20 minutes        |
 | 10 GiB in about 16,000 similarly sized items | About 2 hours 45 minutes       |
 
-These values cover worker admission and adoption, not `db-init`, and are
-planning values rather than a promise. Many small items hit the row bound;
-large items hit the byte bound. Slow or shared storage, retries, checkpoints,
-and foreground load add time. A fast local SSD can copy bytes much faster than
-these wall times, but the minute cadence limits load on the running application.
+These are scheduling examples, not minimum or maximum times, and exclude
+`db-init`. Many small items hit the row bound; large items hit the byte bound.
+The one-minute cadence deliberately leaves room for normal traffic, while slow
+storage, retries, checkpoints, and foreground load can add time.
 
 Do not add CPU or RAM only because of these examples. First confirm ordinary
 headroom and monitor database I/O, WAL, free disk, CPU, worker memory, and API
@@ -211,31 +205,18 @@ Do not increase the batch defaults only to shorten the window. First test a
 production-size restore with representative traffic and measure API p95/p99,
 database CPU and I/O, WAL/checkpoints, free disk, and batch duration.
 
-### What performance was measured?
+<Callout type="info">
+  As a reference, PostgreSQL 13 copied and verified a 10 GiB test set in about
+  331 seconds of active work. The normal cadence stretched that to about 2 hours
+  42 minutes. Worker memory stayed near 140 MiB, no PostgreSQL temporary files
+  were written, and the final payload check found no mismatch. This validates
+  the bounded design; use a restored copy to forecast another server.
+</Callout>
 
-The default was measured on PostgreSQL 13 with the normal 128 MiB shared-buffer
-and 4 MiB work-memory settings. A 10 GiB set of 16,384 640 KiB files completed
-331 seconds of active work at 31.0 MiB/s. The one-minute schedule projects about
-2 hours 42 minutes because it deliberately leaves room for foreground traffic.
-Worker peak RSS was about 140 MiB, PostgreSQL stayed near 170-217 MiB for this
-workload, WAL was 11.0 GiB, the database grew about 10.4 GiB, and PostgreSQL
-wrote no temporary files. A separate verification pass hashed every stored
-destination payload and found no mismatch. Concurrent metadata-query latency
-measured p95 6.3 ms and p99 14.5 ms on the benchmark host.
-
-A separate maximum-item test kept worker memory near 140 MiB. PostgreSQL briefly
-reached about 620 MiB while hashing and copying one 200 MiB `bytea`. Treat the
-inline ceiling as a database-memory safety bound. Storage latency, checkpoint
-pressure, replicas, WAL archiving, and foreground work can dominate elsewhere.
-
-The main throughput lever is batch cadence, not PostgreSQL query parallelism.
-One advisory lock intentionally allows only one worker replica to process a
-batch at a time. Change the default batch bounds only after a restored-production
-canary shows acceptable API latency, memory, database I/O, WAL, and checkpoint
-behavior. Do not compensate by running parallel worker replicas or disabling
-PostgreSQL planner features such as nested-loop joins globally. Change
-cluster-wide WAL or checkpoint settings only in response to measured pressure
-and the installation's backup and replication design.
+The main throughput lever is cadence, not parallel PostgreSQL workers. Keep the
+defaults unless a restored-production canary shows that higher bounds preserve
+API latency, memory, I/O, WAL, and checkpoint behavior. Do not disable planner
+features globally to speed up this one-time job.
 
 ## Run and monitor
 
