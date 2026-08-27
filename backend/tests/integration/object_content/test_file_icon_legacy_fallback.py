@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from eneo.database.database import AsyncSession, DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.icons_table import Icons
+from eneo.database.tables.object_content_table import FileContentReferences
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_repo import FileRepository
@@ -16,10 +17,24 @@ from eneo.files.file_service import FileService
 from eneo.files.file_size_service import FileSizeService
 from eneo.icons.icon_repo import IconRepository
 from eneo.icons.icon_service import IconService
+from eneo.object_content.configuration import ObjectContentCoreSettings
+from eneo.object_content.content_service import ObjectContentService
+from eneo.users.user import UserInDB
 
 
 async def _read_chunks(chunks: AsyncIterator[bytes]) -> bytes:
     return b"".join([chunk async for chunk in chunks])
+
+
+def _content_service(database: DatabaseSessionManager) -> ObjectContentService:
+    return ObjectContentService(
+        ObjectContentCoreSettings(
+            _env_file=None,
+            inline_maximum_bytes=1024 * 1024,
+            inline_io_chunk_bytes=64 * 1024,
+        ),
+        database,
+    )
 
 
 async def _seed_legacy_rows(
@@ -189,6 +204,77 @@ async def test_file_and_icon_legacy_fallbacks_execute_against_postgres(
             finally:
                 await icon_download.aclose()
         object_content.open_content.assert_not_called()
+    finally:
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(
+                sa.delete(Files).where(Files.id.in_([text_id, image_id, audio_id]))
+            )
+            await session.execute(sa.delete(Icons).where(Icons.id == icon_id))
+
+
+@pytest.mark.asyncio
+async def test_legacy_audio_transcription_remains_the_first_committed_value(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    legacy_transcription = "legacy audio transcription"
+    async with object_content_database.session() as session, session.begin():
+        (
+            _tenant_id,
+            text_id,
+            image_id,
+            audio_id,
+            icon_id,
+            *_payloads,
+        ) = await _seed_legacy_rows(session)
+        user_row = (await session.scalars(sa.select(Users))).first()
+        assert user_row is not None
+        user = UserInDB.model_construct(
+            id=user_row.id,
+            tenant_id=user_row.tenant_id,
+        )
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.update(Files)
+            .where(Files.id == audio_id)
+            .values(legacy_transcription=legacy_transcription)
+        )
+
+    try:
+        async with object_content_database.session() as session:
+            service = FileService(
+                user=user,
+                repo=FileRepository(session),
+                protocol=AsyncMock(),
+                object_content=_content_service(object_content_database),
+            )
+            saved = await service.save_transcription(
+                audio_id,
+                "replacement transcription",
+            )
+            async with session.begin():
+                hydrated = await service.get_file_content(audio_id)
+                persisted_legacy, reference_count = (
+                    await session.execute(
+                        sa.select(
+                            Files.legacy_transcription,
+                            sa.func.count(FileContentReferences.content_id),
+                        )
+                        .outerjoin(
+                            FileContentReferences,
+                            sa.and_(
+                                FileContentReferences.file_id == Files.id,
+                                FileContentReferences.variant == "transcription",
+                            ),
+                        )
+                        .where(Files.id == audio_id)
+                        .group_by(Files.legacy_transcription)
+                    )
+                ).one()
+
+        assert saved == legacy_transcription
+        assert hydrated.transcription == legacy_transcription
+        assert persisted_legacy == legacy_transcription
+        assert reference_count == 0
     finally:
         async with object_content_database.session() as session, session.begin():
             await session.execute(

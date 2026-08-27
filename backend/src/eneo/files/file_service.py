@@ -609,7 +609,6 @@ class FileService:
         return (await self._hydrate_files([metadata]))[0]
 
     async def save_transcription(self, file_id: UUID, transcription: str) -> str:
-        payload = transcription.encode("utf-8")
         user = self._authenticated_user()
         async with self._write_transaction():
             metadata = await self.repo.get_by_id_for_update(file_id)
@@ -625,6 +624,13 @@ class FileService:
             if existing is not None:
                 return (await self._read_bytes(metadata, existing)).decode("utf-8")
 
+            legacy = await self.repo.get_legacy_content(
+                {file_id: {FileContentVariant.TRANSCRIPTION}}
+            )
+            if legacy:
+                return legacy[0].payload.decode("utf-8")
+
+            payload = transcription.encode("utf-8")
             async with self._object_content.capture_for_target(
                 _bytes_source(payload),
                 storage_kind=StorageKind.POSTGRES_INLINE,
