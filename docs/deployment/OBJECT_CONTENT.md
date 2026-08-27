@@ -690,30 +690,37 @@ is missing.
 PostgreSQL inline remains the complete destination when no S3-compatible store
 is configured. Choosing inline still needs capacity for the second verified
 copy until the later contract and table rewrite reclaim the legacy storage, but
-the work no longer blocks `db-init`. Choosing object storage avoids that second
-payload copy in PostgreSQL; from the first authoritative remote payload onward,
-backup and restore must include both PostgreSQL and the paired bucket.
+the work no longer blocks `db-init`. This release has no adapter that adopts
+legacy bytes directly into object storage. Choosing object storage before a
+campaign starts leaves adoption waiting; it does not avoid the inline copy. A
+later remote adapter must change the backup contract from the first
+authoritative remote payload onward.
 
 The worker adopts inline legacy variants in resumable batches after startup.
 Each item is leased, captured, and hashed once per processing attempt, then
 committed with its content row, inline payload, exact File/Icon reference, and
 completed ledger state in one short transaction. Crash recovery can read and
 hash an item again after its lease expires. Owner deletion cancels only that
-item; an invalid or oversized payload halts the campaign after other leased
-items finish and leaves the frozen legacy source untouched for operator
+item. An invalid or oversized payload marks the item failed; the worker
+continues other pending or leased items and halts the campaign when no
+actionable item remains. The frozen legacy source stays untouched for operator
 recovery.
 
-An inline campaign starts automatically when its remaining stored-byte estimate
+By default, an inline campaign starts automatically when its remaining estimate
 is at most 5 GiB. Above that size, calculate PostgreSQL payload, WAL, backup,
 replica, and safety headroom first, then set
-`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` to at least the reported estimate. The
+`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` in `env_backend.env` to at least the
+reported exact byte estimate and recreate the worker. The
 acknowledgement does not reserve disk and the estimate is not peak allocation;
 it records that the operator has accepted the capacity plan. When the current
 Admin storage policy selects object storage, this inline worker does not start
 or silently redirect the campaign. Remote adoption requires the verified
-object-store adapter and changes the coordinated backup contract.
-Set `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` when every non-empty inline
-campaign must require explicit operator acknowledgement.
+object-store adapter and changes the coordinated backup contract. Selecting
+PostgreSQL inline instead changes the deployment-wide target for eligible new
+writes; keep it selected until the campaign is complete, then reselect object
+storage and queue verified moves if required.
+Set `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` in `env_backend.env` when every
+non-empty inline campaign must require explicit operator acknowledgement.
 Waiting for capacity is non-fatal: the upgrade is complete, the application
 continues serving frozen legacy File/Icon content, and the worker emits a
 structured warning with the estimate and required acknowledgement on startup
@@ -722,30 +729,46 @@ and every scheduled tick.
 Large installations can tune bounded throughput without changing application
 or tenant policy:
 
-| Variable                                      | Default | Meaning |
-| --------------------------------------------- | ------: | ------- |
-| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES`    |   5 GiB | Largest estimate that may start inline without an explicit capacity acknowledgement |
-| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`      |       0 | Accepted inline estimate in bytes; must cover the current remaining estimate |
-| `FILE_ICON_BACKFILL_BATCH_ROWS`               |     100 | Maximum ledger rows leased by one worker run |
-| `FILE_ICON_BACKFILL_BATCH_BYTES`              |  32 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded |
-| `FILE_ICON_BACKFILL_LEASE_SECONDS`            |     300 | Crash-recovery lease duration |
-| `FILE_ICON_BACKFILL_RESUME_REVISION`          |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value requeues failed items once |
-| `FILE_ICON_BACKFILL_MAX_ATTEMPTS`              |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure |
+| Variable                                   | Default | Meaning                                                                                                                              |
+| ------------------------------------------ | ------: | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES` |   5 GiB | Largest estimate that may start inline without an explicit capacity acknowledgement                                                  |
+| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`   |       0 | Accepted inline estimate in bytes; must cover the current remaining estimate                                                         |
+| `FILE_ICON_BACKFILL_BATCH_ROWS`            |     100 | Maximum ledger rows leased by one worker run                                                                                         |
+| `FILE_ICON_BACKFILL_BATCH_BYTES`           |  32 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded                         |
+| `FILE_ICON_BACKFILL_LEASE_SECONDS`         |     300 | Crash-recovery lease duration                                                                                                        |
+| `FILE_ICON_BACKFILL_RESUME_REVISION`       |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value requeues failed items once |
+| `FILE_ICON_BACKFILL_MAX_ATTEMPTS`          |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure                                     |
 
-Keep one item within `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the batch byte bound
-does not override that per-content ceiling. The worker logs structured batch
-counts after every non-empty run and logs the estimate and required action while
-a campaign waits for capacity or is halted. Completion runs `ANALYZE` once on
-the new content, payload, and reference tables before the campaign is marked
-done.
+The worker reads these values at process startup. After changing
+`env_backend.env`, recreate it with the same Compose files and profile used by
+the deployment:
+
+```bash
+docker compose up -d --force-recreate --no-deps worker
+```
+
+Keep every item within `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the batch byte
+bound does not override that per-content ceiling. An `inline_payload_too_large`
+failure halts the campaign. After confirming capacity, raise the inline ceiling
+and `FILE_ICON_BACKFILL_RESUME_REVISION` together in `env_backend.env`, then
+recreate every backend and worker replica so both use the same safety ceiling.
+
+```bash
+docker compose up -d --force-recreate --no-deps backend worker
+```
+
+The worker logs structured batch counts after every non-empty run and logs the
+estimate and required action while a campaign waits for capacity or is halted.
+Completion runs `ANALYZE` once on the new content, payload, and reference tables
+before the campaign is marked done.
 A PostgreSQL 13 integration benchmark compared these defaults with 200 rows and
 128 MiB at 1 GiB, then validated the larger candidate with 10 GiB of
 incompressible legacy payloads. The candidate reduced scheduled batches from 33
 to 9 per GiB without changing active throughput or WAL per payload byte. It is
 not the default because the benchmark did not include concurrent application
-traffic. The once-per-minute cadence deliberately limits database load while
-the application remains online; it is not intended to maximize migration
-throughput. Before increasing the batch limits, run a canary under
+traffic. The startup run and once-per-minute schedule deliberately limit
+database load while the application remains online; they are not intended to
+maximize migration throughput. Before increasing the batch limits, run a canary under
 representative traffic and monitor foreground p95/p99 latency, errors, database
 CPU and I/O, WAL/checkpoints, and batch duration. Restore the defaults if that
 traffic regresses.
@@ -756,10 +779,11 @@ memory bounds. Plan worst-case worker memory at roughly three times
 allowance; measure the exact peak on the deployment's Python, asyncpg, and
 PostgreSQL versions before raising that ceiling.
 After correcting a halted campaign's stated cause, increase
-`FILE_ICON_BACKFILL_RESUME_REVISION` and restart the worker configuration. Do
-not reuse or lower a previous value. The worker records the accepted revision
-in PostgreSQL, requeues failed items once, and still refuses to resume if the
-Admin storage target differs from the campaign's frozen destination.
+`FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env` and recreate the worker
+with the deployment's normal Compose files and profile. Do not reuse or lower a
+previous value. The worker records the accepted revision in PostgreSQL, requeues
+failed items once, and still refuses to resume if the Admin storage target
+differs from the campaign's frozen destination.
 Completion is terminal and cached by each worker process; manual campaign
 edits are unsupported and require a worker restart even during diagnosis.
 
@@ -819,8 +843,10 @@ WITH actionable_pending AS (
       )
 )
 SELECT count(*) AS pending_items,
+       coalesce(sum(payload_size_estimate), 0)::bigint
+           AS estimated_payload_bytes,
        pg_size_pretty(coalesce(sum(payload_size_estimate), 0)::bigint)
-           AS estimated_payload_bytes
+           AS estimated_payload_size
 FROM actionable_pending;
 ```
 
@@ -839,13 +865,16 @@ SELECT campaign.target_kind,
        count(*) FILTER (WHERE item.state = 'failed') AS failed_items,
        count(*) FILTER (WHERE item.state = 'done') AS done_items,
        count(*) FILTER (WHERE item.state = 'cancelled') AS cancelled_items,
+       coalesce(sum(item.payload_size_estimate) FILTER (
+           WHERE item.state NOT IN ('done', 'cancelled')
+       ), 0)::bigint AS estimated_remaining_bytes,
        pg_size_pretty(
            coalesce(sum(item.payload_size_estimate) FILTER (
                WHERE item.state NOT IN ('done', 'cancelled')
            ), 0)::bigint
-       ) AS estimated_remaining_bytes
-FROM file_icon_backfill_items AS item
-LEFT JOIN file_icon_backfill_campaign AS campaign ON true
+       ) AS estimated_remaining_size
+FROM file_icon_backfill_campaign AS campaign
+LEFT JOIN file_icon_backfill_items AS item ON true
 GROUP BY campaign.target_kind,
          campaign.state,
          campaign.halt_reason,

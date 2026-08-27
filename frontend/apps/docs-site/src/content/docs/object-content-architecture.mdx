@@ -18,9 +18,31 @@ import { Callout } from "nextra/components";
 File and Icon use this contract for exact originals and named derivatives. New
 knowledge file and audio uploads use it for the exact original while searchable
 text and vectors remain in PostgreSQL. New content is stored inline by default,
-so Eneo still needs no S3-compatible service. A bounded upgrade migration
-copies and verifies legacy File and Icon bytes before removing duplicate
-columns.
+so Eneo still needs no S3-compatible service.
+
+Legacy File and Icon adoption uses an expand, online backfill, and later contract
+sequence. The expand migration creates the ledger, makes legacy columns
+nullable, freezes their payload facts with database triggers, and inventories
+stored-size estimates without copying or hashing the payloads. New code reads a
+verified object-content reference when present and otherwise reads the frozen
+legacy source. A scheduled worker then adopts each variant in bounded,
+resumable PostgreSQL-inline transactions. The later contract must refuse to
+remove the legacy schema until no actionable ledger item remains.
+
+```mermaid
+flowchart LR
+  expand["Expand\nschema · inventory · write fence"] --> fallback["Read fallback\nlegacy remains authoritative"]
+  fallback --> backfill["Online backfill\nbounded lease · SHA-256 · reference flip"]
+  backfill --> complete["Campaign complete\none object-content path"]
+  complete --> contract["Contract\npreflight · short fence · legacy removal"]
+```
+
+The current online adapter targets PostgreSQL inline. It starts automatically
+for estimates up to the configured safety threshold and waits for capacity
+acknowledgement above it. If policy selects object storage before the campaign
+starts, it waits for a compatible adapter rather than redirecting the copy.
+This is intentional: Alembic owns schema and metadata, while application workers
+own byte-proportional work, network retries, leases, progress, and recovery.
 
 Administrators with the Storage permission use **Admin > Storage** to choose
 where eligible new content is written and to queue bounded moves of existing
@@ -96,7 +118,31 @@ stateDiagram-v2
   tombstoned --> [*]: purge horizon passed
 ```
 
-### Product usage fence
+## Why uploads pass through Eneo
+
+File and Icon uploads currently pass through the authenticated backend. Eneo
+prepares the product variants, enforces business and operator bounds, captures
+the bytes in a memory-bounded spool, calculates the canonical digest and
+per-chunk verification digests, and reserves opaque keys before remote storage
+I/O. The
+adapter uploads and reads the object back to recompute its SHA-256. Only a short
+database transaction after that verification publishes product metadata,
+available content, and concrete references together.
+
+This ordering prevents a partial or unverified remote object from becoming a
+visible File or Icon. It also gives reconciliation a durable reservation from
+which to clean up a remote object when a process or response fails between
+upload and publication.
+
+Browser-direct object-store upload is possible only with another public
+protocol: scoped signed multipart sessions, ownership binding, completion and
+abort state, digest proof or backend readback, expiry, orphan cleanup, and
+ambiguous-result reconciliation. It may reduce backend network traffic, but it
+does not remove verification or incomplete-upload recovery. Temporary disk also
+serves as a memory bound for multipart parsing and asynchronous knowledge jobs,
+so direct File/Icon upload would not eliminate all staging.
+
+## Product usage fence
 
 File deletion has a product-level fence before the object-content lifecycle
 starts. A bounded File-owned query counts four concrete relations:
@@ -120,6 +166,17 @@ Object-content holds and minimum retention protect bytes after the final
 product reference disappears; they are not duplicated as File-identity rules.
 
 ## Crash recovery and reconciliation
+
+Legacy File/Icon adoption commits one item at a time. Its durable ledger and
+expiring lease make a worker crash resumable; a PostgreSQL advisory transaction
+lock prevents replicas from overlapping batches. The database trigger keeps the
+legacy payload immutable, while the per-item transaction locks the owner and
+rechecks whether another path already published the same variant before it
+creates the inline payload and reference atomically. A deleted owner is
+cancelled, not recreated. An invalid source, integrity failure, or oversized
+payload fails its item immediately; interrupted attempts retry until their
+configured limit. Failed items halt the campaign with a stored reason and
+require a higher operator resume revision after correction.
 
 Inline creation has no database/object-store crash gap: payload and intent share
 one transaction. For eligible new File and Icon object-store writes, Eneo
@@ -247,6 +304,11 @@ commands.
 ## Operational consequences
 
 - Inline-only backups contain control and bytes in PostgreSQL.
+- Legacy File/Icon adoption remains online and resumable, but inline adoption
+  needs additional PostgreSQL capacity for the second payload copy plus WAL and
+  safety headroom.
+- Removing legacy columns later does not by itself return PostgreSQL table
+  storage to the filesystem; physical reclamation is separate maintenance.
 - If object-store rows exist, PostgreSQL and the object store must share one
   backup and restore point.
 - The stable deployment ID and internal marker must survive restoration.

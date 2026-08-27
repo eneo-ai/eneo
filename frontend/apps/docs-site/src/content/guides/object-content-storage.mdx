@@ -11,6 +11,9 @@ import { Callout, Steps, Tabs } from "nextra/components";
   writes in **Admin > Storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
   implicitly.
+- Upgrades adopt legacy File and Icon bytes online after the schema migration.
+  PostgreSQL-only installations need this adoption too; it is an object-content
+  change, not an S3 migration.
 - You can change to another S3-compatible service later: copy the bucket with
   your own tooling, then switch destination in **Admin > Storage**. The previous
   destination stays available so you can switch back.
@@ -19,16 +22,17 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## Start here
 
-| I want to…                                        | Go to                                                        |
-| ------------------------------------------------- | ------------------------------------------------------------ |
-| Run the simplest supported deployment             | [PostgreSQL only](#set-up-your-choice)                       |
-| Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)                     |
-| Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)                     |
-| Understand ownership and RAG                      | [How content flows](#how-content-flows)                      |
-| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file)           |
-| Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service) |
-| Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)                      |
-| Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)            |
+| I want to…                                        | Go to                                                         |
+| ------------------------------------------------- | ------------------------------------------------------------- |
+| Run the simplest supported deployment             | [PostgreSQL only](#set-up-your-choice)                        |
+| Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)                      |
+| Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)                      |
+| Understand ownership and RAG                      | [How content flows](#how-content-flows)                       |
+| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file)            |
+| Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service)  |
+| Upgrade legacy File and Icon content              | [Online legacy adoption](#adopt-legacy-file-and-icon-content) |
+| Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)                       |
+| Review lifecycle and integrity implementation     | [Architecture](/docs/object-content-architecture)             |
 
 ## How content flows
 
@@ -60,16 +64,16 @@ Object storage and RAG solve different problems:
 
 ### What is adopted now?
 
-| Product content                        | Current behavior                                                                                        |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Eligible new File and Icon bytes       | Use the deployment-wide target selected in **Admin > Storage**                                          |
-| Existing File and Icon bytes           | Copied, SHA-256 verified, switched to typed references, then removed from legacy columns during upgrade |
-| New knowledge file and audio originals | Keep the exact upload in the selected target after successful processing                                |
-| Existing knowledge versions            | Stay usable, but have no recoverable original because earlier releases did not retain it                |
-| Searchable knowledge text and vectors  | Remain in PostgreSQL/pgvector; only a complete replacement becomes active                               |
-| Flow artifacts                         | Remain separate follow-up work                                                                          |
-| Changing the selected target           | Affects eligible new writes without a restart; existing content stays where it is                       |
-| Moving existing content                | Requires a separate explicit, verified migration                                                        |
+| Product content                        | Current behavior                                                                                |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Eligible new File and Icon bytes       | Use the deployment-wide target selected in **Admin > Storage**                                  |
+| Existing File and Icon bytes           | Stay readable from frozen legacy columns while a bounded worker adopts and verifies them online |
+| New knowledge file and audio originals | Keep the exact upload in the selected target after successful processing                        |
+| Existing knowledge versions            | Stay usable, but have no recoverable original because earlier releases did not retain it        |
+| Searchable knowledge text and vectors  | Remain in PostgreSQL/pgvector; only a complete replacement becomes active                       |
+| Flow artifacts                         | Remain separate follow-up work                                                                  |
+| Changing the selected target           | Affects eligible new writes without a restart; existing content stays where it is               |
+| Moving existing content                | Requires a separate explicit, verified migration                                                |
 
 Replacing searchable knowledge keeps the previous complete version as
 recovery history. Retained versions continue to count toward the configured
@@ -383,6 +387,162 @@ entire object; a range verifies only the chunks that cover that response.
   </Tabs.Tab>
 </Tabs>
 
+## Adopt legacy File and Icon content
+
+Upgrading from a release that stored File and Icon payloads directly on product
+rows has two separate phases:
+
+1. Alembic expands the schema, inventories the legacy variants, and prevents old
+   code from changing those payloads. It does not copy or hash the payload bytes.
+2. The new worker adopts the frozen payloads into object content in bounded,
+   resumable batches while Eneo stays available.
+
+Existing Files and Icons remain readable through the legacy source until their
+new reference is available. The worker verifies the content before switching
+each reference. A later contract release may remove the legacy columns only
+after that deployment has no actionable legacy item left.
+
+```mermaid
+flowchart LR
+  expand["Schema expansion\ninventory · write fence"] --> readable["Eneo starts\nlegacy content remains readable"]
+  readable --> worker["Online worker\nbounded copy · SHA-256"]
+  worker --> adopted["Verified object-content reference"]
+  adopted --> contract["Later contract release\nremove legacy schema"]
+```
+
+<Callout type="info">
+  This is required even without S3-compatible storage. Object content is Eneo's
+  common identity, integrity, reference, and lifecycle model; PostgreSQL inline
+  is one of its supported byte backends. The current worker adopts legacy bytes
+  into PostgreSQL inline and never contacts S3.
+</Callout>
+
+### Before the upgrade
+
+Restore a production-size backup in a test environment and run the upgrade there
+first. Measure the legacy payload estimate, worker duration, database growth,
+WAL, and application latency.
+
+Then follow [Upgrade, restore, and rollback](#upgrade-restore-and-rollback) in
+order. It stops the APIs, drains old knowledge jobs, stops every old worker,
+verifies the drain, and only then takes the paired recovery point. Do not run an
+old File/Icon writer against the expanded schema.
+
+### Follow progress
+
+The worker runs once at startup and is scheduled once per minute. A PostgreSQL
+advisory lock prevents worker replicas from overlapping batches. It logs a
+progress event after every non-empty batch and a warning when operator action is
+required:
+
+```bash
+docker compose logs --since=30m worker \
+  | grep "File/Icon legacy backfill"
+```
+
+No matching log line is not proof that an empty installation is complete. After
+a campaign starts, this on-demand query reports its durable state:
+
+```sql
+SELECT target_kind, state, halt_reason, resume_revision
+FROM file_icon_backfill_campaign;
+```
+
+No row means no campaign has started; use the warning log for a capacity or
+object-store wait before campaign creation. The [detailed deployment
+runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#upgrade-and-rollback)
+contains payload-free preflight, progress-count, and failed-item queries.
+
+### Understand the worker state
+
+| State                      | Meaning and action                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `active`                   | The worker is adopting bounded batches. Keep it running and monitor foreground latency, database I/O, WAL, and free disk.                                           |
+| `waiting_for_capacity`     | Eneo is available, but the estimated inline copy is above the automatic threshold. Reserve payload, WAL, replica, backup, and safety headroom, then acknowledge it. |
+| `waiting_for_object_store` | The selected target is remote, but this release only adopts legacy bytes inline. Choose the action below.                                                           |
+| `halted`                   | The destination changed, or an invalid, oversized, or retry-exhausted item needs operator action. Correct the stored cause before explicitly resuming.              |
+| `complete`                 | Every remaining item is adopted or was safely cancelled because its File or Icon was deleted.                                                                       |
+
+Waiting is not an upgrade failure. The application keeps serving the frozen
+legacy bytes and resumes from durable ledger state after the operator acts.
+
+To leave `waiting_for_object_store`, either wait for a compatible release or
+select PostgreSQL inline. Selecting inline changes the deployment-wide target
+for eligible new writes. Keep it selected until the campaign reports `complete`,
+then reselect object storage and queue verified moves if required.
+
+To resume a halted campaign, correct its stated cause, keep **Admin > Storage**
+on the campaign's frozen destination, increase
+`FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env`, and recreate the
+worker with the same Compose files and profile used by the deployment:
+
+```bash
+docker compose up -d --force-recreate --no-deps worker
+```
+
+Do not edit the campaign, ledger, or freeze trigger manually.
+
+### Plan PostgreSQL capacity
+
+The relevant number is the estimated legacy File and Icon payload size, not the
+total database size. Inline adoption stores a second copy of those payloads in
+PostgreSQL. Both copies remain until the later contract release and physical
+table maintenance.
+
+For example, a 200 GB database that contains 10 GB of legacy File/Icon payloads
+needs roughly 10 GB for the new payload copy, plus WAL, indexes, replicas,
+backups, and safety headroom. It does not automatically become a 400 GB
+database. If the legacy payloads themselves occupy 200 GB, however, the data
+portion can approach another 200 GB before the later contract and physical
+table maintenance.
+
+Dropping a legacy column later is a metadata change and does not immediately
+return its underlying PostgreSQL storage to the filesystem. Plan a separate,
+tested `pg_repack` or table-rewrite maintenance operation after the contract
+release when physical disk reclamation matters.
+
+By default, an inline campaign starts automatically when its remaining estimate
+is no more than 5 GiB. This is a safety threshold, not a claim that every server
+has that space and not a tenant upload limit. Above it, the worker warning names
+the exact byte acknowledgement. After confirming capacity, set
+`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` to at least that value in
+`env_backend.env` and recreate the worker. Set
+`FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` in the same file when every
+non-empty campaign must wait for explicit approval.
+
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is also the per-item ceiling for legacy
+adoption. If a campaign halts with `inline_payload_too_large`, confirm memory,
+temporary-disk, PostgreSQL, WAL, and backup capacity before raising that ceiling.
+Set the corrected ceiling and a higher `FILE_ICON_BACKFILL_RESUME_REVISION` in
+`env_backend.env` together, then recreate every backend and worker replica so
+the API, Admin view, and worker use the same ceiling:
+
+```bash
+docker compose up -d --force-recreate --no-deps backend worker
+```
+
+The worker defaults to at most 100 ledger rows and 32 MiB of estimated payload
+per run. Larger batches reduce scheduling overhead but do not reduce the bytes,
+WAL, or verification work. Change `FILE_ICON_BACKFILL_BATCH_ROWS` and
+`FILE_ICON_BACKFILL_BATCH_BYTES` only after a representative canary shows that
+foreground p95/p99 latency, errors, database CPU and I/O, WAL/checkpoints, and
+batch duration remain acceptable. Put these settings in `env_backend.env` and
+recreate the worker for them to take effect.
+
+### Pause or recover
+
+Stopping the worker pauses this adoption and every other background job. An
+in-flight bounded batch may finish; after an abrupt stop, unfinished leases
+become claimable again after the configured lease duration. Completed items stay
+committed, pending items stay in the ledger, and legacy content remains readable.
+Restarting the same release resumes rather than restarting the copy.
+
+If the new release must be abandoned, stop traffic and restore the complete
+pre-upgrade recovery point with the matching old image. Do not use Alembic
+`stamp`, run `downgrade`, remove the trigger, or start the old application
+against the expanded database. After new-version writes have been accepted,
+recovery is either forward on the new schema or a coordinated restore.
+
 ## Operate it safely
 
 ### Move existing content
@@ -557,7 +717,7 @@ direction followed by **Change destination**. When you are satisfied, select
 
 If anything looks wrong, switch back, correct the copy, and switch again.
 
-### Backup rule
+### Back up and restore
 
 - **Only inline rows:** PostgreSQL backup contains control and bytes.
 - **Any object-store rows:** PostgreSQL and the endpoint are one recovery unit.
@@ -567,15 +727,11 @@ recovery ID, preserve `OBJECT_CONTENT_DEPLOYMENT_ID` and the bucket marker,
 restore both halves in isolation, verify checksums and sample reads, then reopen
 traffic. Never combine a newer database with an older bucket or the reverse.
 
-During the File/Icon normalization upgrade, keep backend and worker producers
-stopped until Alembic succeeds. Retry a stopped migration before accepting new
-uploads; intervening writes deliberately block an unsafe retry.
-
-The copy phase is row- and byte-bounded and hashes copied content before the
-final write fence. The fenced pass compares copied payloads with the legacy
-File/Icon columns once before dropping them. Measure this on a restored
-production-size database and plan a maintenance window proportional to total
-File/Icon bytes.
+The File/Icon schema expansion needs this pre-upgrade recovery point, but its
+online worker does not require a new full backup for every batch. Keep the
+pre-upgrade backup until adoption is complete and the release has passed its
+verification period. See [Adopt legacy File and Icon
+content](#adopt-legacy-file-and-icon-content) for pause and recovery behavior.
 
 The later range-verification revision uses the same maintenance window. It
 backfills at most 10,000 unexpected pre-production object descriptors in one
@@ -601,9 +757,10 @@ multipart uploads. Keep endpoint APIs and consoles private.
 
 ### Upgrade, restore, and rollback
 
-The release that first retains knowledge originals requires one coordinated
-maintenance window because its durable job envelope is not executable by an
-older worker:
+The release that first retains knowledge originals and expands File/Icon legacy
+adoption requires one coordinated maintenance window. Its durable job envelope
+is not executable by an older worker, and old workers still write the legacy
+payload columns:
 
 1. Stop all `backend` API replicas so no new writes or knowledge jobs can be
    accepted. In the reference Compose deployment, `docker compose stop backend`
@@ -684,6 +841,73 @@ database/object backup pair.
 
 No. PostgreSQL inline is the default and needs no endpoint, bucket, credentials,
 or extra container.
+
+### Why must legacy File and Icon adoption run without S3?
+
+Because the upgrade changes Eneo's content model, not only its storage location.
+The new object-content records provide one identity, SHA-256, size, media type,
+typed product references, and deletion lifecycle whether the bytes live in
+PostgreSQL or an optional endpoint. PostgreSQL inline is therefore a complete
+destination, not a temporary fallback.
+
+Without adoption, the new code would have to keep a second legacy File/Icon
+read and lifecycle path indefinitely. That would preserve two sources of truth
+and make later integrity, deletion, and storage moves less reliable.
+
+### Does the upgrade copy legacy bytes directly to S3?
+
+No. The schema migration never contacts S3, and this release's online adoption
+worker writes legacy payloads to PostgreSQL inline. If **Admin > Storage**
+selects object storage before a campaign starts, the worker waits instead of
+silently changing the destination. Selecting PostgreSQL inline to proceed also
+changes the deployment-wide target for eligible new writes until you select
+object storage again.
+
+This keeps Alembic independent of network credentials, endpoint outages,
+ambiguous upload results, and retry cleanup. After inline adoption completes,
+an administrator can use the normal bounded, verified move operation to move
+content to object storage. A future direct legacy-to-object-store adapter would
+need the same resumable worker guarantees; it still would not belong in
+`db-init`.
+
+### Can we pause legacy adoption safely?
+
+Yes. Committed progress and legacy readability survive a worker stop, but
+stopping the worker also pauses unrelated background jobs. See [Pause or
+recover](#pause-or-recover) for in-flight batch and rollback behavior.
+
+### Does a 200 GB database require 400 GB during adoption?
+
+Not necessarily. Capacity follows affected legacy File and Icon payloads, not
+the total database size. If those payloads themselves occupy 200 GB, the new
+inline payload data can approach another 200 GB before later cleanup, plus WAL
+and operational headroom. See [Plan PostgreSQL capacity](#plan-postgresql-capacity)
+for the worked example and acknowledgement process.
+
+### Why does the browser not upload directly to S3?
+
+It is technically possible, but it is a different upload protocol. Today Eneo
+accepts the authenticated upload, applies size and media-type policy, prepares
+the required variants, calculates the canonical SHA-256, reserves an opaque
+remote object, uploads it, reads it back to verify the persisted bytes, and
+only then publishes the File or Icon and its references.
+
+A browser-direct design would need signed multipart sessions, ownership binding,
+an explicit finalization call, proof or server-side verification of the complete
+bytes, expiry and abort handling, orphan cleanup, and reconciliation when the
+browser loses the final response. For example, if a 500 MB upload loses its
+connection after 400 MB, Eneo must know that the object is incomplete and must
+never publish it as a valid File. That design can be added later, but it is not
+the current architecture.
+
+### Would direct S3 upload remove temporary disk and verification?
+
+No. It could reduce traffic through the backend and some local capture work,
+but Eneo would still need to verify the final object and reconcile incomplete
+uploads before publishing it. Temporary disk also bounds memory while multipart
+requests are parsed and while knowledge files wait for worker processing. The
+current design can reduce and bound that usage; a direct-upload protocol would
+not make every staging and verification need disappear.
 
 ### Are files stored in both PostgreSQL and object storage?
 
