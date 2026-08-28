@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.file_icon_backfill_table import (
+    FileIconBackfillAdmissionState,
     FileIconBackfillCampaign,
     FileIconBackfillItems,
 )
@@ -783,6 +784,16 @@ class ObjectContentRepository:
             ContentFailureCode.BACKEND_CORRUPT,
         }:
             raise ValueError("mark_backend_failure requires a backend failure code")
+        admission_state = await self._session.scalar(
+            select(FileIconBackfillAdmissionState).with_for_update()
+        )
+        if admission_state is None:
+            raise ObjectContentStateError(
+                "File/Icon backfill admission state is missing"
+            )
+        campaign = await self._session.scalar(
+            select(FileIconBackfillCampaign).with_for_update()
+        )
         completed_items = (
             await self._session.scalars(
                 select(FileIconBackfillItems)
@@ -803,6 +814,8 @@ class ObjectContentRepository:
             if completed_items:
                 await self._reopen_failed_file_icon_items(
                     completed_items,
+                    admission_state=admission_state,
+                    campaign=campaign,
                     failure_code=failure_code,
                 )
             await self._session.flush()
@@ -811,11 +824,10 @@ class ObjectContentRepository:
         self,
         items: Sequence[FileIconBackfillItems],
         *,
+        admission_state: FileIconBackfillAdmissionState,
+        campaign: FileIconBackfillCampaign | None,
         failure_code: ContentFailureCode,
     ) -> None:
-        campaign = await self._session.scalar(
-            select(FileIconBackfillCampaign).with_for_update()
-        )
         now = await self._database_now()
         for item in items:
             item.content_id = None
@@ -836,12 +848,15 @@ class ObjectContentRepository:
             )
             item.failure_revision = campaign.resume_revision
 
-        if campaign is not None:
-            campaign.state = "halted"
-            campaign.resume_cursor_id = None
-            campaign.halt_reason = (
-                "Adopted File/Icon content failed durable backend verification"
-            )
+        if campaign is None:
+            admission_state.generation += 1
+            return
+
+        campaign.state = "halted"
+        campaign.resume_cursor_id = None
+        campaign.halt_reason = (
+            "Adopted File/Icon content failed durable backend verification"
+        )
 
     async def apply_hold(
         self,

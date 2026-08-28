@@ -13,7 +13,8 @@ import { Callout, Steps } from "nextra/components";
 - `db-init` expands the schema and inventories rows. The worker then asks
   PostgreSQL to hash and copy one frozen payload at a time inside the database;
   it does not stream the payload through Python. Eneo can stay available while
-  this runs. Inline work starts automatically up to a stable 5 GiB estimate;
+  this runs. Inline work starts automatically up to 5 GiB of affected logical
+  payload;
   larger sets wait for an explicit capacity decision. This release does not
   adopt legacy bytes directly to object storage, so adoption waits if that
   target is selected.
@@ -65,10 +66,11 @@ I/O, WAL, and backup volume. Small installations can run during normal hours if
 a production-size test shows acceptable latency.
 
 <Callout type="warning">
-  A test or development database that already completed the former unreleased
-  `202607231700` migration must restore its pre-upgrade backup before using this
-  migration chain. Alembic cannot distinguish two implementations with the same
-  revision ID. Do not stamp past it.
+  A test or development database that started or completed the former unreleased
+  `202607231700` migration or an earlier form of `202607231745` must restore its
+  pre-upgrade backup before using this migration chain. The inventory commits
+  groups independently, and a rerun keeps existing rows. Alembic records
+  revision IDs, not later code changes behind those IDs. Do not stamp past them.
 </Callout>
 
 <Steps>
@@ -117,8 +119,9 @@ legacy write fence.
 
 ### Disk: use the affected bytes, not total database size
 
-Let `L` be the worker's final estimate of legacy File/Icon payloads that still
-need adoption.
+Let `L` be the worker's exact logical byte total for legacy File/Icon payloads
+that still need adoption. It is not the physical PostgreSQL allocation or WAL
+volume.
 
 | Capacity                             | Simple planning rule                                                                  |
 | ------------------------------------ | ------------------------------------------------------------------------------------- |
@@ -207,10 +210,10 @@ database CPU and I/O, WAL/checkpoints, free disk, and batch duration.
 
 <Callout type="info">
   As a reference, PostgreSQL 13 copied and verified a 10 GiB test set in about
-  331 seconds of active work. The normal cadence stretched that to about 2 hours
-  42 minutes. Worker memory stayed near 140 MiB, no PostgreSQL temporary files
-  were written, and the final payload check found no mismatch. This validates
-  the bounded design; use a restored copy to forecast another server.
+  310 seconds of active work. The normal cadence projects to about 2 hours 42
+  minutes. Worker memory peaked near 141 MiB, no PostgreSQL temporary files were
+  written, and the final payload check found no mismatch. This validates the
+  bounded design; use a restored copy to forecast another server.
 </Callout>
 
 The main throughput lever is cadence, not parallel PostgreSQL workers. Keep the

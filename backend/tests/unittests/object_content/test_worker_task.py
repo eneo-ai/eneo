@@ -1,3 +1,4 @@
+import logging
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,6 +11,7 @@ from eneo.object_content.file_icon_backfill import (
 )
 from eneo.object_content.reconciliation import ReconciliationResult
 from eneo.object_content.runtime import ObjectContentRuntime
+from eneo.worker import object_content_tasks
 from eneo.worker.object_content_tasks import (
     backfill_file_icon_content_task,
     reconcile_object_content_task,
@@ -80,3 +82,62 @@ async def test_file_icon_backfill_task_returns_sanitized_progress() -> None:
         "detail": None,
     }
     runtime.backfill_file_icons_once.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "detail", "admitted_count", "expected_level"),
+    [
+        (FileIconBackfillState.ACTIVE, "Waiting for a lease", 0, logging.INFO),
+        (
+            FileIconBackfillState.WAITING_FOR_CAPACITY,
+            "Capacity acknowledgement required",
+            4,
+            logging.WARNING,
+        ),
+        (
+            FileIconBackfillState.HALTED,
+            "Operator action required",
+            0,
+            logging.WARNING,
+        ),
+        (FileIconBackfillState.COMPLETE, None, 0, None),
+    ],
+)
+async def test_file_icon_backfill_task_logs_operational_state(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    state: FileIconBackfillState,
+    detail: str | None,
+    admitted_count: int,
+    expected_level: int | None,
+) -> None:
+    logger = logging.getLogger(f"test_file_icon_backfill_task_{state.value}")
+    logger.handlers = []
+    monkeypatch.setattr(object_content_tasks, "logger", logger)
+    runtime = MagicMock(spec=ObjectContentRuntime)
+    runtime.backfill_file_icons_once = AsyncMock(
+        return_value=FileIconBackfillResult(
+            state=state,
+            target_kind=StorageKind.POSTGRES_INLINE,
+            admitted_count=admitted_count,
+            claimed_count=0,
+            completed_count=0,
+            cancelled_count=0,
+            failed_count=0,
+            detail=detail,
+        )
+    )
+
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        await backfill_file_icon_content_task(cast(ObjectContentRuntime, runtime))
+
+    records = [record for record in caplog.records if record.name == logger.name]
+    if expected_level is None:
+        assert records == []
+    else:
+        assert len(records) == 1
+        assert records[0].levelno == expected_level
+        assert records[0].state == state.value
+        assert records[0].admitted_count == admitted_count
+        assert records[0].claimed_count == 0

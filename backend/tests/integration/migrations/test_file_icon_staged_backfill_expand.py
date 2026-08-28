@@ -23,6 +23,8 @@ _POSTGRES_13_IMAGE = (
 _PREVIOUS_REVISION = "202607240310"
 _EXPAND_REVISION = "202607231700"
 _INVENTORY_REVISION = "202607231745"
+_PRE_CAPACITY_REVISION = "202608281000"
+_CAPACITY_REVISION = "202608281130"
 _EXTRACTED_TEXT = "expanded extracted text é"
 _TRANSCRIPTION = "spoken words åäö " * 512
 
@@ -474,3 +476,99 @@ def test_inventory_refuses_non_utf8_before_writing_ledger_rows() -> None:
             assert cursor.fetchone() == (_EXPAND_REVISION,)
             cursor.execute("SELECT count(*) FROM file_icon_backfill_items")
             assert cursor.fetchone() == (0,)
+
+
+def test_recovery_capacity_migration_preserves_prior_exposure_for_replacements(
+    migration_database: tuple[str, Config],
+) -> None:
+    database_url, config = migration_database
+    command.upgrade(config, _PRE_CAPACITY_REVISION)
+    tenant_id = str(uuid4())
+
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute("DELETE FROM file_icon_backfill_items")
+        cursor.execute(
+            """
+            INSERT INTO tenants (id, name, quota_limit, state)
+            VALUES (%s, %s, 1000000, 'active')
+            """,
+            (tenant_id, f"capacity-migration-{uuid4().hex[:8]}"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO file_icon_backfill_items (
+                owner_kind,
+                owner_id,
+                variant,
+                ordinal,
+                tenant_id,
+                payload_size_estimate,
+                state,
+                attempts,
+                last_error_code,
+                last_error_detail,
+                failure_revision
+            )
+            VALUES
+                ('file', gen_random_uuid(), 'original', 0, %s, 100, 'ready', 0,
+                 NULL, NULL, NULL),
+                ('file', gen_random_uuid(), 'original', 0, %s, 200, 'failed', 1,
+                 'backend_missing', 'missing during test', 0),
+                ('file', gen_random_uuid(), 'original', 0, %s, 400, 'failed', 0,
+                 'backend_corrupt', 'corrupt existing reference during test', 0),
+                ('file', gen_random_uuid(), 'original', 0, %s, 300, 'failed', 1,
+                 'legacy_source_invalid', 'worker failure during test', 0)
+            RETURNING id, payload_size_estimate
+            """,
+            (tenant_id, tenant_id, tenant_id, tenant_id),
+        )
+        ids_by_size = {estimate: item_id for item_id, estimate in cursor.fetchall()}
+        ready_id = ids_by_size[100]
+        failed_id = ids_by_size[200]
+        never_attempted_failed_id = ids_by_size[400]
+        worker_failed_id = ids_by_size[300]
+        cursor.execute(
+            """
+            INSERT INTO file_icon_backfill_campaign (
+                id,
+                target_kind,
+                destination_revision,
+                state,
+                resume_revision,
+                resume_cursor_id
+            )
+            VALUES (%s, 'postgres_inline', NULL, 'active', 0, NULL)
+            """,
+            (str(uuid4()),),
+        )
+
+    command.upgrade(config, _CAPACITY_REVISION)
+
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT id, capacity_admitted
+            FROM file_icon_backfill_items
+            WHERE id IN (%s, %s, %s, %s)
+            ORDER BY id
+            """,
+            (
+                ready_id,
+                failed_id,
+                never_attempted_failed_id,
+                worker_failed_id,
+            ),
+        )
+        admitted = dict(cursor.fetchall())
+        cursor.execute(
+            "SELECT capacity_admitted_bytes FROM file_icon_backfill_campaign"
+        )
+        campaign_bytes = cursor.fetchone()
+
+    assert admitted == {
+        ready_id: True,
+        failed_id: False,
+        never_attempted_failed_id: False,
+        worker_failed_id: True,
+    }
+    assert campaign_bytes == (600,)

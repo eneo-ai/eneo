@@ -734,9 +734,9 @@ By default, an inline campaign starts automatically when its stable ready-set
 estimate is at most 5 GiB. Above that size, calculate PostgreSQL payload, WAL,
 backup, replica, and safety headroom first, then set
 `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` in `env_backend.env` to at least the
-reported exact byte estimate and recreate the worker. The
-acknowledgement does not reserve disk and the estimate is not peak allocation;
-it records that the operator has accepted the capacity plan. When the current
+reported exact logical-byte requirement and recreate the worker. The
+acknowledgement does not reserve disk and the requirement is not peak
+allocation; it records that the operator has accepted the capacity plan. When the current
 Admin storage policy selects object storage, this inline worker does not start
 or silently redirect the campaign. Remote adoption requires the verified
 object-store adapter and changes the coordinated backup contract. Selecting
@@ -747,7 +747,7 @@ Set `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` in `env_backend.env` when every
 non-empty inline campaign must require explicit operator acknowledgement.
 Waiting for capacity is non-fatal: the upgrade is complete, the application
 continues serving frozen legacy File/Icon content, and the worker emits a
-structured warning with the estimate and required acknowledgement on startup
+structured warning with the requirement and required acknowledgement on startup
 and every scheduled tick.
 
 Large installations can tune bounded throughput without changing application
@@ -755,10 +755,10 @@ or tenant policy:
 
 | Variable                                   | Default | Meaning                                                                                                                                            |
 | ------------------------------------------ | ------: | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES` |   5 GiB | Largest estimate that may start inline without an explicit capacity acknowledgement                                                                |
-| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`   |       0 | Accepted inline estimate in bytes; must cover the current remaining estimate                                                                       |
+| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES` |   5 GiB | Largest cumulative logical-byte requirement that may start inline without an explicit capacity acknowledgement                                     |
+| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`   |       0 | Accepted cumulative logical-byte exposure, including replacement copies admitted during recovery                                                   |
 | `FILE_ICON_BACKFILL_BATCH_ROWS`            |     200 | Maximum ledger rows leased by one worker run                                                                                                       |
-| `FILE_ICON_BACKFILL_BATCH_BYTES`           | 128 MiB | Maximum summed stored-byte estimate per run; one larger first item is still claimed so it cannot be stranded                                       |
+| `FILE_ICON_BACKFILL_BATCH_BYTES`           | 128 MiB | Maximum summed logical payload bytes per run; one larger first item is still claimed so it cannot be stranded                                      |
 | `FILE_ICON_BACKFILL_LEASE_SECONDS`         |     300 | Crash-recovery lease duration                                                                                                                      |
 | `FILE_ICON_BACKFILL_RESUME_REVISION`       |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value starts bounded retries of older failures |
 | `FILE_ICON_BACKFILL_MAX_ATTEMPTS`          |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure                                                   |
@@ -781,17 +781,18 @@ recreate every backend and worker replica so both use the same safety ceiling.
 docker compose up -d --force-recreate --no-deps backend worker
 ```
 
-The worker logs structured batch counts after every non-empty run and logs the
-estimate and required action while a campaign waits for capacity or is halted.
+The worker logs structured batch counts for every active run, including a
+zero-work run while leases or another worker hold work. It logs the requirement
+and required action while a campaign waits for capacity or is halted.
 Completion runs `ANALYZE` once on the new content, payload, and reference tables
 before the campaign is marked done.
 A PostgreSQL 13 integration benchmark validated the defaults with 10 GiB of
 incompressible legacy payloads across 16,384 items. Active work completed in
-331 seconds at 31.0 MiB/s. Worker peak RSS was about 140 MiB, PostgreSQL stayed
+310 seconds at 33.1 MiB/s. Worker peak RSS was about 141 MiB, PostgreSQL stayed
 near 170-217 MiB for that workload, WAL was 11.0 GiB, database allocation grew
 about 10.4 GiB, no PostgreSQL temporary files were written, and a separate
 verification pass found no stored-payload digest mismatch. A concurrent metadata
-query measured p95 6.3 ms and p99 14.5 ms. At the once-per-minute schedule, the
+query measured p95 6.2 ms and p99 13.0 ms. At the once-per-minute schedule, the
 163 bounded runs project to about
 2 hours 42 minutes. The schedule deliberately limits database load while the
 application remains online; it is not intended to maximize migration

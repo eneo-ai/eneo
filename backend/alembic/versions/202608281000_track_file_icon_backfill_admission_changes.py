@@ -6,7 +6,9 @@ Create Date: 2026-08-28 10:00:00.000000
 
 Capacity waits are cached between scheduled worker runs. This revision adds a
 transactional singleton generation and advances it whenever an owner deletion
-cancels ledger work, allowing the worker to invalidate the cache in O(1).
+cancels ledger work, allowing the worker to invalidate the cache in O(1). The
+deletion trigger takes the singleton before ledger and cascading-reference locks
+so every admission participant uses the same PostgreSQL lock order.
 """
 
 from collections.abc import Sequence
@@ -58,6 +60,11 @@ def upgrade() -> None:
         DECLARE
             cancelled_count integer;
         BEGIN
+            PERFORM generation
+            FROM file_icon_backfill_admission_state
+            WHERE singleton
+            FOR UPDATE;
+
             UPDATE file_icon_backfill_items
             SET state = 'cancelled',
                 content_id = NULL,
@@ -83,6 +90,18 @@ def upgrade() -> None:
             RETURN OLD;
         END;
         $$;
+
+        DROP TRIGGER cancel_deleted_file_backfill_owner ON files;
+        CREATE TRIGGER cancel_deleted_file_backfill_owner
+        BEFORE DELETE ON files
+        FOR EACH ROW
+        EXECUTE FUNCTION cancel_deleted_file_icon_backfill_owner();
+
+        DROP TRIGGER cancel_deleted_icon_backfill_owner ON icons;
+        CREATE TRIGGER cancel_deleted_icon_backfill_owner
+        BEFORE DELETE ON icons
+        FOR EACH ROW
+        EXECUTE FUNCTION cancel_deleted_file_icon_backfill_owner();
         """
     )
 

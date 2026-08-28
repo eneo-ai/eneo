@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from secrets import token_hex
@@ -61,7 +61,7 @@ def _is_lock_not_available(error: DBAPIError) -> bool:
 
 
 class FileIconBackfillSettings(BaseSettings):
-    """Fixed worker bounds and the explicit one-time inline capacity grant."""
+    """Fixed worker bounds and the cumulative inline capacity acknowledgement."""
 
     model_config = SettingsConfigDict(
         env_prefix="FILE_ICON_BACKFILL_",
@@ -247,6 +247,15 @@ class _FileIconBackfillRepository:
             capacity_admitted_bytes=required_bytes,
         )
 
+    async def lock_admission(self) -> None:
+        admission_state = await self._session.scalar(
+            sa.select(FileIconBackfillAdmissionState).with_for_update()
+        )
+        if admission_state is None:
+            raise ObjectContentStateError(
+                "File/Icon backfill admission state is missing"
+            )
+
     async def _insert_campaign(
         self,
         *,
@@ -293,7 +302,8 @@ class _FileIconBackfillRepository:
         return (
             "The upgrade is complete and existing File/Icon content remains "
             "readable, but legacy adoption is waiting for an inline capacity "
-            f"decision. The backfill estimates {required_bytes} bytes; set "
+            f"decision. The backfill requires {required_bytes} cumulative logical "
+            "bytes; set "
             "FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK to at least that value "
             "after reserving payload, WAL, and safety headroom"
         )
@@ -1138,12 +1148,20 @@ class FileIconBackfill:
         if result is None:
             return await self._contended_result()
 
+        stable_result = replace(
+            result,
+            admitted_count=0,
+            claimed_count=0,
+            completed_count=0,
+            cancelled_count=0,
+            failed_count=0,
+        )
         if result.state is FileIconBackfillState.COMPLETE:
-            self._completed_result = result
+            self._completed_result = stable_result
         elif result.state is FileIconBackfillState.WAITING_FOR_CAPACITY:
             if admission_generation is None:
                 raise RuntimeError("Capacity wait lost its admission generation")
-            self._waiting_capacity_result = (result, admission_generation)
+            self._waiting_capacity_result = (stable_result, admission_generation)
         return result
 
     async def _run_once(self) -> tuple[FileIconBackfillResult, int | None]:
@@ -1156,6 +1174,7 @@ class FileIconBackfill:
         try:
             async with self._database.session() as session, session.begin():
                 repository = _FileIconBackfillRepository(session)
+                await repository.lock_admission()
                 if not await repository.has_campaign():
                     admission = await repository.admit(self._settings)
                     if not admission.terminal:

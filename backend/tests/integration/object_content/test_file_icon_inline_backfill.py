@@ -45,6 +45,7 @@ from eneo.object_content.content_repository import (
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.file_icon_backfill import (
     FileIconBackfill,
+    FileIconBackfillResult,
     FileIconBackfillSettings,
     FileIconBackfillState,
 )
@@ -761,7 +762,10 @@ async def test_large_inline_campaign_waits_for_capacity_acknowledgement(
         )
         repeated = await backfill.run_once()
 
-    assert repeated == waiting
+    assert repeated.state is FileIconBackfillState.WAITING_FOR_CAPACITY
+    assert repeated.admitted_count == 0
+    assert repeated.completed_count == 0
+    assert repeated.detail == waiting.detail
     async with object_content_database.session() as session, session.begin():
         assert (
             await session.scalar(
@@ -927,6 +931,172 @@ async def test_reference_failure_before_admission_requires_inline_capacity(
 
 
 @pytest.mark.asyncio
+async def test_reference_failure_invalidates_cached_capacity_requirement(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    await _seed_legacy_text(
+        object_content_database,
+        payload=b"a" * 1200,
+    )
+    referenced_payload = b"b" * 800
+    referenced_file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=referenced_payload,
+    )
+    referenced_content_id = await _attach_existing_inline_reference(
+        object_content_database,
+        file_id=referenced_file_id,
+        payload=referenced_payload,
+    )
+    backfill = _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+    )
+
+    initial_wait = await backfill.run_once()
+
+    assert initial_wait.state is FileIconBackfillState.WAITING_FOR_CAPACITY
+    assert initial_wait.detail is not None
+    assert "requires 1200 cumulative logical bytes" in initial_wait.detail
+    async with object_content_database.session() as session, session.begin():
+        await ObjectContentRepository(session).mark_backend_failure(
+            content_id=referenced_content_id,
+            failure_code=ContentFailureCode.BACKEND_CORRUPT,
+        )
+
+    refreshed_wait = await backfill.run_once()
+
+    assert refreshed_wait.state is FileIconBackfillState.WAITING_FOR_CAPACITY
+    assert refreshed_wait.detail is not None
+    assert "requires 2000 cumulative logical bytes" in refreshed_wait.detail
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _seed_legacy_text(
+        object_content_database,
+        payload=b"a" * 1200,
+    )
+    referenced_payload = b"b" * 800
+    referenced_file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=referenced_payload,
+    )
+    referenced_content_id = await _attach_existing_inline_reference(
+        object_content_database,
+        file_id=referenced_file_id,
+        payload=referenced_payload,
+    )
+    initial_wait = await _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+    ).run_once()
+    assert initial_wait.state is FileIconBackfillState.WAITING_FOR_CAPACITY
+
+    failure_paused = asyncio.Event()
+    release_failure = asyncio.Event()
+
+    async def fail_reference() -> None:
+        async with object_content_database.session() as session, session.begin():
+            failure_repository = ObjectContentRepository(session)
+            original_database_now = failure_repository._database_now
+
+            async def pause_failure_after_coordination_locks() -> datetime:
+                failure_paused.set()
+                await release_failure.wait()
+                return await original_database_now()
+
+            monkeypatch.setattr(
+                failure_repository,
+                "_database_now",
+                pause_failure_after_coordination_locks,
+            )
+            await failure_repository.mark_backend_failure(
+                content_id=referenced_content_id,
+                failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            )
+
+    failure_task = asyncio.create_task(fail_reference())
+    startup_task: asyncio.Task[FileIconBackfillResult] | None = None
+    capacity_lock_observed = False
+    try:
+        await asyncio.wait_for(failure_paused.wait(), timeout=5)
+        startup_task = asyncio.create_task(
+            _backfill(
+                object_content_database,
+                auto_inline_max_bytes=1024,
+                inline_capacity_ack=1200,
+            ).run_once()
+        )
+
+        async def wait_for_capacity_snapshot_lock() -> bool:
+            async with object_content_database.session() as session, session.begin():
+                while not startup_task.done():
+                    waiting = await session.scalar(
+                        sa.text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE datname = current_database()
+                                  AND pid <> pg_backend_pid()
+                                  AND wait_event_type = 'Lock'
+                                  AND query ILIKE
+                                      '%file_icon_backfill_admission_state%'
+                                  AND query ILIKE '%FOR UPDATE%'
+                            )
+                            """
+                        )
+                    )
+                    if waiting:
+                        return True
+                    await asyncio.sleep(0.01)
+            return False
+
+        capacity_lock_observed = await asyncio.wait_for(
+            wait_for_capacity_snapshot_lock(),
+            timeout=5,
+        )
+    finally:
+        release_failure.set()
+        await asyncio.wait_for(failure_task, timeout=5)
+
+    assert startup_task is not None
+    startup = await asyncio.wait_for(startup_task, timeout=5)
+    assert capacity_lock_observed
+    assert startup.state is FileIconBackfillState.WAITING_FOR_CAPACITY
+    assert startup.detail is not None
+    assert "requires 2000 cumulative logical bytes" in startup.detail
+    async with object_content_database.session() as session, session.begin():
+        campaign_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(FileIconBackfillCampaign)
+        )
+        inline_payload_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(InlineContentPayloads)
+        )
+    assert campaign_count == 0
+    assert inline_payload_count == 1
+
+    completed = await _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+        inline_capacity_ack=2000,
+        batch_bytes=2048,
+        inline_maximum_bytes=2048,
+    ).run_once()
+
+    assert completed.state is FileIconBackfillState.COMPLETE
+    async with object_content_database.session() as session, session.begin():
+        admitted_bytes = await session.scalar(
+            sa.select(FileIconBackfillCampaign.capacity_admitted_bytes)
+        )
+    assert admitted_bytes == 2000
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("target", "waiting_state"),
     [
@@ -1006,8 +1176,9 @@ async def test_expired_lease_resumes_without_duplicate_content(
             },
         )
 
-    result = await _backfill(object_content_database).run_once()
-    repeated = await _backfill(object_content_database).run_once()
+    backfill = _backfill(object_content_database)
+    result = await backfill.run_once()
+    repeated = await backfill.run_once()
 
     assert result.state is FileIconBackfillState.COMPLETE
     assert result.completed_count == 1
@@ -1151,7 +1322,7 @@ async def test_existing_reference_does_not_require_phantom_inline_capacity(
 async def test_failed_adopted_reference_reopens_completed_campaign_for_recovery(
     object_content_database: DatabaseSessionManager,
 ) -> None:
-    payload = b"authoritative legacy source"
+    payload = b"a" * 800
     file_id = await _seed_legacy_text(
         object_content_database,
         payload=payload,
@@ -1214,8 +1385,35 @@ async def test_failed_adopted_reference_reopens_completed_campaign_for_recovery(
         ).one()
     assert failed_state == ("failed", None, "halted", 0)
 
+    insufficient = await _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+        inline_capacity_ack=800,
+        resume_revision=1,
+    ).run_once()
+
+    assert insufficient.state is FileIconBackfillState.HALTED
+    assert insufficient.detail is not None
+    assert "requires 1600 cumulative logical bytes" in insufficient.detail
+    async with object_content_database.session() as session, session.begin():
+        unchanged_capacity = (
+            await session.execute(
+                sa.select(
+                    FileIconBackfillCampaign.capacity_admitted_bytes,
+                    FileIconBackfillCampaign.resume_revision,
+                )
+            )
+        ).one()
+        inline_payload_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(InlineContentPayloads)
+        )
+    assert unchanged_capacity == (800, 0)
+    assert inline_payload_count == 1
+
     recovered = await _backfill(
         object_content_database,
+        auto_inline_max_bytes=1024,
+        inline_capacity_ack=1600,
         resume_revision=1,
     ).run_once()
 
@@ -1232,21 +1430,25 @@ async def test_failed_adopted_reference_reopens_completed_campaign_for_recovery(
         replacement = await session.get(ObjectContents, replacement_id)
         replacement_state = None if replacement is None else replacement.state
         replacement_sha256 = None if replacement is None else replacement.sha256
-        item_state = await session.scalar(
-            sa.text(
-                """
-                SELECT state
-                FROM file_icon_backfill_items
-                WHERE owner_id = :file_id
-                """
-            ),
-            {"file_id": file_id},
-        )
+        item_state, admitted_bytes = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT item.state, campaign.capacity_admitted_bytes
+                    FROM file_icon_backfill_items AS item
+                    CROSS JOIN file_icon_backfill_campaign AS campaign
+                    WHERE item.owner_id = :file_id
+                    """
+                ),
+                {"file_id": file_id},
+            )
+        ).one()
     assert replacement_id != content_id
     assert replacement is not None
     assert replacement_state == ContentState.AVAILABLE.value
     assert replacement_sha256 == sha256(payload).digest()
     assert item_state == "done"
+    assert admitted_bytes == 1600
 
 
 @pytest.mark.asyncio
@@ -1682,6 +1884,64 @@ async def test_owner_delete_waits_for_existing_reference_admission_fence(
         )
     assert item == ("cancelled", None)
     assert reference_count == 0
+
+
+@pytest.mark.asyncio
+async def test_owner_delete_locks_admission_before_ledger_item(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=b"delete with canonical lock order",
+    )
+    delete_started = asyncio.Event()
+
+    async def delete_owner() -> None:
+        async with object_content_database.session() as session, session.begin():
+            delete_started.set()
+            await session.execute(
+                sa.text("DELETE FROM files WHERE id = :file_id"),
+                {"file_id": file_id},
+            )
+
+    deleting: asyncio.Task[None] | None = None
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            sa.text(
+                """
+                SELECT generation
+                FROM file_icon_backfill_admission_state
+                WHERE singleton
+                FOR UPDATE
+                """
+            )
+        )
+        deleting = asyncio.create_task(delete_owner())
+        await asyncio.wait_for(delete_started.wait(), timeout=5)
+        await asyncio.sleep(0.1)
+        assert not deleting.done()
+        state_while_delete_waits = await session.scalar(
+            sa.text(
+                """
+                SELECT state
+                FROM file_icon_backfill_items
+                WHERE owner_id = :file_id
+                FOR UPDATE
+                """
+            ),
+            {"file_id": file_id},
+        )
+        assert state_while_delete_waits == "pending"
+
+    assert deleting is not None
+    await asyncio.wait_for(deleting, timeout=5)
+    async with object_content_database.session() as session, session.begin():
+        item_state = await session.scalar(
+            sa.select(FileIconBackfillItems.state).where(
+                FileIconBackfillItems.owner_id == file_id
+            )
+        )
+    assert item_state == "cancelled"
 
 
 @pytest.mark.asyncio

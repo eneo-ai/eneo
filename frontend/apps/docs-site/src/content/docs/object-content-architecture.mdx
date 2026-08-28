@@ -23,16 +23,19 @@ so Eneo still needs no S3-compatible service.
 Legacy File and Icon adoption uses an expand, online backfill, and later contract
 sequence. Two consecutive Alembic revisions own the expand phase. The first
 creates the ledger, makes legacy columns nullable, installs the payload-write
-fence, and commits. The second inventories stored-size estimates in resumable,
-idempotent groups without copying or hashing payload bytes. It never inherits
+fence, and commits. The second scans owners and obtains exact logical source
+sizes in resumable, idempotent groups without hashing, converting, or copying
+external payload bytes. It never inherits
 the schema revision's exclusive table locks. New code reads a verified
 object-content reference when present and otherwise reads the frozen legacy
 source. A scheduled worker first finalizes a bounded admission set: it locks
 owners, accepts still-available references, cancels deleted owners, and marks
-only source-bearing rows ready. The capacity decision is frozen after admission,
-then the worker adopts each ready variant in bounded, resumable
-PostgreSQL-inline transactions. The later contract applies the fail-closed
-completion and live-reference recheck described in
+only source-bearing rows ready. The initial capacity decision is frozen after
+admission. If an adopted reference later fails verification, its replacement
+is re-admitted against the cumulative logical-byte total and requires a higher
+acknowledgement only above the automatic threshold. The worker adopts each ready
+variant in bounded, resumable PostgreSQL-inline transactions. The later contract
+applies the fail-closed completion and live-reference recheck described in
 [Verify and clean up](/guides/file-icon-storage-upgrade#verify-and-clean-up)
 before it removes the legacy schema.
 

@@ -60,12 +60,12 @@ def upgrade() -> None:
         $$;
 
         CREATE TRIGGER cancel_deleted_file_backfill_owner
-        AFTER DELETE ON files
+        BEFORE DELETE ON files
         FOR EACH ROW
         EXECUTE FUNCTION cancel_deleted_file_icon_backfill_owner();
 
         CREATE TRIGGER cancel_deleted_icon_backfill_owner
-        AFTER DELETE ON icons
+        BEFORE DELETE ON icons
         FOR EACH ROW
         EXECUTE FUNCTION cancel_deleted_file_icon_backfill_owner();
         """

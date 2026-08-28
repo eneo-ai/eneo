@@ -65,12 +65,16 @@ async def backfill_file_icon_content_task(
         "failed_count": result.failed_count,
         "detail": result.detail,
     }
-    if result.admitted_count or result.claimed_count:
-        logger.info("File/Icon legacy backfill progress", extra=summary)
-    elif result.state in {
+    if result.state in {
         FileIconBackfillState.WAITING_FOR_CAPACITY,
         FileIconBackfillState.WAITING_FOR_OBJECT_STORE,
         FileIconBackfillState.HALTED,
     }:
         logger.warning("File/Icon legacy backfill needs operator action", extra=summary)
+    elif (
+        result.admitted_count
+        or result.claimed_count
+        or result.state is FileIconBackfillState.ACTIVE
+    ):
+        logger.info("File/Icon legacy backfill progress", extra=summary)
     return summary
