@@ -107,6 +107,7 @@ class FileIconBackfillItems(BaseWithTableName):
             "lease_expires_at",
             "id",
         ),
+        Index("ix_file_icon_backfill_items_content_id", "content_id"),
     )
 
 

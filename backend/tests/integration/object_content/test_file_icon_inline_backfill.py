@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.file_icon_backfill_table import (
+    FileIconBackfillAdmissionState,
     FileIconBackfillCampaign,
     FileIconBackfillItems,
 )
@@ -998,13 +999,19 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
 
     failure_paused = asyncio.Event()
     release_failure = asyncio.Event()
+    failure_backend_pid: int | None = None
 
     async def fail_reference() -> None:
+        nonlocal failure_backend_pid
         async with object_content_database.session() as session, session.begin():
             failure_repository = ObjectContentRepository(session)
             original_database_now = failure_repository._database_now
 
             async def pause_failure_after_coordination_locks() -> datetime:
+                nonlocal failure_backend_pid
+                failure_backend_pid = await session.scalar(
+                    sa.text("SELECT pg_backend_pid()")
+                )
                 failure_paused.set()
                 await release_failure.wait()
                 return await original_database_now()
@@ -1031,8 +1038,9 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
                 inline_capacity_ack=1200,
             ).run_once()
         )
+        assert failure_backend_pid is not None
 
-        async def wait_for_capacity_snapshot_lock() -> bool:
+        async def wait_for_blocked_campaign_start() -> bool:
             async with object_content_database.session() as session, session.begin():
                 while not startup_task.done():
                     waiting = await session.scalar(
@@ -1043,13 +1051,11 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
                                 FROM pg_stat_activity
                                 WHERE datname = current_database()
                                   AND pid <> pg_backend_pid()
-                                  AND wait_event_type = 'Lock'
-                                  AND query ILIKE
-                                      '%file_icon_backfill_admission_state%'
-                                  AND query ILIKE '%FOR UPDATE%'
+                                  AND :blocking_pid = ANY(pg_blocking_pids(pid))
                             )
                             """
-                        )
+                        ),
+                        {"blocking_pid": failure_backend_pid},
                     )
                     if waiting:
                         return True
@@ -1057,7 +1063,7 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
             return False
 
         capacity_lock_observed = await asyncio.wait_for(
-            wait_for_capacity_snapshot_lock(),
+            wait_for_blocked_campaign_start(),
             timeout=5,
         )
     finally:
@@ -1942,6 +1948,95 @@ async def test_owner_delete_locks_admission_before_ledger_item(
             )
         )
     assert item_state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_bulk_owner_delete_after_campaign_does_not_lock_admission(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    first_file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=b"first completed owner",
+    )
+    second_file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=b"second completed owner",
+    )
+    completed = await _backfill(object_content_database).run_once()
+    assert completed.state is FileIconBackfillState.COMPLETE
+
+    async def delete_owners() -> None:
+        async with object_content_database.session() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL lock_timeout = '1s'"))
+            await session.execute(
+                sa.text(
+                    """
+                    DELETE FROM files
+                    WHERE id IN (:first_file_id, :second_file_id)
+                    """
+                ),
+                {
+                    "first_file_id": first_file_id,
+                    "second_file_id": second_file_id,
+                },
+            )
+
+    async with object_content_database.session() as session, session.begin():
+        generation_before = await session.scalar(
+            sa.text(
+                """
+                SELECT generation
+                FROM file_icon_backfill_admission_state
+                WHERE singleton
+                FOR UPDATE
+                """
+            )
+        )
+        deleting = asyncio.create_task(delete_owners())
+        await asyncio.wait_for(deleting, timeout=5)
+
+    async with object_content_database.session() as session, session.begin():
+        generation_after = await session.scalar(
+            sa.select(FileIconBackfillAdmissionState.generation)
+        )
+        states = (
+            await session.scalars(
+                sa.select(FileIconBackfillItems.state)
+                .where(
+                    FileIconBackfillItems.owner_id.in_((first_file_id, second_file_id))
+                )
+                .order_by(FileIconBackfillItems.owner_id)
+            )
+        ).all()
+    assert generation_after == generation_before
+    assert states == ["cancelled", "cancelled"]
+
+
+@pytest.mark.asyncio
+async def test_backend_failure_lookup_has_content_id_index(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    async with object_content_database.session() as session, session.begin():
+        index = (
+            await session.execute(
+                sa.text(
+                    """
+                    SELECT attribute.attname, catalog.indisvalid, catalog.indisready
+                    FROM pg_index AS catalog
+                    JOIN LATERAL unnest(catalog.indkey)
+                        WITH ORDINALITY AS key(attnum, position) ON true
+                    JOIN pg_attribute AS attribute
+                      ON attribute.attrelid = catalog.indrelid
+                     AND attribute.attnum = key.attnum
+                    WHERE catalog.indexrelid =
+                        to_regclass('ix_file_icon_backfill_items_content_id')
+                      AND key.position = 1
+                    """
+                )
+            )
+        ).one_or_none()
+
+    assert index == ("content_id", True, True)
 
 
 @pytest.mark.asyncio

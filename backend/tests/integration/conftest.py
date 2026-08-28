@@ -588,9 +588,13 @@ async def cleanup_database(
             setup_database.transcription_audio_limit_bytes,
         ),
     )
-    # The migration seeds this singleton once in production. Full test cleanup
+    # Migrations seed these singletons once in production. Full test cleanup
     # truncates every table, so restore the same required control-plane state.
     cursor.execute("INSERT INTO object_content_reconciliation_state (id) VALUES (1)")
+    cursor.execute(
+        "INSERT INTO file_icon_backfill_admission_state "
+        "(singleton, generation) VALUES (true, 0)"
+    )
     # Add API key scope enforcement feature flags.
     conn.commit()
     cursor.close()
