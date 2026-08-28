@@ -621,25 +621,51 @@ payload columns:
 1. Stop all `backend` API replicas so no new writes or knowledge jobs can be
    accepted. In the reference Compose deployment, `docker compose stop backend`
    leaves `worker`, `db`, `redis`, and optional `object-content` running.
-2. Keep the old worker running until both queued and in-progress
-   `upload_info_blob` and `transcription` jobs are zero:
+2. Keep the old worker running and read its live ARQ health value plus TTL from
+   Redis:
+
+   ```bash
+   docker compose exec -T redis redis-cli --raw GET arq:queue:health-check
+   docker compose exec -T redis redis-cli --raw TTL arq:queue:health-check
+   ```
+
+   The health value must contain `queued=0`, and the TTL must be greater than
+   zero. In the single-worker reference deployment, also require
+   `j_ongoing=0`. If the old release has multiple worker replicas, keep all of
+   them running until the shared Redis value first reports `queued=0` with a
+   positive TTL. Then use the deployment orchestrator to verify that every
+   replica has zero active jobs, scale down to one idle old worker, and repeat
+   both Redis commands. Proceed only when the repeated value contains both
+   `queued=0` and `j_ongoing=0` and its TTL is positive. Then inspect the
+   matching database jobs:
 
    ```bash
    docker compose exec -T db sh -lc \
      'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
-     -c "SELECT task, status, count(*) FROM jobs
+     -c "SELECT task, status,
+                to_jsonb(jobs) ->> 'dispatch_envelope' IS NULL AS pre_durable,
+                count(*)
+         FROM jobs
          WHERE task IN ('\''upload_info_blob'\'', '\''transcription'\'')
            AND status IN ('\''queued'\'', '\''in progress'\'')
-         GROUP BY task, status;"'
+         GROUP BY task, status, pre_durable;"'
    ```
 
-   No rows is the required result.
+   No rows is the normal result. Once the live Redis health value reports an
+   empty queue and its TTL is positive, a deployment may still contain
+   historical `queued` rows with
+   `pre_durable = true` that have no executable queue entry. `db-init` records
+   only those rows as failed and continues; no manual SQL repair is needed. An
+   `in progress` row or any row with `pre_durable = false` still blocks the
+   migration.
    An old worker marks an in-progress knowledge job failed after five minutes
    without a heartbeat. If a worker process stopped mid-job, keep one old worker
    running until that automatic recovery has completed; do not edit the job row
    by hand.
 
-3. Stop every old worker. Verify the zero-job condition again.
+3. Stop every old worker. Run the database query again and proceed only when it
+   shows no `in progress` row and no row with `pre_durable = false`. Historical
+   `queued` rows with `pre_durable = true` are the only permitted exception.
 4. Take one recovery point containing PostgreSQL and, when configured, the
    object store. Preserve Redis and the shared staging volume until the release
    has been verified.

@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import event
 
 from eneo.jobs.job_manager import job_manager
-from eneo.jobs.job_models import Job, JobInDb, JobUpdate, Task
+from eneo.jobs.job_models import KNOWLEDGE_TASKS, Job, JobInDb, JobUpdate, Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
@@ -35,6 +35,8 @@ class JobService:
     async def queue_job(
         self, task: Task, *, name: str, task_params: TaskParams, enqueue: bool = True
     ) -> JobInDb:
+        if task in KNOWLEDGE_TASKS:
+            raise ValueError(f"Knowledge task {task.value} requires durable dispatch")
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
         job_in_db = await self.job_repo.add_job(job=job)
 
