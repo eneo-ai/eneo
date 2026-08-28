@@ -1,4 +1,8 @@
+from collections import defaultdict
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from hashlib import sha256
+from typing import TypeVar
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -19,7 +23,7 @@ from eneo.files.file_models import (
     FileType,
 )
 from eneo.main.exceptions import NotFoundException
-from eneo.object_content.content import ContentAccessClass, ContentState
+from eneo.object_content.content import ByteRange, ContentAccessClass, ContentState
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +40,53 @@ class FileContentReferenceRecord:
     size_bytes: int
     media_type: str
     access_class: ContentAccessClass
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyFileContentRecord:
+    """Frozen Release A payload used until its object-content reference exists."""
+
+    file_id: UUID
+    variant: FileContentVariant
+    payload: bytes
+    media_type: str
+
+    @property
+    def sha256(self) -> bytes:
+        return sha256(self.payload).digest()
+
+    @property
+    def size_bytes(self) -> int:
+        return len(self.payload)
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyFileInfoRecord:
+    """Legacy integrity facts that do not require detoasting payload bytes."""
+
+    file_id: UUID
+    variant: FileContentVariant
+    checksum: str
+    size_bytes: int
+    media_type: str
+    original_available: bool
+    transcription_available: bool
+
+    @property
+    def sha256(self) -> bytes:
+        return bytes.fromhex(self.checksum)
+
+
+@dataclass(frozen=True, slots=True)
+class LegacyAudioSlice:
+    payload: bytes
+    media_type: str
+
+
+LegacyContentT = TypeVar(
+    "LegacyContentT",
+    bound=LegacyFileContentRecord | LegacyFileInfoRecord,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +111,7 @@ _IMAGE_INPUT_VARIANTS = (
 )
 
 
-def select_primary_file_reference(
-    file_type: FileType,
-    references: list[FileContentReferenceRecord],
-) -> FileContentReferenceRecord | None:
+def primary_file_variants(file_type: FileType) -> tuple[FileContentVariant, ...]:
     if file_type is FileType.TEXT:
         variants = (
             FileContentVariant.EXTRACTED_TEXT,
@@ -73,8 +121,36 @@ def select_primary_file_reference(
         variants = _IMAGE_INPUT_VARIANTS
     else:
         variants = (FileContentVariant.ORIGINAL,)
+    return tuple(dict.fromkeys((*variants, *_PRIMARY_VARIANTS)))
 
-    for variant in (*variants, *_PRIMARY_VARIANTS):
+
+def binary_file_variants(file_type: FileType) -> tuple[FileContentVariant, ...]:
+    return (
+        _IMAGE_INPUT_VARIANTS
+        if file_type is FileType.IMAGE
+        else (FileContentVariant.ORIGINAL,)
+    )
+
+
+def legacy_primary_file_variant(
+    file_type: FileType,
+    *,
+    parent_file_id: UUID | None,
+) -> FileContentVariant:
+    if file_type is FileType.TEXT:
+        return FileContentVariant.EXTRACTED_TEXT
+    if file_type is FileType.AUDIO:
+        return FileContentVariant.ORIGINAL
+    if parent_file_id is not None:
+        return FileContentVariant.DERIVED_PAGE
+    return FileContentVariant.LEGACY_IMAGE
+
+
+def select_primary_file_reference(
+    file_type: FileType,
+    references: list[FileContentReferenceRecord],
+) -> FileContentReferenceRecord | None:
+    for variant in primary_file_variants(file_type):
         reference = next(
             (candidate for candidate in references if candidate.variant is variant),
             None,
@@ -84,16 +160,40 @@ def select_primary_file_reference(
     return None
 
 
+def select_file_content_variant(
+    references: list[FileContentReferenceRecord],
+    legacy_content: Sequence[LegacyContentT],
+    variant: FileContentVariant,
+) -> FileContentReferenceRecord | LegacyContentT | None:
+    reference = next(
+        (candidate for candidate in references if candidate.variant is variant),
+        None,
+    )
+    if reference is not None:
+        return reference
+    return next(
+        (candidate for candidate in legacy_content if candidate.variant is variant),
+        None,
+    )
+
+
+def select_primary_file_content(
+    file_type: FileType,
+    references: list[FileContentReferenceRecord],
+    legacy_content: Sequence[LegacyContentT],
+) -> FileContentReferenceRecord | LegacyContentT | None:
+    for variant in primary_file_variants(file_type):
+        content = select_file_content_variant(references, legacy_content, variant)
+        if content is not None:
+            return content
+    return None
+
+
 def select_binary_file_reference(
     file_type: FileType,
     references: list[FileContentReferenceRecord],
 ) -> FileContentReferenceRecord | None:
-    variants = (
-        _IMAGE_INPUT_VARIANTS
-        if file_type is FileType.IMAGE
-        else (FileContentVariant.ORIGINAL,)
-    )
-    for variant in variants:
+    for variant in binary_file_variants(file_type):
         reference = next(
             (candidate for candidate in references if candidate.variant is variant),
             None,
@@ -106,8 +206,14 @@ def select_binary_file_reference(
 def project_file_info(
     file: FileMetadata,
     references: list[FileContentReferenceRecord],
+    legacy_content: Sequence[LegacyFileContentRecord | LegacyFileInfoRecord]
+    | None = None,
 ) -> FileInfo:
-    primary = select_primary_file_reference(file.file_type, references)
+    primary = select_primary_file_content(
+        file.file_type,
+        references,
+        legacy_content or [],
+    )
     if primary is None:
         raise NotFoundException(f"File {file.id} has no durable content")
     return FileInfo(
@@ -126,7 +232,9 @@ def project_file_info(
 
 def project_file_media_type(
     file: FileMetadata,
-    reference: FileContentReferenceRecord,
+    reference: (
+        FileContentReferenceRecord | LegacyFileContentRecord | LegacyFileInfoRecord
+    ),
 ) -> str:
     """Project the media type users supplied, except for transformed images."""
     if file.file_type is FileType.IMAGE:
@@ -206,8 +314,19 @@ class FileRepository:
             else_=file.parent_file_id,
         )
         root_has_content = sa.exists().where(FileContentReferences.file_id == root_id)
+        legacy_root = aliased(Files)
+        root_has_legacy = sa.exists().where(
+            legacy_root.id == root_id,
+            sa.or_(
+                legacy_root.legacy_text.is_not(None),
+                legacy_root.legacy_blob.is_not(None),
+            ),
+        )
         return sa.and_(
-            root_has_content.correlate(file),
+            sa.or_(
+                root_has_content.correlate(file),
+                root_has_legacy.correlate(file),
+            ),
             ~FileRepository._family_has_unavailable_content(file),
         )
 
@@ -463,15 +582,169 @@ class FileRepository:
             for row in rows
         ]
 
+    async def get_legacy_content(
+        self,
+        requests: Mapping[UUID, Collection[FileContentVariant]],
+    ) -> list[LegacyFileContentRecord]:
+        """Load only the frozen variants whose object references are missing."""
+        ids_by_variant: defaultdict[FileContentVariant, list[UUID]] = defaultdict(list)
+        for file_id, variants in requests.items():
+            for variant in variants:
+                ids_by_variant[variant].append(file_id)
+
+        records: list[LegacyFileContentRecord] = []
+        for variant in (
+            FileContentVariant.EXTRACTED_TEXT,
+            FileContentVariant.ORIGINAL,
+            FileContentVariant.DERIVED_PAGE,
+            FileContentVariant.LEGACY_IMAGE,
+            FileContentVariant.TRANSCRIPTION,
+        ):
+            file_ids = ids_by_variant[variant]
+            if not file_ids:
+                continue
+            payload_column = (
+                Files.legacy_text
+                if variant is FileContentVariant.EXTRACTED_TEXT
+                else (
+                    Files.legacy_transcription
+                    if variant is FileContentVariant.TRANSCRIPTION
+                    else Files.legacy_blob
+                )
+            )
+            query = sa.select(Files.id, Files.mimetype, payload_column).where(
+                Files.id.in_(file_ids),
+                payload_column.is_not(None),
+            )
+            if variant is FileContentVariant.ORIGINAL:
+                query = query.where(
+                    Files.file_type.in_((FileType.TEXT.value, FileType.AUDIO.value))
+                )
+            rows = (await self.session.execute(query)).all()
+            for file_id, mimetype, payload in rows:
+                is_text = variant in (
+                    FileContentVariant.EXTRACTED_TEXT,
+                    FileContentVariant.TRANSCRIPTION,
+                )
+                records.append(
+                    LegacyFileContentRecord(
+                        file_id=file_id,
+                        variant=variant,
+                        payload=(
+                            payload.encode("utf-8")
+                            if isinstance(payload, str)
+                            else bytes(payload)
+                        ),
+                        media_type=(
+                            "text/plain"
+                            if is_text
+                            else mimetype or "application/octet-stream"
+                        ),
+                    )
+                )
+        return records
+
+    async def get_legacy_infos(
+        self,
+        file_ids: list[UUID],
+    ) -> list[LegacyFileInfoRecord]:
+        """Read legacy integrity metadata without materializing TOAST payloads."""
+        if not file_ids:
+            return []
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    Files.id,
+                    Files.file_type,
+                    Files.parent_file_id,
+                    Files.mimetype,
+                    Files.legacy_checksum,
+                    Files.legacy_size,
+                    Files.legacy_blob.is_not(None).label("original_available"),
+                    Files.legacy_transcription.is_not(None).label(
+                        "transcription_available"
+                    ),
+                ).where(
+                    Files.id.in_(file_ids),
+                    Files.legacy_checksum.is_not(None),
+                    Files.legacy_size.is_not(None),
+                )
+            )
+        ).all()
+        return [
+            LegacyFileInfoRecord(
+                file_id=row.id,
+                variant=legacy_primary_file_variant(
+                    FileType(row.file_type),
+                    parent_file_id=row.parent_file_id,
+                ),
+                checksum=row.legacy_checksum,
+                size_bytes=row.legacy_size,
+                media_type=(
+                    "text/plain"
+                    if FileType(row.file_type) is FileType.TEXT
+                    else row.mimetype or "application/octet-stream"
+                ),
+                original_available=(
+                    FileType(row.file_type) in (FileType.TEXT, FileType.AUDIO)
+                    and row.original_available
+                ),
+                transcription_available=row.transcription_available,
+            )
+            for row in rows
+        ]
+
+    async def get_legacy_audio_slice(
+        self,
+        file_id: UUID,
+        selected_range: ByteRange | None,
+    ) -> LegacyAudioSlice | None:
+        payload = (
+            Files.legacy_blob
+            if selected_range is None
+            else sa.func.substring(
+                Files.legacy_blob,
+                selected_range.start + 1,
+                selected_range.content_length,
+            )
+        )
+        row = (
+            await self.session.execute(
+                sa.select(
+                    payload.label("payload"),
+                    Files.mimetype,
+                ).where(
+                    Files.id == file_id,
+                    Files.file_type == FileType.AUDIO.value,
+                    Files.legacy_blob.is_not(None),
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return LegacyAudioSlice(
+            payload=bytes(row.payload),
+            media_type=row.mimetype or "application/octet-stream",
+        )
+
     async def get_infos_by_ids(self, file_ids: list[UUID]) -> list[FileInfo]:
         metadata = await self.get_by_ids(file_ids)
         references = await self.get_content_references([file.id for file in metadata])
+        legacy_infos = await self.get_legacy_infos([file.id for file in metadata])
         by_file: dict[UUID, list[FileContentReferenceRecord]] = {
+            file.id: [] for file in metadata
+        }
+        legacy_by_file: dict[UUID, list[LegacyFileInfoRecord]] = {
             file.id: [] for file in metadata
         }
         for reference in references:
             by_file[reference.file_id].append(reference)
-        return [project_file_info(file, by_file[file.id]) for file in metadata]
+        for content in legacy_infos:
+            legacy_by_file[content.file_id].append(content)
+        return [
+            project_file_info(file, by_file[file.id], legacy_by_file[file.id])
+            for file in metadata
+        ]
 
     async def delete_by_owner_for_lifecycle(
         self,

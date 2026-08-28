@@ -58,13 +58,13 @@ availability requirements justify it. There is no production filesystem
 backend, automatic fallback, dual write, public object URL, provider registry,
 or provider-specific product branch.
 
-File and Icon are the first adopted product owners. Their legacy bytes are
-copied in bounded batches, verified against PostgreSQL-owned SHA-256 and size,
-switched to concrete typed references, and only then removed from the old
-columns. Eligible new File and Icon writes use the target selected in **Admin >
-Storage**. InfoBlob generations and Flow artifacts remain separate follow-up
-work. A target change affects new writes only; moving existing content remains
-a separate migration workflow.
+File and Icon are the first adopted product owners. Existing legacy bytes stay
+readable while a staged, resumable backfill creates and verifies concrete typed
+references. The old columns remain the recovery source until a later contract
+release confirms that no legacy item remains. Eligible new File and Icon writes
+use the target selected in **Admin > Storage**. InfoBlob generations and Flow
+artifacts remain separate follow-up work. A target change affects new writes
+only; moving existing content remains a separate migration workflow.
 
 ## Choose the endpoint
 
@@ -672,16 +672,83 @@ store-generation fence, which pre-upgrade code does not, so never change
 destination while any pre-upgrade process is running. The old columns are
 dropped by a separate migration in a later release.
 
-For the File/Icon normalization upgrade, stop backend and worker producers
-before Alembic starts and do not restart them until the migration succeeds. If
-it stops, retry the migration before accepting new uploads; intervening writes
-make the retry fail closed rather than guess which authority is valid.
+The File/Icon revisions perform schema setup followed by row-metadata inventory.
+The first revision installs a database trigger that freezes legacy payload
+columns and commits that fence. The following revision records one resumable
+ledger item per legacy variant in separately committed, idempotent groups. It
+refuses a non-UTF-8 database before writing the first group because legacy text
+has UTF-8 canonical bytes. Inventory can run without retaining the schema
+revision's exclusive locks on `files` or `icons`.
+Both revisions keep every legacy byte and integrity column. The inventory scans
+the owners and obtains the exact logical byte length of each frozen source
+column without hashing, converting, or copying external payloads. It does not
+contact object storage, hold an `ACCESS EXCLUSIVE` fence during the owner scan,
+or drop the old columns. Normal reads prefer object-content
+references and fall back to the frozen legacy variant only while its reference
+is missing.
 
-The migration copies in row- and byte-bounded batches and hashes copied content
-before its final write fence. While that fence is held, PostgreSQL compares the
-copied payloads with the legacy File/Icon columns once and contracts the old
-schema. Measure this pass on a restored production-size database and reserve a
-maintenance window proportional to total File/Icon bytes.
+PostgreSQL inline remains the complete destination when no S3-compatible store
+is configured. Choosing inline still needs capacity for the second verified
+copy until the later contract and table rewrite reclaim the legacy storage, but
+the work no longer blocks `db-init`. Choosing object storage avoids that second
+payload copy in PostgreSQL; from the first authoritative remote payload onward,
+backup and restore must include both PostgreSQL and the paired bucket.
+
+This unreleased expand revision reuses Alembic revision ID `202607231700` and
+replaces the former destructive normalization at that position. The inventory
+revision `202607231745` was also corrected in place before release so capacity
+uses logical source bytes consistently. A test or development environment that
+started or completed either earlier revision must restore its pre-upgrade
+database backup before using the new chain. The inventory commits groups
+independently, and a rerun deliberately keeps existing ledger rows. Alembic also
+cannot detect changed code behind an already-recorded revision ID.
+
+After these revisions, recovery is forward: keep the legacy source frozen,
+retry failed work, and resume from the ledger. A rollback to an older image is a
+coordinated restore of its matching pre-upgrade database backup. Do not Alembic
+stamp past the revision, attempt `alembic downgrade`, drop the trigger, edit
+ledger state manually, or run an old File/Icon writer against the expanded
+schema.
+
+The Tier 1 operator status contract is this payload-free preflight query. It
+excludes owners that were deleted and variants that already gained a durable
+reference after the inventory snapshot. The later campaign worker owns state
+transitions and any administrative progress surface:
+
+```sql
+WITH actionable_pending AS (
+    SELECT item.payload_size_estimate
+    FROM file_icon_backfill_items AS item
+    JOIN files AS file
+      ON item.owner_kind = 'file' AND file.id = item.owner_id
+    WHERE item.state = 'pending'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM file_content_references AS reference
+          WHERE reference.file_id = item.owner_id
+            AND reference.variant = item.variant
+            AND reference.ordinal = item.ordinal
+      )
+
+    UNION ALL
+
+    SELECT item.payload_size_estimate
+    FROM file_icon_backfill_items AS item
+    JOIN icons AS icon
+      ON item.owner_kind = 'icon' AND icon.id = item.owner_id
+    WHERE item.state = 'pending'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM icon_content_references AS reference
+          WHERE reference.icon_id = item.owner_id
+            AND reference.variant = item.variant
+      )
+)
+SELECT count(*) AS pending_items,
+       pg_size_pretty(coalesce(sum(payload_size_estimate), 0)::bigint)
+           AS estimated_payload_bytes
+FROM actionable_pending;
+```
 
 The later range-verification revision uses the same maintenance window. It
 backfills at most 10,000 unexpected pre-production object descriptors in one
