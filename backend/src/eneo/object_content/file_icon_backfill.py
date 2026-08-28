@@ -171,6 +171,13 @@ class _FileIconBackfillRepository:
             sa.select(FileIconBackfillCampaign).with_for_update()
         )
         if campaign is not None:
+            if (
+                campaign.state == FileIconBackfillState.HALTED.value
+                and not await self._has_incomplete_items()
+            ):
+                campaign.state = FileIconBackfillState.COMPLETE.value
+                campaign.resume_cursor_id = None
+                campaign.halt_reason = None
             if campaign.state == FileIconBackfillState.ACTIVE.value:
                 policy_target = await self.policy_target()
                 if campaign.target_kind != policy_target.value:
@@ -948,6 +955,19 @@ class _FileIconBackfillRepository:
                 sa.select(
                     sa.exists().where(
                         FileIconBackfillItems.state.in_(("ready", "leased"))
+                    )
+                )
+            )
+        )
+
+    async def _has_incomplete_items(self) -> bool:
+        return bool(
+            await self._session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        FileIconBackfillItems.state.in_(
+                            ("pending", "ready", "leased", "failed")
+                        )
                     )
                 )
             )

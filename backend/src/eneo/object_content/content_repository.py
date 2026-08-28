@@ -784,6 +784,22 @@ class ObjectContentRepository:
             ContentFailureCode.BACKEND_CORRUPT,
         }:
             raise ValueError("mark_backend_failure requires a backend failure code")
+        completed_item_exists = await self._has_completed_file_icon_item(content_id)
+        if not completed_item_exists:
+            async with self._session.begin_nested() as savepoint:
+                row = await self._content_for_update(content_id)
+                completed_item_exists = await self._has_completed_file_icon_item(
+                    content_id
+                )
+                if not completed_item_exists:
+                    if self._mark_available_content_backend_failed(
+                        row,
+                        failure_code,
+                    ):
+                        await self._session.flush()
+                    return
+                await savepoint.rollback()
+
         admission_state = await self._session.scalar(
             select(FileIconBackfillAdmissionState).with_for_update()
         )
@@ -806,11 +822,7 @@ class ObjectContentRepository:
             )
         ).all()
         row = await self._content_for_update(content_id)
-        if row.state == ContentState.AVAILABLE.value:
-            row.state = ContentState.FAILED.value
-            row.failure_code = failure_code.value
-            row.failure_detail = "durable object bytes are unavailable or untrusted"
-            row.next_attempt_at = None
+        if self._mark_available_content_backend_failed(row, failure_code):
             if completed_items:
                 await self._reopen_failed_file_icon_items(
                     completed_items,
@@ -819,6 +831,33 @@ class ObjectContentRepository:
                     failure_code=failure_code,
                 )
             await self._session.flush()
+
+    async def _has_completed_file_icon_item(self, content_id: UUID) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(
+                    select(FileIconBackfillItems.id)
+                    .where(
+                        FileIconBackfillItems.content_id == content_id,
+                        FileIconBackfillItems.state == "done",
+                    )
+                    .exists()
+                )
+            )
+        )
+
+    @staticmethod
+    def _mark_available_content_backend_failed(
+        row: ObjectContents,
+        failure_code: ContentFailureCode,
+    ) -> bool:
+        if row.state != ContentState.AVAILABLE.value:
+            return False
+        row.state = ContentState.FAILED.value
+        row.failure_code = failure_code.value
+        row.failure_detail = "durable object bytes are unavailable or untrusted"
+        row.next_attempt_at = None
+        return True
 
     async def _reopen_failed_file_icon_items(
         self,

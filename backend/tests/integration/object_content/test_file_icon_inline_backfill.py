@@ -17,9 +17,14 @@ from eneo.database.tables.file_icon_backfill_table import (
     FileIconBackfillCampaign,
     FileIconBackfillItems,
 )
+from eneo.database.tables.info_blobs_table import (
+    InfoBlobs,
+    InfoBlobVersionState,
+)
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     IconContentReferences,
+    InfoBlobContentReferences,
     InlineContentPayloads,
     ObjectContents,
     ObjectStoreObjects,
@@ -174,6 +179,70 @@ async def _attach_existing_inline_reference(
                     width=width,
                     height=height,
                     duration_ms=duration_ms,
+                )
+            )
+        return prepared.id
+
+
+async def _create_unrelated_inline_content(
+    database: DatabaseSessionManager,
+    *,
+    payload: bytes,
+) -> UUID:
+    tenant_id, user_id = await _tenant_and_user(database)
+    service = ObjectContentService(
+        ObjectContentCoreSettings(
+            inline_maximum_bytes=1024,
+            inline_io_chunk_bytes=256,
+        ),
+        database,
+    )
+
+    async def source() -> AsyncIterator[bytes]:
+        yield payload
+
+    async with service.capture_for_target(
+        source(),
+        storage_kind=StorageKind.POSTGRES_INLINE,
+        declared_media_type="text/plain",
+        verified_media_type="text/plain",
+    ) as captured:
+        async with database.session() as session, session.begin():
+            owner = InfoBlobs(
+                text="",
+                title="unrelated object content",
+                url=None,
+                size=len(payload),
+                content_hash=sha256(payload).digest(),
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.ACTIVE.value,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                group_id=None,
+                website_id=None,
+                embedding_model_id=None,
+                integration_knowledge_id=None,
+                sharepoint_item_id=None,
+            )
+            session.add(owner)
+            await session.flush()
+            prepared = await service.prepare_in_transaction(
+                session,
+                intent=ContentIntent(
+                    tenant_id=tenant_id,
+                    created_by_user_id=user_id,
+                    access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                    idempotency_key=f"unrelated:{owner.id}",
+                    producer_receipt=f"info-blob:{owner.id}:original:0",
+                ),
+                content=captured,
+                storage_kind=StorageKind.POSTGRES_INLINE,
+            )
+            session.add(
+                InfoBlobContentReferences(
+                    info_blob_id=owner.id,
+                    content_id=prepared.id,
+                    original_filename="unrelated.txt",
                 )
             )
         return prepared.id
@@ -1103,6 +1172,200 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
 
 
 @pytest.mark.asyncio
+async def test_unrelated_content_failure_does_not_wait_for_admission_lock(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    completed = await _backfill(object_content_database).run_once()
+    assert completed.state is FileIconBackfillState.COMPLETE
+
+    payload = b"unrelated durable content"
+    content_id = await _create_unrelated_inline_content(
+        object_content_database,
+        payload=payload,
+    )
+    tenant_id, _ = await _tenant_and_user(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.update(InlineContentPayloads)
+            .where(InlineContentPayloads.content_id == content_id)
+            .values(payload=b"x" * len(payload))
+        )
+
+    service = ObjectContentService(
+        ObjectContentCoreSettings(
+            inline_maximum_bytes=1024,
+            inline_io_chunk_bytes=256,
+        ),
+        object_content_database,
+    )
+    grant = ContentReadGrant(
+        content_id=content_id,
+        tenant_id=tenant_id,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+    )
+
+    async def read_corrupt_content() -> None:
+        with pytest.raises(ObjectContentIntegrityError):
+            async with service.open_content(grant) as opened:
+                _ = b"".join([chunk async for chunk in opened.chunks])
+
+    async with object_content_database.session() as session, session.begin():
+        await session.scalar(
+            sa.select(FileIconBackfillAdmissionState).with_for_update()
+        )
+        failure_task = asyncio.create_task(read_corrupt_content())
+        completed_while_locked, _ = await asyncio.wait(
+            {failure_task},
+            timeout=1,
+        )
+
+    await asyncio.wait_for(failure_task, timeout=5)
+    assert failure_task in completed_while_locked
+    async with object_content_database.session() as session, session.begin():
+        failed = (
+            await session.execute(
+                sa.select(ObjectContents.state, ObjectContents.failure_code).where(
+                    ObjectContents.id == content_id
+                )
+            )
+        ).one()
+    assert failed == (
+        ContentState.FAILED.value,
+        ContentFailureCode.BACKEND_CORRUPT.value,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reference_failure_rechecks_admission_before_lock_order_fallback(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = b"existing reference admitted during failure"
+    file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=payload,
+    )
+    content_id = await _attach_existing_inline_reference(
+        object_content_database,
+        file_id=file_id,
+        payload=payload,
+    )
+    first_check_finished = asyncio.Event()
+    release_failure = asyncio.Event()
+    original_has_completed_item = ObjectContentRepository._has_completed_file_icon_item
+    first_check_seen = False
+    failure_backend_pid: int | None = None
+    blocked_on_admission = False
+    locked_content_id: UUID | None = None
+
+    async def pause_after_first_negative_check(
+        repository: ObjectContentRepository,
+        checked_content_id: UUID,
+    ) -> bool:
+        nonlocal first_check_seen
+        exists = await original_has_completed_item(repository, checked_content_id)
+        if checked_content_id == content_id and not exists and not first_check_seen:
+            first_check_seen = True
+            first_check_finished.set()
+            await release_failure.wait()
+        return exists
+
+    monkeypatch.setattr(
+        ObjectContentRepository,
+        "_has_completed_file_icon_item",
+        pause_after_first_negative_check,
+    )
+
+    async def fail_reference() -> None:
+        nonlocal failure_backend_pid
+        async with object_content_database.session() as session, session.begin():
+            failure_backend_pid = await session.scalar(
+                sa.text("SELECT pg_backend_pid()")
+            )
+            await ObjectContentRepository(session).mark_backend_failure(
+                content_id=content_id,
+                failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            )
+
+    failure_task = asyncio.create_task(fail_reference())
+    try:
+        await asyncio.wait_for(first_check_finished.wait(), timeout=5)
+        admitted = await _backfill(object_content_database).run_once()
+        assert admitted.state is FileIconBackfillState.COMPLETE
+        assert failure_backend_pid is not None
+
+        async with object_content_database.session() as session, session.begin():
+            admission_backend_pid = await session.scalar(
+                sa.text("SELECT pg_backend_pid()")
+            )
+            await session.scalar(
+                sa.select(FileIconBackfillAdmissionState).with_for_update()
+            )
+            release_failure.set()
+
+            async def wait_for_failure_on_admission() -> bool:
+                while not failure_task.done():
+                    blocked = await session.scalar(
+                        sa.text(
+                            "SELECT :blocking_pid = ANY(pg_blocking_pids(:blocked_pid))"
+                        ),
+                        {
+                            "blocking_pid": admission_backend_pid,
+                            "blocked_pid": failure_backend_pid,
+                        },
+                    )
+                    if blocked:
+                        return True
+                    await asyncio.sleep(0.01)
+                return False
+
+            blocked_on_admission = await asyncio.wait_for(
+                wait_for_failure_on_admission(),
+                timeout=5,
+            )
+            locked_content_id = await session.scalar(
+                sa.select(ObjectContents.id)
+                .where(ObjectContents.id == content_id)
+                .with_for_update(nowait=True)
+            )
+    finally:
+        release_failure.set()
+    await asyncio.wait_for(failure_task, timeout=5)
+
+    async with object_content_database.session() as session, session.begin():
+        state = (
+            await session.execute(
+                sa.select(
+                    ObjectContents.state,
+                    FileIconBackfillItems.state,
+                    FileIconBackfillItems.content_id,
+                    FileIconBackfillCampaign.state,
+                )
+                .select_from(ObjectContents)
+                .join(
+                    FileIconBackfillItems,
+                    sa.true(),
+                )
+                .join(FileIconBackfillCampaign, sa.true())
+                .where(
+                    ObjectContents.id == content_id,
+                    FileIconBackfillItems.owner_id == file_id,
+                )
+            )
+        ).one()
+    assert first_check_seen
+    assert blocked_on_admission
+    assert locked_content_id == content_id
+    assert state == (
+        ContentState.FAILED.value,
+        "failed",
+        None,
+        FileIconBackfillState.HALTED.value,
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("target", "waiting_state"),
     [
@@ -1322,6 +1585,83 @@ async def test_existing_reference_does_not_require_phantom_inline_capacity(
             )
         ).one()
     assert item == ("done", content_id)
+
+
+@pytest.mark.asyncio
+async def test_deleted_last_failed_owner_completes_without_resume_revision(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    payload = b"legacy source"
+    file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=payload,
+    )
+    backfill = _backfill(object_content_database)
+    completed = await backfill.run_once()
+    assert completed.state is FileIconBackfillState.COMPLETE
+
+    tenant_id, _ = await _tenant_and_user(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        content_id = await session.scalar(
+            sa.select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id == file_id,
+                FileContentReferences.variant == "extracted_text",
+                FileContentReferences.ordinal == 0,
+            )
+        )
+        assert content_id is not None
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.update(InlineContentPayloads)
+            .where(InlineContentPayloads.content_id == content_id)
+            .values(payload=b"x" * len(payload))
+        )
+
+    service = ObjectContentService(
+        ObjectContentCoreSettings(
+            inline_maximum_bytes=1024,
+            inline_io_chunk_bytes=256,
+        ),
+        object_content_database,
+    )
+    grant = ContentReadGrant(
+        content_id=content_id,
+        tenant_id=tenant_id,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+    )
+    with pytest.raises(ObjectContentIntegrityError):
+        async with service.open_content(grant) as opened:
+            _ = b"".join([chunk async for chunk in opened.chunks])
+
+    async with object_content_database.session() as session, session.begin():
+        campaign_state = await session.scalar(sa.select(FileIconBackfillCampaign.state))
+        await session.execute(
+            sa.text("DELETE FROM files WHERE id = :file_id"),
+            {"file_id": file_id},
+        )
+    assert campaign_state == FileIconBackfillState.HALTED.value
+
+    converged = await backfill.run_once()
+
+    assert converged.state is FileIconBackfillState.COMPLETE
+    assert converged.detail is None
+    async with object_content_database.session() as session, session.begin():
+        state = (
+            await session.execute(
+                sa.select(
+                    FileIconBackfillItems.state,
+                    FileIconBackfillCampaign.state,
+                    FileIconBackfillCampaign.halt_reason,
+                    FileIconBackfillCampaign.resume_cursor_id,
+                ).join(FileIconBackfillCampaign, sa.true())
+            )
+        ).one()
+    assert state == (
+        "cancelled",
+        FileIconBackfillState.COMPLETE.value,
+        None,
+        None,
+    )
 
 
 @pytest.mark.asyncio
