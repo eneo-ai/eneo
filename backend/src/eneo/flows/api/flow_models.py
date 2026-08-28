@@ -957,6 +957,16 @@ class FlowRunTranscriptionUsagePublic(BaseModel):
             "may have been charged without Eneo learning its result."
         ),
     )
+    recording_seconds: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Length of the audio the run's transcription steps read, as measured "
+            "by those steps. Unlike `audio_seconds` it counts each recording "
+            "once, however many providers it was sent to. Null when no step "
+            "measured its audio."
+        ),
+    )
 
 
 class FlowRunPublic(BaseModel):

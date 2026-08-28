@@ -36,7 +36,15 @@ RESULT_BODY = {
     "duration_seconds": 123.5,
     "model": "KBLab/kb-whisper-large",
     "text": "[00:00:00 - 00:00:05] SPEAKER_00: Hej och välkomna.",
-    "segments": [],
+    "segments": [
+        {
+            "start": 0.0,
+            "end": 5.2,
+            "speaker": "SPEAKER_00",
+            "text": "Hej och välkomna.",
+            "words": [{"word": "Hej", "start": 0.0, "end": 0.4}],
+        }
+    ],
     "alignment": "segment_split",
 }
 
@@ -338,6 +346,9 @@ async def test_transcribe_returns_service_text_verbatim_with_duration() -> None:
     assert result.duration_seconds == 123.5
     assert result.diarization == "external"
     assert result.alignment == "segment_split"
+    assert result.transcript_segments == (
+        TranscriptSegment("Hej och välkomna.", 0.0, 5.2, speaker="SPEAKER_00"),
+    )
     assert service.submit_count == 1
 
     submit_request = service.requests[0]
@@ -640,6 +651,31 @@ def test_build_remote_flow_transcriber_requires_configuration() -> None:
     )
     transcriber = build_remote_flow_transcriber(configured)
     assert transcriber.client.base_url == "http://tolka.test"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        ("not a list", None),
+        ([], ()),
+        (
+            [
+                {"start": 1, "end": 2, "text": "ok", "speaker": ""},
+                {"start": "1", "end": 2, "text": "bad start"},
+                {"start": 1, "end": True, "text": "bad end"},
+                {"start": 1, "end": 2},
+                "garbage",
+            ],
+            (TranscriptSegment("ok", 1.0, 2.0, speaker=None),),
+        ),
+    ],
+)
+def test_result_segments_keep_only_well_formed_entries(
+    raw: object, expected: object
+) -> None:
+    """A segment the reader cannot place in time is dropped; the text stands."""
+    assert remote_transcription._parse_result_segments(raw) == expected
 
 
 def test_result_parsing_defends_against_malformed_payloads() -> None:

@@ -45,6 +45,9 @@ FLOW_GRAPH_PATH: Final[str] = "/{id}/graph/"
 FLOW_RUN_ARTIFACT_SIGNED_URL_PATH: Final[str] = (
     "/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/"
 )
+FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH: Final[str] = (
+    "/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"
+)
 
 FLOW_RUN_EVIDENCE_PATH: Final[str] = "/{id}/runs/{run_id}/evidence/"
 FLOW_RUN_PROVIDER_CALLS_PATH: Final[str] = "/{id}/runs/{run_id}/provider-calls/"
@@ -212,6 +215,14 @@ class FlowRuntimePathsPublic(BaseModel):
             "and send a SignedURLRequest body."
         )
     )
+    input_file_signed_url_template: str = Field(
+        description=(
+            "POST template for generating a signed download URL for a file the run "
+            "received as step input (for example the audio a transcript was made "
+            "from). Replace `{run_id}` and `{file_id}` with values from a step "
+            "result's `runtime_input_file_ids` and send a SignedURLRequest body."
+        )
+    )
 
 
 def _flow_runtime_public_schema_extra(schema: JsonDict) -> None:
@@ -339,6 +350,11 @@ def build_flow_runtime_paths(
         ),
         artifact_signed_url_template=_flow_path(
             FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+            flow_id=flow_id_value,
+            api_prefix=api_prefix,
+        ),
+        input_file_signed_url_template=_flow_path(
+            FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
             flow_id=flow_id_value,
             api_prefix=api_prefix,
         ),

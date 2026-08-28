@@ -1930,6 +1930,36 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).all()
         return await self._project_result_file_rows(rows)
 
+    async def recording_seconds_by_run_ids(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, float]:
+        """Measured audio length per run, summed over its transcription steps'
+        current attempts. Runs without a measured transcription are absent."""
+        unique_run_ids = list(dict.fromkeys(run_ids))
+        if not unique_run_ids:
+            return {}
+        # Explicit operators: JSONB subscripting needs PostgreSQL 14, and the
+        # oldest supported server is older than that.
+        audio_seconds_text = cast(
+            Any,
+            FlowStepResults.input_payload_json.op("->")("transcription").op("->>")(
+                "audio_seconds"
+            ),
+        )
+        seconds: sa.ColumnElement[float | None] = sa.cast(audio_seconds_text, sa.Float)
+        stmt: sa.Select[tuple[UUID, float | None]] = (
+            sa.select(FlowStepResults.flow_run_id, sa.func.sum(seconds))
+            .where(FlowStepResults.flow_run_id.in_(unique_run_ids))
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(seconds.isnot(None))
+            .group_by(FlowStepResults.flow_run_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {run_id: float(total) for run_id, total in rows if total is not None}
+
     async def list_result_files_for_runs(
         self,
         *,
@@ -1988,6 +2018,24 @@ class FlowRunRepository:
             return None
         projected = await self._project_result_file_rows([row])
         return projected[0]
+
+    async def is_step_input_file(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        file_id: UUID,
+    ) -> bool:
+        """Whether ``file_id`` was submitted as runtime input to any step attempt
+        of this run."""
+        stmt = (
+            sa.select(FlowRunStepInputFiles.id)
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+            .where(FlowRunStepInputFiles.file_id == file_id)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).first() is not None
 
     async def _project_result_file_rows(
         self,

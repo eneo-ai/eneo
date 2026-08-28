@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
-from eneo.files.file_models import FileMetadata
+from eneo.files.file_models import FileContentVariant, FileMetadata
 from eneo.files.file_repo import FileRepository
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
@@ -217,6 +217,50 @@ class FlowRunEvidenceService:
                 "You do not have access to this artifact.",
                 code="forbidden_action",
                 context={"auth_layer": "domain_policy"},
+            )
+        return file
+
+    async def get_run_input_file(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        file_id: UUID,
+    ) -> FileMetadata:
+        """A file the run received as step input, for whoever may see the run's
+        artifacts: reviewing a transcript means hearing the audio behind it,
+        and the reviewer is rarely the person who uploaded it."""
+        run = await self.access_policy.load_run(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind="artifact",
+        )
+        attached = await self.flow_run_repo.is_step_input_file(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            file_id=file_id,
+        )
+        if not attached:
+            raise NotFoundException(
+                f"File {file_id} is not an input file of run {run_id}.",
+                code=FlowApiErrorCode.RUN_INPUT_FILE_NOT_FOUND.value,
+            )
+
+        file = await self.file_repo.get_by_id(file_id=file_id)
+        if file.tenant_id != self.user.tenant_id:
+            raise UnauthorizedException(
+                "You do not have access to this file.",
+                code="forbidden_action",
+                context={"auth_layer": "domain_policy"},
+            )
+        references = await self.file_repo.get_content_references([file_id])
+        if not any(
+            reference.variant is FileContentVariant.ORIGINAL for reference in references
+        ):
+            raise ResourceGoneException(
+                "Input file content has been purged by retention policy.",
+                code=FlowApiErrorCode.RUN_INPUT_FILE_CONTENT_UNAVAILABLE.value,
+                context={"run_id": str(run_id), "file_id": str(file_id)},
             )
         return file
 

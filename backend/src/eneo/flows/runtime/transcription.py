@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
@@ -11,7 +12,9 @@ from uuid import UUID
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.audio import AudioMimeTypes
 from eneo.flows.domain.speaker_labels import (
+    build_label_renumbering,
     build_speaker_inventory,
+    renumber_segment_speakers,
     renumber_speaker_labels,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -141,10 +144,37 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+        TranscriptSegment,
+    )
 
 
 def _empty_speakers() -> list[dict[str, Any]]:
     return []
+
+
+# Segments are evidence for a reader, not input to any step, so a transcript
+# whose structured view would bloat the step's stored payload keeps only its
+# text; the reader falls back to parsing the timestamped lines.
+MAX_SEGMENTS_BYTES = 256 * 1024
+SEGMENTS_OMITTED_TOO_LARGE = "too_large"
+
+
+def serialize_segments(
+    segments: Sequence["TranscriptSegment"], *, file_index: int
+) -> list[dict[str, Any]]:
+    """Structured transcript lines for one file, timestamps relative to that
+    file's audio (a multi-file transcript restarts at zero per file)."""
+    return [
+        {
+            "file_index": file_index,
+            "start": round(segment.start, 2),
+            "end": round(segment.end, 2),
+            "speaker": segment.speaker,
+            "text": segment.text,
+        }
+        for segment in segments
+    ]
 
 
 @dataclass(frozen=True)
@@ -171,6 +201,10 @@ class FlowTranscriptionResult:
     max_speakers: int | None = None
     # Coarsest word-timestamp source across files, as reported by the service.
     alignment: str | None = None
+    # Structured transcript lines across all files (see ``serialize_segments``),
+    # or None when the engine produced none or they exceeded the size cap.
+    segments: list[dict[str, Any]] | None = None
+    segments_omitted_reason: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -191,6 +225,8 @@ class FlowTranscriptionResult:
             "speakers": self.speakers,
             "max_speakers": self.max_speakers,
             "alignment": self.alignment,
+            "segments": self.segments,
+            "segments_omitted_reason": self.segments_omitted_reason,
         }
 
 
@@ -300,6 +336,8 @@ async def transcribe_audio_input(
     diarization_elapsed: list[int] = []
     speakers: list[dict[str, Any]] = []
     alignments: list[str] = []
+    segments: list[dict[str, Any]] = []
+    every_file_segmented = True
     # Labels are assigned per file by the diarization service; renumber so one
     # label means one speaker across the whole transcript.
     label_offset = 0
@@ -361,14 +399,27 @@ async def transcribe_audio_input(
         if transcribed.alignment:
             alignments.append(transcribed.alignment)
         block_text = transcribed.text
+        block_transcript_segments = list(transcribed.transcript_segments or ())
         if transcribed.diarization == "external":
+            label_mapping = build_label_renumbering(block_text, label_offset)
             block_text, label_count = renumber_speaker_labels(block_text, label_offset)
+            block_transcript_segments = renumber_segment_speakers(
+                block_transcript_segments, label_mapping
+            )
             speakers.extend(
                 build_speaker_inventory(
                     block_text, file_index=file_index, file_id=str(file.id)
                 )
             )
             label_offset += label_count
+        if block_transcript_segments:
+            segments.extend(
+                serialize_segments(block_transcript_segments, file_index=file_index)
+            )
+        elif block_text.strip():
+            # A reader can only seek by segments when every file has them;
+            # a partial list would silently mislabel the transcript's parts.
+            every_file_segmented = False
         if block_text.strip():
             text_blocks.append(block_text.strip())
             block_segments.append(
@@ -396,6 +447,9 @@ async def transcribe_audio_input(
     near_inline_limit = transcript_bytes >= threshold
     estimated_tokens = count_tokens(combined)
     elapsed_ms = int((time.monotonic() - transcription_started) * 1000)
+    kept_segments, segments_omitted_reason = _cap_segments(
+        segments if every_file_segmented else []
+    )
 
     return FlowTranscriptionResult(
         text=combined,
@@ -416,21 +470,35 @@ async def transcribe_audio_input(
         speakers=speakers,
         max_speakers=max_speakers if diarize else None,
         alignment=_coarsest_alignment(alignments),
+        segments=kept_segments,
+        segments_omitted_reason=segments_omitted_reason,
     )
 
 
-# Ordered from most to least precise; a step reports its weakest file.
-_ALIGNMENT_PRECISION = ("provider_words", "forced", "segment_split", "segment_only")
+def _cap_segments(
+    segments: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    if not segments:
+        return None, None
+    size = len(json.dumps(segments, ensure_ascii=False).encode("utf-8"))
+    if size > MAX_SEGMENTS_BYTES:
+        return None, SEGMENTS_OMITTED_TOO_LARGE
+    return segments, None
+
+
+# Alignment values the service reports when it could not force-align the text
+# inside its chunk windows and labelled whole segments instead.
 REDUCED_PRECISION_ALIGNMENTS = frozenset({"segment_split", "segment_only"})
 
 
 def _coarsest_alignment(alignments: list[str]) -> str | None:
+    """One alignment for the step: ``forced`` only when every file was forced."""
     if not alignments:
         return None
-    known = [value for value in alignments if value in _ALIGNMENT_PRECISION]
-    if not known:
-        return alignments[0]
-    return max(known, key=_ALIGNMENT_PRECISION.index)
+    return next(
+        (value for value in alignments if value != "forced"),
+        alignments[0],
+    )
 
 
 def _combine_diarization_outcomes(outcomes: list[str | None]) -> str | None:

@@ -143,6 +143,7 @@ def flow_run_repo_mock() -> AsyncMock:
     repo.measure_step_attempt_evidence.return_value = EMPTY_PROVENANCE_SIZE
     repo.measure_evidence_sections.return_value = FlowRunEvidenceMeasurements.empty()
     repo.measure_evidence_row_counts.return_value = FlowRunEvidenceRowCounts(0, 0, 0, 0)
+    repo.recording_seconds_by_run_ids.return_value = {}
     repo.list_resolved_input_edges_by_attempt_id.side_effect = (
         lambda *, attempt_ids, **_: {
             attempt_id: parse_resolved_input_edges(None) for attempt_id in attempt_ids
@@ -2212,6 +2213,10 @@ async def test_list_runs_with_result_files_and_usage_enriches_page(user):
     )
     flow_run_repo.list_runs.return_value = [run_with_file, run_with_usage, extra_run]
     flow_run_repo.list_result_files_for_runs.return_value = [result_file]
+    # A diarize-mode run sends the recording twice; the step measured it once.
+    flow_run_repo.recording_seconds_by_run_ids.return_value = {
+        run_with_usage.id: 25.6254
+    }
     provider_call_repo.list_usage_for_runs.return_value = {
         run_with_usage.id: FlowRunUsage(
             token_usage=usage, transcription_usage=transcription_usage
@@ -2240,7 +2245,9 @@ async def test_list_runs_with_result_files_and_usage_enriches_page(user):
     assert page.items[0].transcription_usage is None
     assert page.items[1].result_files == ()
     assert page.items[1].token_usage == usage
-    assert page.items[1].transcription_usage == transcription_usage
+    assert page.items[1].transcription_usage == transcription_usage.model_copy(
+        update={"recording_seconds": 25.625}
+    )
     flow_run_repo.list_runs.assert_awaited_once_with(
         tenant_id=user.tenant_id,
         flow_id=flow_id,
@@ -2257,6 +2264,39 @@ async def test_list_runs_with_result_files_and_usage_enriches_page(user):
     provider_call_repo.list_usage_for_runs.assert_awaited_once_with(
         run_ids=[run_with_file.id, run_with_usage.id],
         tenant_id=user.tenant_id,
+    )
+    flow_run_repo.recording_seconds_by_run_ids.assert_awaited_once_with(
+        run_ids=[run_with_file.id, run_with_usage.id],
+        tenant_id=user.tenant_id,
+    )
+
+
+async def test_measured_recording_is_reported_without_provider_usage(user):
+    """A run whose step measured its audio shows the length even when no
+    provider request contributed seconds."""
+    flow_run_repo = flow_run_repo_mock()
+    provider_call_repo = _provider_call_repo()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    flow_run_repo.list_runs.return_value = [run]
+    flow_run_repo.list_result_files_for_runs.return_value = []
+    flow_run_repo.recording_seconds_by_run_ids.return_value = {run.id: 94.829}
+    provider_call_repo.list_usage_for_runs.return_value = {}
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=provider_call_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    page = await service.list_runs_with_result_files_and_usage(
+        flow_id=flow_id, limit=10, offset=0
+    )
+
+    assert page.items[0].transcription_usage == FlowRunTranscriptionUsage(
+        audio_seconds=0.0, completeness="complete", recording_seconds=94.829
     )
 
 

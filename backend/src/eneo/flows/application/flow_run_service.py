@@ -128,8 +128,18 @@ def _token_usage(usage: FlowRunUsage | None) -> FlowRunTokenUsage | None:
 
 def _transcription_usage(
     usage: FlowRunUsage | None,
+    recording_seconds: float | None = None,
 ) -> FlowRunTranscriptionUsage | None:
-    return usage.transcription_usage if usage is not None else None
+    provider_usage = usage.transcription_usage if usage is not None else None
+    if provider_usage is None:
+        if recording_seconds is None:
+            return None
+        # The step measured the recording even though no provider request was
+        # recorded (or all were rejected); the length is still worth showing.
+        provider_usage = FlowRunTranscriptionUsage.from_counts(
+            audio_seconds=0.0, completeness="complete"
+        )
+    return provider_usage.with_recording_seconds(recording_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -741,6 +751,12 @@ class FlowRunService:
             run_ids=run_ids,
             tenant_id=self.user.tenant_id,
         )
+        recording_seconds_by_run_id = (
+            await self.flow_run_repo.recording_seconds_by_run_ids(
+                run_ids=run_ids,
+                tenant_id=self.user.tenant_id,
+            )
+        )
         result_files_by_run_id = _result_files_by_run_id(result_files)
         final_output_by_version_ref = await self._final_outputs_for_runs(runs=runs)
         return tuple(
@@ -748,7 +764,10 @@ class FlowRunService:
                 run=run,
                 result_files=tuple(result_files_by_run_id.get(run.id, ())),
                 token_usage=_token_usage(usage_by_run_id.get(run.id)),
-                transcription_usage=_transcription_usage(usage_by_run_id.get(run.id)),
+                transcription_usage=_transcription_usage(
+                    usage_by_run_id.get(run.id),
+                    recording_seconds_by_run_id.get(run.id),
+                ),
                 final_output=final_output_by_version_ref.get(
                     (run.flow_id, run.flow_version)
                 ),

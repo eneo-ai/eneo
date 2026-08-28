@@ -4,7 +4,12 @@ export type FlowRunTranscriptionUsagePayload = FlowRunTranscriptionUsage;
 
 export interface FlowRunTranscriptionUsageRecordedView {
   kind: "recorded";
+  /** What the badge shows: the recording's length when the step measured it. */
   audioSeconds: number;
+  /** Audio sent to providers (a diarize-mode run sends the recording twice). */
+  providerSeconds: number;
+  /** True when `audioSeconds` is the measured recording rather than provider traffic. */
+  measured: boolean;
   incomplete: boolean;
 }
 
@@ -18,9 +23,14 @@ export function buildFlowRunTranscriptionUsageView(
     return { kind: "not_recorded" };
   }
 
+  const providerSeconds = nonNegativeSeconds(transcriptionUsage.audio_seconds);
+  const recording = transcriptionUsage.recording_seconds;
+  const measured = typeof recording === "number" && Number.isFinite(recording) && recording > 0;
   return {
     kind: "recorded",
-    audioSeconds: nonNegativeSeconds(transcriptionUsage.audio_seconds),
+    audioSeconds: measured ? recording : providerSeconds,
+    providerSeconds,
+    measured,
     incomplete: transcriptionUsage.completeness === "incomplete"
   };
 }

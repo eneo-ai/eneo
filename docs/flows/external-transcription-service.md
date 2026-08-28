@@ -20,15 +20,17 @@ app runs always use the model-registry path regardless.
 `diarize` mode keeps model governance in Eneo and reduces the service to a
 diarization backend (Tolka's `TOLKA_ENGINE=diarize` tier needs no ASR model at
 all). It costs one extra upload of the audio per file (Eneo to the provider,
-then Eneo to the service) and depends on the transcription model returning
-word-level timestamps:
+then Eneo to the service). The provider is trusted for text only:
 
-- Word timestamps are requested with `response_format=verbose_json` and
-  `timestamp_granularities=["word"]`. OpenAI `whisper-1` and most self-hosted
-  Whisper servers support this; the `gpt-4o-transcribe` family does not.
-- A provider that rejects or omits them degrades the file to text only. The
-  step still succeeds, the transcript has no speaker labels, run metadata shows
-  `diarization: skipped:no_word_timestamps` and the step carries an
+- Eneo splits the audio into five-minute chunks, measures each chunk, and
+  sends the service one segment per chunk spanning that measured window. No
+  provider word or segment timestamps are requested or forwarded; they have
+  produced interleaved sentences when a server emitted broken timings.
+- The service force-aligns the text inside each window (result metadata shows
+  `alignment: forced`; anything else on a diarize job is worth alerting on).
+  If alignment fails it labels whole segments, so text order is never lost.
+- A transcript with no text at all is not sent; run metadata shows
+  `diarization: skipped:empty_transcript` and the step carries an
   `audio_diarization_skipped` diagnostic.
 - A failure of the service after a successful transcription fails the step
   (the author asked for speaker identification; silently dropping it would
@@ -38,6 +40,16 @@ Speaker labels are assigned per audio file by the service; Eneo renumbers them
 so a multi-file transcript has unique labels, and records a speaker inventory
 in the step's transcription metadata. A follow-up `speaker_mapping` step (see
 `flow-developer-quickstart.md`) can map those labels to real participants.
+
+The service's segments (`start`, `end`, `speaker`, `text` per rendered line)
+are stored alongside the text as `transcription.segments` in the step's input
+payload, with a `file_index` per audio file and the same renumbered labels.
+The run review and evidence views use them to play the recording with the
+spoken line highlighted; `POST
+/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/` signs the
+audio for anyone allowed to download the run's artifacts. Oversized segment
+lists are dropped (`segments: null`, `segments_omitted_reason: "too_large"`)
+and the views fall back to parsing the timestamped lines.
 
 The frontend reads the mode from `GET /api/v1/settings/`
 (`flow_transcription_service_mode`) to decide whether to show the model picker.

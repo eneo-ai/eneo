@@ -34,6 +34,7 @@ from eneo.flows.api.flow_run_evidence_router import (
 )
 from eneo.flows.api.flow_run_steps_router import (
     generate_flow_run_artifact_signed_url,
+    generate_flow_run_input_file_signed_url,
     list_flow_run_steps,
 )
 from eneo.flows.application.flow_run_service import FlowRunStepResultWithFiles
@@ -1392,3 +1393,76 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     assert call_kwargs["entity_id"] == file_id
     assert call_kwargs["metadata"]["extra"]["flow_id"] == str(flow_id)
     assert call_kwargs["metadata"]["extra"]["run_id"] == str(run_id)
+
+
+@pytest.mark.asyncio
+async def test_input_file_signed_url_delegates_to_service_and_audits(monkeypatch):
+    """Input-file endpoint signs whatever the evidence service admits and audits it."""
+    container = MagicMock()
+    flow_id = uuid4()
+    run_id = uuid4()
+    file_id = uuid4()
+    user = SimpleNamespace(
+        id=uuid4(), tenant_id=uuid4(), username="tester", email="t@e.com"
+    )
+    container.user.return_value = user
+    file_tenant_id = uuid4()
+
+    file_obj = SimpleNamespace(
+        id=file_id,
+        name="meeting.mp3",
+        tenant_id=file_tenant_id,
+        mimetype="audio/mpeg",
+        size=4096,
+    )
+    run_service = AsyncMock()
+    run_service.get_run_input_file.return_value = file_obj
+    container.flow_run_evidence_service.return_value = run_service
+    container.flow_service.return_value = AsyncMock()
+    audit_service = AsyncMock()
+    container.audit_service.return_value = audit_service
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(container)
+
+    from eneo.files.file_models import ContentDisposition, SignedURLRequest
+
+    signed_req = SignedURLRequest(
+        expires_in=300, content_disposition=ContentDisposition.INLINE
+    )
+
+    response = await generate_flow_run_input_file_signed_url(
+        id=flow_id,
+        run_id=run_id,
+        file_id=file_id,
+        request=SimpleNamespace(
+            state=SimpleNamespace(), base_url="https://app.example.com/"
+        ),
+        signed_url_req=signed_req,
+        container=container,
+    )
+
+    run_service.get_run_input_file.assert_awaited_once_with(
+        run_id=run_id,
+        flow_id=flow_id,
+        file_id=file_id,
+    )
+    assert response.url.startswith("https://app.example.com/api/v1/files/")
+    assert str(file_id) in response.url
+    token = response.url.split("token=", 1)[1]
+    payload = verify_signed_token(token)
+    assert payload is not None
+    assert payload["tenant_id"] == str(file_tenant_id)
+    assert payload["content_disposition"] == "inline"
+
+    audit_service.log_async.assert_awaited_once()
+    call_kwargs = audit_service.log_async.call_args[1]
+    assert call_kwargs["action"] == ActionType.FLOW_RUN_INPUT_FILE_DOWNLOADED
+    assert call_kwargs["entity_id"] == file_id
+    assert call_kwargs["metadata"]["extra"]["flow_id"] == str(flow_id)
+    assert call_kwargs["metadata"]["extra"]["run_id"] == str(run_id)
+    assert call_kwargs["metadata"]["extra"]["content_disposition"] == "inline"

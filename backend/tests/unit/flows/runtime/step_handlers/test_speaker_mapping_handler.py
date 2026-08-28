@@ -212,7 +212,7 @@ async def test_skipped_upstream_diarization_passes_transcript_through(harness) -
         step_id=uuid4(),
         current_attempt_no=1,
         input_payload_json={
-            "transcription": {"diarization": "skipped:no_word_timestamps"}
+            "transcription": {"diarization": "skipped:empty_transcript"}
         },
     )
     state = SimpleNamespace(completed_by_order={1: previous})

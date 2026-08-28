@@ -501,6 +501,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_artifact_downloaded,
     description: m.audit_action_flow_run_artifact_downloaded_description
   },
+  flow_run_input_file_downloaded: {
+    name: m.audit_action_flow_run_input_file_downloaded,
+    description: m.audit_action_flow_run_input_file_downloaded_description
+  },
   flow_evidence_viewed: {
     name: m.audit_action_flow_evidence_viewed,
     description: m.audit_action_flow_evidence_viewed_description

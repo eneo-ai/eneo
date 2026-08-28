@@ -56,6 +56,8 @@ class FlowApiErrorCode(str, Enum):
     RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN = "flow_run_evidence_raw_export_forbidden"
     RUN_ARTIFACT_NOT_FOUND = "flow_run_artifact_not_found"
     RUN_ARTIFACT_CONTENT_UNAVAILABLE = "flow_run_artifact_content_unavailable"
+    RUN_INPUT_FILE_NOT_FOUND = "flow_run_input_file_not_found"
+    RUN_INPUT_FILE_CONTENT_UNAVAILABLE = "flow_run_input_file_content_unavailable"
     AUDIT_OUTBOX_DELIVERY_NOT_FOUND = "flow_audit_outbox_delivery_not_found"
     AUDIT_OUTBOX_REDRIVE_CONFLICT = "flow_audit_outbox_redrive_conflict"
     DEFINITION_CHECKSUM_MISMATCH = "flow_definition_checksum_mismatch"

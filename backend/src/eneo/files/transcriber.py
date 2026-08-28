@@ -17,7 +17,6 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
     TranscriptSegment,
-    TranscriptWord,
 )
 
 if TYPE_CHECKING:
@@ -48,11 +47,14 @@ class TranscribedAudio:
 
     text: str
     duration_seconds: float | None
-    # Word timestamps, present only when they were requested and the provider
-    # delivered them for the whole file.
-    words: tuple[TranscriptWord, ...] | None = None
-    # Segment timestamps; the coarser fallback when a provider has no words.
+    # The chunk windows the audio was decoded in, each spanning its measured
+    # duration; None when the text came from the File's stored transcription.
     segments: tuple[TranscriptSegment, ...] | None = None
+    # The transcript's own lines as structured segments (one per rendered
+    # ``[HH:MM:SS - HH:MM:SS] SPEAKER_NN: text`` line, speaker-labelled), when
+    # the external service produced them. Distinct from ``segments``: these
+    # place text in time for a reader, chunk windows place it for alignment.
+    transcript_segments: tuple[TranscriptSegment, ...] | None = None
     # How speaker labels were handled for this transcript: None when none were
     # requested, "external" when an external service labelled it, or
     # "skipped:<reason>" when they were requested but could not be produced.
@@ -88,7 +90,6 @@ class Transcriber:
         diarize: bool = True,
         persist_cache_to_file: bool = True,
         observer: "ProviderCallObserver | None" = None,
-        want_words: bool = False,
         max_speakers: int | None = None,
     ) -> TranscribedAudio:
         # ``diarize`` and ``max_speakers`` are part of the flow-step transcriber
@@ -99,11 +100,7 @@ class Transcriber:
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
 
-        # The File's stored transcription is text only, so it cannot serve a
-        # request for word timestamps and must not be overwritten by one.
-        file_cache_enabled = (
-            persist_cache_to_file and language is None and not want_words
-        )
+        file_cache_enabled = persist_cache_to_file and language is None
         # Cached transcription is only safe when language is auto-detected and
         # the caller has chosen the File's shared transcription reference.
         if file_cache_enabled and file.transcription:
@@ -120,7 +117,6 @@ class Transcriber:
                 transcription_model=transcription_model,
                 language=language,
                 observer=observer,
-                want_words=want_words,
             )
 
             if file_cache_enabled:
@@ -215,7 +211,6 @@ class Transcriber:
         transcription_model: "TranscriptionModel",
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
-        want_words: bool = False,
     ) -> TranscribedAudio:
         adapter = await self.prepare_transcription(transcription_model)
         return await self.transcribe_prepared_from_filepath(
@@ -223,7 +218,6 @@ class Transcriber:
             adapter=adapter,
             language=language,
             observer=observer,
-            want_words=want_words,
         )
 
     async def prepare_transcription(
@@ -239,15 +233,13 @@ class Transcriber:
         adapter: LiteLLMTranscriptionAdapter,
         language: str | None = None,
         observer: "ProviderCallObserver | None" = None,
-        want_words: bool = False,
     ) -> TranscribedAudio:
         async with audio.to_wav(str(filepath)) as wav_file:
             transcription = await adapter.get_text_from_file(
-                wav_file, language=language, observer=observer, want_words=want_words
+                wav_file, language=language, observer=observer
             )
             return TranscribedAudio(
                 text=transcription.text,
                 duration_seconds=wav_file.duration,
-                words=transcription.words,
                 segments=transcription.segments,
             )

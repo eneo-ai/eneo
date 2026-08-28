@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from eneo.flows.domain.speaker_labels import (
     apply_speaker_names,
+    build_label_renumbering,
     build_speaker_inventory,
     parse_participants,
+    renumber_segment_speakers,
     renumber_speaker_labels,
 )
 
@@ -66,3 +68,34 @@ def test_parse_participants_accepts_lists_and_delimited_text() -> None:
     ]
     assert parse_participants(None) == []
     assert parse_participants(42) == []
+
+
+def test_label_renumbering_follows_text_order_and_applies_to_segments() -> None:
+    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+        TranscriptSegment,
+    )
+
+    text = "\n".join(
+        [
+            "[00:00:00 - 00:00:01] SPEAKER_01: Hej.",
+            "[00:00:02 - 00:00:03] SPEAKER_00: Hallå.",
+        ]
+    )
+    mapping = build_label_renumbering(text, 2)
+    assert mapping == {"SPEAKER_01": "SPEAKER_02", "SPEAKER_00": "SPEAKER_03"}
+
+    segments = renumber_segment_speakers(
+        [
+            TranscriptSegment("Hej.", 0.0, 1.0, speaker="SPEAKER_01"),
+            TranscriptSegment("Hallå.", 2.0, 3.0, speaker="SPEAKER_00"),
+            TranscriptSegment("(paus)", 3.0, 4.0, speaker=None),
+            TranscriptSegment("?", 4.0, 5.0, speaker="SPEAKER_09"),
+        ],
+        mapping,
+    )
+    assert [segment.speaker for segment in segments] == [
+        "SPEAKER_02",
+        "SPEAKER_03",
+        None,
+        "SPEAKER_09",
+    ]

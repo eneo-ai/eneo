@@ -352,6 +352,7 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/flows/{id}/runs/{run_id}/evidence/export": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/steps/": {"get"},
     "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/": {"post"},
+    "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/": {"post"},
     "/api/v1/settings/flow-input-limits": {"get", "patch"},
     "/api/v1/settings/flow-mapped-execution-policy": {"get", "patch"},
     "/api/v1/settings/flow-document-render-limits": {"get", "patch"},
@@ -576,6 +577,10 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "post",
     ): {"403", "404", "410", "422"},
     (
+        "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/",
+        "post",
+    ): {"403", "404", "410", "422"},
+    (
         "/api/v1/settings/flow-input-limits",
         "get",
     ): {"403"},
@@ -714,6 +719,10 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     ): {"400", "403", "404", "503"},
     (
         "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/",
+        "post",
+    ): {"403", "404", "410"},
+    (
+        "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/",
         "post",
     ): {"403", "404", "410"},
     ("/api/v1/settings/flow-input-limits", "get"): {"403"},
@@ -1634,6 +1643,10 @@ def test_openapi_runtime_paths_expose_review_checkpoint_templates(
     assert (
         "SignedURLRequest"
         in runtime_paths["artifact_signed_url_template"]["description"]
+    )
+    assert (
+        "runtime_input_file_ids"
+        in runtime_paths["input_file_signed_url_template"]["description"]
     )
 
 

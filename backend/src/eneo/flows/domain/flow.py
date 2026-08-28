@@ -417,6 +417,15 @@ class FlowRunTranscriptionUsage(BaseModel):
 
     audio_seconds: float = Field(ge=0)
     completeness: Literal["complete", "incomplete"]
+    # Length of the audio the run's transcription steps read, as those steps
+    # measured it. Distinct from ``audio_seconds``: a diarize-mode run sends the
+    # same recording to two providers and counts it twice there.
+    recording_seconds: float | None = Field(default=None, ge=0)
+
+    def with_recording_seconds(self, seconds: float | None) -> Self:
+        if seconds is None:
+            return self
+        return self.model_copy(update={"recording_seconds": round(seconds, 3)})
 
     @classmethod
     def from_counts(

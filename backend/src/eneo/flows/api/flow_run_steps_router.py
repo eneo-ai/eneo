@@ -22,6 +22,7 @@ from eneo.flows.api.flow_models import FlowRunStepPublic
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_GRAPH_PATH,
     FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+    FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
     FLOW_RUN_STEPS_PATH,
 )
 from eneo.flows.flow_access_policy import FlowApiAction
@@ -317,6 +318,117 @@ async def generate_flow_run_artifact_signed_url(
                 "artifact_name": file.name,
                 "artifact_mimetype": getattr(file, "mimetype", None),
                 "artifact_size_bytes": getattr(file, "size", None),
+            },
+        ),
+    )
+
+    return signed_url
+
+
+_FLOW_RUN_INPUT_FILE_DESCRIPTION = """
+Generate a time-limited signed download URL for a file the run received as step input, such as
+the audio recording a transcription step read.
+
+Visibility follows the run's artifact policy: callers can download input files from their own
+runs, tenant admins across the tenant, trusted in-space operators (space owner and space admin)
+for runs in their space, and service-key principals only for their own runs. The uploader need
+not be the caller: a reviewer confirming a transcript needs the recording behind it.
+
+The file_id must be listed in a step result's `runtime_input_file_ids` for the specified run.
+Audio downloads honour HTTP Range requests, so the URL can be used directly as a media source.
+"""
+
+
+@router.post(
+    FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
+    response_model=SignedURLResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="generate_flow_run_input_file_signed_url",
+    summary="Generate signed URL for a flow run input file",
+    description=_FLOW_RUN_INPUT_FILE_DESCRIPTION,
+    responses={
+        403: error_response(
+            description=_FLOW_RUNTIME_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow, run, or input file not found.",
+            message="Input file not found for this run.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+            code=FlowApiErrorCode.RUN_INPUT_FILE_NOT_FOUND,
+        ),
+        410: error_response(
+            description="Input file content was purged by retention policy.",
+            message="Input file content has been purged by retention policy.",
+            eneo_error_code=ErrorCodes.RESOURCE_GONE,
+            code=FlowApiErrorCode.RUN_INPUT_FILE_CONTENT_UNAVAILABLE,
+        ),
+    },
+)
+async def generate_flow_run_input_file_signed_url(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the requested run."),
+    ],
+    run_id: Annotated[
+        UUID, Path(description="Identifier of the run that received the file.")
+    ],
+    file_id: Annotated[
+        UUID, Path(description="Identifier of the run input file to download.")
+    ],
+    request: Request,
+    signed_url_req: SignedURLRequest,
+    container: Container = Depends(
+        get_container(with_user=True, with_upload_admission=True)
+    ),
+):
+    await flow_access_context.enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        required_access=FlowApiAction.VIEW,
+        allow_service_key_principals=True,
+    )
+    evidence_service = container.flow_run_evidence_service()
+    user = container.user()
+    actor_kwargs = audit_actor_kwargs(user)
+
+    file = await evidence_service.get_run_input_file(
+        run_id=run_id,
+        flow_id=id,
+        file_id=file_id,
+    )
+
+    signed_url = build_signed_download_response(
+        base_url=str(request.base_url),
+        file_id=file_id,
+        tenant_id=file.tenant_id,
+        signed_url_request=signed_url_req,
+    )
+
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=actor_kwargs["actor_id"],
+        actor_type=actor_kwargs["actor_type"],
+        actor_api_key_id=actor_kwargs["actor_api_key_id"],
+        action=ActionType.FLOW_RUN_INPUT_FILE_DOWNLOADED,
+        entity_type=EntityType.FILE,
+        entity_id=file_id,
+        description=f"Downloaded input file '{file.name}' from flow run",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=file,
+            extra={
+                "flow_id": str(id),
+                "run_id": str(run_id),
+                "file_name": file.name,
+                "file_mimetype": getattr(file, "mimetype", None),
+                "file_size_bytes": getattr(file, "size", None),
+                "content_disposition": signed_url_req.content_disposition.value,
+                "expires_in_seconds": signed_url_req.expires_in,
             },
         ),
     )

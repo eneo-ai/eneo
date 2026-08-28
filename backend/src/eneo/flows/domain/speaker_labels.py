@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+        TranscriptSegment,
+    )
 
 SPEAKER_LINE_RE = re.compile(
     r"^(?P<prefix>\[\d{2}:\d{2}:\d{2} - \d{2}:\d{2}:\d{2}\] )"
@@ -51,21 +57,47 @@ def _format_label(index: int) -> str:
     return f"SPEAKER_{index:02d}"
 
 
+def build_label_renumbering(text: str, offset: int) -> dict[str, str]:
+    """This file's labels mapped to ``SPEAKER_{offset + n}`` in order of first
+    appearance in the text."""
+    mapping: dict[str, str] = {}
+    for line in text.split("\n"):
+        match = SPEAKER_LINE_RE.match(line)
+        if match is None:
+            continue
+        label = match.group("label")
+        if label not in mapping:
+            mapping[label] = _format_label(offset + len(mapping))
+    return mapping
+
+
 def renumber_speaker_labels(text: str, offset: int) -> tuple[str, int]:
     """Rewrite this file's labels to ``SPEAKER_{offset + n}`` in order of first
     appearance. Returns the text and how many distinct labels it had."""
-    mapping: dict[str, str] = {}
+    mapping = build_label_renumbering(text, offset)
     lines: list[str] = []
     for line in text.split("\n"):
         match = SPEAKER_LINE_RE.match(line)
         if match is None:
             lines.append(line)
             continue
-        label = match.group("label")
-        if label not in mapping:
-            mapping[label] = _format_label(offset + len(mapping))
-        lines.append(f"{match.group('prefix')}{mapping[label]}: {match.group('text')}")
+        label = mapping[match.group("label")]
+        lines.append(f"{match.group('prefix')}{label}: {match.group('text')}")
     return "\n".join(lines), len(mapping)
+
+
+def renumber_segment_speakers(
+    segments: Sequence["TranscriptSegment"], mapping: Mapping[str, str]
+) -> list["TranscriptSegment"]:
+    """The same renumbering applied to the structured segments behind the text,
+    so a label means the same person in both views. Labels the text never
+    showed (the service's text is the contract) stay as they are."""
+    return [
+        replace(segment, speaker=mapping.get(segment.speaker, segment.speaker))
+        if segment.speaker is not None
+        else segment
+        for segment in segments
+    ]
 
 
 def build_speaker_inventory(

@@ -967,6 +967,44 @@ export function initFlows(client) {
             }
           }
         });
+      },
+
+      /**
+       * Generate a signed URL for a file the run received as step input, such as
+       * the audio a transcription step read. Access follows the run's artifact
+       * policy, so a reviewer who did not upload the file can still play it.
+       * The signed path is re-based on this client's host so the URL can be used
+       * directly as a same-origin media source (Range requests included).
+       * @param {{flowId: string, runId: string, fileId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params
+       * @returns {Promise<{url: string, expires_at: number}>}
+       * @throws {EneoError}
+       */
+      inputFileSignedUrl: async ({
+        flowId,
+        runId,
+        fileId,
+        expiresIn = 3600,
+        contentDisposition = "inline"
+      }) => {
+        const res = await _fetch(
+          "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/",
+          {
+            method: "post",
+            params: { path: { id: flowId, run_id: runId, file_id: fileId } },
+            requestBody: {
+              "application/json": {
+                expires_in: expiresIn,
+                content_disposition: contentDisposition
+              }
+            }
+          }
+        );
+        const signedUrl = new URL(res.url);
+        const url = new URL(
+          `${signedUrl.pathname}${signedUrl.search}${signedUrl.hash}`,
+          client.baseUrl
+        );
+        return { url: url.toString(), expires_at: res.expires_at };
       }
     }
   };

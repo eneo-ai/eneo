@@ -42,6 +42,28 @@ export function getSpeakerMappingParticipants(payload: Payload): string[] {
     : [];
 }
 
+/** The transcription step this mapping was proposed from, when recorded. */
+export function getSpeakerMappingSourceStep(payload: Payload): {
+  stepId: string | null;
+  stepOrder: number | null;
+} {
+  const extension = record(payload?.speaker_mapping);
+  return {
+    stepId: typeof extension?.source_step_id === "string" ? extension.source_step_id : null,
+    stepOrder: typeof extension?.source_step_order === "number" ? extension.source_step_order : null
+  };
+}
+
+/** Label to name for every row the reviewer has named. */
+export function speakerNamesFromRows(rows: readonly SpeakerMappingRow[]): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const row of rows) {
+    const name = row.name?.trim();
+    if (name) names[row.label] = name;
+  }
+  return names;
+}
+
 function confidenceOf(value: unknown): SpeakerConfidence {
   return value === "high" || value === "medium" ? value : "low";
 }

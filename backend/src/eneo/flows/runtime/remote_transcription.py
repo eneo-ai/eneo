@@ -135,9 +135,13 @@ class RemoteTranscriptionResult:
     duration_seconds: float | None
     model: str | None
     language: str | None
-    # How word timestamps were obtained for speaker labelling, when the service
-    # reports it: provider_words | forced | segment_split | segment_only.
+    # How the service placed words in time for speaker labelling, when it
+    # reports it. A diarize job is expected to report "forced"; segment_split
+    # and segment_only mean it fell back to labelling whole segments.
     alignment: str | None = None
+    # The service's segments behind ``text``, one per rendered line, with the
+    # same speaker labels. None when the service sent none.
+    segments: tuple[TranscriptSegment, ...] | None = None
 
 
 class RemoteTranscriptionClient:
@@ -492,6 +496,7 @@ class RemoteTranscriptionClient:
             model=model if isinstance(model, str) else None,
             language=language if isinstance(language, str) else None,
             alignment=alignment if isinstance(alignment, str) else None,
+            segments=_parse_result_segments(body.get("segments")),
         )
 
     def _parse_job_id(self, response: httpx.Response) -> str:
@@ -583,6 +588,7 @@ class RemoteFlowTranscriber:
         return TranscribedAudio(
             text=result.text,
             duration_seconds=result.duration_seconds or audio_seconds,
+            transcript_segments=result.segments,
             diarization="external" if diarize else None,
             alignment=result.alignment if diarize else None,
         )
@@ -871,6 +877,43 @@ async def _probe_quietly(probe: RunCancelProbe, *, job_id: str) -> bool:
             exc_info=True,
         )
         return False
+
+
+def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
+    """Segments from a result body; malformed entries are dropped, not fatal.
+
+    The rendered text is the contract; segments are the structured view of the
+    same lines that a reader UI uses to seek audio. A service that sends none
+    (or garbage) still produced a usable transcript.
+    """
+    if not isinstance(raw, list):
+        return None
+    segments: list[TranscriptSegment] = []
+    for entry in cast(list[object], raw):
+        if not isinstance(entry, dict):
+            continue
+        item = cast(dict[str, object], entry)
+        text = item.get("text")
+        start = item.get("start")
+        end = item.get("end")
+        if (
+            not isinstance(text, str)
+            or isinstance(start, bool)
+            or isinstance(end, bool)
+            or not isinstance(start, (int, float))
+            or not isinstance(end, (int, float))
+        ):
+            continue
+        speaker = item.get("speaker")
+        segments.append(
+            TranscriptSegment(
+                text=text,
+                start=float(start),
+                end=float(end),
+                speaker=speaker if isinstance(speaker, str) and speaker else None,
+            )
+        )
+    return tuple(segments)
 
 
 def _json_object(response: httpx.Response) -> dict[str, object]:

@@ -85,6 +85,8 @@ function buildRun(status: FlowRun["status"]): FlowRun {
 
 function buildEneo({
   activeCheckpoint,
+  steps,
+  inputFileSignedUrl,
   active,
   edit = vi.fn(),
   approve = vi.fn(),
@@ -97,10 +99,16 @@ function buildEneo({
   approve?: ReturnType<typeof vi.fn>;
   reject?: ReturnType<typeof vi.fn>;
   resume?: ReturnType<typeof vi.fn>;
+  steps?: ReturnType<typeof vi.fn>;
+  inputFileSignedUrl?: ReturnType<typeof vi.fn>;
 }) {
   return {
     flows: {
       runs: {
+        steps: steps ?? vi.fn(async () => []),
+        inputFileSignedUrl:
+          inputFileSignedUrl ??
+          vi.fn(async () => ({ url: "https://app.test/f", expires_at: 4102444800 })),
         reviewCheckpoints: {
           active: active ?? vi.fn(async () => activeCheckpoint),
           edit,
@@ -542,5 +550,96 @@ describe("FlowRunReviewCheckpointPanel", () => {
       (screen.getByRole("button", { name: m.flow_run_review_resume() }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
+  });
+});
+
+describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
+  function buildSpeakerCheckpoint(): FlowRunReviewCheckpoint {
+    return {
+      ...buildCheckpoint("awaiting_review", 1),
+      output_type: "json",
+      current_payload_json: {
+        text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej.\n[00:00:05 - 00:00:09] SPEAKER_01: Hallå.",
+        structured: {
+          speakers: [
+            { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "" },
+            { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
+          ]
+        },
+        speaker_mapping: {
+          source_step_id: "step-0",
+          source_step_order: 1,
+          participants: ["Anna", "Bo"],
+          inventory: [
+            { label: "SPEAKER_00", line_count: 1, samples: ["Hej."] },
+            { label: "SPEAKER_01", line_count: 1, samples: ["Hallå."] }
+          ]
+        }
+      }
+    };
+  }
+
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  });
+
+  it("plays the transcription step's audio next to the transcript", async () => {
+    const steps = vi.fn(async () => [
+      {
+        step_id: "step-0",
+        step_order: 1,
+        runtime_input_file_ids: ["file-1"],
+        input_payload_json: {
+          transcription: {
+            file_ids: ["file-1"],
+            segments: [
+              { file_index: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej." },
+              { file_index: 0, start: 5, end: 9, speaker: "SPEAKER_01", text: "Hallå." }
+            ]
+          }
+        }
+      }
+    ]);
+    const inputFileSignedUrl = vi.fn(async () => ({
+      url: "https://app.test/api/v1/files/file-1/download/?token=t",
+      expires_at: 4102444800
+    }));
+    const eneo = buildEneo({
+      activeCheckpoint: buildSpeakerCheckpoint(),
+      steps,
+      inputFileSignedUrl
+    });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByText(m.flow_run_review_speakers_title());
+    await waitFor(() =>
+      expect(inputFileSignedUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ flowId: "flow-1", runId: "run-1", fileId: "file-1" })
+      )
+    );
+    expect(inputFileSignedUrl).toHaveBeenCalledTimes(1);
+    // Stored segments carry raw labels; the proposed name shows on them.
+    const line = await screen.findByRole("button", { name: /Hej\./ });
+    expect(line.textContent).toContain("Anna");
+    expect(screen.getByRole("button", { name: /Hallå\./ }).textContent).toContain("SPEAKER_01");
+  });
+
+  it("still shows the transcript when the run's steps cannot be loaded", async () => {
+    const eneo = buildEneo({
+      activeCheckpoint: buildSpeakerCheckpoint(),
+      steps: vi.fn(async () => {
+        throw new Error("boom");
+      })
+    });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByRole("button", { name: /Hej\./ });
   });
 });

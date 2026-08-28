@@ -65,7 +65,7 @@ async def test_kb_whisper_language_fallback_only_when_language_is_auto(
         audio_path, language=language, audio_seconds=1.0
     )
 
-    assert result.text == "transcript"
+    assert result == "transcript"
     assert captured_kwargs["language"] == expected_language
 
 
@@ -121,7 +121,7 @@ async def test_each_transcription_network_attempt_is_recorded_once(
         audio_path, language="sv", observer=observer, audio_seconds=51.25
     )
 
-    assert result.text == "transcript"
+    assert result == "transcript"
     # The retry is its own request, not a silent second charge folded into the
     # attempt it replaced.
     assert len(observer.started_requests) == 2

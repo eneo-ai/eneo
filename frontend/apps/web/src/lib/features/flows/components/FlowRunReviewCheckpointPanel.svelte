@@ -15,13 +15,21 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import SpeakerMappingReviewEditor from "./SpeakerMappingReviewEditor.svelte";
+  import TranscriptPlayer from "./TranscriptPlayer.svelte";
   import {
     buildEditedMapping,
     buildSpeakerRows,
     getSpeakerMappingParticipants,
+    getSpeakerMappingSourceStep,
     isSpeakerMappingCheckpoint,
+    speakerNamesFromRows,
     type SpeakerMappingRow
   } from "$lib/features/flows/speakerMappingReview";
+  import {
+    parseTranscript,
+    segmentsFromMetadata,
+    type TranscriptSegment
+  } from "$lib/features/flows/transcriptSegments";
 
   let {
     runId,
@@ -43,7 +51,16 @@
   let actionError: string | null = $state(null);
   let draftValueText = $state("");
   let speakerRows = $state<SpeakerMappingRow[]>([]);
+  // The transcription step's stored segments and audio, loaded once per
+  // checkpoint so the reviewer can listen while naming speakers.
+  let storedSegments = $state<TranscriptSegment[] | null>(null);
+  let audioFileIds = $state<string[]>([]);
+  let audioContextPending = $state(true);
   const isSpeakerMapping = $derived(isSpeakerMappingCheckpoint(checkpoint?.current_payload_json));
+  // Stored segments carry raw labels, so the reviewer's draft names apply
+  // live; the rendered text already has the saved names baked in.
+  const transcriptSegments = $derived(storedSegments ?? parseTranscript(draftValueText));
+  const speakerNames = $derived(speakerNamesFromRows(speakerRows));
   const speakerParticipants = $derived(
     getSpeakerMappingParticipants(checkpoint?.current_payload_json)
   );
@@ -135,12 +152,58 @@
     }
   }
 
+  async function loadTranscriptContext(payload: Record<string, unknown> | null | undefined) {
+    const source = getSpeakerMappingSourceStep(payload);
+    audioContextPending = true;
+    try {
+      const steps = await eneo.flows.runs.steps({ flowId, runId });
+      const sourceStep =
+        steps.find((step) => step.step_id === source.stepId) ??
+        steps.find((step) => step.step_order === source.stepOrder) ??
+        steps.find((step) => readTranscription(step.input_payload_json) !== null);
+      const transcription = readTranscription(sourceStep?.input_payload_json);
+      const fileIds = Array.isArray(transcription?.file_ids)
+        ? transcription.file_ids.filter((id): id is string => typeof id === "string")
+        : (sourceStep?.runtime_input_file_ids ?? []);
+      storedSegments = segmentsFromMetadata(transcription);
+      audioFileIds = fileIds;
+    } catch (error) {
+      // The transcript is still reviewable as text; only playback is lost.
+      console.error("Failed to load transcript context", error);
+    } finally {
+      audioContextPending = false;
+    }
+  }
+
+  function readTranscription(payload: unknown): Record<string, unknown> | null {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    const raw = (payload as Record<string, unknown>).transcription;
+    return raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : null;
+  }
+
+  function getAudioUrl(fileIndex: number) {
+    const fileId = audioFileIds[fileIndex];
+    if (!fileId) return Promise.reject(new Error("No audio file for this part"));
+    return eneo.flows.runs.inputFileSignedUrl({
+      flowId,
+      runId,
+      fileId,
+      contentDisposition: "inline"
+    });
+  }
+
   async function loadCheckpoint() {
     loading = true;
     loadError = null;
     actionError = null;
     try {
-      applyCheckpoint(await eneo.flows.runs.reviewCheckpoints.active({ flowId, runId }));
+      const active = await eneo.flows.runs.reviewCheckpoints.active({ flowId, runId });
+      applyCheckpoint(active);
+      if (active && isSpeakerMappingCheckpoint(active.current_payload_json)) {
+        void loadTranscriptContext(active.current_payload_json);
+      }
     } catch (error) {
       console.error("Failed to load review checkpoint", error);
       loadError = getFlowRuntimeErrorMessage(error, m.flow_run_review_load_failed());
@@ -325,7 +388,9 @@
     <Alert.Description>{m.flow_run_review_no_active_checkpoint()}</Alert.Description>
   </Alert.Root>
 {:else}
-  <div class="flex flex-col gap-4">
+  <!-- The panel renders inside a table cell that keeps its own text on one
+       line; review prose must wrap. -->
+  <div class="flex min-w-0 flex-col gap-4 whitespace-normal">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <h3 class="text-primary text-sm font-semibold">
@@ -393,7 +458,11 @@
       </div>
     {/if}
 
-    <Field.Group class="grid gap-4 lg:grid-cols-2">
+    <Field.Group
+      class="grid gap-4 {isSpeakerMapping
+        ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]'
+        : 'lg:grid-cols-2'}"
+    >
       {#if isSpeakerMapping}
         <SpeakerMappingReviewEditor
           rows={speakerRows}
@@ -405,8 +474,17 @@
           <Field.Label class="text-primary text-xs font-medium">
             {m.flow_run_review_speakers_preview()}
           </Field.Label>
-          <pre
-            class="border-default bg-hover-dimmer min-h-72 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap lg:min-h-80">{draftValueText}</pre>
+          {#key checkpoint.id}
+            <TranscriptPlayer
+              segments={transcriptSegments}
+              fileCount={audioFileIds.length}
+              {getAudioUrl}
+              {speakerNames}
+              textFallback={draftValueText}
+              audioPending={audioContextPending}
+              class="lg:min-h-80"
+            />
+          {/key}
         </Field.Field>
       {:else}
         <Field.Field>

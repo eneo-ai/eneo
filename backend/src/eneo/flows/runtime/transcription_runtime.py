@@ -220,16 +220,16 @@ async def resolve_transcribe_and_attach_audio_input(
     ):
         diarization_message = (
             f"Step {request.step.step_order}: speaker identification was requested "
-            "but skipped; the transcription model did not provide word timestamps."
+            "but skipped; the transcription produced no text to label."
         )
 
     reduced_precision_message = None
     if transcription_result.alignment in REDUCED_PRECISION_ALIGNMENTS:
         reduced_precision_message = (
             f"Step {request.step.step_order}: speakers were labelled per transcript "
-            f"segment ({transcription_result.alignment}) because the transcription "
-            "model gave no word timestamps; a speaker change inside a segment may be "
-            "misattributed."
+            f"segment ({transcription_result.alignment}) because the service could "
+            "not align the words to the audio; a speaker change inside a segment "
+            "may be misattributed."
         )
 
     return AudioRuntimeResolution(

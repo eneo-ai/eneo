@@ -56,6 +56,9 @@ def _runtime_paths_payload() -> dict[str, object]:
         "artifact_signed_url_template": (
             "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/"
         ),
+        "input_file_signed_url_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"
+        ),
     }
 
 
@@ -108,6 +111,11 @@ def test_build_flow_runtime_paths_uses_explicit_api_prefix() -> None:
     assert (
         runtime_paths.artifact_signed_url_template
         == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/artifacts/"
+        "{file_id}/signed-url/"
+    )
+    assert (
+        runtime_paths.input_file_signed_url_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/input-files/"
         "{file_id}/signed-url/"
     )
 

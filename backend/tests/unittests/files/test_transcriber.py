@@ -166,12 +166,7 @@ async def test_transcribe_from_filepath_passes_language_to_adapter(
     transcriber = Transcriber(file_service=_file_service())
     adapter = SimpleNamespace(
         get_text_from_file=AsyncMock(
-            return_value=AdapterTranscription(
-                text="transcript",
-                words=None,
-                segments=None,
-                timestamps_degraded=False,
-            )
+            return_value=AdapterTranscription(text="transcript", segments=())
         )
     )
     transcriber._get_adapter = AsyncMock(return_value=adapter)
@@ -190,9 +185,11 @@ async def test_transcribe_from_filepath_passes_language_to_adapter(
     )
 
     # The decoded length reaches the caller with the text it paid for.
-    assert result == TranscribedAudio(text="transcript", duration_seconds=42.0)
+    assert result == TranscribedAudio(
+        text="transcript", duration_seconds=42.0, segments=()
+    )
     adapter.get_text_from_file.assert_awaited_once_with(
-        wav_file, language=language, observer=None, want_words=False
+        wav_file, language=language, observer=None
     )
 
 

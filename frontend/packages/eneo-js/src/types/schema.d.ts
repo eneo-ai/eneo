@@ -2982,7 +2982,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 168 actions with their enabled status for the modal UI.
+     * @description Retrieve all 169 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -4690,6 +4690,35 @@ export interface paths {
     get: operations["export_flow_run_evidence"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate signed URL for a flow run input file
+     * @description Generate a time-limited signed download URL for a file the run received as step input, such as
+     *     the audio recording a transcription step read.
+     *
+     *     Visibility follows the run's artifact policy: callers can download input files from their own
+     *     runs, tenant admins across the tenant, trusted in-space operators (space owner and space admin)
+     *     for runs in their space, and service-key principals only for their own runs. The uploader need
+     *     not be the caller: a reviewer confirming a transcript needs the recording behind it.
+     *
+     *     The file_id must be listed in a step result's `runtime_input_file_ids` for the specified run.
+     *     Audio downloads honour HTTP Range requests, so the URL can be used directly as a media source.
+     */
+    post: operations["generate_flow_run_input_file_signed_url"];
     delete?: never;
     options?: never;
     head?: never;
@@ -10334,6 +10363,7 @@ export interface components {
       | "flow_run_audio_transcribed"
       | "flow_http_outbound_call"
       | "flow_run_artifact_downloaded"
+      | "flow_run_input_file_downloaded"
       | "flow_evidence_viewed"
       | "flow_evidence_exported_json"
       | "flow_package_exported"
@@ -15426,6 +15456,8 @@ export interface components {
       | "flow_run_evidence_raw_export_forbidden"
       | "flow_run_artifact_not_found"
       | "flow_run_artifact_content_unavailable"
+      | "flow_run_input_file_not_found"
+      | "flow_run_input_file_content_unavailable"
       | "flow_audit_outbox_delivery_not_found"
       | "flow_audit_outbox_redrive_conflict"
       | "flow_definition_checksum_mismatch"
@@ -20592,6 +20624,11 @@ export interface components {
        * @enum {string}
        */
       completeness: "complete" | "incomplete";
+      /**
+       * Recording Seconds
+       * @description Length of the audio the run's transcription steps read, as measured by those steps. Unlike `audio_seconds` it counts each recording once, however many providers it was sent to. Null when no step measured its audio.
+       */
+      recording_seconds?: number | null;
     };
     /**
      * FlowRunWebhookDeliveryPublic
@@ -20826,6 +20863,11 @@ export interface components {
        */
       graph: string;
       /**
+       * Input File Signed Url Template
+       * @description POST template for generating a signed download URL for a file the run received as step input (for example the audio a transcript was made from). Replace `{run_id}` and `{file_id}` with values from a step result's `runtime_input_file_ids` and send a SignedURLRequest body.
+       */
+      input_file_signed_url_template: string;
+      /**
        * List Runs
        * @description GET path for listing visible runs for this flow. Service keys list only runs created by the same key.
        */
@@ -20947,6 +20989,7 @@ export interface components {
      *         "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
      *         "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
      *         "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
+     *         "input_file_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/input-files/{file_id}/signed-url/",
      *         "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
      *         "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
      *         "provider_calls_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/provider-calls/",
@@ -49822,6 +49865,97 @@ export interface operations {
            *       "message": "Evidence audit logging is unavailable."
            *     }
            */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  generate_flow_run_input_file_signed_url: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the requested run. */
+        id: string;
+        /** @description Identifier of the run that received the file. */
+        run_id: string;
+        /** @description Identifier of the run input file to download. */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow, run, or input file not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_input_file_not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Input file not found for this run."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Input file content was purged by retention policy. */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_input_file_content_unavailable",
+           *       "eneo_error_code": 9056,
+           *       "message": "Input file content has been purged by retention policy."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };

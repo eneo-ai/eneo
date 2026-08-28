@@ -18,6 +18,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_CAPACITY_PATH,
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
     FLOW_RUN_EVIDENCE_PATH,
+    FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
     FLOW_RUN_PATH,
     FLOW_RUN_PROVIDER_CALLS_PATH,
     FLOW_RUN_REDISPATCH_PATH,
@@ -228,6 +229,13 @@ FLOW_RUNTIME_ENDPOINT_CONTRACTS: tuple[FlowRuntimeEndpointContract, ...] = (
         operation_id="generate_flow_run_artifact_signed_url",
         success_status=status.HTTP_200_OK,
         runtime_path_fields=(_field("artifact_signed_url_template"),),
+    ),
+    FlowRuntimeEndpointContract(
+        route_path=FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
+        method="post",
+        operation_id="generate_flow_run_input_file_signed_url",
+        success_status=status.HTTP_200_OK,
+        runtime_path_fields=(_field("input_file_signed_url_template"),),
     ),
 )
 

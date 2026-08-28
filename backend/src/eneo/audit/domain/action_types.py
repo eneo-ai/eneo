@@ -120,6 +120,7 @@ class ActionType(str, Enum):
     FLOW_RUN_AUDIO_TRANSCRIBED = "flow_run_audio_transcribed"
     FLOW_HTTP_OUTBOUND_CALL = "flow_http_outbound_call"
     FLOW_RUN_ARTIFACT_DOWNLOADED = "flow_run_artifact_downloaded"
+    FLOW_RUN_INPUT_FILE_DOWNLOADED = "flow_run_input_file_downloaded"
     FLOW_EVIDENCE_VIEWED = "flow_evidence_viewed"
     FLOW_EVIDENCE_EXPORTED_JSON = "flow_evidence_exported_json"
     FLOW_PACKAGE_EXPORTED = "flow_package_exported"

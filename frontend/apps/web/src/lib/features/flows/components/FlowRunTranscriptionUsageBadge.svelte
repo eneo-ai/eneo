@@ -20,7 +20,11 @@
   <Badge
     variant="outline"
     class="bg-secondary/60 text-muted shrink-0 px-2 py-0.5 text-xs font-medium tabular-nums"
-    title={m.flow_run_audio_usage_provider_note()}
+    title={usage.measured
+      ? m.flow_run_audio_recording_note({
+          duration: formatFlowRunAudioDuration(usage.providerSeconds)
+        })
+      : m.flow_run_audio_usage_provider_note()}
   >
     {m.flow_run_audio_badge({ duration: formatFlowRunAudioDuration(usage.audioSeconds) })}
     {#if usage.incomplete}

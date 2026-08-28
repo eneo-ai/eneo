@@ -424,6 +424,27 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Show retention-aware messaging and avoid retry loops for purged content.",
         user_action="The artifact content is no longer available.",
     ),
+    FlowApiErrorCode.RUN_INPUT_FILE_NOT_FOUND: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause=(
+            "The requested file was not submitted as step input to the run, or "
+            "the run is not visible to the caller."
+        ),
+        consumer_action=(
+            "Only request file ids listed in a step result's runtime_input_file_ids."
+        ),
+        user_action="Reload the run; the recording it received is listed there.",
+    ),
+    FlowApiErrorCode.RUN_INPUT_FILE_CONTENT_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The input file's original content was purged or is unavailable.",
+        consumer_action=(
+            "Show retention-aware messaging and avoid retry loops for purged content."
+        ),
+        user_action="The recording is no longer available; the transcript remains.",
+    ),
     FlowApiErrorCode.AUDIT_OUTBOX_DELIVERY_NOT_FOUND: _entry(
         category="Evidence and artifacts",
         surfaced_through="API error response",

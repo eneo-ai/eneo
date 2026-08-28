@@ -25,7 +25,10 @@
   import FlowRunProgressView from "./FlowRunProgressView.svelte";
   import FlowRunEvidenceToolbar from "./FlowRunEvidenceToolbar.svelte";
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
-  import FlowRunEvidenceStepCard from "./FlowRunEvidenceStepCard.svelte";
+  import FlowRunEvidenceStepCard, {
+    type FlowRunTranscriptContext
+  } from "./FlowRunEvidenceStepCard.svelte";
+  import { segmentsFromMetadata } from "$lib/features/flows/transcriptSegments";
   import type { FlowRunProgressSnapshot } from "./flowRunProgress";
   import { getReviewPolicyErrorStepsFromDefinitionSnapshot } from "$lib/features/flows/flowRuntimeErrorMapping";
 
@@ -58,8 +61,12 @@
     /** null: no speaker labels requested; "external": labelled; "skipped:<reason>". */
     diarization?: string | null;
     diarization_elapsed_ms?: number | null;
-    /** provider_words | forced | segment_split | segment_only, from the service. */
+    /** forced | segment_split | segment_only, from the service. */
     alignment?: string | null;
+    /** Audio files read, in the order their timestamps restart. */
+    file_ids?: string[];
+    /** Structured transcript lines; null when the step stored none. */
+    segments?: unknown;
   };
 
   let evidence: EvidencePayload | null = $state(null);
@@ -257,6 +264,33 @@
     return debugStep?.rag ?? null;
   }
 
+  // The transcription step's audio and segments, available to every step card
+  // that shows the transcript (raw or renamed).
+  const transcriptContext = $derived.by((): FlowRunTranscriptContext | null => {
+    for (const result of evidence?.step_results ?? []) {
+      const transcription = getStepTranscription(result);
+      const fileIds = Array.isArray(transcription?.file_ids)
+        ? transcription.file_ids.filter((id): id is string => typeof id === "string")
+        : [];
+      if (fileIds.length === 0) continue;
+      return {
+        fileIds,
+        segments: segmentsFromMetadata(transcription as Record<string, unknown>),
+        getAudioUrl: (fileIndex: number) => {
+          const fileId = fileIds[fileIndex];
+          if (!fileId) return Promise.reject(new Error("No audio file for this part"));
+          return eneo.flows.runs.inputFileSignedUrl({
+            flowId,
+            runId,
+            fileId,
+            contentDisposition: "inline"
+          });
+        }
+      };
+    }
+    return null;
+  });
+
   function getStepTranscription(result: FlowRunStep): FlowRunTranscriptionTelemetry | null {
     const payload = result.input_payload_json;
     if (payload === null || payload === undefined || typeof payload !== "object") {
@@ -451,6 +485,7 @@
         stepAttempts={getStepAttempts(result.step_order)}
         runError={evidence.run.error ?? null}
         {reviewPolicyDefinitionSteps}
+        {transcriptContext}
         {copiedKey}
         expanded={expandedSteps.includes(result.step_order)}
         panelId={getStepPanelId(result.step_order)}

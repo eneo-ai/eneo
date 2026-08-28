@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -20,7 +21,7 @@ from test_flow_run_service import (
 )
 
 from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
-from eneo.files.file_models import FileType
+from eneo.files.file_models import FileContentVariant, FileType
 from eneo.flows.application import flow_run_evidence_service
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_evidence_service import (
@@ -76,7 +77,12 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionEvidenceMeasurement
 from eneo.flows.published_definition import published_definition_checksum
-from eneo.main.exceptions import FileTooLargeException, UnauthorizedException
+from eneo.main.exceptions import (
+    FileTooLargeException,
+    NotFoundException,
+    ResourceGoneException,
+    UnauthorizedException,
+)
 
 
 def _seed_flow_repo(flow_repo, flow) -> None:
@@ -1358,3 +1364,73 @@ async def test_mapped_view_omission_is_counted_once(user, monkeypatch) -> None:
     omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
     assert omission["passages_omitted"] == 1
     assert omission["passage_bytes_omitted"] == 100
+
+
+def _input_file_service(
+    user, *, attached: bool, references: list[object], file_tenant_id=None
+):
+    user = _trace_user(user)
+    file = SimpleNamespace(
+        id=uuid4(), name="meeting.mp3", tenant_id=file_tenant_id or user.tenant_id
+    )
+    flow_run_repo = AsyncMock()
+    flow_run_repo.is_step_input_file = AsyncMock(return_value=attached)
+    file_repo = AsyncMock()
+    file_repo.get_by_id = AsyncMock(return_value=file)
+    file_repo.get_content_references = AsyncMock(return_value=references)
+    access_policy = AsyncMock()
+    access_policy.load_run = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    service = FlowRunEvidenceService(
+        user=user,
+        flow_repo=AsyncMock(),
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=AsyncMock(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        file_repo=file_repo,
+        webhook_delivery_repo=AsyncMock(),
+        access_policy=access_policy,
+    )
+    return service, file, access_policy
+
+
+async def test_run_input_file_is_served_under_the_artifact_access_policy(
+    user,
+) -> None:
+    """Whoever may download the run's artifacts may fetch the audio it read."""
+    service, file, access_policy = _input_file_service(
+        user,
+        attached=True,
+        references=[SimpleNamespace(variant=FileContentVariant.ORIGINAL)],
+    )
+
+    result = await service.get_run_input_file(
+        run_id=uuid4(), flow_id=uuid4(), file_id=file.id
+    )
+
+    assert result is file
+    assert access_policy.load_run.await_args.kwargs["access_kind"] == "artifact"
+
+
+async def test_run_input_file_must_be_attached_to_the_run(user) -> None:
+    service, file, _ = _input_file_service(user, attached=False, references=[])
+
+    with pytest.raises(NotFoundException) as excinfo:
+        await service.get_run_input_file(
+            run_id=uuid4(), flow_id=uuid4(), file_id=file.id
+        )
+
+    assert excinfo.value.code == FlowApiErrorCode.RUN_INPUT_FILE_NOT_FOUND.value
+
+
+async def test_run_input_file_without_original_content_is_gone(user) -> None:
+    service, file, _ = _input_file_service(user, attached=True, references=[])
+
+    with pytest.raises(ResourceGoneException) as excinfo:
+        await service.get_run_input_file(
+            run_id=uuid4(), flow_id=uuid4(), file_id=file.id
+        )
+
+    assert (
+        excinfo.value.code == FlowApiErrorCode.RUN_INPUT_FILE_CONTENT_UNAVAILABLE.value
+    )

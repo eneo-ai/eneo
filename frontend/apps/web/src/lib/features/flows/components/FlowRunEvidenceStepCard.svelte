@@ -15,6 +15,8 @@
   import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
+  import TranscriptPlayer, { type SignedAudio } from "./TranscriptPlayer.svelte";
+  import { parseTranscript, type TranscriptSegment } from "$lib/features/flows/transcriptSegments";
   import {
     isReviewPolicyRunErrorRelevantForStep,
     type FlowReviewPolicyErrorStep
@@ -34,8 +36,19 @@
     /** null: no speaker labels requested; "external": labelled; "skipped:<reason>". */
     diarization?: string | null;
     diarization_elapsed_ms?: number | null;
-    /** provider_words | forced | segment_split | segment_only, from the service. */
+    /** forced | segment_split | segment_only, from the service. */
     alignment?: string | null;
+    /** Audio files read, in the order their timestamps restart. */
+    file_ids?: string[];
+    /** Structured transcript lines; null when the step stored none. */
+    segments?: unknown;
+  };
+
+  /** Audio and segments of the run's transcription step, shared by every card. */
+  export type FlowRunTranscriptContext = {
+    fileIds: string[];
+    segments: TranscriptSegment[] | null;
+    getAudioUrl: (fileIndex: number) => Promise<SignedAudio>;
   };
 
   let {
@@ -51,6 +64,7 @@
     stepAttempts,
     runError = null,
     reviewPolicyDefinitionSteps = [],
+    transcriptContext = null,
     copiedKey,
     expanded,
     panelId,
@@ -75,6 +89,7 @@
     stepAttempts: Record<string, unknown>[];
     runError?: FlowRunError | null;
     reviewPolicyDefinitionSteps?: readonly FlowReviewPolicyErrorStep[];
+    transcriptContext?: FlowRunTranscriptContext | null;
     copiedKey: string | null;
     expanded: boolean;
     panelId: string;
@@ -103,6 +118,41 @@
 
   let inputOpen = $state(false);
   const hasResultFiles = $derived(resultFiles.length > 0);
+
+  // A step whose text output is the (possibly renamed) transcript gets the
+  // player: the stored segments carry raw labels, and this step's own speaker
+  // mapping, when it has one, supplies the names.
+  const outputText = $derived(
+    typeof result.output_payload_json?.text === "string" ? result.output_payload_json.text : ""
+  );
+  const transcriptSegments = $derived.by(() => {
+    if (!transcriptContext || !outputText) return null;
+    const parsed = parseTranscript(outputText);
+    if (parsed.length === 0) return null;
+    return transcriptContext.segments ?? parsed;
+  });
+  const transcriptSpeakerNames = $derived.by(() => {
+    const structured = result.output_payload_json?.structured;
+    const speakers =
+      structured && typeof structured === "object" && !Array.isArray(structured)
+        ? (structured as Record<string, unknown>).speakers
+        : null;
+    const names: Record<string, string> = {};
+    if (!Array.isArray(speakers)) return names;
+    for (const item of speakers) {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        const entry = item as Record<string, unknown>;
+        if (
+          typeof entry.label === "string" &&
+          typeof entry.name === "string" &&
+          entry.name.trim()
+        ) {
+          names[entry.label] = entry.name.trim();
+        }
+      }
+    }
+    return names;
+  });
 </script>
 
 <Card.Root class="overflow-hidden">
@@ -203,7 +253,16 @@
               </div>
             {/if}
 
-            {#if result.output_payload_json.text && !result.output_payload_json.structured && !hasResultFiles}
+            {#if transcriptSegments && transcriptContext && !hasResultFiles}
+              <TranscriptPlayer
+                segments={transcriptSegments}
+                fileCount={transcriptContext.fileIds.length}
+                getAudioUrl={transcriptContext.getAudioUrl}
+                speakerNames={transcriptSpeakerNames}
+                textFallback={outputText}
+                class="mt-1"
+              />
+            {:else if result.output_payload_json.text && !result.output_payload_json.structured && !hasResultFiles}
               <div class="bg-hover-dimmer mt-1 max-h-96 overflow-auto rounded-lg p-4">
                 <Markdown source={result.output_payload_json.text} class="text-sm" />
               </div>

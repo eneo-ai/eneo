@@ -1,4 +1,4 @@
-"""Word timestamps from the LiteLLM transcription adapter."""
+"""Chunk windows from the LiteLLM transcription adapter."""
 
 from __future__ import annotations
 
@@ -8,14 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
-import pytest
-
-from eneo.main.exceptions import ProviderCapabilityRejectedException
 from eneo.transcription_models.infrastructure.adapters import litellm_transcription
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
     TranscriptSegment,
-    TranscriptWord,
 )
 
 TRANSPORT = (
@@ -82,129 +78,59 @@ def _audio(tmp_path: Path, chunk_seconds: list[float], monkeypatch) -> SimpleNam
     return SimpleNamespace(duration=sum(chunk_seconds), asplit_file=asplit_file)
 
 
-async def test_word_timestamps_are_requested_and_offset_by_measured_chunks(
-    monkeypatch, tmp_path
-) -> None:
+async def test_segments_are_the_measured_chunk_windows(monkeypatch, tmp_path) -> None:
     calls: list[dict[str, object]] = []
+    texts = iter([" hej ", "du"])
 
     async def fake(**kwargs):
         calls.append(kwargs)
+        # Provider timings are deliberately nonsense; they must not be used.
         return SimpleNamespace(
-            text="hej",
-            words=[{"word": "hej", "start": 1.0, "end": 1.5}],
+            text=next(texts),
+            words=[{"word": "hej", "start": 0.0, "end": 900.0}],
+            segments=[{"text": "hej", "start": 0.0, "end": 900.0}],
         )
 
     monkeypatch.setattr(TRANSPORT, AsyncMock(side_effect=fake))
     audio = _audio(tmp_path, [300.7, 120.0], monkeypatch)
 
-    result = await _adapter().get_text_from_file(audio, want_words=True)  # type: ignore[arg-type]
+    result = await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
 
-    assert all(call["response_format"] == "verbose_json" for call in calls)
-    assert all(call["timestamp_granularities"] == ["word", "segment"] for call in calls)
-    assert result.timestamps_degraded is False
-    # The second chunk's words are shifted by the first chunk's measured length,
-    # not by the nominal five minutes the transcript header claims.
-    assert result.words == (
-        TranscriptWord("hej", 1.0, 1.5),
-        TranscriptWord("hej", 301.7, 302.2),
+    # Provider timestamps are never requested.
+    assert all("response_format" not in call for call in calls)
+    assert all("timestamp_granularities" not in call for call in calls)
+    # Each chunk's window is placed by the measured lengths of the chunks
+    # before it, not by the nominal five minutes the transcript header claims.
+    assert result.segments == (
+        TranscriptSegment("hej", 0.0, 300.7),
+        TranscriptSegment("du", 300.7, 420.7),
     )
-    assert result.text.startswith("### 0:00 - 5:00")
+    assert result.text.startswith("### 0:00 - 5:00\n\n hej ")
 
 
-async def test_without_word_request_no_timestamp_parameters_are_sent(
+async def test_silent_chunks_keep_their_place_but_emit_no_segment(
     monkeypatch, tmp_path
 ) -> None:
-    calls: list[dict[str, object]] = []
+    texts = iter(["hej", "   ", "du"])
 
     async def fake(**kwargs):
-        calls.append(kwargs)
-        return SimpleNamespace(
-            text="hej", words=[{"word": "hej", "start": 0, "end": 1}]
-        )
+        return SimpleNamespace(text=next(texts))
 
     monkeypatch.setattr(TRANSPORT, AsyncMock(side_effect=fake))
+    audio = _audio(tmp_path, [300.0, 300.0, 60.0], monkeypatch)
+
+    result = await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
+
+    assert result.segments == (
+        TranscriptSegment("hej", 0.0, 300.0),
+        TranscriptSegment("du", 600.0, 660.0),
+    )
+
+
+async def test_transcript_with_no_text_has_no_segments(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(TRANSPORT, AsyncMock(return_value=SimpleNamespace(text="")))
     audio = _audio(tmp_path, [10.0], monkeypatch)
 
     result = await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
 
-    assert "response_format" not in calls[0]
-    assert result.words is None
-    assert result.timestamps_degraded is False
-
-
-async def test_provider_rejecting_timestamps_degrades_to_text_only(
-    monkeypatch, tmp_path
-) -> None:
-    calls: list[dict[str, object]] = []
-
-    async def fake(**kwargs):
-        calls.append(kwargs)
-        if "response_format" in kwargs:
-            raise ProviderCapabilityRejectedException(
-                "no", capability="response_format", retry_without_capability_safe=False
-            )
-        return SimpleNamespace(text="hej")
-
-    monkeypatch.setattr(TRANSPORT, AsyncMock(side_effect=fake))
-    audio = _audio(tmp_path, [10.0, 10.0], monkeypatch)
-    observer = _Observer()
-
-    result = await _adapter().get_text_from_file(
-        audio,  # type: ignore[arg-type]
-        want_words=True,
-        observer=observer,  # type: ignore[arg-type]
-    )
-
-    # First chunk: refused with timestamps, retried without; second chunk never asks.
-    assert [("response_format" in call) for call in calls] == [True, False, False]
-    assert result.words is None
-    assert result.timestamps_degraded is True
-    assert result.text.count("hej") == 2
-    # The refused attempt is recorded as a rejection, the retries as completions.
-    assert observer.rejected_reasons == ["provider_rejected"]
-    assert len(observer.completed_calls) == 2
-
-
-async def test_provider_returning_no_timestamps_degrades(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(
-        TRANSPORT, AsyncMock(return_value=SimpleNamespace(text="hej", words=[]))
-    )
-    audio = _audio(tmp_path, [10.0], monkeypatch)
-
-    result = await _adapter().get_text_from_file(audio, want_words=True)  # type: ignore[arg-type]
-
-    assert result.words is None
-    assert result.segments is None
-    assert result.timestamps_degraded is True
-
-
-async def test_segments_survive_when_words_are_missing(monkeypatch, tmp_path) -> None:
-    async def fake(**kwargs):
-        return SimpleNamespace(
-            text="hej du",
-            segments=[{"text": " hej du ", "start": 0.5, "end": 1.2}],
-        )
-
-    monkeypatch.setattr(TRANSPORT, AsyncMock(side_effect=fake))
-    audio = _audio(tmp_path, [300.7, 10.0], monkeypatch)
-
-    result = await _adapter().get_text_from_file(audio, want_words=True)  # type: ignore[arg-type]
-
-    assert result.words is None
-    assert result.timestamps_degraded is False
-    assert result.segments == (
-        TranscriptSegment("hej du", 0.5, 1.2),
-        TranscriptSegment("hej du", 301.2, 301.9),
-    )
-
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        [{"word": "hej", "start": "0", "end": 1}],
-        [{"word": None, "start": 0, "end": 1}],
-        "not a list",
-    ],
-)
-def test_malformed_word_payloads_are_treated_as_absent(raw: object) -> None:
-    assert litellm_transcription._extract_words(SimpleNamespace(words=raw)) is None
+    assert result.segments == ()
