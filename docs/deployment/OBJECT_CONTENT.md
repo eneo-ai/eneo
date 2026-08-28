@@ -672,16 +672,18 @@ store-generation fence, which pre-upgrade code does not, so never change
 destination while any pre-upgrade process is running. The old columns are
 dropped by a separate migration in a later release.
 
-The File/Icon schema and inventory revisions do metadata work only. The first
-revision installs a database trigger that freezes legacy payload columns and
-commits that fence. The following revision records one resumable ledger item per
-legacy variant in separately committed, idempotent groups. Inventory can run
-without retaining the schema revision's exclusive locks on `files` or `icons`.
-Both revisions keep every legacy byte and integrity column. Existing logical
-sizes are reused where available; `pg_column_size` provides a stored-byte
-estimate for variants that have no legacy logical-size fact. They do not copy or
-hash payloads, contact object storage, hold an `ACCESS EXCLUSIVE` fence during
-the owner scan, or drop the old columns. Normal reads prefer object-content
+The File/Icon revisions perform schema setup followed by row-metadata inventory.
+The first revision installs a database trigger that freezes legacy payload
+columns and commits that fence. The following revision records one resumable
+ledger item per legacy variant in separately committed, idempotent groups. It
+refuses a non-UTF-8 database before writing the first group because legacy text
+has UTF-8 canonical bytes. Inventory can run without retaining the schema
+revision's exclusive locks on `files` or `icons`.
+Both revisions keep every legacy byte and integrity column. The inventory scans
+the owners and obtains the exact logical byte length of each frozen source
+column without hashing, converting, or copying external payloads. It does not
+contact object storage, hold an `ACCESS EXCLUSIVE` fence during the owner scan,
+or drop the old columns. Normal reads prefer object-content
 references and fall back to the frozen legacy variant only while its reference
 is missing.
 
@@ -693,10 +695,13 @@ payload copy in PostgreSQL; from the first authoritative remote payload onward,
 backup and restore must include both PostgreSQL and the paired bucket.
 
 This unreleased expand revision reuses Alembic revision ID `202607231700` and
-replaces the former destructive normalization at that position. A test or
-development environment that already completed the former revision must restore
-its pre-upgrade database backup before using the new chain. Alembic cannot tell
-the two implementations apart from the shared revision ID.
+replaces the former destructive normalization at that position. The inventory
+revision `202607231745` was also corrected in place before release so capacity
+uses logical source bytes consistently. A test or development environment that
+started or completed either earlier revision must restore its pre-upgrade
+database backup before using the new chain. The inventory commits groups
+independently, and a rerun deliberately keeps existing ledger rows. Alembic also
+cannot detect changed code behind an already-recorded revision ID.
 
 After these revisions, recovery is forward: keep the legacy source frozen,
 retry failed work, and resume from the ledger. A rollback to an older image is a

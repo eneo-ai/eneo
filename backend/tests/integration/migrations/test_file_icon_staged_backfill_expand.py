@@ -23,6 +23,8 @@ _POSTGRES_13_IMAGE = (
 _PREVIOUS_REVISION = "202607240310"
 _EXPAND_REVISION = "202607231700"
 _INVENTORY_REVISION = "202607231745"
+_EXTRACTED_TEXT = "expanded extracted text é"
+_TRANSCRIPTION = "spoken words åäö " * 512
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -135,9 +137,9 @@ def _seed_legacy_owners(database_url: str) -> dict[str, str]:
                 transcription, user_id, tenant_id, parent_file_id
             )
             VALUES
-                (%s, 'legacy.pdf', 'extracted text', %s, 'legacy-text', 14,
-                 'application/pdf', 'text', 'spoken words', %s, %s, NULL),
-                (%s, 'legacy.png', NULL, %s, 'legacy-image', 12,
+                (%s, 'legacy.pdf', %s, %s, 'legacy-text', 12,
+                 'application/pdf', 'text', %s, %s, %s, NULL),
+                (%s, 'legacy.png', NULL, %s, 'legacy-image', 1200,
                  'image/png', 'image', NULL, %s, %s, NULL),
                 (%s, 'legacy-page.png', NULL, %s, 'legacy-derived', 12,
                  'image/png', 'image', NULL, %s, %s, %s),
@@ -146,7 +148,9 @@ def _seed_legacy_owners(database_url: str) -> dict[str, str]:
             """,
             (
                 ids["text"],
+                _EXTRACTED_TEXT,
                 b"original pdf",
+                _TRANSCRIPTION,
                 ids["user"],
                 ids["tenant"],
                 ids["image"],
@@ -167,7 +171,7 @@ def _seed_legacy_owners(database_url: str) -> dict[str, str]:
         cursor.execute(
             """
             INSERT INTO icons (id, blob, mimetype, size, tenant_id)
-            VALUES (%s, %s, 'image/png', 11, %s)
+            VALUES (%s, %s, 'image/png', 1100, %s)
             """,
             (ids["icon"], b"legacy icon", ids["tenant"]),
         )
@@ -292,7 +296,13 @@ def test_staged_inventory_is_online_resumable_and_preserves_legacy_bytes(
             and state == "pending"
             for ordinal, tenant_id, estimate, state in actual.values()
         )
-        assert actual[("file", ids["text"], "extracted_text")][2] == 14
+        assert actual[("file", ids["text"], "extracted_text")][2] == len(
+            _EXTRACTED_TEXT.encode()
+        )
+        assert actual[("file", ids["text"], "original")][2] == len(b"original pdf")
+        assert actual[("file", ids["text"], "transcription")][2] == len(
+            _TRANSCRIPTION.encode()
+        )
         assert actual[("file", ids["image"], "legacy_image")][2] == 12
         assert actual[("file", ids["derived"], "derived_page")][2] == 12
         assert actual[("file", ids["audio"], "original")][2] == 12
@@ -353,12 +363,6 @@ def test_staged_inventory_is_online_resumable_and_preserves_legacy_bytes(
             "UPDATE OF blob, mimetype, size"
             in (trigger_definitions["freeze_icons_legacy_payload_update"])
         )
-
-
-def test_expand_freezes_legacy_payload_writes_but_allows_metadata_and_deletes(
-    migration_database: tuple[str, Config],
-) -> None:
-    database_url, _config = migration_database
     with _connect(database_url) as connection, connection.cursor() as cursor:
         cursor.execute(
             "UPDATE files SET name = 'renamed.pdf' WHERE name = 'legacy.pdf'"
@@ -396,3 +400,77 @@ def test_expand_freezes_legacy_payload_writes_but_allows_metadata_and_deletes(
         )
         cursor.execute("DELETE FROM files WHERE name = 'renamed.pdf'")
         assert cursor.rowcount == 1
+
+
+def test_inventory_refuses_non_utf8_before_writing_ledger_rows() -> None:
+    postgres = PostgresContainer(
+        image=_POSTGRES_13_IMAGE,
+        username="file_icon_latin1",
+        password="file_icon_latin1_password",
+        dbname="file_icon_latin1",
+    ).with_env("POSTGRES_INITDB_ARGS", "--encoding=LATIN1 --locale=C")
+    with postgres:
+        database_url = postgres.get_connection_url()
+        config = _alembic_config(database_url)
+        command.stamp(config, _EXPAND_REVISION)
+        with _connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE files (
+                    id uuid PRIMARY KEY,
+                    file_type text,
+                    parent_file_id uuid,
+                    tenant_id uuid,
+                    size bigint,
+                    text text,
+                    blob bytea,
+                    transcription text
+                );
+                CREATE TABLE icons (
+                    id uuid PRIMARY KEY,
+                    tenant_id uuid,
+                    size bigint,
+                    blob bytea
+                );
+                CREATE TABLE file_content_references (
+                    file_id uuid,
+                    variant text,
+                    ordinal integer
+                );
+                CREATE TABLE icon_content_references (
+                    icon_id uuid,
+                    variant text
+                );
+                CREATE TABLE file_icon_backfill_items (
+                    owner_kind text,
+                    owner_id uuid,
+                    variant text,
+                    ordinal integer,
+                    tenant_id uuid,
+                    payload_size_estimate bigint,
+                    CONSTRAINT uq_file_icon_backfill_items_owner_variant
+                        UNIQUE (owner_kind, owner_id, variant, ordinal)
+                );
+                """
+            )
+            cursor.execute("SHOW server_encoding")
+            assert cursor.fetchone() == ("LATIN1",)
+            cursor.execute(
+                """
+                INSERT INTO files (
+                    id, file_type, parent_file_id, tenant_id, size,
+                    text, blob, transcription
+                )
+                VALUES (%s, 'text', NULL, %s, 4, %s, NULL, NULL)
+                """,
+                (str(uuid4()), str(uuid4()), "café"),
+            )
+
+        with pytest.raises(RuntimeError, match="found LATIN1"):
+            command.upgrade(config, _INVENTORY_REVISION)
+
+        with _connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT version_num FROM alembic_version")
+            assert cursor.fetchone() == (_EXPAND_REVISION,)
+            cursor.execute("SELECT count(*) FROM file_icon_backfill_items")
+            assert cursor.fetchone() == (0,)

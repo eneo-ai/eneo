@@ -10,6 +10,8 @@ inventory never inherits ACCESS EXCLUSIVE locks on ``files`` or ``icons``.
 
 Each variant group commits independently and ignores already-inventoried keys.
 An interrupted run can therefore resume without duplicating ledger items.
+Direct ``octet_length`` records the logical bytes of the frozen source column
+without hashing, converting, or copying the payload.
 """
 
 from collections.abc import Sequence
@@ -25,6 +27,15 @@ _CONFLICT = """
 ON CONFLICT ON CONSTRAINT uq_file_icon_backfill_items_owner_variant
 DO NOTHING
 """
+
+
+def _require_utf8_server_encoding() -> None:
+    encoding = op.get_bind().exec_driver_sql("SHOW server_encoding").scalar_one()
+    if encoding != "UTF8":
+        raise RuntimeError(
+            "File/Icon legacy inventory requires UTF8 server_encoding; "
+            f"found {encoding}"
+        )
 
 
 def _inventory_primary_file_payloads() -> None:
@@ -49,7 +60,11 @@ def _inventory_primary_file_payloads() -> None:
             END,
             0,
             file.tenant_id,
-            file.size::bigint
+            CASE
+                WHEN file.file_type = 'text'
+                    THEN octet_length(file.text)::bigint
+                ELSE octet_length(file.blob)::bigint
+            END
         FROM files AS file
         WHERE CASE
                   WHEN file.file_type = 'text' THEN file.text IS NOT NULL
@@ -84,7 +99,7 @@ def _inventory_text_originals() -> None:
             payload_size_estimate
         )
         SELECT 'file', file.id, 'original', 0, file.tenant_id,
-               pg_column_size(file.blob)::bigint
+               octet_length(file.blob)::bigint
         FROM files AS file
         WHERE file.file_type = 'text'
           AND file.blob IS NOT NULL
@@ -112,7 +127,7 @@ def _inventory_transcriptions() -> None:
             payload_size_estimate
         )
         SELECT 'file', file.id, 'transcription', 0, file.tenant_id,
-               pg_column_size(file.transcription)::bigint
+               octet_length(file.transcription)::bigint
         FROM files AS file
         WHERE file.transcription IS NOT NULL
           AND NOT EXISTS (
@@ -139,7 +154,7 @@ def _inventory_icons() -> None:
             payload_size_estimate
         )
         SELECT 'icon', icon.id, 'primary', 0, icon.tenant_id,
-               icon.size::bigint
+               octet_length(icon.blob)::bigint
         FROM icons AS icon
         WHERE icon.blob IS NOT NULL
           AND NOT EXISTS (
@@ -155,6 +170,7 @@ def _inventory_icons() -> None:
 
 def upgrade() -> None:
     with op.get_context().autocommit_block():
+        _require_utf8_server_encoding()
         _inventory_primary_file_payloads()
         _inventory_text_originals()
         _inventory_transcriptions()
