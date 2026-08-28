@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Identity,
@@ -100,6 +101,32 @@ class FileIconBackfillItems(BaseWithTableName):
             "state",
             "lease_expires_at",
             "id",
+        ),
+    )
+
+
+class FileIconBackfillAdmissionState(BaseWithTableName):
+    """Transactional invalidation token for pre-campaign capacity decisions."""
+
+    singleton: Mapped[bool] = mapped_column(
+        Boolean,
+        primary_key=True,
+        server_default=text("true"),
+    )
+    generation: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=text("0"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "singleton",
+            name="ck_file_icon_backfill_admission_singleton",
+        ),
+        CheckConstraint(
+            "generation >= 0",
+            name="ck_file_icon_backfill_admission_generation",
         ),
     )
 

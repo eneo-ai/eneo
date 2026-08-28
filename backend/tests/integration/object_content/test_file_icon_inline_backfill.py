@@ -15,6 +15,7 @@ from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     IconContentReferences,
+    InlineContentPayloads,
     ObjectContents,
 )
 from eneo.database.tables.users_table import Users
@@ -25,7 +26,9 @@ from eneo.object_content.content import (
     ContentFacts,
     ContentFailureCode,
     ContentIntent,
+    ContentReadGrant,
     ContentState,
+    ObjectContentIntegrityError,
     ObjectContentStateError,
     StorageKind,
 )
@@ -740,6 +743,62 @@ async def test_large_inline_campaign_waits_for_capacity_acknowledgement(
 
 
 @pytest.mark.asyncio
+async def test_partial_owner_delete_rechecks_waiting_capacity_in_same_worker(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    deleted_file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=b"delete this source",
+        estimate=800,
+    )
+    retained_file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=b"retain this source",
+        estimate=800,
+    )
+    backfill = _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+    )
+
+    waiting = await backfill.run_once()
+
+    assert waiting.state is FileIconBackfillState.WAITING_FOR_CAPACITY
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            sa.text("DELETE FROM files WHERE id = :file_id"),
+            {"file_id": deleted_file_id},
+        )
+
+    completed = await backfill.run_once()
+
+    assert completed.state is FileIconBackfillState.COMPLETE
+    assert completed.completed_count == 1
+    async with object_content_database.session() as session, session.begin():
+        states = dict(
+            (
+                await session.execute(
+                    sa.text(
+                        """
+                    SELECT owner_id, state
+                    FROM file_icon_backfill_items
+                    WHERE owner_id IN (:deleted_file_id, :retained_file_id)
+                    """
+                    ),
+                    {
+                        "deleted_file_id": deleted_file_id,
+                        "retained_file_id": retained_file_id,
+                    },
+                )
+            ).all()
+        )
+    assert states == {
+        deleted_file_id: "cancelled",
+        retained_file_id: "done",
+    }
+
+
+@pytest.mark.asyncio
 async def test_reference_failure_before_admission_requires_inline_capacity(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -1019,6 +1078,108 @@ async def test_existing_reference_does_not_require_phantom_inline_capacity(
             )
         ).one()
     assert item == ("done", content_id)
+
+
+@pytest.mark.asyncio
+async def test_failed_adopted_reference_reopens_completed_campaign_for_recovery(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    payload = b"authoritative legacy source"
+    file_id = await _seed_legacy_text(
+        object_content_database,
+        payload=payload,
+    )
+    completed_backfill = _backfill(object_content_database)
+
+    completed = await completed_backfill.run_once()
+
+    assert completed.state is FileIconBackfillState.COMPLETE
+    tenant_id, _ = await _tenant_and_user(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        content_id = await session.scalar(
+            sa.select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id == file_id,
+                FileContentReferences.variant == "extracted_text",
+                FileContentReferences.ordinal == 0,
+            )
+        )
+        assert content_id is not None
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.update(InlineContentPayloads)
+            .where(InlineContentPayloads.content_id == content_id)
+            .values(payload=b"x" * len(payload))
+        )
+
+    service = ObjectContentService(
+        ObjectContentCoreSettings(
+            inline_maximum_bytes=1024,
+            inline_io_chunk_bytes=256,
+        ),
+        object_content_database,
+    )
+    grant = ContentReadGrant(
+        content_id=content_id,
+        tenant_id=tenant_id,
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+    )
+    with pytest.raises(ObjectContentIntegrityError):
+        async with service.open_content(grant) as opened:
+            _ = b"".join([chunk async for chunk in opened.chunks])
+
+    halted = await completed_backfill.run_once()
+
+    assert halted.state is FileIconBackfillState.HALTED
+    async with object_content_database.session() as session, session.begin():
+        failed_state = (
+            await session.execute(
+                sa.text(
+                    """
+                SELECT item.state, item.content_id, campaign.state,
+                       item.failure_revision
+                FROM file_icon_backfill_items AS item
+                CROSS JOIN file_icon_backfill_campaign AS campaign
+                WHERE item.owner_id = :file_id
+                """
+                ),
+                {"file_id": file_id},
+            )
+        ).one()
+    assert failed_state == ("failed", None, "halted", 0)
+
+    recovered = await _backfill(
+        object_content_database,
+        resume_revision=1,
+    ).run_once()
+
+    assert recovered.state is FileIconBackfillState.COMPLETE
+    assert recovered.completed_count == 1
+    async with object_content_database.session() as session, session.begin():
+        replacement_id = await session.scalar(
+            sa.select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id == file_id,
+                FileContentReferences.variant == "extracted_text",
+                FileContentReferences.ordinal == 0,
+            )
+        )
+        replacement = await session.get(ObjectContents, replacement_id)
+        replacement_state = None if replacement is None else replacement.state
+        replacement_sha256 = None if replacement is None else replacement.sha256
+        item_state = await session.scalar(
+            sa.text(
+                """
+                SELECT state
+                FROM file_icon_backfill_items
+                WHERE owner_id = :file_id
+                """
+            ),
+            {"file_id": file_id},
+        )
+    assert replacement_id != content_id
+    assert replacement is not None
+    assert replacement_state == ContentState.AVAILABLE.value
+    assert replacement_sha256 == sha256(payload).digest()
+    assert item_state == "done"
 
 
 @pytest.mark.asyncio

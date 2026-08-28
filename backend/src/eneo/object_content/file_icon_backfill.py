@@ -19,6 +19,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import DatabaseSessionManager, sessionmanager
 from eneo.database.tables.file_icon_backfill_table import (
+    FileIconBackfillAdmissionState,
     FileIconBackfillCampaign,
     FileIconBackfillItems,
 )
@@ -102,6 +103,7 @@ class _Campaign:
     state: FileIconBackfillState
     target_kind: StorageKind | None
     detail: str | None
+    admission_generation: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +218,7 @@ class _FileIconBackfillRepository:
                 detail="The object-store backfill adapter is not active in this release",
             )
 
+        admission_generation = await self.admission_generation()
         required_bytes = await self.capacity_required_bytes()
         capacity_granted = (
             required_bytes <= settings.auto_inline_max_bytes
@@ -232,6 +235,7 @@ class _FileIconBackfillRepository:
                     "FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK to at least that value "
                     "after reserving payload, WAL, and safety headroom"
                 ),
+                admission_generation=admission_generation,
             )
         return await self._insert_campaign(
             state=FileIconBackfillState.ACTIVE,
@@ -867,6 +871,18 @@ class _FileIconBackfillRepository:
         )
         return int(required_bytes or 0)
 
+    async def admission_generation(self) -> int:
+        generation = await self._session.scalar(
+            sa.select(FileIconBackfillAdmissionState.generation).where(
+                FileIconBackfillAdmissionState.singleton.is_(True)
+            )
+        )
+        return int(generation or 0)
+
+    async def campaign_state(self) -> FileIconBackfillState | None:
+        state = await self._session.scalar(sa.select(FileIconBackfillCampaign.state))
+        return None if state is None else FileIconBackfillState(state)
+
     async def _has_actionable_items(self) -> bool:
         return bool(
             await self._session.scalar(
@@ -1028,30 +1044,36 @@ class FileIconBackfill:
         self._object_content = object_content
         self._database = database
         self._completed_result: FileIconBackfillResult | None = None
-        self._waiting_capacity_result: FileIconBackfillResult | None = None
+        self._waiting_capacity_result: tuple[FileIconBackfillResult, int] | None = None
 
     async def run_once(self) -> FileIconBackfillResult:
         if self._completed_result is not None:
-            return self._completed_result
+            async with self._database.session() as session, session.begin():
+                state = await _FileIconBackfillRepository(session).campaign_state()
+            if state is FileIconBackfillState.COMPLETE:
+                return self._completed_result
+            self._completed_result = None
         if self._waiting_capacity_result is not None:
+            waiting_result, waiting_generation = self._waiting_capacity_result
             async with self._database.session() as session, session.begin():
                 repository = _FileIconBackfillRepository(session)
                 campaign_exists = await repository.has_campaign()
                 policy_target = (
                     None if campaign_exists else await repository.policy_target()
                 )
-                source_items = (
-                    False if campaign_exists else await repository.has_source_items()
+                admission_generation = (
+                    None if campaign_exists else await repository.admission_generation()
                 )
             if (
                 not campaign_exists
-                and source_items
                 and policy_target is StorageKind.POSTGRES_INLINE
+                and admission_generation == waiting_generation
             ):
-                return self._waiting_capacity_result
+                return waiting_result
             self._waiting_capacity_result = None
 
         result: FileIconBackfillResult | None = None
+        admission_generation: int | None = None
         async with self._database.connect() as guard:
             acquired = await guard.scalar(
                 sa.text(
@@ -1062,7 +1084,7 @@ class FileIconBackfill:
                 )
             )
             if acquired:
-                result = await self._run_once()
+                result, admission_generation = await self._run_once()
 
         if result is None:
             return await self._contended_result()
@@ -1070,10 +1092,12 @@ class FileIconBackfill:
         if result.state is FileIconBackfillState.COMPLETE:
             self._completed_result = result
         elif result.state is FileIconBackfillState.WAITING_FOR_CAPACITY:
-            self._waiting_capacity_result = result
+            if admission_generation is None:
+                raise RuntimeError("Capacity wait lost its admission generation")
+            self._waiting_capacity_result = (result, admission_generation)
         return result
 
-    async def _run_once(self) -> FileIconBackfillResult:
+    async def _run_once(self) -> tuple[FileIconBackfillResult, int | None]:
         admission = _Admission(
             terminal=True,
             inspected_count=0,
@@ -1086,26 +1110,32 @@ class FileIconBackfill:
                 if not await repository.has_campaign():
                     admission = await repository.admit(self._settings)
                     if not admission.terminal:
-                        return self._result(
-                            _Campaign(
-                                state=FileIconBackfillState.ACTIVE,
-                                target_kind=None,
-                                detail=(
-                                    "Finalizing File/Icon backfill admission before "
-                                    "the destination capacity decision"
+                        return (
+                            self._result(
+                                _Campaign(
+                                    state=FileIconBackfillState.ACTIVE,
+                                    target_kind=None,
+                                    detail=(
+                                        "Finalizing File/Icon backfill admission before "
+                                        "the destination capacity decision"
+                                    ),
                                 ),
+                                admitted_count=admission.inspected_count,
+                                completed_count=admission.completed_count,
+                                cancelled_count=admission.cancelled_count,
                             ),
-                            admitted_count=admission.inspected_count,
-                            completed_count=admission.completed_count,
-                            cancelled_count=admission.cancelled_count,
+                            None,
                         )
                 campaign = await repository.campaign_or_start(self._settings)
                 if campaign.state is not FileIconBackfillState.ACTIVE:
-                    return self._result(
-                        campaign,
-                        admitted_count=admission.inspected_count,
-                        completed_count=admission.completed_count,
-                        cancelled_count=admission.cancelled_count,
+                    return (
+                        self._result(
+                            campaign,
+                            admitted_count=admission.inspected_count,
+                            completed_count=admission.completed_count,
+                            cancelled_count=admission.cancelled_count,
+                        ),
+                        campaign.admission_generation,
                     )
                 if campaign.target_kind is not StorageKind.POSTGRES_INLINE:
                     raise ObjectContentStateError(
@@ -1113,15 +1143,18 @@ class FileIconBackfill:
                     )
                 work = await repository.claim(self._settings)
         except _AdmissionContended:
-            return self._result(
-                _Campaign(
-                    state=FileIconBackfillState.ACTIVE,
-                    target_kind=None,
-                    detail=(
-                        "A File/Icon owner or reference is changing; admission "
-                        "will retry on the next worker run"
-                    ),
-                )
+            return (
+                self._result(
+                    _Campaign(
+                        state=FileIconBackfillState.ACTIVE,
+                        target_kind=None,
+                        detail=(
+                            "A File/Icon owner or reference is changing; admission "
+                            "will retry on the next worker run"
+                        ),
+                    )
+                ),
+                None,
             )
 
         completed_count = 0
@@ -1190,13 +1223,16 @@ class FileIconBackfill:
         async with self._database.session() as session, session.begin():
             repository = _FileIconBackfillRepository(session)
             campaign = await repository.finish_campaign()
-        return self._result(
-            campaign,
-            admitted_count=admission.inspected_count,
-            claimed_count=len(work),
-            completed_count=completed_count + admission.completed_count,
-            cancelled_count=cancelled_count + admission.cancelled_count,
-            failed_count=failed_count,
+        return (
+            self._result(
+                campaign,
+                admitted_count=admission.inspected_count,
+                claimed_count=len(work),
+                completed_count=completed_count + admission.completed_count,
+                cancelled_count=cancelled_count + admission.cancelled_count,
+                failed_count=failed_count,
+            ),
+            None,
         )
 
     async def _contended_result(self) -> FileIconBackfillResult:

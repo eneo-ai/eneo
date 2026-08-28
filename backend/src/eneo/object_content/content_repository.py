@@ -9,6 +9,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.affected_rows import affected_row_count
+from eneo.database.tables.file_icon_backfill_table import (
+    FileIconBackfillCampaign,
+    FileIconBackfillItems,
+)
 from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContentHolds,
@@ -779,13 +783,64 @@ class ObjectContentRepository:
             ContentFailureCode.BACKEND_CORRUPT,
         }:
             raise ValueError("mark_backend_failure requires a backend failure code")
+        completed_items = (
+            await self._session.scalars(
+                select(FileIconBackfillItems)
+                .where(
+                    FileIconBackfillItems.content_id == content_id,
+                    FileIconBackfillItems.state == "done",
+                )
+                .order_by(FileIconBackfillItems.id)
+                .with_for_update()
+            )
+        ).all()
         row = await self._content_for_update(content_id)
         if row.state == ContentState.AVAILABLE.value:
             row.state = ContentState.FAILED.value
             row.failure_code = failure_code.value
             row.failure_detail = "durable object bytes are unavailable or untrusted"
             row.next_attempt_at = None
+            if completed_items:
+                await self._reopen_failed_file_icon_items(
+                    completed_items,
+                    failure_code=failure_code,
+                )
             await self._session.flush()
+
+    async def _reopen_failed_file_icon_items(
+        self,
+        items: Sequence[FileIconBackfillItems],
+        *,
+        failure_code: ContentFailureCode,
+    ) -> None:
+        campaign = await self._session.scalar(
+            select(FileIconBackfillCampaign).with_for_update()
+        )
+        now = await self._database_now()
+        for item in items:
+            item.content_id = None
+            item.lease_owner = None
+            item.lease_expires_at = None
+            item.updated_at = now
+            if campaign is None:
+                item.state = "ready"
+                item.last_error_code = None
+                item.last_error_detail = None
+                item.failure_revision = None
+                continue
+            item.state = "failed"
+            item.last_error_code = failure_code.value
+            item.last_error_detail = (
+                "Adopted content failed durable backend verification"
+            )
+            item.failure_revision = campaign.resume_revision
+
+        if campaign is not None:
+            campaign.state = "halted"
+            campaign.resume_cursor_id = None
+            campaign.halt_reason = (
+                "Adopted File/Icon content failed durable backend verification"
+            )
 
     async def apply_hold(
         self,
