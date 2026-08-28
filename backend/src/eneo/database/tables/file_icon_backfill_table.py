@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Identity,
@@ -38,10 +39,16 @@ class FileIconBackfillItems(BaseWithTableName):
     attempts: Mapped[int] = mapped_column(
         Integer, server_default=text("0"), nullable=False
     )
+    capacity_admitted: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=text("false"),
+        nullable=False,
+    )
     lease_owner: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     last_error_code: Mapped[str | None] = mapped_column(String(64))
     last_error_detail: Mapped[str | None] = mapped_column(String(512))
+    failure_revision: Mapped[int | None] = mapped_column(BigInteger)
     content_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("object_contents.id", ondelete="RESTRICT")
     )
@@ -66,7 +73,7 @@ class FileIconBackfillItems(BaseWithTableName):
             name="ck_file_icon_backfill_items_payload_size",
         ),
         CheckConstraint(
-            "state IN ('pending', 'leased', 'failed', 'done', 'cancelled')",
+            "state IN ('pending', 'ready', 'leased', 'failed', 'done', 'cancelled')",
             name="ck_file_icon_backfill_items_state",
         ),
         CheckConstraint("attempts >= 0", name="ck_file_icon_backfill_items_attempts"),
@@ -77,6 +84,11 @@ class FileIconBackfillItems(BaseWithTableName):
         CheckConstraint(
             "(state = 'done') = (content_id IS NOT NULL)",
             name="ck_file_icon_backfill_items_done_content",
+        ),
+        CheckConstraint(
+            "(state = 'failed') = (failure_revision IS NOT NULL) AND "
+            "(failure_revision IS NULL OR failure_revision >= 0)",
+            name="ck_file_icon_backfill_items_failure_revision",
         ),
         CheckConstraint(
             "last_error_detail IS NULL OR char_length(last_error_detail) <= 512",
@@ -95,6 +107,33 @@ class FileIconBackfillItems(BaseWithTableName):
             "lease_expires_at",
             "id",
         ),
+        Index("ix_file_icon_backfill_items_content_id", "content_id"),
+    )
+
+
+class FileIconBackfillAdmissionState(BaseWithTableName):
+    """Transactional invalidation token for pre-campaign capacity decisions."""
+
+    singleton: Mapped[bool] = mapped_column(
+        Boolean,
+        primary_key=True,
+        server_default=text("true"),
+    )
+    generation: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=text("0"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "singleton",
+            name="ck_file_icon_backfill_admission_singleton",
+        ),
+        CheckConstraint(
+            "generation >= 0",
+            name="ck_file_icon_backfill_admission_generation",
+        ),
     )
 
 
@@ -109,6 +148,17 @@ class FileIconBackfillCampaign(BaseWithTableName):
         TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
     )
     halt_reason: Mapped[str | None] = mapped_column(String(512))
+    resume_revision: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=text("0"),
+        nullable=False,
+    )
+    resume_cursor_id: Mapped[int | None] = mapped_column(BigInteger)
+    capacity_admitted_bytes: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=text("0"),
+        nullable=False,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -127,6 +177,18 @@ class FileIconBackfillCampaign(BaseWithTableName):
         CheckConstraint(
             "halt_reason IS NULL OR char_length(halt_reason) <= 512",
             name="ck_file_icon_backfill_campaign_halt_reason",
+        ),
+        CheckConstraint(
+            "resume_revision >= 0",
+            name="ck_file_icon_backfill_campaign_resume_revision",
+        ),
+        CheckConstraint(
+            "resume_cursor_id IS NULL OR (resume_cursor_id >= 0 AND state = 'active')",
+            name="ck_file_icon_backfill_campaign_resume_cursor",
+        ),
+        CheckConstraint(
+            "capacity_admitted_bytes >= 0",
+            name="ck_file_icon_backfill_campaign_capacity_admitted",
         ),
         Index(
             "uq_file_icon_backfill_campaign_singleton",
