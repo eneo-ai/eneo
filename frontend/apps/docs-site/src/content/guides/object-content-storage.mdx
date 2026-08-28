@@ -643,7 +643,7 @@ payload columns:
    docker compose exec -T db sh -lc \
      'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
      -c "SELECT task, status,
-                to_jsonb(jobs) ->> 'dispatch_envelope' IS NULL AS pre_durable,
+                to_jsonb(jobs) ->> '\''dispatch_envelope'\'' IS NULL AS pre_durable,
                 count(*)
          FROM jobs
          WHERE task IN ('\''upload_info_blob'\'', '\''transcription'\'')
