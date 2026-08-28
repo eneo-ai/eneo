@@ -39,6 +39,11 @@ class FileIconBackfillItems(BaseWithTableName):
     attempts: Mapped[int] = mapped_column(
         Integer, server_default=text("0"), nullable=False
     )
+    capacity_admitted: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=text("false"),
+        nullable=False,
+    )
     lease_owner: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     last_error_code: Mapped[str | None] = mapped_column(String(64))
@@ -148,6 +153,11 @@ class FileIconBackfillCampaign(BaseWithTableName):
         nullable=False,
     )
     resume_cursor_id: Mapped[int | None] = mapped_column(BigInteger)
+    capacity_admitted_bytes: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=text("0"),
+        nullable=False,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -174,6 +184,10 @@ class FileIconBackfillCampaign(BaseWithTableName):
         CheckConstraint(
             "resume_cursor_id IS NULL OR (resume_cursor_id >= 0 AND state = 'active')",
             name="ck_file_icon_backfill_campaign_resume_cursor",
+        ),
+        CheckConstraint(
+            "capacity_admitted_bytes >= 0",
+            name="ck_file_icon_backfill_campaign_capacity_admitted",
         ),
         Index(
             "uq_file_icon_backfill_campaign_singleton",

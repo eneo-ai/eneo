@@ -187,10 +187,22 @@ class _FileIconBackfillRepository:
             ):
                 policy_target = await self.policy_target()
                 if campaign.target_kind == policy_target.value:
-                    campaign.state = FileIconBackfillState.ACTIVE.value
-                    campaign.halt_reason = None
-                    campaign.resume_revision = settings.resume_revision
-                    campaign.resume_cursor_id = 0
+                    additional_bytes = await self._unadmitted_resume_bytes(
+                        campaign,
+                        settings.resume_revision,
+                    )
+                    required_bytes = campaign.capacity_admitted_bytes + additional_bytes
+                    if additional_bytes > 0 and not self._capacity_granted(
+                        settings,
+                        required_bytes,
+                    ):
+                        campaign.halt_reason = self._capacity_detail(required_bytes)
+                    else:
+                        campaign.state = FileIconBackfillState.ACTIVE.value
+                        campaign.halt_reason = None
+                        campaign.resume_revision = settings.resume_revision
+                        campaign.resume_cursor_id = 0
+                        campaign.capacity_admitted_bytes = required_bytes
             if (
                 campaign.state == FileIconBackfillState.ACTIVE.value
                 and campaign.resume_cursor_id is not None
@@ -208,6 +220,7 @@ class _FileIconBackfillRepository:
             return await self._insert_campaign(
                 state=FileIconBackfillState.COMPLETE,
                 resume_revision=settings.resume_revision,
+                capacity_admitted_bytes=0,
             )
 
         policy_target = await self.policy_target()
@@ -220,26 +233,18 @@ class _FileIconBackfillRepository:
 
         admission_generation = await self.admission_generation()
         required_bytes = await self.capacity_required_bytes()
-        capacity_granted = (
-            required_bytes <= settings.auto_inline_max_bytes
-            or settings.inline_capacity_ack >= required_bytes
-        )
+        capacity_granted = self._capacity_granted(settings, required_bytes)
         if not capacity_granted:
             return _Campaign(
                 state=FileIconBackfillState.WAITING_FOR_CAPACITY,
                 target_kind=StorageKind.POSTGRES_INLINE,
-                detail=(
-                    "The upgrade is complete and existing File/Icon content remains "
-                    "readable, but legacy adoption is waiting for an inline capacity "
-                    f"decision. The backfill estimates {required_bytes} bytes; set "
-                    "FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK to at least that value "
-                    "after reserving payload, WAL, and safety headroom"
-                ),
+                detail=self._capacity_detail(required_bytes),
                 admission_generation=admission_generation,
             )
         return await self._insert_campaign(
             state=FileIconBackfillState.ACTIVE,
             resume_revision=settings.resume_revision,
+            capacity_admitted_bytes=required_bytes,
         )
 
     async def _insert_campaign(
@@ -247,6 +252,7 @@ class _FileIconBackfillRepository:
         *,
         state: FileIconBackfillState,
         resume_revision: int,
+        capacity_admitted_bytes: int,
     ) -> _Campaign:
         statement = (
             insert(FileIconBackfillCampaign)
@@ -256,6 +262,7 @@ class _FileIconBackfillRepository:
                 destination_revision=None,
                 state=state.value,
                 resume_revision=resume_revision,
+                capacity_admitted_bytes=capacity_admitted_bytes,
             )
             .on_conflict_do_nothing()
         )
@@ -270,6 +277,46 @@ class _FileIconBackfillRepository:
             target_kind=StorageKind(row.target_kind),
             detail=row.halt_reason,
         )
+
+    @staticmethod
+    def _capacity_granted(
+        settings: FileIconBackfillSettings,
+        required_bytes: int,
+    ) -> bool:
+        return (
+            required_bytes <= settings.auto_inline_max_bytes
+            or settings.inline_capacity_ack >= required_bytes
+        )
+
+    @staticmethod
+    def _capacity_detail(required_bytes: int) -> str:
+        return (
+            "The upgrade is complete and existing File/Icon content remains "
+            "readable, but legacy adoption is waiting for an inline capacity "
+            f"decision. The backfill estimates {required_bytes} bytes; set "
+            "FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK to at least that value "
+            "after reserving payload, WAL, and safety headroom"
+        )
+
+    async def _unadmitted_resume_bytes(
+        self,
+        campaign: FileIconBackfillCampaign,
+        requested_resume_revision: int,
+    ) -> int:
+        additional_bytes = await self._session.scalar(
+            sa.select(
+                sa.func.coalesce(
+                    sa.func.sum(FileIconBackfillItems.payload_size_estimate),
+                    0,
+                )
+            ).where(
+                FileIconBackfillItems.state == "failed",
+                FileIconBackfillItems.capacity_admitted.is_(False),
+                FileIconBackfillItems.failure_revision >= campaign.resume_revision,
+                FileIconBackfillItems.failure_revision < requested_resume_revision,
+            )
+        )
+        return int(additional_bytes or 0)
 
     async def policy_target(self) -> StorageKind:
         target = await self._session.scalar(
@@ -510,6 +557,7 @@ class _FileIconBackfillRepository:
         work: list[_WorkItem] = []
         for item in selected:
             item.state = "leased"
+            item.capacity_admitted = True
             item.lease_owner = lease_owner
             item.lease_expires_at = lease_expires_at
             item.last_error_code = None
@@ -546,6 +594,7 @@ class _FileIconBackfillRepository:
         now = await self._database_now()
         for item in batch:
             item.state = "ready"
+            item.capacity_admitted = True
             item.attempts = 0
             item.last_error_code = None
             item.last_error_detail = None

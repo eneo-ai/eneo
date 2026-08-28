@@ -12,11 +12,16 @@ from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import DatabaseSessionManager
+from eneo.database.tables.file_icon_backfill_table import (
+    FileIconBackfillCampaign,
+    FileIconBackfillItems,
+)
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     IconContentReferences,
     InlineContentPayloads,
     ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.database.tables.users_table import Users
 from eneo.object_content import file_icon_backfill as file_icon_backfill_module
@@ -30,6 +35,7 @@ from eneo.object_content.content import (
     ContentState,
     ObjectContentIntegrityError,
     ObjectContentStateError,
+    ObjectContentUnavailableError,
     StorageKind,
 )
 from eneo.object_content.content_repository import (
@@ -42,6 +48,8 @@ from eneo.object_content.file_icon_backfill import (
     FileIconBackfillSettings,
     FileIconBackfillState,
 )
+from eneo.object_content.object_store_provider import ObjectStoreProvider
+from tests.integration.object_content.conftest import RealObjectStore
 
 
 async def _tenant_and_user(
@@ -167,6 +175,65 @@ async def _attach_existing_inline_reference(
                 )
             )
         return prepared.id
+
+
+async def _attach_existing_object_store_reference(
+    database: DatabaseSessionManager,
+    store: RealObjectStore,
+    *,
+    file_id: UUID,
+    payload: bytes,
+) -> tuple[UUID, str]:
+    tenant_id, user_id = await _tenant_and_user(database)
+    service = ObjectContentService(
+        store.settings,
+        database,
+        object_store_provider=ObjectStoreProvider.fixed(
+            store.settings,
+            store.store,
+        ),
+    )
+
+    async def source() -> AsyncIterator[bytes]:
+        yield payload
+
+    async with service.capture_for_target(
+        source(),
+        storage_kind=StorageKind.OBJECT_STORE,
+        declared_media_type="text/plain",
+        verified_media_type="text/plain",
+    ) as captured:
+        async with database.session() as session, session.begin():
+            prepared = await service.prepare_in_transaction(
+                session,
+                intent=ContentIntent(
+                    tenant_id=tenant_id,
+                    created_by_user_id=user_id,
+                    access_class=ContentAccessClass.PRIVATE_RESOURCE,
+                    idempotency_key=f"existing-object:{file_id}:extracted_text:0",
+                    producer_receipt=f"existing-object:{file_id}:extracted_text:0",
+                ),
+                content=captured,
+                storage_kind=StorageKind.OBJECT_STORE,
+            )
+            session.add(
+                FileContentReferences(
+                    file_id=file_id,
+                    content_id=prepared.id,
+                    variant="extracted_text",
+                    ordinal=0,
+                )
+            )
+        await service.store_and_verify(content_id=prepared.id, content=captured)
+
+    async with database.session() as session, session.begin():
+        object_key = await session.scalar(
+            sa.select(ObjectStoreObjects.object_key).where(
+                ObjectStoreObjects.content_id == prepared.id
+            )
+        )
+    assert object_key is not None
+    return prepared.id, object_key
 
 
 async def _seed_legacy_icon(
@@ -1180,6 +1247,150 @@ async def test_failed_adopted_reference_reopens_completed_campaign_for_recovery(
     assert replacement_state == ContentState.AVAILABLE.value
     assert replacement_sha256 == sha256(payload).digest()
     assert item_state == "done"
+
+
+@pytest.mark.asyncio
+async def test_failed_existing_object_store_references_require_recovery_capacity(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    tenant_id, _ = await _tenant_and_user(object_content_database)
+    payloads = (b"first authoritative source", b"second authoritative source")
+    file_ids = [
+        await _seed_legacy_text(
+            object_content_database,
+            payload=payload,
+            estimate=800,
+        )
+        for payload in payloads
+    ]
+    references = [
+        await _attach_existing_object_store_reference(
+            object_content_database,
+            real_object_store,
+            file_id=file_id,
+            payload=payload,
+        )
+        for file_id, payload in zip(file_ids, payloads, strict=True)
+    ]
+    completed = await _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+    ).run_once()
+
+    assert completed.state is FileIconBackfillState.COMPLETE
+    assert completed.completed_count == 2
+    service = ObjectContentService(
+        real_object_store.settings,
+        object_content_database,
+        object_store_provider=ObjectStoreProvider.fixed(
+            real_object_store.settings,
+            real_object_store.store,
+        ),
+    )
+    for content_id, object_key in references:
+        await real_object_store.store.delete_and_confirm(object_key)
+        grant = ContentReadGrant(
+            content_id=content_id,
+            tenant_id=tenant_id,
+            access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        )
+        with pytest.raises(ObjectContentUnavailableError):
+            async with service.open_content(grant) as opened:
+                _ = b"".join([chunk async for chunk in opened.chunks])
+
+    waiting = await _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+        resume_revision=1,
+    ).run_once()
+
+    assert waiting.state is FileIconBackfillState.HALTED
+    assert waiting.detail is not None
+    assert "FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK" in waiting.detail
+    async with object_content_database.session() as session, session.begin():
+        inline_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FileContentReferences)
+            .join(
+                InlineContentPayloads,
+                InlineContentPayloads.content_id == FileContentReferences.content_id,
+            )
+            .where(FileContentReferences.file_id.in_(file_ids))
+        )
+        capacity_state = (
+            await session.execute(
+                sa.text(
+                    """
+                SELECT capacity_admitted_bytes, resume_revision
+                FROM file_icon_backfill_campaign
+                """
+                )
+            )
+        ).one()
+        item_capacity = (
+            (
+                await session.execute(
+                    sa.select(FileIconBackfillItems.capacity_admitted)
+                    .where(FileIconBackfillItems.owner_id.in_(file_ids))
+                    .order_by(FileIconBackfillItems.owner_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert inline_count == 0
+    assert capacity_state == (0, 0)
+    assert item_capacity == [False, False]
+
+    recovered = await _backfill(
+        object_content_database,
+        auto_inline_max_bytes=1024,
+        inline_capacity_ack=1600,
+        batch_bytes=2048,
+        resume_revision=1,
+    ).run_once()
+
+    assert recovered.state is FileIconBackfillState.COMPLETE
+    assert recovered.completed_count == 2
+    async with object_content_database.session() as session, session.begin():
+        rows = (
+            await session.execute(
+                sa.select(
+                    FileContentReferences.file_id,
+                    ObjectContents.storage_kind,
+                    InlineContentPayloads.payload,
+                )
+                .join(
+                    ObjectContents,
+                    ObjectContents.id == FileContentReferences.content_id,
+                )
+                .join(
+                    InlineContentPayloads,
+                    InlineContentPayloads.content_id == ObjectContents.id,
+                )
+                .where(FileContentReferences.file_id.in_(file_ids))
+                .order_by(FileContentReferences.file_id)
+            )
+        ).all()
+        admitted_bytes = await session.scalar(
+            sa.select(FileIconBackfillCampaign.capacity_admitted_bytes)
+        )
+        item_capacity = (
+            (
+                await session.execute(
+                    sa.select(FileIconBackfillItems.capacity_admitted)
+                    .where(FileIconBackfillItems.owner_id.in_(file_ids))
+                    .order_by(FileIconBackfillItems.owner_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert {row.storage_kind for row in rows} == {StorageKind.POSTGRES_INLINE.value}
+    assert {row.payload for row in rows} == set(payloads)
+    assert admitted_bytes == 1600
+    assert item_capacity == [True, True]
 
 
 @pytest.mark.asyncio

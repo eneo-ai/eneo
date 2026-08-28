@@ -819,6 +819,7 @@ class ObjectContentRepository:
         now = await self._database_now()
         for item in items:
             item.content_id = None
+            item.capacity_admitted = False
             item.lease_owner = None
             item.lease_expires_at = None
             item.updated_at = now
