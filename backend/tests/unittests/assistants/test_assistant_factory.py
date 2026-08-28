@@ -5,8 +5,10 @@ from uuid import uuid4
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.api.assistant_models import KnowledgeMode
 from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
     SupportedModelKwargs,
 )
 from eneo.database.tables.assistant_table import Assistants
@@ -76,6 +78,8 @@ def _space_assistant_row(*, user_id, space_id):
         published=False,
         description=None,
         insight_enabled=False,
+        inline_file_text=True,
+        knowledge_mode=KnowledgeMode.INJECT.value,
         data_retention_days=None,
         metadata_json={},
         hidden=False,
@@ -123,7 +127,9 @@ def test_create_space_assistant_preserves_persisted_model_kwargs(
     assistant_row = _space_assistant_row(user_id=user.id, space_id=uuid4())
     completion_model = MagicMock()
     completion_model.id = uuid4()
-    completion_model.get_supported_model_kwargs.return_value = SupportedModelKwargs()
+    completion_model.get_supported_model_kwargs.return_value = SupportedModelKwargs(
+        top_p=ModelKwargCapability(supported=True)
+    )
     assistant_row.completion_model_id = completion_model.id
     assistant_row.completion_model_kwargs = {"top_p": 0.72}
 

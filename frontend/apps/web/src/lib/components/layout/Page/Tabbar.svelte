@@ -35,13 +35,14 @@
 </script>
 
 <!--
-  Labels stay on one line and the strip scrolls once they no longer fit: the header
-  row has a fixed height, so a wrapped second line would collide with the title.
-  The vertical padding, cancelled by the negative margin, keeps the active segment's
-  shadow, the focus outline and the overflow scrollbar inside the scroll port
-  without changing the row height.
+  Labels stay on one line inside a strip that scrolls when the responsive header
+  wraps or becomes too narrow. The vertical padding keeps the active segment's
+  shadow, focus outline, and scrollbar inside the scroll port.
 -->
-<div bind:this={port} class="my-[-0.5rem] mr-auto flex min-w-0 items-center overflow-x-auto py-2">
+<div
+  bind:this={port}
+  class="text-primary left-[50%] my-[-0.5rem] flex min-w-0 flex-grow items-center justify-center overflow-x-auto py-2 pr-3 max-lg:order-2 max-lg:w-full max-lg:flex-none max-lg:justify-start @4xl:lg:absolute @4xl:lg:-translate-x-[50%]"
+>
   <div
     {...$list}
     use:list

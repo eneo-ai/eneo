@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -12,8 +14,14 @@ from eneo.files.file_models import (
     FileOwner,
     FileType,
 )
+from eneo.files.file_repo import (
+    FileContentReferenceRecord,
+    LegacyAudioSlice,
+    LegacyFileContentRecord,
+    LegacyFileInfoRecord,
+)
 from eneo.files.file_service import FileService
-from eneo.object_content.content import StorageKind
+from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 
@@ -126,8 +134,8 @@ async def test_get_owned_file_infos_filters_by_owner_and_reads_no_bytes(
     owned_id, unowned_id = uuid4(), uuid4()
     owned = FileMetadata(
         id=owned_id,
-        created_at=datetime(2026, 8, 16, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 8, 16, tzinfo=timezone.utc),
+        created_at=datetime(2026, 8, 16, tzinfo=UTC),
+        updated_at=datetime(2026, 8, 16, tzinfo=UTC),
         name="meeting.wav",
         file_type=FileType.AUDIO,
         mimetype="audio/wav",
@@ -149,6 +157,7 @@ async def test_get_owned_file_infos_filters_by_owner_and_reads_no_bytes(
             access_class=None,
         )
     ]
+    service.repo.get_legacy_infos.return_value = []
     loader = AsyncMock()
     service._content_loader = loader  # pyright: ignore[reportPrivateUsage]
 
@@ -167,3 +176,265 @@ async def test_get_owned_file_infos_filters_by_owner_and_reads_no_bytes(
     assert infos[0].checksum == (b"\x01" * 32).hex()
     assert not hasattr(infos[0], "blob")
     loader.load.assert_not_awaited()
+
+
+def _legacy_metadata(*, file_type: FileType = FileType.TEXT) -> FileMetadata:
+    return FileMetadata(
+        id=uuid4(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        name="legacy.pdf" if file_type is FileType.TEXT else "legacy.mp3",
+        mimetype=("application/pdf" if file_type is FileType.TEXT else "audio/mpeg"),
+        file_type=file_type,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
+        tenant_id=uuid4(),
+        parent_file_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_info_and_original_availability_fall_back_to_legacy() -> None:
+    metadata = _legacy_metadata()
+    user = SimpleNamespace(id=metadata.owner_user_id, tenant_id=metadata.tenant_id)
+    extracted = LegacyFileContentRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        payload=b"legacy text",
+        media_type="text/plain",
+    )
+    original = LegacyFileContentRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.ORIGINAL,
+        payload=b"%PDF legacy",
+        media_type="application/pdf",
+    )
+    repository = AsyncMock()
+    repository.session = MagicMock()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [
+        LegacyFileInfoRecord(
+            file_id=metadata.id,
+            variant=FileContentVariant.EXTRACTED_TEXT,
+            checksum=sha256(extracted.payload).hexdigest(),
+            size_bytes=len(extracted.payload),
+            media_type="text/plain",
+            original_available=True,
+            transcription_available=False,
+        )
+    ]
+    repository.get_legacy_content.return_value = [original]
+    service = FileService(
+        user=user,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=AsyncMock(),
+    )
+
+    info = await service.get_file_by_id(metadata.id)
+    available = await service.ensure_original_available(metadata.id)
+
+    assert available == metadata
+    assert info.checksum == sha256(extracted.payload).hexdigest()
+    assert info.size == len(extracted.payload)
+    assert info.mimetype == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_file_info_does_not_load_legacy_payload_bytes() -> None:
+    metadata = _legacy_metadata()
+    user = SimpleNamespace(id=metadata.owner_user_id, tenant_id=metadata.tenant_id)
+    repository = AsyncMock()
+    repository.session = MagicMock()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [
+        LegacyFileInfoRecord(
+            file_id=metadata.id,
+            variant=FileContentVariant.EXTRACTED_TEXT,
+            checksum=sha256(b"legacy text").hexdigest(),
+            size_bytes=len(b"legacy text"),
+            media_type="text/plain",
+            original_available=True,
+            transcription_available=False,
+        )
+    ]
+    service = FileService(
+        user=user,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=AsyncMock(),
+    )
+
+    info = await service.get_file_by_id(metadata.id)
+
+    assert info.size == len(b"legacy text")
+    repository.get_legacy_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_download_streams_without_opening_object_content() -> None:
+    metadata = _legacy_metadata(file_type=FileType.AUDIO)
+    payload = b"legacy audio"
+    legacy_info = LegacyFileInfoRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.ORIGINAL,
+        checksum=sha256(payload).hexdigest(),
+        size_bytes=len(payload),
+        media_type="audio/mpeg",
+        original_available=False,
+        transcription_available=False,
+    )
+    legacy_slice = LegacyAudioSlice(
+        payload=payload,
+        media_type="audio/mpeg",
+    )
+
+    class Session:
+        def in_transaction(self) -> bool:
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    repository = AsyncMock()
+    repository.session = Session()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [legacy_info]
+    repository.get_legacy_audio_slice.return_value = legacy_slice
+    object_content = MagicMock()
+    service = FileService(
+        user=None,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=object_content,
+    )
+
+    opened = await service.get_download_no_auth(
+        metadata.id,
+        tenant_id=metadata.tenant_id,
+    )
+
+    assert b"".join([chunk async for chunk in opened.chunks]) == payload
+    assert opened.content_length == len(payload)
+    assert opened.sha256 == sha256(payload).digest()
+    assert opened.range_supported is True
+    repository.get_legacy_audio_slice.assert_awaited_once_with(metadata.id, None)
+    repository.get_legacy_content.assert_not_awaited()
+    object_content.open_content.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_text_download_prefers_exact_legacy_text_over_object_original() -> None:
+    metadata = _legacy_metadata()
+    extracted = LegacyFileContentRecord(
+        file_id=metadata.id,
+        variant=FileContentVariant.EXTRACTED_TEXT,
+        payload=b"legacy extracted text",
+        media_type="text/plain",
+    )
+    original = FileContentReferenceRecord(
+        file_id=metadata.id,
+        content_id=uuid4(),
+        variant=FileContentVariant.ORIGINAL,
+        ordinal=0,
+        page_number=None,
+        width=None,
+        height=None,
+        duration_ms=None,
+        sha256=sha256(b"original pdf").digest(),
+        size_bytes=len(b"original pdf"),
+        media_type="application/pdf",
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        state=ContentState.AVAILABLE,
+    )
+
+    class Session:
+        def in_transaction(self) -> bool:
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    repository = AsyncMock()
+    repository.session = Session()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = [original]
+    repository.get_legacy_content.return_value = [extracted]
+    object_content = MagicMock()
+    service = FileService(
+        user=None,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=object_content,
+    )
+
+    opened = await service.get_download_no_auth(
+        metadata.id,
+        tenant_id=metadata.tenant_id,
+    )
+
+    assert b"".join([chunk async for chunk in opened.chunks]) == extracted.payload
+    assert opened.filename == "legacy.txt"
+    repository.get_legacy_content.assert_awaited_once_with(
+        {metadata.id: {FileContentVariant.EXTRACTED_TEXT}}
+    )
+    object_content.open_content.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_audio_range_fetches_only_the_selected_slice() -> None:
+    metadata = _legacy_metadata(file_type=FileType.AUDIO)
+    payload = b"legacy audio payload"
+    selected_payload = payload[2:5]
+
+    class Session:
+        def in_transaction(self) -> bool:
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    repository = AsyncMock()
+    repository.session = Session()
+    repository.get_by_id.return_value = metadata
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [
+        LegacyFileInfoRecord(
+            file_id=metadata.id,
+            variant=FileContentVariant.ORIGINAL,
+            checksum=sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+            media_type="audio/mpeg",
+            original_available=False,
+            transcription_available=False,
+        )
+    ]
+    repository.get_legacy_audio_slice.return_value = LegacyAudioSlice(
+        payload=selected_payload,
+        media_type="audio/mpeg",
+    )
+    service = FileService(
+        user=None,
+        repo=repository,
+        protocol=AsyncMock(),
+        object_content=MagicMock(),
+    )
+
+    opened = await service.get_download_no_auth(
+        metadata.id,
+        range_header="bytes=2-4",
+        tenant_id=metadata.tenant_id,
+    )
+
+    assert b"".join([chunk async for chunk in opened.chunks]) == selected_payload
+    assert opened.content_length == len(selected_payload)
+    assert opened.content_range == f"bytes 2-4/{len(payload)}"
+    selected_range = repository.get_legacy_audio_slice.await_args.args[1]
+    assert selected_range.start == 2
+    assert selected_range.end == 4

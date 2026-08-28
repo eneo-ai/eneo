@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - develop
+  # Required check, so it must also report on merge queue candidates. The
+  # action itself needs a pull_request diff to review; the queue run is a
+  # no-op success (the real review already ran on the PR).
+  merge_group:
 
 permissions:
   contents: read
@@ -20,12 +24,18 @@ jobs:
 
     steps:
       - name: Checkout
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@v4
 
       - name: Review dependency changes
+        if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
           show-openssf-scorecard: false
           show-patched-versions: true
+
+      - name: Merge queue no-op
+        if: github.event_name == 'merge_group'
+        run: echo "Dependency review ran on the pull request; nothing to re-check on the merge candidate."

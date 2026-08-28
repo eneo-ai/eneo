@@ -63,6 +63,7 @@ async def test_flow_transcription_service_configured_follows_deployment_config(
         tenant_credentials_enabled=False,
         flow_transcription_service_configured=configured,
         flow_transcription_service_mode="diarize",
+        sharepoint_fixture_mode_active=False,
     )
     monkeypatch.setattr(setting_service, "get_app_settings", lambda: app_settings)
     monkeypatch.setattr(

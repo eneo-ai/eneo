@@ -37,6 +37,7 @@ from eneo.authentication.auth_models import (
     ApiKeyExactLookupRequest,
     ApiKeyExactLookupResponse,
     ApiKeyExtendRequest,
+    ApiKeyListCursor,
     ApiKeyNotificationPolicyResponse,
     ApiKeyNotificationPolicyUpdate,
     ApiKeyPermission,
@@ -972,7 +973,7 @@ _ADMIN_API_KEY_EXAMPLE = {
 _ADMIN_API_KEY_LIST_EXAMPLE = {
     "items": [_ADMIN_API_KEY_EXAMPLE],
     "limit": 50,
-    "next_cursor": "2026-02-05T12:00:00Z",
+    "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
     "previous_cursor": None,
     "total_count": 1,
 }
@@ -1366,7 +1367,7 @@ async def update_model_pricing_visibility(
     response_model=SuperApiKeyStatus,
     tags=["Admin API Keys"],
     summary="Get super API key status",
-    description="Return whether super and super-duper API keys are configured in environment settings.",
+    description="Return whether the sysadmin API key is configured in environment settings.",
     responses={
         200: {
             "description": "Super key configuration status.",
@@ -1374,7 +1375,6 @@ async def update_model_pricing_visibility(
                 "application/json": {
                     "example": {
                         "super_api_key_configured": True,
-                        "super_duper_api_key_configured": False,
                     }
                 }
             },
@@ -1392,7 +1392,6 @@ async def get_super_api_key_status(
 
     return SuperApiKeyStatus(
         super_api_key_configured=bool(settings.eneo_super_api_key),
-        super_duper_api_key_configured=bool(settings.eneo_super_duper_api_key),
     )
 
 
@@ -1407,7 +1406,7 @@ async def get_super_api_key_status(
             "description": "Paginated tenant API key list.",
             "content": {"application/json": {"example": _ADMIN_API_KEY_LIST_EXAMPLE}},
         },
-        **error_responses([401, 403, 429]),
+        **error_responses([400, 401, 403, 429]),
     },
 )
 async def list_api_keys_admin(
@@ -1422,11 +1421,17 @@ async def list_api_keys_admin(
     normalized_search = query.search.strip() if query.search else None
     owner_filter = query.owner_user_id
     creator_filter = query.created_by_user_id
+    try:
+        decoded_cursor = (
+            ApiKeyListCursor.deserialize(query.cursor) if query.cursor else None
+        )
+    except ValueError as exc:
+        raise BadRequestException("Invalid API key cursor.") from exc
 
     keys = await repo.list_paginated(
         tenant_id=tenant_id,
         limit=query.limit,
-        cursor=query.cursor,
+        cursor=decoded_cursor,
         previous=query.previous,
         scope_type=query.scope_type,
         scope_id=query.scope_id,
@@ -1436,6 +1441,8 @@ async def list_api_keys_admin(
         created_by_user_id=creator_filter,
         search=normalized_search,
         expires_within_days=query.expires_within_days,
+        ownership=query.ownership.value if query.ownership else None,
+        min_permission=query.min_permission.value if query.min_permission else None,
     )
     total_count = await repo.count(
         tenant_id=tenant_id,
@@ -1447,13 +1454,15 @@ async def list_api_keys_admin(
         created_by_user_id=creator_filter,
         search=normalized_search,
         expires_within_days=query.expires_within_days,
+        ownership=query.ownership.value if query.ownership else None,
+        min_permission=query.min_permission.value if query.min_permission else None,
     )
 
     paginated = paginate_keys(
         keys,
         total_count=total_count,
         limit=query.limit,
-        cursor=query.cursor,
+        cursor=decoded_cursor,
         previous=query.previous,
     )
     session = cast(AsyncSession, container.session())

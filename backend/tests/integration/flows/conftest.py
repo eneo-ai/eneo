@@ -20,7 +20,7 @@ from arq.connections import ArqRedis
 from arq.jobs import Job
 from dependency_injector import providers
 from httpx import AsyncClient
-from testcontainers.redis import RedisContainer
+from testcontainers.community.redis import RedisContainer
 
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table

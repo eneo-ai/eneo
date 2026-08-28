@@ -208,7 +208,6 @@ VLLM_API_KEY=
 
 # Super API keys (system administration)
 ENEO_SUPER_API_KEY=
-ENEO_SUPER_DUPER_API_KEY=
 
 # ----------------------------------------------------------------------------
 # Upload Limits (startup requirement on released images, migration seed later)
@@ -250,6 +249,17 @@ OBJECT_CONTENT_RECONCILIATION_LEASE_SECONDS=300
 OBJECT_CONTENT_RECONCILIATION_RETRY_BASE_SECONDS=30
 OBJECT_CONTENT_RECONCILIATION_RETRY_MAX_SECONDS=3600
 OBJECT_CONTENT_PENDING_STALE_SECONDS=300
+
+# File/Icon legacy-content adoption. Campaigns above the automatic 5 GiB
+# threshold require an explicit capacity acknowledgement. See
+# docs/deployment/OBJECT_CONTENT.md before changing these values.
+FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=5368709120
+FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK=0
+FILE_ICON_BACKFILL_BATCH_ROWS=200
+FILE_ICON_BACKFILL_BATCH_BYTES=134217728
+FILE_ICON_BACKFILL_LEASE_SECONDS=300
+FILE_ICON_BACKFILL_MAX_ATTEMPTS=3
+FILE_ICON_BACKFILL_RESUME_REVISION=0
 
 # ----------------------------------------------------------------------------
 # Optional S3-compatible byte backend

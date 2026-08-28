@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
 import { createRawSnippet } from "svelte";
 import type { Eneo, FlowRunDebugRagReference, RetrievedPassage } from "@eneo/eneo-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
@@ -10,6 +10,13 @@ import FlowRunKnowledgeSourceRow from "./FlowRunKnowledgeSourceRow.svelte";
 
 afterEach(() => {
   cleanup();
+});
+
+beforeEach(() => {
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn()
+  });
 });
 
 // The reviewer-facing count contract: matched=3 (retrieval), recorded=2

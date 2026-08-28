@@ -1,263 +1,336 @@
 import asyncio
-from uuid import uuid4
+from datetime import datetime, timedelta, timezone
+from uuid import UUID, uuid4
 
 import pytest
 
-from eneo.modules.module import ModuleCreate
+from eneo.authentication.auth_models import (
+    ApiKeyOwnership,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyType,
+)
 
 pytestmark = pytest.mark.integration
 
 REDIRECT_URI = "https://module.example.com/auth/callback"
+UPDATED_REDIRECT_URI = "https://module.example.com/login/callback"
 
 
-def client_config_path(*, tenant_id, module_id) -> str:
-    return f"/api/v1/modules/{tenant_id}/{module_id}/client-config/"
-
-
-@pytest.mark.asyncio
-async def test_registering_duplicate_module_key_returns_name_collision(
-    client,
-    db_container,
-    test_settings,
-):
-    module_key = f"duplicate-{uuid4().hex[:12]}"
+@pytest.fixture
+async def admin_token(db_container, patch_auth_service_jwt, admin_user) -> str:
     async with db_container() as container:
-        await container.module_repo().add(ModuleCreate(name=module_key))
+        return container.auth_service().create_access_token_for_user(admin_user)
 
+
+async def create_module_service_key(client, *, token: str) -> dict:
     response = await client.post(
-        "/api/v1/modules/",
-        json={"name": module_key},
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+        "/api/v1/api-keys",
+        json={
+            "name": f"module-key-{uuid4().hex[:8]}",
+            "key_type": ApiKeyType.SK.value,
+            "ownership": ApiKeyOwnership.SERVICE.value,
+            "permission": ApiKeyPermission.WRITE.value,
+            "scope_type": ApiKeyScopeType.TENANT.value,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def installation_path(module_key: str) -> str:
+    return f"/api/v1/admin/modules/{module_key}/"
+
+
+async def install_module(
+    client,
+    *,
+    token: str,
+    module_key: str,
+    service_key_id: str,
+    redirect_uri: str = REDIRECT_URI,
+):
+    return await client.put(
+        installation_path(module_key),
+        json={
+            "redirect_uris": [redirect_uri],
+            "service_key_id": service_key_id,
+        },
+        headers={"Authorization": f"Bearer {token}"},
     )
 
-    assert response.status_code == 409, response.text
-    assert response.json()["eneo_error_code"] == 9017
+
+@pytest.mark.asyncio
+async def test_install_list_reconfigure_and_uninstall_module(
+    client,
+    db_container,
+    admin_user,
+    admin_token,
+):
+    module_key = f"admin-module-{uuid4().hex[:12]}"
+    service_key = await create_module_service_key(client, token=admin_token)
+
+    installed = await install_module(
+        client,
+        token=admin_token,
+        module_key=module_key,
+        service_key_id=service_key["api_key"]["id"],
+    )
+    assert installed.status_code == 200, installed.text
+    assert installed.json() == {
+        "module_id": installed.json()["module_id"],
+        "module_key": module_key,
+        "redirect_uris": [REDIRECT_URI],
+        "service_key_id": service_key["api_key"]["id"],
+        "configured": True,
+    }
+    assert "tenant_id" not in installed.json()
+
+    listed = await client.get(
+        "/api/v1/admin/modules/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert listed.status_code == 200, listed.text
+    matching = [
+        item for item in listed.json()["items"] if item["module_key"] == module_key
+    ]
+    assert matching == [installed.json()]
+
+    reconfigured = await install_module(
+        client,
+        token=admin_token,
+        module_key=module_key,
+        service_key_id=service_key["api_key"]["id"],
+        redirect_uri=UPDATED_REDIRECT_URI,
+    )
+    assert reconfigured.status_code == 200, reconfigured.text
+    assert reconfigured.json()["redirect_uris"] == [UPDATED_REDIRECT_URI]
+
+    removed = await client.delete(
+        installation_path(module_key),
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json() == {
+        "module_id": installed.json()["module_id"],
+        "module_key": module_key,
+        "enabled": False,
+        "changed": True,
+    }
+    assert "tenant_id" not in removed.json()
+
+    # After the uninstall committed, the module is indistinguishable from one
+    # that never existed for this organization: uniform 404, no existence
+    # oracle over the global registry.
+    repeated = await client.delete(
+        installation_path(module_key),
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert repeated.status_code == 404, repeated.text
+
+    async with db_container() as container:
+        assert (
+            await container.module_repo().get_module_client_config(
+                tenant_id=admin_user.tenant_id,
+                module_id=installed.json()["module_id"],
+            )
+            is None
+        )
 
 
 @pytest.mark.asyncio
-async def test_registering_non_url_safe_module_key_is_rejected(
-    client,
-    test_settings,
-):
-    """A key like 'reports/v2' would pass handoff (the key rides in JSON) but
-    could never reach the path-segment session and refresh routes, so it must
-    be unrepresentable from registration on."""
-    response = await client.post(
-        "/api/v1/modules/",
-        json={"name": "reports/v2"},
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+async def test_install_rejects_non_url_safe_module_key(client, admin_token):
+    service_key = await create_module_service_key(client, token=admin_token)
+
+    response = await install_module(
+        client,
+        token=admin_token,
+        module_key="reports key",
+        service_key_id=service_key["api_key"]["id"],
     )
 
     assert response.status_code == 422, response.text
 
 
 @pytest.mark.asyncio
-async def test_targeted_module_enable_and_disable_preserve_other_assignments(
+async def test_invalid_service_key_rolls_back_global_registration(
     client,
     db_container,
-    admin_user,
-    test_settings,
+    admin_token,
 ):
-    async with db_container() as container:
-        first_module = await container.module_repo().add(
-            ModuleCreate(name=f"first-{uuid4().hex[:12]}")
-        )
-        target_module = await container.module_repo().add(
-            ModuleCreate(name=f"target-{uuid4().hex[:12]}")
-        )
+    module_key = f"invalid-key-{uuid4().hex[:12]}"
 
-    headers = {"X-API-Key": test_settings.eneo_super_duper_api_key}
-    first_enable = await client.put(
-        f"/api/v1/modules/{admin_user.tenant_id}/{first_module.id}/",
-        headers=headers,
+    response = await install_module(
+        client,
+        token=admin_token,
+        module_key=module_key,
+        service_key_id=str(uuid4()),
     )
-    assert first_enable.status_code == 200, first_enable.text
-    assert first_enable.json() == {
-        "tenant_id": str(admin_user.tenant_id),
-        "module_id": str(first_module.id),
-        "module_key": first_module.name,
-        "enabled": True,
-        "changed": True,
-    }
+
+    assert response.status_code == 400, response.text
     async with db_container() as container:
-        tenant = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant is not None
-        initial_ids = {module.id for module in tenant.modules}
-    assert first_module.id in initial_ids
+        assert await container.module_repo().get_module_by_key(module_key) is None
 
-    target_path = f"/api/v1/modules/{admin_user.tenant_id}/{target_module.id}/"
-    target_enable = await client.put(target_path, headers=headers)
-    assert target_enable.status_code == 200, target_enable.text
-    assert target_enable.json()["changed"] is True
-    async with db_container() as container:
-        tenant = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant is not None
-        enabled_ids = {module.id for module in tenant.modules}
-    assert enabled_ids == initial_ids | {target_module.id}
 
-    repeated_enable = await client.put(target_path, headers=headers)
-    assert repeated_enable.status_code == 200, repeated_enable.text
-    assert repeated_enable.json()["enabled"] is True
-    assert repeated_enable.json()["changed"] is False
-
-    config_response = await client.patch(
-        client_config_path(tenant_id=admin_user.tenant_id, module_id=target_module.id),
-        json={"redirect_uris": [REDIRECT_URI]},
-        headers=headers,
-    )
-    assert config_response.status_code == 200, config_response.text
-
-    disable = await client.delete(target_path, headers=headers)
-    assert disable.status_code == 200, disable.text
-    assert disable.json()["enabled"] is False
-    assert disable.json()["changed"] is True
+@pytest.mark.asyncio
+async def test_revocation_committing_before_installation_prevents_binding(
+    client,
+    db_container,
+    admin_token,
+):
+    module_key = f"revoked-concurrently-{uuid4().hex[:12]}"
+    service_key = await create_module_service_key(client, token=admin_token)
+    service_key_id = service_key["api_key"]["id"]
 
     async with db_container() as container:
-        tenant = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant is not None
-        assert {module.id for module in tenant.modules} == initial_ids
-        assert (
-            await container.module_repo().get_module_client_config(
-                tenant_id=admin_user.tenant_id,
-                module_id=target_module.id,
+        await container.api_key_lifecycle_service().revoke_key(
+            key_id=UUID(service_key_id)
+        )
+
+        install_task = asyncio.create_task(
+            install_module(
+                client,
+                token=admin_token,
+                module_key=module_key,
+                service_key_id=service_key_id,
             )
-            is None
         )
+        done, _pending = await asyncio.wait({install_task}, timeout=0.1)
+        assert not done, "installation must wait for the key lifecycle transaction"
 
-    repeated_disable = await client.delete(target_path, headers=headers)
-    assert repeated_disable.status_code == 200, repeated_disable.text
-    assert repeated_disable.json()["enabled"] is False
-    assert repeated_disable.json()["changed"] is False
+    response = await asyncio.wait_for(install_task, timeout=10)
+    assert response.status_code == 400, response.text
+    assert "revoked" in response.text
+
+    async with db_container() as container:
+        assert await container.module_repo().get_module_by_key(module_key) is None
 
 
 @pytest.mark.asyncio
-async def test_targeted_assignment_is_atomic_under_concurrent_retries(
+async def test_install_and_uninstall_are_idempotent_under_concurrent_retries(
     client,
-    db_container,
-    admin_user,
-    test_settings,
+    admin_token,
 ):
-    async with db_container() as container:
-        module = await container.module_repo().add(
-            ModuleCreate(name=f"concurrent-{uuid4().hex[:12]}")
-        )
+    module_key = f"concurrent-{uuid4().hex[:12]}"
+    service_key = await create_module_service_key(client, token=admin_token)
+    service_key_id = service_key["api_key"]["id"]
 
-    path = f"/api/v1/modules/{admin_user.tenant_id}/{module.id}/"
-    headers = {"X-API-Key": test_settings.eneo_super_duper_api_key}
-
-    enabled = await asyncio.gather(
-        client.put(path, headers=headers),
-        client.put(path, headers=headers),
+    installed = await asyncio.gather(
+        install_module(
+            client,
+            token=admin_token,
+            module_key=module_key,
+            service_key_id=service_key_id,
+        ),
+        install_module(
+            client,
+            token=admin_token,
+            module_key=module_key,
+            service_key_id=service_key_id,
+        ),
     )
-    assert [response.status_code for response in enabled] == [200, 200]
-    assert sorted(response.json()["changed"] for response in enabled) == [False, True]
-
-    async with db_container() as container:
-        tenant = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant is not None
-        assert [item.id for item in tenant.modules].count(module.id) == 1
-
-    disabled = await asyncio.gather(
-        client.delete(path, headers=headers),
-        client.delete(path, headers=headers),
-    )
-    assert [response.status_code for response in disabled] == [200, 200]
-    assert sorted(response.json()["changed"] for response in disabled) == [False, True]
-
-    async with db_container() as container:
-        tenant = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant is not None
-        assert module.id not in {item.id for item in tenant.modules}
-
-
-@pytest.mark.asyncio
-async def test_legacy_bulk_assignment_remains_full_set_replacement(
-    client,
-    db_container,
-    admin_user,
-    test_settings,
-):
-    async with db_container() as container:
-        first_module = await container.module_repo().add(
-            ModuleCreate(name=f"bulk-first-{uuid4().hex[:12]}")
-        )
-        replacement_module = await container.module_repo().add(
-            ModuleCreate(name=f"bulk-replacement-{uuid4().hex[:12]}")
-        )
-        await container.tenant_repo().enable_module(
-            tenant_id=admin_user.tenant_id,
-            module_id=first_module.id,
-        )
-
-    response = await client.post(
-        f"/api/v1/modules/{admin_user.tenant_id}/",
-        json=[{"id": str(replacement_module.id)}],
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
-    )
-
-    assert response.status_code == 200, response.text
-    assert {module["id"] for module in response.json()["modules"]} == {
-        str(replacement_module.id)
+    assert [response.status_code for response in installed] == [200, 200]
+    assert {response.json()["module_id"] for response in installed} == {
+        installed[0].json()["module_id"]
     }
 
-
-@pytest.mark.asyncio
-async def test_bulk_assignment_rejects_partial_unknown_set_before_replacement(
-    client,
-    db_container,
-    admin_user,
-    test_settings,
-):
-    async with db_container() as container:
-        existing_module = await container.module_repo().add(
-            ModuleCreate(name=f"bulk-existing-{uuid4().hex[:12]}")
-        )
-        valid_replacement = await container.module_repo().add(
-            ModuleCreate(name=f"bulk-valid-{uuid4().hex[:12]}")
-        )
-        await container.tenant_repo().enable_module(
-            tenant_id=admin_user.tenant_id,
-            module_id=existing_module.id,
-        )
-
-    path = f"/api/v1/modules/{admin_user.tenant_id}/"
-    headers = {"X-API-Key": test_settings.eneo_super_duper_api_key}
-    rejected = await client.post(
-        path,
-        json=[{"id": str(valid_replacement.id)}, {"id": str(uuid4())}],
-        headers=headers,
+    removed = await asyncio.gather(
+        client.delete(
+            installation_path(module_key),
+            headers={"Authorization": f"Bearer {admin_token}"},
+        ),
+        client.delete(
+            installation_path(module_key),
+            headers={"Authorization": f"Bearer {admin_token}"},
+        ),
     )
-    assert rejected.status_code == 404, rejected.text
-
-    async with db_container() as container:
-        tenant = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant is not None
-        assert {module.id for module in tenant.modules} == {existing_module.id}
-
-    cleared = await client.post(path, json=[], headers=headers)
-    assert cleared.status_code == 200, cleared.text
-    assert cleared.json()["modules"] == []
+    assert [response.status_code for response in removed] == [200, 200]
+    assert sorted(response.json()["changed"] for response in removed) == [False, True]
 
 
 @pytest.mark.asyncio
-async def test_targeted_enable_rejects_unknown_module_without_side_effects(
+async def test_sibling_installations_survive_install_reconfigure_and_uninstall(
     client,
-    db_container,
-    admin_user,
+    admin_token,
+):
+    """Mutating one module must never touch the tenant's other assignments."""
+    sibling_key = f"sibling-{uuid4().hex[:12]}"
+    target_key = f"target-{uuid4().hex[:12]}"
+    service_key = await create_module_service_key(client, token=admin_token)
+    service_key_id = service_key["api_key"]["id"]
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    for module_key in (sibling_key, target_key):
+        installed = await install_module(
+            client,
+            token=admin_token,
+            module_key=module_key,
+            service_key_id=service_key_id,
+        )
+        assert installed.status_code == 200, installed.text
+
+    reconfigured = await install_module(
+        client,
+        token=admin_token,
+        module_key=target_key,
+        service_key_id=service_key_id,
+        redirect_uri=UPDATED_REDIRECT_URI,
+    )
+    assert reconfigured.status_code == 200, reconfigured.text
+
+    removed = await client.delete(installation_path(target_key), headers=headers)
+    assert removed.status_code == 200, removed.text
+
+    listed = await client.get("/api/v1/admin/modules/", headers=headers)
+    assert listed.status_code == 200, listed.text
+    keys = {item["module_key"] for item in listed.json()["items"]}
+    assert target_key not in keys
+    sibling = next(
+        item for item in listed.json()["items"] if item["module_key"] == sibling_key
+    )
+    assert sibling["redirect_uris"] == [REDIRECT_URI]
+    assert sibling["service_key_id"] == service_key_id
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_service_key_unbinds_without_uninstalling(
+    client,
+    admin_token,
+):
+    """Incident response: sever ticket exchange while the installation and
+    its callbacks stay in place."""
+    module_key = f"unbind-{uuid4().hex[:12]}"
+    service_key = await create_module_service_key(client, token=admin_token)
+
+    installed = await install_module(
+        client,
+        token=admin_token,
+        module_key=module_key,
+        service_key_id=service_key["api_key"]["id"],
+    )
+    assert installed.status_code == 200, installed.text
+
+    unbound = await client.put(
+        installation_path(module_key),
+        json={"redirect_uris": [REDIRECT_URI], "service_key_id": None},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert unbound.status_code == 200, unbound.text
+    assert unbound.json()["service_key_id"] is None
+    assert unbound.json()["redirect_uris"] == [REDIRECT_URI]
+    assert unbound.json()["configured"] is False
+
+
+@pytest.mark.asyncio
+async def test_module_admin_routes_reject_environment_key_auth(
+    client,
     test_settings,
 ):
-    async with db_container() as container:
-        tenant_before = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant_before is not None
-        before_ids = {module.id for module in tenant_before.modules}
-
-    response = await client.put(
-        f"/api/v1/modules/{admin_user.tenant_id}/{uuid4()}/",
-        headers={"X-API-Key": test_settings.eneo_super_duper_api_key},
+    response = await client.get(
+        "/api/v1/admin/modules/",
+        headers={"X-API-Key": test_settings.eneo_super_api_key},
     )
 
-    assert response.status_code == 404, response.text
-    async with db_container() as container:
-        tenant_after = await container.tenant_repo().get(admin_user.tenant_id)
-        assert tenant_after is not None
-        assert {module.id for module in tenant_after.modules} == before_ids
+    assert response.status_code == 401, response.text

@@ -15,6 +15,7 @@
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
   import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
+  import SharePointFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointFixtureLauncher.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
@@ -170,6 +171,10 @@
       {:else if $selectedTab === "websites"}
         {@render noCreatePermission(m.websites().toLowerCase())}
       {:else if $selectedTab === "integrations" && $currentSpace.hasPermission("create", "integrationKnowledge")}
+        {#if data.settings.sharepoint_fixture_mode_available}
+          <SharePointFixtureLauncher authType={isPersonalSpace ? "user_oauth" : "tenant_app"}
+          ></SharePointFixtureLauncher>
+        {/if}
         {#if data.availableIntegrations.length > 0}
           <ImportKnowledgeDialog></ImportKnowledgeDialog>
         {:else if isPersonalSpace}

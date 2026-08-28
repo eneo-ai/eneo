@@ -105,11 +105,15 @@ vi.mock("$lib/components/toast", () => ({
   }
 }));
 
-afterEach(() => {
+afterEach(async () => {
   vi.useFakeTimers();
   cleanup();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
+  // Bits UI releases its body scroll lock after dialog teardown completes.
+  await waitFor(() => {
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
   vi.clearAllMocks();
   vi.restoreAllMocks();
 });

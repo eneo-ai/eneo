@@ -91,6 +91,10 @@ class SettingsPublic(SettingsBase):
     # when it is not configured. In "diarize" mode the flow's own transcription
     # model still transcribes, so the model picker stays meaningful.
     flow_transcription_service_mode: Literal["full", "diarize"] | None = None
+    # Read-only: whether the guarded SharePoint fixture API is available in
+    # this deployment. Lets the UI expose local test controls without relying
+    # on a manually entered query parameter.
+    sharepoint_fixture_mode_available: bool = False
 
 
 class GetModelsResponse(BaseModel):

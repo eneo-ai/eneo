@@ -2,7 +2,16 @@ from typing import Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import CheckConstraint, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BasePublic
@@ -31,6 +40,40 @@ class Files(BasePublic):
     # Set for files derived from another upload (for example extracted images).
     parent_file_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("files.id", ondelete="CASCADE"), index=True
+    )
+
+    # Temporary Release A read source. Normal metadata queries must never
+    # detoast these payloads; the File repository loads them explicitly only
+    # when an object-content reference is still missing.
+    legacy_text: Mapped[Optional[str]] = mapped_column(
+        "text",
+        Text,
+        deferred=True,
+        deferred_raiseload=True,
+    )
+    legacy_blob: Mapped[Optional[bytes]] = mapped_column(
+        "blob",
+        BYTEA,
+        deferred=True,
+        deferred_raiseload=True,
+    )
+    legacy_checksum: Mapped[Optional[str]] = mapped_column(
+        "checksum",
+        String,
+        deferred=True,
+        deferred_raiseload=True,
+    )
+    legacy_size: Mapped[Optional[int]] = mapped_column(
+        "size",
+        Integer,
+        deferred=True,
+        deferred_raiseload=True,
+    )
+    legacy_transcription: Mapped[Optional[str]] = mapped_column(
+        "transcription",
+        Text,
+        deferred=True,
+        deferred_raiseload=True,
     )
 
     __table_args__ = (

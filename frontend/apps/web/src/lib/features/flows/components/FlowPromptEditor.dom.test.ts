@@ -4,8 +4,11 @@ import type { FlowStep } from "@eneo/eneo-js";
 
 import FlowPromptEditor from "./FlowPromptEditor.svelte";
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await vi.waitFor(() => {
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
 });
 
 describe("FlowPromptEditor", () => {

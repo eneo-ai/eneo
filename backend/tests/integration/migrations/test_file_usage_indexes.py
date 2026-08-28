@@ -5,7 +5,7 @@ from pathlib import Path
 
 import psycopg2
 import pytest
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
@@ -16,7 +16,7 @@ _POSTGRES_13_IMAGE = (
     "pgvector/pgvector:pg13@"
     "sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3"
 )
-_PREVIOUS_REVISION = "202607231700"
+_PREVIOUS_REVISION = "202607231745"
 _INDEX_REVISION = "202607241000"
 _INDEXES = (
     "ix_questions_files_file_id",

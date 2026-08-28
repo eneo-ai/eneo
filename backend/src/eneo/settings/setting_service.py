@@ -482,6 +482,9 @@ class SettingService:
                 if app_settings.flow_transcription_service_configured
                 else None
             ),
+            sharepoint_fixture_mode_available=(
+                app_settings.sharepoint_fixture_mode_active
+            ),
         )
 
     async def get_settings(self) -> SettingsPublic:

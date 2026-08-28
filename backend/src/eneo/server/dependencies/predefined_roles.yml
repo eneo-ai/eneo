@@ -27,6 +27,7 @@ roles:
     permissions:
       - admin
       - storage
+      - modules
       - personal_chat
       - assistants
       - skills

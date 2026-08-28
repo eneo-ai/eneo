@@ -251,6 +251,10 @@ async def test_get_settings_if_settings():
 
     assert settings.chatbot_widget == TEST_SETTINGS_EXPECTED.chatbot_widget
     assert settings.using_templates == False  # Feature flag disabled in mock
+    assert (
+        settings.sharepoint_fixture_mode_available
+        is get_app_settings().sharepoint_fixture_mode_active
+    )
 
 
 async def test_update_settings():

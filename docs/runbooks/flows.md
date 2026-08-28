@@ -7,10 +7,21 @@ configured Eneo super API key; ordinary user, tenant API, service, and
 super-duper credentials are rejected. Keep the key in the deployment secret
 manager and never print it in logs or tickets.
 
+```bash
+curl --fail-with-body --silent --show-error \
+  --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
+  "${ENEO_BASE_URL}/api/healthz/flows" | jq .
+```
+
 The response combines bounded database diagnostics with platform worker
 readiness for execution and maintenance. `UNKNOWN` means a diagnostic query
 failed or timed out. Missing or expired ARQ health keys and Redis probe failures
 fail closed.
+
+Health and recovery use the same staleness predicate for running runs. A stale
+run with a pending or claimed webhook delivery is excluded from both surfaces
+because the webhook worker may still own an external effect. Let the bounded
+claim/retry lifecycle converge before repeating the health check.
 
 Production has two Flow-related platform processes:
 
@@ -22,23 +33,26 @@ There is no Flow-private worker, beat process, or scheduler.
 
 ## Health flags and recovery
 
-| Flag | Operator response |
-| --- | --- |
-| `EXECUTION_WORKER_UNAVAILABLE` | Restore Redis and the execution worker, then repeat the health check. |
-| `MAINTENANCE_WORKER_UNAVAILABLE` | Restore Redis and the maintenance worker, then repeat the health check. |
-| `STALE_QUEUED_RUNS` | Verify broker and execution health; allow bounded redispatch to converge. |
-| `ACCEPTED_DISPATCH_EXHAUSTED` | Check for a delayed claim before using the authorized generation-fenced redispatch endpoint. Never clear fields with SQL. |
-| `STALE_RUNNING_RUNS` | Restore worker capacity and allow the stale-running reconciler to terminalize through normal ownership. |
-| `STALE_RUNNING_RECONCILER_LAG` | Restore maintenance capacity and inspect sanitized reconciler errors. |
-| `EXPIRED_REVIEW_CHECKPOINTS` | Allow review-expiry reconciliation to terminalize the checkpoint. |
-| `REVIEW_EXPIRY_RECONCILER_LAG` | Restore maintenance capacity and inspect expiry-task failures. |
-| `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | Stop mutation, preserve evidence, and investigate terminalization ownership. |
-| `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | Stop mutation, preserve evidence, and investigate terminalization ownership. |
-| `AUDIT_OUTBOX_DELIVERY_BACKLOG` | Restore audit storage and maintenance capacity; let bounded delivery retry. |
-| `AUDIT_OUTBOX_DEAD_LETTERS` | Preserve the row, restore dependencies, and follow the dead-letter guidance below. |
-| `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | Restore destination connectivity and maintenance capacity; inspect sanitized diagnosis. |
-| `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Verify the former worker no longer owns the effect, then allow bounded reclaim. |
-| `WEBHOOK_OUTBOX_DEAD_LETTERS` | Preserve the row and inspect its sanitized failure and destination contract. |
+Timing values are returned in `thresholds`; code-owned defaults are shown below.
+Any positive count triggers a flag unless an age condition is stated.
+
+| Flag | Effective threshold | Recovery action |
+| --- | --- | --- |
+| `EXECUTION_WORKER_UNAVAILABLE` | The platform execution worker health key is missing or the one-second Redis readiness probe failed. | Restore Redis and `task-execution-worker`, then repeat the health check. |
+| `MAINTENANCE_WORKER_UNAVAILABLE` | The platform maintenance worker health key is missing or the one-second Redis readiness probe failed. | Restore Redis and `task-maintenance-worker`, then repeat the health check. |
+| `STALE_QUEUED_RUNS` | A queued run remains dispatch-pending for at least `stale_queued_after_seconds` (30 seconds). | Verify broker and execution health; allow bounded redispatch to converge. |
+| `ACCEPTED_DISPATCH_EXHAUSTED` | At least one queued run has exhausted dispatch after broker acceptance or an outcome-unknown send. | Check for a delayed claim before using the authorized generation-fenced redispatch endpoint. Never clear fields with SQL. |
+| `STALE_RUNNING_RUNS` | A recovery-eligible run is at least `stale_running_after_seconds` old (task timeout plus 60 seconds) but has not crossed the unhealthy threshold. | Restore worker capacity and allow the stale-running reconciler to terminalize through normal ownership. |
+| `STALE_RUNNING_RECONCILER_LAG` | The oldest recovery-eligible run exceeds `stale_running_unhealthy_after_seconds` (task timeout plus 180 seconds). | Restore maintenance capacity and inspect sanitized reconciler errors. |
+| `EXPIRED_REVIEW_CHECKPOINTS` | A reconcilable checkpoint is expired but no more than `review_expiry_unhealthy_after_seconds` (120 seconds) past expiry. | Allow review-expiry reconciliation to terminalize the checkpoint. |
+| `REVIEW_EXPIRY_RECONCILER_LAG` | The oldest reconcilable checkpoint is more than 120 seconds past expiry. | Restore maintenance capacity and inspect expiry-task failures. |
+| `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | Any terminal run updated within the 24-hour integrity lookback still has an open attempt. | Stop mutation, preserve evidence, and investigate terminalization ownership. |
+| `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | Any terminal run updated within the 24-hour integrity lookback still has an active step result. | Stop mutation, preserve evidence, and investigate terminalization ownership. |
+| `AUDIT_OUTBOX_DELIVERY_BACKLOG` | A pending audit row remains eligible after the 300-second backlog grace. | Restore audit storage and maintenance capacity; let bounded delivery retry. |
+| `AUDIT_OUTBOX_DEAD_LETTERS` | Any lifecycle-audit delivery exhausted its bounded attempts. | Preserve the row, restore dependencies, and follow the fail-closed dead-letter guidance below. |
+| `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | An unclaimed or sufficiently expired pending webhook delivery remains eligible beyond the 300-second grace. | Restore destination connectivity and maintenance capacity; inspect sanitized diagnosis. |
+| `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Any pending webhook claim has reached `claim_expires_at`. | Verify the former worker no longer owns the effect, then allow bounded reclaim. |
+| `WEBHOOK_OUTBOX_DEAD_LETTERS` | Any webhook delivery exhausted its five-attempt budget. | Preserve the row and inspect its sanitized failure and destination contract. |
 
 A stale running run with a pending or claimed webhook delivery may still have an
 external effect in progress. Do not terminalize it manually. Let the bounded
@@ -76,10 +90,12 @@ canonical delivery owner records success.
 ## Evidence export
 
 Raw evidence export is exceptional. It requires the explicit non-default reason
-gate, active encryption, and an audit-before-response transaction. If audit or
-commit fails, protected bytes are not returned. Redacted export remains the
-default. Never put encryption keys, API keys, or exported evidence in tickets or
-command history.
+gate and an audit-before-response transaction. If audit or commit fails,
+protected bytes are not returned. Active encryption enforcement belongs to
+M2.9; until that enforcement is active and verified in the deployment, do not
+enable or perform raw evidence export. Redacted export remains the default.
+Never put encryption keys, API keys, or exported evidence in tickets or command
+history.
 
 ## Stored HTTP credentials
 

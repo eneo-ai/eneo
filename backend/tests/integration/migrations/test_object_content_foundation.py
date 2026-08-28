@@ -6,7 +6,7 @@ from pathlib import Path
 import psycopg2
 import pytest
 from sqlalchemy import create_engine, inspect
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config

@@ -9,13 +9,7 @@ from pathlib import Path
 from fastapi.routing import APIRoute
 
 
-def test_server_main_imports_cleanly() -> None:
-    module = importlib.import_module("eneo.server.main")
-
-    assert module is not None
-
-
-def test_server_main_imports_in_fresh_python_process() -> None:
+def _run_in_fresh_python(script: str) -> subprocess.CompletedProcess[str]:
     backend_root = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
     source_path = str(backend_root / "src")
@@ -23,47 +17,7 @@ def test_server_main_imports_in_fresh_python_process() -> None:
     env["PYTHONPATH"] = (
         f"{source_path}:{existing_pythonpath}" if existing_pythonpath else source_path
     )
-
-    result = subprocess.run(
-        [sys.executable, "-c", "import eneo.server.main"],
-        cwd=backend_root,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_eneo_flows_package_does_not_import_services_as_side_effect() -> None:
-    sys.modules.pop("eneo.flows", None)
-    sys.modules.pop("eneo.flows.application.flow_service", None)
-    sys.modules.pop("eneo.flows.application.flow_run_service", None)
-
-    importlib.import_module("eneo.flows")
-
-    assert "eneo.flows.application.flow_service" not in sys.modules
-    assert "eneo.flows.application.flow_run_service" not in sys.modules
-
-
-def test_flow_api_contract_models_do_not_import_routers_as_side_effect() -> None:
-    backend_root = Path(__file__).resolve().parents[2]
-    env = os.environ.copy()
-    source_path = str(backend_root / "src")
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{source_path}:{existing_pythonpath}" if existing_pythonpath else source_path
-    )
-    script = """
-import sys
-import eneo.flows.api.flow_run_contract_models
-
-assert "eneo.flows.api.flow_router" not in sys.modules
-assert "eneo.flows.ai_builder.ai_builder_router" not in sys.modules
-"""
-
-    result = subprocess.run(
+    return subprocess.run(
         [sys.executable, "-c", script],
         cwd=backend_root,
         env=env,
@@ -72,18 +26,60 @@ assert "eneo.flows.ai_builder.ai_builder_router" not in sys.modules
         check=False,
     )
 
+
+def test_server_main_imports_cleanly() -> None:
+    module = importlib.import_module("eneo.server.main")
+
+    assert module is not None
+
+
+def test_server_main_imports_in_fresh_python_process() -> None:
+    result = _run_in_fresh_python("import eneo.server.main")
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_eneo_flows_package_does_not_import_services_as_side_effect() -> None:
+    result = _run_in_fresh_python(
+        """
+import sys
+import eneo.flows
+
+assert "eneo.flows.application.flow_service" not in sys.modules
+assert "eneo.flows.application.flow_run_service" not in sys.modules
+"""
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_flow_api_contract_models_do_not_import_routers_as_side_effect() -> None:
+    script = """
+import sys
+import eneo.flows.api.flow_run_contract_models
+
+assert "eneo.flows.api.flow_router" not in sys.modules
+assert "eneo.flows.ai_builder.ai_builder_router" not in sys.modules
+"""
+
+    result = _run_in_fresh_python(script)
+
     assert result.returncode == 0, result.stderr
 
 
 def test_eneo_flows_runtime_package_does_not_import_task_transport_as_side_effect() -> (
     None
 ):
-    sys.modules.pop("eneo.flows.runtime", None)
-    sys.modules.pop("arq", None)
+    result = _run_in_fresh_python(
+        """
+import sys
+import eneo.flows.runtime
 
-    importlib.import_module("eneo.flows.runtime")
+assert "arq" not in sys.modules
+"""
+    )
 
-    assert "arq" not in sys.modules
+    assert result.returncode == 0, result.stderr
 
 
 def test_flow_api_router_modules_export_only_router() -> None:

@@ -1,7 +1,7 @@
 """add reverse indexes for File usage checks
 
 Revision ID: 202607241000
-Revises: 202607231700
+Revises: 202607231745
 Create Date: 2026-07-24 10:00:00.000000
 
 Each junction-table primary key starts with its product owner ID. File deletion
@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "202607241000"
-down_revision: str | None = "202607231700"
+down_revision: str | None = "202607231745"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

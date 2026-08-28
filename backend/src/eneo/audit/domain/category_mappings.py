@@ -37,7 +37,7 @@ CATEGORY_MAPPINGS = {
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
     ActionType.MODULE_REMOVED_FROM_TENANT.value: "admin_actions",
     ActionType.MODULE_CLIENT_CONFIG_UPDATED.value: "admin_actions",
-    # SCIM Provisioning Actions (11 actions)
+    # SCIM Provisioning Actions
     ActionType.SCIM_USER_PROVISIONED.value: "admin_actions",
     ActionType.SCIM_USER_RECONCILED.value: "admin_actions",
     ActionType.SCIM_USER_REACTIVATED.value: "admin_actions",
@@ -49,7 +49,7 @@ CATEGORY_MAPPINGS = {
     ActionType.SCIM_GROUP_DELETED.value: "admin_actions",
     ActionType.SCIM_TOKEN_CREATED.value: "admin_actions",
     ActionType.SCIM_TOKEN_REVOKED.value: "admin_actions",
-    # User Actions (45 actions)
+    # User Actions
     ActionType.ASSISTANT_CREATED.value: "user_actions",
     ActionType.ASSISTANT_UPDATED.value: "user_actions",
     ActionType.ASSISTANT_DELETED.value: "user_actions",
@@ -110,6 +110,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_AUDIO_TRANSCRIBED.value: "user_actions",
     ActionType.FLOW_HTTP_OUTBOUND_CALL.value: "user_actions",
     ActionType.FLOW_RUN_ARTIFACT_DOWNLOADED.value: "file_operations",
+    ActionType.FLOW_RUN_INPUT_FILE_DOWNLOADED.value: "file_operations",
     ActionType.FLOW_EVIDENCE_VIEWED.value: "audit_access",
     ActionType.FLOW_EVIDENCE_EXPORTED_JSON.value: "audit_access",
     # Package exports can leave the tenant boundary, so audit views should group them
@@ -130,6 +131,7 @@ CATEGORY_MAPPINGS = {
     ActionType.AI_BUILDER_FLOW_APPLIED.value: "user_actions",
     ActionType.AI_BUILDER_ATTACHMENT_DETACHED.value: "user_actions",
     ActionType.AI_BUILDER_SESSION_CANCELLED.value: "user_actions",
+    ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
     # Security Events
@@ -142,12 +144,12 @@ CATEGORY_MAPPINGS = {
     ActionType.MODULE_AUTH_TICKET_ISSUED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_EXCHANGED.value: "security_events",
     ActionType.MODULE_AUTH_TOKEN_REFRESHED.value: "security_events",
-    # File Operations (4 actions)
+    # File Operations
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
-    # Integration Events (12 actions)
+    # Integration Events
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",
     ActionType.INTEGRATION_CONNECTED.value: "integration_events",

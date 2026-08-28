@@ -445,7 +445,7 @@ class TestIsActionEnabled:
 
 
 class TestGetActionConfig:
-    """Tests for get_action_config() returning all 66 actions with metadata."""
+    """Tests for get_action_config() returning all actions with metadata."""
 
     async def test_get_action_config_returns_all_actions(
         self, config_service, mock_repository

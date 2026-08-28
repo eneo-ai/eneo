@@ -7,10 +7,9 @@ then links to focused guides for storage, authentication, and AI providers.
 import { Callout, Steps, Tabs } from "nextra/components";
 
 <Callout type="warning">
-  **This is an example configuration.** You MUST customize all values before
-  deployment. Search for `your-domain.com`, `changeme`, and `CHANGEME` and
-  replace with your actual values. Copy-paste without modification will NOT
-  work.
+  **This is an example configuration.** You MUST customize all values before deployment. Search for
+  `your-domain.com`, `changeme`, and `CHANGEME` and replace with your actual values. Copy-paste
+  without modification will NOT work.
 </Callout>
 
 ## Start here
@@ -25,10 +24,9 @@ import { Callout, Steps, Tabs } from "nextra/components";
 | Diagnose a failed deployment        | [Troubleshooting](#troubleshooting)                      |
 
 <Callout type="info">
-  You do not need S3-compatible storage to start Eneo. The default deployment
-  keeps bounded durable content in PostgreSQL. Add SeaweedFS, MinIO, or another
-  compatible endpoint only when your capacity and recovery requirements call for
-  it.
+  You do not need S3-compatible storage to start Eneo. The default deployment keeps bounded durable
+  content in PostgreSQL. Add SeaweedFS, MinIO, or another compatible endpoint only when your
+  capacity and recovery requirements call for it.
 </Callout>
 
 ## Architecture overview
@@ -43,21 +41,21 @@ enabled when needed.
 
 </div>
 
-| Service            | Technology               | Port         | Role                                               |
-| ------------------ | ------------------------ | ------------ | -------------------------------------------------- |
-| **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                                 |
-| **Backend**        | FastAPI (Python)         | 8000         | API server, authentication                         |
-| **General worker** | ARQ                      | -            | Uploads, crawling, integrations, and audit jobs     |
-| **Execution worker** | ARQ                    | -            | Flow runtime execution on its own capacity queue    |
-| **Maintenance worker** | ARQ                  | -            | Flow recovery, expiry, and outbox scheduling        |
-| **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                        |
-| **Redis**          | Redis 7                  | 6379         | Cache and independent ARQ task queues               |
-| **Object content** | S3-compatible endpoint   | 8333 private | Optional durable original and derived byte storage |
-| **db-init**        | Python                   | -            | One-time database initialization                   |
+| Service                | Technology               | Port         | Role                                               |
+| ---------------------- | ------------------------ | ------------ | -------------------------------------------------- |
+| **Frontend**           | SvelteKit                | 3000         | Web interface, SSR                                 |
+| **Backend**            | FastAPI (Python)         | 8000         | API server, authentication                         |
+| **General worker**     | ARQ                      | -            | Uploads, crawling, integrations, and audit jobs    |
+| **Execution worker**   | ARQ                      | -            | Flow runtime execution on its own capacity queue   |
+| **Maintenance worker** | ARQ                      | -            | Flow recovery, expiry, and outbox scheduling       |
+| **Database**           | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                        |
+| **Redis**              | Redis 7                  | 6379         | Cache and independent ARQ task queues              |
+| **Object content**     | S3-compatible endpoint   | 8333 private | Optional durable original and derived byte storage |
+| **db-init**            | Python                   | -            | One-time database initialization                   |
 
 <Callout type="info">
-  **Traefik is provided as an example reverse proxy**, not a requirement. You
-  can use nginx, HAProxy, Caddy, or any reverse proxy that supports the [routing
+  **Traefik is provided as an example reverse proxy**, not a requirement. You can use nginx,
+  HAProxy, Caddy, or any reverse proxy that supports the [routing
   requirements](#reverse-proxy-requirements) below.
 </Callout>
 
@@ -216,22 +214,21 @@ Change this password immediately after first login.
 
 The Docker Compose stack uses four networks:
 
-| Network                                 | Services                                 | Purpose                                                                |
-| --------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
+| Network                                 | Services                                                                         | Purpose                                                                       |
+| --------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `proxy_tier` (external)                 | Traefik, frontend, backend, general worker, execution worker, maintenance worker | Ingress and outbound access for APIs, OIDC, crawls, model calls, and webhooks |
-| `data_net` (`internal: true`)           | db, redis, backend, all three workers, db-init | Data layer without internet egress, isolated from Traefik and frontend |
-| `module_net`                            | Traefik, backend                         | Reserved for optional module containers                                |
-| `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker | Private S3-compatible byte plane when enabled; never routed publicly   |
+| `data_net` (`internal: true`)           | db, redis, backend, all three workers, db-init                                   | Data layer without internet egress, isolated from Traefik and frontend        |
+| `module_net`                            | Traefik, backend                                                                 | Reserved for optional module containers                                       |
+| `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker               | Private S3-compatible byte plane when enabled; never routed publicly          |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend or Traefik containers, and they have no outbound internet access.
 
 <Callout type="warning">
-  **Existing installations:** Older deployment files put every service on
-  `proxy_tier`. Running `docker compose up -d` with the current template
-  recreates containers with the new network membership while keeping PostgreSQL
-  and Redis volumes intact. External backup jobs or admin tools that connected
-  to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec`
-  or attach to `eneo_data_net`.
+  **Existing installations:** Older deployment files put every service on `proxy_tier`. Running
+  `docker compose up -d` with the current template recreates containers with the new network
+  membership while keeping PostgreSQL and Redis volumes intact. External backup jobs or admin tools
+  that connected to `db:5432` or `redis:6379` over `proxy_tier` must run through `docker exec` or
+  attach to `eneo_data_net`.
 </Callout>
 
 Verify the isolation after upgrading:
@@ -424,8 +421,8 @@ curl -fsS https://your-domain.com/version
 ## Object Content Storage
 
 <Callout type="warning">
-  When object-store rows exist, PostgreSQL and that endpoint form one recovery
-  unit. Inline-only bytes are already part of PostgreSQL backups.
+  When object-store rows exist, PostgreSQL and that endpoint form one recovery unit. Inline-only
+  bytes are already part of PostgreSQL backups.
 </Callout>
 
 The reference stack defaults to bounded PostgreSQL-inline content. An optional
@@ -557,18 +554,16 @@ server {
 
 ## API Key Hierarchy
 
-Eneo uses a three-tier API key system for different administrative tasks.
+Eneo uses environment and user/service credentials for separate tasks.
 
-| Key                     | Environment Variable       | Purpose                                                            |
-| ----------------------- | -------------------------- | ------------------------------------------------------------------ |
-| **Super API Key**       | `ENEO_SUPER_API_KEY`       | Sysadmin operations: tenants, users, credentials, crawler settings |
-| **Super Duper API Key** | `ENEO_SUPER_DUPER_API_KEY` | Module management: assigning modules to tenants                    |
-| **User API Key**        | Generated per user         | Admin operations within a tenant via `/api/v1/admin/`              |
+| Key               | Source               | Purpose                                                            |
+| ----------------- | -------------------- | ------------------------------------------------------------------ |
+| **Super API Key** | `ENEO_SUPER_API_KEY` | Sysadmin operations: tenants, users, credentials, crawler settings |
+| **User/API key**  | Generated in Eneo    | Organization operations allowed by the user's role and key scope   |
 
 <Callout type="info">
-  **Service Account Pattern:** We recommend creating a dedicated admin account
-  (service account) for automated user provisioning via the admin API endpoints,
-  rather than using personal accounts.
+  **Service Account Pattern:** We recommend creating a dedicated admin account (service account) for
+  automated user provisioning via the admin API endpoints, rather than using personal accounts.
 </Callout>
 
 ### Credentials API
@@ -576,9 +571,9 @@ Eneo uses a three-tier API key system for different administrative tasks.
 Manage AI provider credentials per tenant using the sysadmin API.
 
 <Callout type="warning">
-  **Prerequisite:** Set `TENANT_CREDENTIALS_ENABLED=true` and `ENCRYPTION_KEY`
-  in backend env before using these endpoints. See [Per-Tenant
-  Credentials](#environment-configuration) in the Backend configuration.
+  **Prerequisite:** Set `TENANT_CREDENTIALS_ENABLED=true` and `ENCRYPTION_KEY` in backend env before
+  using these endpoints. See [Per-Tenant Credentials](#environment-configuration) in the Backend
+  configuration.
 </Callout>
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
@@ -613,8 +608,8 @@ Manage AI provider credentials per tenant using the sysadmin API.
 **Supported providers:** `openai`, `anthropic`, `azure`, `google`, `mistral`, `vllm`
 
 <Callout type="warning">
-  Credentials are encrypted with Fernet (AES-128-CBC + HMAC). **Backup your
-  `ENCRYPTION_KEY`** - if lost, all credentials must be re-entered.
+  Credentials are encrypted with Fernet (AES-128-CBC + HMAC). **Backup your `ENCRYPTION_KEY`** - if
+  lost, all credentials must be re-entered.
 </Callout>
 
 ### Crawler Settings API
@@ -653,16 +648,15 @@ After deployment, some features require additional configuration in the Admin pa
 ### Crawler & Document Upload
 
 <Callout type="info">
-  To use the web crawler or upload documents for processing, the **worker
-  service must be running** and at least one **embedding model must be enabled**
-  in Admin → Models → Embeddings.
+  To use the web crawler or upload documents for processing, the **worker service must be running**
+  and at least one **embedding model must be enabled** in Admin → Models → Embeddings.
 </Callout>
 
 ### Apps (Voice/Audio Features)
 
 <Callout type="info">
-  **Can't create Apps?** This feature requires a transcription model. Go to
-  Admin → Models → Transcription tab and enable a model like Whisper.
+  **Can't create Apps?** This feature requires a transcription model. Go to Admin → Models →
+  Transcription tab and enable a model like Whisper.
 </Callout>
 
 ### Sysadmin API Access
@@ -673,13 +667,12 @@ To use system administration endpoints (tenants, credentials, crawler settings),
 ENEO_SUPER_API_KEY=your-secure-api-key
 ```
 
-### Modules API Access
+### Module administration
 
-To manage module assignments to tenants, set a separate higher-privileged API key:
-
-```bash
-ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
-```
+Configure modules in **Administration → Modules** with an ordinary signed-in
+administrator holding the `modules` permission. The organization is derived
+from the session; module administration does not require a separate environment
+key or a tenant ID.
 
 ---
 
@@ -687,26 +680,26 @@ ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
 
 ### Common Issues
 
-| Symptom                              | Likely Cause                                         | Fix                                                                                 |
-| ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run     | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                 |
-| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                      | Set to `true`, restart backend                                                      |
-| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                  | Set to external URL (not localhost in prod)                                         |
-| Can't upload multiple files          | `MAX_IN_QUESTION=1`                                  | Increase value in backend env                                                       |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > Storage                  |
-| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                  | Set correct key or re-enter credentials                                             |
-| Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
-| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND IdP config                                     |
-| Crawls not processing                | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
-| Crawls/uploads not working           | Worker not running or no embedding model             | Check worker is running, enable embedding model in Admin → Models                   |
-| Flow remains queued                  | Execution worker not running                          | Check `task-execution-worker`; its queue is separate from the general worker        |
+| Symptom                               | Likely Cause                                         | Fix                                                                                 |
+| ------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Can't login with default credentials  | `DEFAULT_*` vars commented or db-init didn't run     | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                 |
+| Can't see Users page in Admin         | `USING_ACCESS_MANAGEMENT=false`                      | Set to `true`, restart backend                                                      |
+| Frontend shows wrong API URL          | `PUBLIC_ENEO_BACKEND_URL` incorrect                  | Set to external URL (not localhost in prod)                                         |
+| Can't upload multiple files           | `MAX_IN_QUESTION=1`                                  | Increase value in backend env                                                       |
+| Large file uploads fail               | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > Storage                  |
+| "Failed to decrypt credential"        | `ENCRYPTION_KEY` missing or changed                  | Set correct key or re-enter credentials                                             |
+| Credentials API returns 404/error     | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
+| OIDC redirect fails                   | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND IdP config                                     |
+| Crawls not processing                 | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
+| Crawls/uploads not working            | Worker not running or no embedding model             | Check worker is running, enable embedding model in Admin → Models                   |
+| Flow remains queued                   | Execution worker not running                         | Check `task-execution-worker`; its queue is separate from the general worker        |
 | Flow recovery or outboxes are delayed | Maintenance worker not running                       | Check `task-maintenance-worker` and `/api/healthz/flows`                            |
-| Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription tab, enable Whisper                                  |
-| JWT token invalid                    | `JWT_SECRET` mismatch                                | Must be identical in backend AND frontend                                           |
-| Worker jobs stuck or slow            | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
-| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service   | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
-| HTTP to HTTPS redirect broken        | Missing Traefik label                                | Ensure `traefik.enable=true` label on traefik service                               |
-| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml            | Replace `your-domain.com` in all 4 locations                                        |
+| Can't create Apps                     | No transcription model enabled                       | Admin → Models → Transcription tab, enable Whisper                                  |
+| JWT token invalid                     | `JWT_SECRET` mismatch                                | Must be identical in backend AND frontend                                           |
+| Worker jobs stuck or slow             | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
+| `ECONNREFUSED 127.0.0.1:8000`         | Frontend using localhost instead of Docker service   | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
+| HTTP to HTTPS redirect broken         | Missing Traefik label                                | Ensure `traefik.enable=true` label on traefik service                               |
+| 502 Bad Gateway                       | Domain not replaced in docker-compose.yml            | Replace `your-domain.com` in all 4 locations                                        |
 
 ### Debug Mode
 
@@ -764,9 +757,8 @@ docker compose logs --tail=100 backend worker \
 ### Immutable Image Digests
 
 <Callout type="warning">
-  The production Compose file requires immutable digests for Traefik, frontend,
-  backend, pgvector, and Redis. Missing or empty digest inputs stop Compose
-  before deployment.
+  The production Compose file requires immutable digests for Traefik, frontend, backend, pgvector,
+  and Redis. Missing or empty digest inputs stop Compose before deployment.
 </Callout>
 
 Set the five digest suffixes in `.env`. Compose builds each image identity as
@@ -780,15 +772,15 @@ database initialization roles.
 - Download `IMAGE-DIGESTS.txt` from the matching release.
 
 <Callout type="info">
-  Review release notes and test a complete digest set before upgrading. Keep the
-  previous set with the matching backup for rollback.
+  Review release notes and test a complete digest set before upgrading. Keep the previous set with
+  the matching backup for rollback.
 </Callout>
 
 ### Backups
 
 <Callout type="warning">
-  **Take one paired recovery point when object-store rows exist.** Inline-only
-  control and bytes are both included in the PostgreSQL backup.
+  **Take one paired recovery point when object-store rows exist.** Inline-only control and bytes are
+  both included in the PostgreSQL backup.
 </Callout>
 
 **Database backup with pg_dump (recommended):**
@@ -826,16 +818,6 @@ checksum and skew-recovery checks.
 ### Updating Eneo
 
 <Steps>
-### Back up your data
-
-```bash
-# Database backup (required)
-docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).sql.gz
-```
-
-If object-store rows exist, take the matching endpoint snapshot before resuming
-writes. Inline-only content needs no second backup artifact.
-
 ### Update the image digest set
 
 Replace all five digest suffixes in `.env`. Keep the previous `.env` with the
@@ -855,13 +837,42 @@ endpoint. If the retained `.env` points to
 `http://object-content:8333`, use the bundled-store overlay and profile on
 every command.
 
+### Drain work and stop old writers
+
+For the release that introduces durable knowledge originals and staged legacy
+File/Icon adoption, do not use a rolling `docker compose up`. Stop all backend
+replicas, let the old worker drain its executable knowledge jobs, then stop all
+old workers before starting `db-init`. The schema expansion installs a database
+write fence because old File/Icon code still changes legacy payload columns.
+Keep `backend`, `worker`, `task-execution-worker`, and
+`task-maintenance-worker` stopped through the recovery point and `db-init`.
+
+Follow the [File and Icon storage upgrade
+checklist](/guides/file-icon-storage-upgrade#before-you-upgrade). Keep the API
+closed until the new migration and same-release worker are ready.
+
+### Take the stopped-writer recovery point
+
+After the drain is verified and every old writer is stopped, create the database
+backup:
+
+```bash
+docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).sql.gz
+```
+
+If object-store rows exist, take the matching endpoint snapshot while writers
+remain stopped and label both artifacts as one recovery point. Inline-only
+content needs no second backup artifact.
+
 ### Pull and deploy
 
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
 docker compose config --images
+docker compose stop backend worker task-execution-worker task-maintenance-worker
 docker compose pull
+docker compose run --rm db-init
 docker compose up -d
 docker compose ps
 curl -fsS https://eneo.example.eu/version
@@ -879,7 +890,17 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
+  stop backend worker task-execution-worker task-maintenance-worker
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
   pull
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  run --rm db-init
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
@@ -900,6 +921,40 @@ while inline content remains available:
 curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
+
+### Check online File and Icon adoption
+
+`db-init` runs two consecutive revisions for this change. The first installs
+the schema and write fence and commits. The second inventories legacy File/Icon
+variants in resumable, idempotent groups without retaining the first revision's
+exclusive table locks. Neither revision copies payload bytes. The new worker
+adopts them online in bounded batches. Follow its state after the deployment:
+
+```bash
+docker compose logs --since=30m worker \
+  | grep "File/Icon legacy backfill"
+```
+
+- `active` needs no operator action beyond capacity and application monitoring.
+  Confirm `complete` with the durable campaign-state query in the storage guide;
+  an empty installation may emit no completion log.
+- `waiting_for_capacity` means Eneo remains available, but the estimated inline
+  copy exceeds the automatic threshold. Confirm payload, WAL, replica, backup,
+  and safety headroom before setting the reported acknowledgement.
+- `waiting_for_object_store` means this release cannot adopt legacy bytes
+  directly to the selected object store. Selecting PostgreSQL inline changes
+  the deployment-wide target for eligible new writes. Keep it selected until
+  adoption is complete, then reselect object storage and queue verified moves,
+  or wait for a compatible release.
+- `halted` means the destination changed, or an invalid, oversized, or
+  retry-exhausted item needs action. Fix the logged cause before increasing the
+  resume revision. The worker retries older failures in bounded scheduled
+  batches; a repeated failure waits for the next higher revision.
+
+Do not edit the ledger or remove the database trigger. Existing legacy content
+remains readable while the worker waits or is stopped. See [Upgrade File & Icon
+Storage](/guides/file-icon-storage-upgrade) for capacity examples, realistic
+duration, state queries, pause behavior, rollback, and cleanup.
 
 ### Clean up old images
 

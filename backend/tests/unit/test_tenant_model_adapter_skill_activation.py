@@ -53,6 +53,9 @@ class _FakeMCPProxy:
     def get_allowed_tool_names(self) -> set[str]:
         return {"server__lookup"}
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        return False
+
     def get_tool_info(self, name: str) -> tuple[str, str, str | None] | None:
         if name == "server__lookup":
             return ("server", "lookup", "Lookup")

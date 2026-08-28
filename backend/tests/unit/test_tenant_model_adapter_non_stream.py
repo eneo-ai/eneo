@@ -22,7 +22,7 @@ class _FakeMCPProxy:
         return {"server__tool"}
 
     def get_tool_info(self, prefixed_tool_name: str):
-        return ("Server", "tool")
+        return ("Server", "tool", None)
 
     async def call_tools_parallel(self, proxy_calls):
         self.call_count += 1
@@ -32,7 +32,7 @@ class _FakeMCPProxy:
 def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
-    adapter.model = SimpleNamespace(name="test-model")
+    adapter.model = SimpleNamespace(name="test-model", token_limit=8000)
     adapter.provider_type = "openai"
 
     adapter._prepare_kwargs = lambda model_kwargs, **kwargs: {}

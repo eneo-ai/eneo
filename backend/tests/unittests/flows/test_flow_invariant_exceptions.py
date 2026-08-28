@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import is_dataclass
 from uuid import uuid4
+
+import pytest
 
 from eneo.flows.domain.flow_invariant_exceptions import (
     FlowInvariantError,
@@ -17,11 +21,41 @@ def test_persisted_flow_id_missing_error_is_non_runtime_flow_invariant() -> None
     assert not issubclass(FlowPersistedIdMissingError, FlowRuntimeInvariantError)
 
 
-def test_persisted_flow_id_missing_error_is_frozen_slots_dataclass() -> None:
+def test_persisted_flow_id_missing_error_is_a_dataclass() -> None:
     exc = FlowPersistedIdMissingError()
 
     assert is_dataclass(exc)
-    assert hasattr(exc, "__slots__")
+
+
+@contextmanager
+def _pass_through_exception_context() -> Iterator[None]:
+    try:
+        yield
+    except FlowInvariantError:
+        raise
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        FlowPersistedIdMissingError(),
+        FlowPublishedDefinitionInvalidError(
+            flow_id=uuid4(),
+            flow_version=3,
+            parser_message="invalid snapshot",
+            parser_code="invalid_snapshot",
+        ),
+    ],
+)
+def test_flow_invariant_errors_keep_identity_and_traceback_through_context(
+    exc: FlowInvariantError,
+) -> None:
+    with pytest.raises(FlowInvariantError) as caught:
+        with _pass_through_exception_context():
+            raise exc
+
+    assert caught.value is exc
+    assert caught.value.__traceback__ is not None
 
 
 def test_invalid_published_definition_error_is_non_runtime_flow_invariant() -> None:
@@ -44,7 +78,6 @@ def test_invalid_published_definition_error_carries_parser_context() -> None:
     )
 
     assert is_dataclass(exc)
-    assert hasattr(exc, "__slots__")
     assert exc.flow_id == flow_id
     assert exc.flow_version == 3
     assert exc.parser_code == "flow_version_missing_step_identifiers"

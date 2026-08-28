@@ -11,7 +11,7 @@ from eneo.embedding_models.infrastructure.datastore import Datastore
 
 def _datastore():
     return Datastore(
-        user=MagicMock(),
+        tenant_id=uuid4(),
         info_blob_chunk_repo=MagicMock(),
         create_embeddings_service=MagicMock(),
     )

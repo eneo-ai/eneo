@@ -165,59 +165,51 @@ def _raw_response(arguments: dict[str, object]) -> SimpleNamespace:
     )
 
 
-def _native_responses_success(probe: ModuleType) -> dict[str, object]:
+def _native_chat_completion_success(probe: ModuleType) -> dict[str, object]:
     return {
-        "id": "resp-probe",
-        "object": "response",
-        "created_at": 1,
-        "status": "completed",
-        "error": None,
-        "incomplete_details": None,
-        "instructions": None,
-        "max_output_tokens": 256,
+        "id": "chatcmpl-probe",
+        "object": "chat.completion",
+        "created": 1,
         "model": "gpt-5.6-luna",
-        "output": [
+        "choices": [
             {
-                "type": "function_call",
-                "id": "fc-probe",
-                "call_id": "call-probe",
-                "name": "propose_flow",
-                "arguments": json.dumps(
-                    VALID_ARGUMENTS,
-                    ensure_ascii=False,
-                ),
-                "status": "completed",
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-probe",
+                            "type": "function",
+                            "function": {
+                                "name": "propose_flow",
+                                "arguments": json.dumps(
+                                    VALID_ARGUMENTS,
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
             }
         ],
-        "parallel_tool_calls": False,
-        "previous_response_id": None,
-        "reasoning": {"effort": "none", "summary": None},
-        "store": False,
-        "temperature": None,
-        "text": {"format": {"type": "text"}},
-        "tool_choice": {"type": "function", "name": "propose_flow"},
-        "tools": [],
-        "top_p": None,
-        "truncation": "disabled",
         "usage": {
-            "input_tokens": 1,
-            "input_tokens_details": {"cached_tokens": 0},
-            "output_tokens": 1,
-            "output_tokens_details": {"reasoning_tokens": 0},
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
             "total_tokens": 2,
         },
-        "user": None,
-        "metadata": {},
     }
 
 
-def _native_responses_incomplete(probe: ModuleType) -> dict[str, object]:
-    response = _native_responses_success(probe)
-    response["status"] = "incomplete"
-    response["incomplete_details"] = {"reason": "max_output_tokens"}
-    output = cast(list[dict[str, object]], response["output"])
-    output[0]["status"] = "incomplete"
-    output[0]["arguments"] = "{"
+def _native_chat_completion_incomplete(probe: ModuleType) -> dict[str, object]:
+    response = _native_chat_completion_success(probe)
+    choices = cast(list[dict[str, object]], response["choices"])
+    choices[0]["finish_reason"] = "length"
+    message = cast(dict[str, object], choices[0]["message"])
+    tool_calls = cast(list[dict[str, object]], message["tool_calls"])
+    function = cast(dict[str, object], tool_calls[0]["function"])
+    function["arguments"] = "{"
     return response
 
 
@@ -227,7 +219,7 @@ def _source(probe: ModuleType, *, clean: bool = True) -> object:
         source_clean=clean,
         runner_sha256="1" * 64,
         lockfile_sha256="2" * 64,
-        litellm_version="1.95.0",
+        litellm_version="1.98.0",
     )
 
 
@@ -648,7 +640,7 @@ async def test_transport_rejection_without_canonical_attribution_is_inconclusive
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal request_count
-        assert request.url.path == "/v1/responses"
+        assert request.url.path == "/v1/chat/completions"
         request_count += 1
         provider_payloads.append(cast(dict[str, object], json.loads(request.content)))
         if request_count == 1:
@@ -667,7 +659,7 @@ async def test_transport_rejection_without_canonical_attribution_is_inconclusive
         return httpx.Response(
             200,
             request=request,
-            json=_native_responses_success(probe),
+            json=_native_chat_completion_success(probe),
         )
 
     monkeypatch.setattr(
@@ -691,21 +683,20 @@ async def test_transport_rejection_without_canonical_attribution_is_inconclusive
     assert request_count == 1
     provider_payload = provider_payloads[0]
     function = cast(dict[str, object], probe.synthetic_tool_schema()["function"])
-    assert provider_payload["tools"] == [
-        {
-            "name": "propose_flow",
-            "parameters": function["parameters"],
-            "strict": True,
-            "type": "function",
-            "description": None,
-        }
-    ]
+    tools = cast(list[dict[str, object]], provider_payload["tools"])
+    assert len(tools) == 1
+    assert tools[0]["type"] == "function"
+    provider_function = cast(dict[str, object], tools[0]["function"])
+    assert provider_function["name"] == "propose_flow"
+    assert provider_function["parameters"] == function["parameters"]
+    assert provider_function["strict"] is True
     assert provider_payload["tool_choice"] == {
         "type": "function",
-        "name": "propose_flow",
+        "function": {"name": "propose_flow"},
     }
     assert provider_payload["parallel_tool_calls"] is False
-    assert provider_payload["max_output_tokens"] == 256
+    assert provider_payload["max_completion_tokens"] == 256
+    assert provider_payload["reasoning_effort"] == "none"
     assert "temperature" not in provider_payload
     assert outcome.response is None
     assert outcome.failure is not None
@@ -715,8 +706,10 @@ async def test_transport_rejection_without_canonical_attribution_is_inconclusive
         "unprocessable_entity",
     }
     assert outcome.failure.status_code == status_code
-    assert outcome.failure.remote_response_observed is True
-    assert outcome.failure.parameter is None
+    assert outcome.failure.remote_response_observed is False
+    assert outcome.failure.parameter == (
+        "tools" if provider_parameter == "tools" else None
+    )
     source = _source(probe)
     runtime = _runtime(
         probe,
@@ -736,7 +729,114 @@ async def test_transport_rejection_without_canonical_attribution_is_inconclusive
         measurement=_measurement(probe),
     )
     assert receipt.verdict == "inconclusive"
-    assert receipt.reason_codes == ("provider_result_inconclusive",)
+    assert receipt.reason_codes == ("request_rejection_without_remote_provenance",)
+
+
+@pytest.mark.asyncio
+async def test_native_litellm_chat_completion_success_is_one_request_and_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe = _probe()
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        assert request.url.path == "/v1/chat/completions"
+        request_count += 1
+        return httpx.Response(
+            200,
+            request=request,
+            json=_native_chat_completion_success(probe),
+        )
+
+    monkeypatch.setattr(
+        AsyncHTTPHandler,
+        "_create_async_transport",
+        staticmethod(lambda **_kwargs: httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    route = _route(
+        kwargs={
+            "api_key": "test-key",
+            "api_base": "https://one-shot-success.invalid/v1",
+        }
+    )
+    outcome = await probe.run_probe_call(
+        route=route,
+        provider_completion=probe._litellm_provider_completion,
+        measurement=_measurement(probe),
+    )
+
+    assert request_count == 1
+    assert outcome.response is not None
+    assert outcome.response.checks.all_pass is True
+    source = _source(probe)
+    runtime = _runtime(probe, route=route)
+    receipt = probe.build_receipt(
+        source_before=source,
+        source_after=source,
+        runtime_before=runtime,
+        runtime_after=runtime,
+        outcome=outcome,
+        measurement=_measurement(probe),
+    )
+    assert receipt.verdict == "pass"
+    assert receipt.reason_codes == ("strict_request_accepted_with_conformant_response",)
+
+
+@pytest.mark.asyncio
+async def test_native_incomplete_chat_completion_is_one_request_and_inconclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe = _probe()
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        assert request.url.path == "/v1/chat/completions"
+        request_count += 1
+        return httpx.Response(
+            200,
+            request=request,
+            json=_native_chat_completion_incomplete(probe),
+        )
+
+    monkeypatch.setattr(
+        AsyncHTTPHandler,
+        "_create_async_transport",
+        staticmethod(lambda **_kwargs: httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    route = _route(
+        kwargs={
+            "api_key": "test-key",
+            "api_base": "https://one-shot-incomplete.invalid/v1",
+        }
+    )
+    outcome = await probe.run_probe_call(
+        route=route,
+        provider_completion=probe._litellm_provider_completion,
+        measurement=_measurement(probe),
+    )
+
+    assert request_count == 1
+    assert outcome.response is not None
+    assert outcome.response.finish_reason == "length"
+    assert outcome.response.checks.all_pass is False
+    source = _source(probe)
+    runtime = _runtime(probe, route=route)
+    receipt = probe.build_receipt(
+        source_before=source,
+        source_after=source,
+        runtime_before=runtime,
+        runtime_after=runtime,
+        outcome=outcome,
+        measurement=_measurement(probe),
+    )
+    assert receipt.verdict == "inconclusive"
+    assert receipt.reason_codes == ("provider_completion_truncated",)
 
 
 @pytest.mark.parametrize(
@@ -781,113 +881,6 @@ def test_canonical_tool_schema_attribution_is_fail(
     )
     assert receipt.verdict == "fail"
     assert receipt.reason_codes == ("configured_route_rejected_strict_request",)
-
-
-@pytest.mark.asyncio
-async def test_native_litellm_responses_success_is_one_request_and_pass(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    probe = _probe()
-    request_count = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal request_count
-        assert request.url.path == "/v1/responses"
-        request_count += 1
-        return httpx.Response(
-            200,
-            request=request,
-            json=_native_responses_success(probe),
-        )
-
-    monkeypatch.setattr(
-        AsyncHTTPHandler,
-        "_create_async_transport",
-        staticmethod(lambda **_kwargs: httpx.MockTransport(handler)),
-    )
-    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
-    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
-    route = _route(
-        kwargs={
-            "api_key": "test-key",
-            "api_base": "https://one-shot-success.invalid/v1",
-        }
-    )
-    outcome = await probe.run_probe_call(
-        route=route,
-        provider_completion=probe._litellm_provider_completion,
-        measurement=_measurement(probe),
-    )
-
-    assert request_count == 1
-    assert outcome.response is not None
-    assert outcome.response.checks.all_pass is True
-    source = _source(probe)
-    runtime = _runtime(probe, route=route)
-    receipt = probe.build_receipt(
-        source_before=source,
-        source_after=source,
-        runtime_before=runtime,
-        runtime_after=runtime,
-        outcome=outcome,
-        measurement=_measurement(probe),
-    )
-    assert receipt.verdict == "pass"
-    assert receipt.reason_codes == ("strict_request_accepted_with_conformant_response",)
-
-
-@pytest.mark.asyncio
-async def test_native_incomplete_response_is_one_request_and_inconclusive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    probe = _probe()
-    request_count = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal request_count
-        assert request.url.path == "/v1/responses"
-        request_count += 1
-        return httpx.Response(
-            200,
-            request=request,
-            json=_native_responses_incomplete(probe),
-        )
-
-    monkeypatch.setattr(
-        AsyncHTTPHandler,
-        "_create_async_transport",
-        staticmethod(lambda **_kwargs: httpx.MockTransport(handler)),
-    )
-    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
-    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
-    route = _route(
-        kwargs={
-            "api_key": "test-key",
-            "api_base": "https://one-shot-incomplete.invalid/v1",
-        }
-    )
-    outcome = await probe.run_probe_call(
-        route=route,
-        provider_completion=probe._litellm_provider_completion,
-        measurement=_measurement(probe),
-    )
-
-    assert request_count == 1
-    assert outcome.response is not None
-    assert outcome.response.finish_reason == "tool_calls"
-    assert outcome.response.checks.all_pass is False
-    source = _source(probe)
-    runtime = _runtime(probe, route=route)
-    receipt = probe.build_receipt(
-        source_before=source,
-        source_after=source,
-        runtime_before=runtime,
-        runtime_after=runtime,
-        outcome=outcome,
-        measurement=_measurement(probe),
-    )
-    assert receipt.verdict == "inconclusive"
-    assert receipt.reason_codes == ("provider_response_nonconformant",)
 
 
 def test_sealed_receipt_round_trips_offline_at_mode_0600(tmp_path: Path) -> None:

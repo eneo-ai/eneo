@@ -23,5 +23,6 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.FLOWS_AI_BUILDER: "Use the AI Builder to plan and edit flows.",
     Permission.FLOWS_TRACE: "Inspect and export rich flow evidence, provenance, and AI Builder trace data.",
     Permission.STORAGE: "Administer file storage. Required for connecting an S3-compatible destination, changing it, rotating its keys, and setting upload limits.",
+    Permission.MODULES: "Install and configure modules for the current Eneo organization.",
     Permission.ASSISTANT_DEBUG: "Inspect body-free chat diagnostics, including Skill activation decisions, for conversations you can access.",
 }

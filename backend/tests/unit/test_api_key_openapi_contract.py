@@ -86,3 +86,25 @@ def test_resource_permissions_document_flow_runtime_review_levels(openapi_spec: 
     assert "`none` means this key has no fine-grained evidence grant" in (
         evidence_description
     )
+
+
+def test_api_key_list_uses_opaque_cursor_and_omits_module_eligibility_filter(
+    openapi_spec: dict,
+):
+    paths = openapi_spec["paths"]
+
+    user_parameters = {
+        parameter["name"]: parameter
+        for parameter in paths["/api/v1/api-keys"]["get"]["parameters"]
+    }
+    assert user_parameters["cursor"]["schema"] == {
+        "anyOf": [{"type": "string"}, {"type": "null"}],
+        "description": "Opaque current cursor",
+        "title": "Cursor",
+    }
+
+    admin_parameters = {
+        parameter["name"]: parameter
+        for parameter in paths["/api/v1/admin/api-keys"]["get"]["parameters"]
+    }
+    assert "eligible_for_module_binding" not in admin_parameters

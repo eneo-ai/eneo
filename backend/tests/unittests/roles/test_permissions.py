@@ -277,6 +277,7 @@ class TestPermissionSemantics:
             "flows_trace",
             "storage",
             "assistant_debug",
+            "modules",
         }
         actual = {p.value for p in Permission}
         assert required <= actual

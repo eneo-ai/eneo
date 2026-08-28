@@ -326,6 +326,7 @@ from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
 from eneo.modules.module_auth import ModuleAuthBroker
+from eneo.modules.module_installation_service import ModuleInstallationService
 from eneo.modules.module_repo import ModuleRepository
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.runtime import object_content_runtime
@@ -1604,6 +1605,14 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         user_service=user_service,
         auth_service=auth_service,
+        audit_service=audit_service,
+    )
+    module_installation_service = providers.Factory(
+        ModuleInstallationService,
+        user=user,
+        module_repo=module_repo,
+        tenant_service=tenant_service,
+        module_auth_broker=module_auth_broker,
         audit_service=audit_service,
     )
     admin_service = providers.Factory(

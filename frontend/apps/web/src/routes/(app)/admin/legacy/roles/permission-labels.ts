@@ -103,6 +103,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_flows_trace(),
         description: m.permission_flows_trace_description()
       };
+    case "modules":
+      return {
+        label: m.permission_modules(),
+        description: m.permission_modules_description()
+      };
     default:
       // Unknown permission — degrade gracefully: reformat the key so
       // "unknown_permission" shows as "Unknown permission" rather than raw

@@ -1915,6 +1915,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 yield comp
 
             # --- Built-in activation and MCP tool call loop ---
+            max_rounds = self.MAX_TOOL_ROUNDS
+            tool_round = 0
             if (
                 result.has_tool_calls
                 and prepared
@@ -1930,8 +1932,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                     else set()
                 )
 
-                max_rounds = self.MAX_TOOL_ROUNDS
-                tool_round = 0
                 result_budget = _ToolResultBudget(
                     token_limit=self.model.token_limit,
                     litellm_model=self.litellm_model,
@@ -2507,7 +2507,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 final_usage = final_usage.model_copy(update={"prompt_tokens": None})
             if result.used_output_estimate and final_usage is not None:
                 final_usage = final_usage.model_copy(update={"completion_tokens": None})
-            if result.has_tool_calls:
+            if result.has_tool_calls and tool_round >= max_rounds:
                 yield Completion(
                     text="",
                     stop=True,

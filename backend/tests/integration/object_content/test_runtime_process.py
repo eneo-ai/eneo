@@ -13,7 +13,7 @@ import pytest
 from botocore.config import Config
 from botocore.session import get_session
 from sqlalchemy import select, text
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config as AlembicConfig

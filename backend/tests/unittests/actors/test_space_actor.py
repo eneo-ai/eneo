@@ -13,7 +13,6 @@ from eneo.actors import (
     SpaceResourceType,
 )
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
-from eneo.modules.module import Modules
 from eneo.roles.permissions import Permission
 
 # All tenant-level permissions — test users should have these by default
@@ -23,15 +22,12 @@ ALL_PERMISSIONS = set(Permission)
 
 # Mocking external dependencies
 class MockUser:
-    def __init__(
-        self, id, permissions=None, modules=None, role=None, user_groups_ids=None
-    ):
+    def __init__(self, id, permissions=None, role=None, user_groups_ids=None):
         self.id = id
         if permissions is None:
             self.permissions = {Permission.SHARED_SPACES}
         else:
             self.permissions = permissions
-        self.modules = modules or []
         self.role = role
         self.user_groups_ids = user_groups_ids or set()
         # Matches UserInDB shape — always defined, None for token auth, set for
@@ -308,7 +304,6 @@ def test_viewer_cannot_edit_shared_space(
 def test_owner_can_not_create_services_without_services_permission(
     owner_user: MockUser, personal_space: MockSpace
 ):
-    owner_user.modules.append(Modules.ENEO_APPLICATIONS)
     actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
@@ -327,19 +322,6 @@ def test_owner_can_not_create_services_without_services_permission(
     )
 
 
-def test_owner_can_not_create_services_without_applications_modules(
-    owner_user: MockUser, personal_space: MockSpace
-):
-    owner_user.permissions.add(MockPermission.SERVICES)
-    actor = _actor(owner_user, personal_space)
-    assert (
-        actor.can_perform_action(
-            action=SpaceAction.CREATE, resource_type=SpaceResourceType.SERVICE
-        )
-        is False
-    )
-
-
 def test_no_one_can_publish_apps_in_personal_space(
     owner_user: MockUser, personal_space: MockSpace
 ):
@@ -355,7 +337,6 @@ def test_no_one_can_publish_apps_in_personal_space(
 def test_no_one_can_publish_services_in_personal_space(
     owner_user: MockUser, personal_space: MockSpace
 ):
-    owner_user.modules.append(Modules.ENEO_APPLICATIONS)
     actor = _actor(owner_user, personal_space)
     assert (
         actor.can_perform_action(
@@ -369,7 +350,6 @@ def test_viewers_can_only_read_published_resources(
     viewer_user: MockUser, shared_space: MockSpace
 ):
     resource = MagicMock(published=False)
-    viewer_user.modules.append(Modules.ENEO_APPLICATIONS)
     viewer = _actor(viewer_user, shared_space)
 
     assert (

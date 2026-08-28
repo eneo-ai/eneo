@@ -16,9 +16,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from sqlalchemy import text
+from testcontainers.community.postgres import PostgresContainer
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.wait_strategies import LogMessageWaitStrategy
-from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
@@ -191,6 +191,11 @@ async def object_content_database(
         await session.execute(
             text(
                 "TRUNCATE TABLE "
+                "files, "
+                "icons, "
+                "file_icon_backfill_campaign, "
+                "file_icon_backfill_items, "
+                "file_icon_backfill_admission_state, "
                 "object_store_connections, "
                 "object_store_bindings, "
                 "object_contents, "
@@ -202,6 +207,12 @@ async def object_content_database(
         )
         await session.execute(
             text("INSERT INTO object_content_reconciliation_state DEFAULT VALUES")
+        )
+        await session.execute(
+            text(
+                "INSERT INTO file_icon_backfill_admission_state "
+                "(singleton, generation) VALUES (true, 0)"
+            )
         )
     yield _object_content_database
 

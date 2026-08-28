@@ -9,9 +9,14 @@ from pydantic import ValidationError
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_models import (
+    ApiKeyListCursor,
+    ApiKeyListResponse,
     ApiKeyOwnership,
     ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
     ApiKeyType,
+    ApiKeyV2InDB,
 )
 from eneo.authentication.auth_service import AuthService
 from eneo.main.config import get_settings
@@ -21,7 +26,11 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from eneo.modules.module import ModuleClientConfig, ModuleInDB, ModuleTenantClientConfig
+from eneo.modules.module import (
+    ModuleInDB,
+    ModuleInstallationConfig,
+    ModuleTenantClientConfig,
+)
 from eneo.modules.module_auth import (
     MODULE_HANDOFF_AT_CLAIM,
     MODULE_TENANT_ID_CLAIM,
@@ -113,6 +122,25 @@ def make_api_key(**overrides):
     for k, v in overrides.items():
         setattr(key, k, v)
     return key
+
+
+def make_api_key_record(**overrides) -> ApiKeyV2InDB:
+    values = {
+        "id": SERVICE_KEY_ID,
+        "tenant_id": TENANT_ID,
+        "ownership": ApiKeyOwnership.SERVICE,
+        "key_prefix": "sk_",
+        "key_suffix": "12345678",
+        "name": "Module service key",
+        "key_type": ApiKeyType.SK,
+        "permission": ApiKeyPermission.WRITE,
+        "scope_type": ApiKeyScopeType.TENANT,
+        "state": ApiKeyState.ACTIVE,
+        "key_hash": "test-hash",
+        "hash_version": "hmac_sha256",
+    }
+    values.update(overrides)
+    return ApiKeyV2InDB(**values)
 
 
 def make_broker(module=None, config=None, user=None, redis=None):
@@ -654,35 +682,33 @@ class TestRefreshToken:
         assert kwargs["tenant_id"] == TENANT_ID
 
 
-class TestModuleClientConfig:
+class TestModuleInstallationConfig:
     def test_redirect_uris_are_normalized_and_deduplicated(self):
-        config = ModuleClientConfig(
+        config = ModuleInstallationConfig(
             redirect_uris=[
                 "https://TTT.example.com/auth/callback/",
                 "https://ttt.example.com/auth/callback",
-            ]
+            ],
+            service_key_id=None,
         )
 
         assert config.redirect_uris == [REDIRECT_URI]
 
     def test_invalid_redirect_uri_is_rejected(self):
         with pytest.raises(ValidationError):
-            ModuleClientConfig(
-                redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"]
+            ModuleInstallationConfig(
+                redirect_uris=["https://ttt.example.com/auth/callback?ticket=x"],
+                service_key_id=None,
             )
 
-    def test_update_values_preserve_omitted_fields(self):
-        config = ModuleClientConfig(redirect_uris=[REDIRECT_URI])
+    def test_service_key_must_be_present_but_may_be_explicitly_null(self):
+        with pytest.raises(ValidationError):
+            ModuleInstallationConfig(redirect_uris=[REDIRECT_URI])
 
-        assert config.update_values() == {"redirect_uris": [REDIRECT_URI]}
-
-    def test_update_values_keep_explicit_null(self):
-        config = ModuleClientConfig(service_key_id=None)
-
-        assert config.update_values() == {"service_key_id": None}
-
-    def test_empty_update_has_no_values(self):
-        assert ModuleClientConfig().update_values() == {}
+        unbound = ModuleInstallationConfig(
+            redirect_uris=[REDIRECT_URI], service_key_id=None
+        )
+        assert unbound.service_key_id is None
 
 
 class TestModuleTicketRequest:
@@ -714,6 +740,71 @@ class TestModuleTicketRequest:
 
 
 class TestModuleServiceKeyRegistration:
+    async def test_lists_keys_through_generic_bounded_repository_filters(self):
+        broker = make_broker()
+        cursor = ApiKeyListCursor(
+            created_at=datetime.now(timezone.utc),
+            key_id=SERVICE_KEY_ID,
+        )
+        broker.api_key_repo.list_paginated.return_value = []
+
+        result = await broker.list_client_config_service_keys(
+            tenant_id=TENANT_ID,
+            limit=50,
+            cursor=cursor,
+            search="reports",
+        )
+
+        assert result == ApiKeyListResponse(
+            items=[],
+            limit=50,
+            next_cursor=None,
+            previous_cursor=cursor.serialize(),
+            total_count=None,
+        )
+        expected_filters = {
+            "tenant_id": TENANT_ID,
+            "ownership": ApiKeyOwnership.SERVICE.value,
+            "key_type": ApiKeyType.SK.value,
+            "min_permission": ApiKeyPermission.WRITE.value,
+            "effectively_active": True,
+            "search": "reports",
+        }
+        broker.api_key_repo.list_paginated.assert_awaited_once_with(
+            **expected_filters,
+            limit=50,
+            cursor=cursor,
+        )
+        broker.api_key_repo.count.assert_not_awaited()
+
+    async def test_exact_lookup_returns_only_currently_eligible_key(self):
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = make_api_key_record()
+
+        result = await broker.get_client_config_service_key(
+            tenant_id=TENANT_ID,
+            service_key_id=SERVICE_KEY_ID,
+        )
+
+        assert result.id == SERVICE_KEY_ID
+        broker.api_key_repo.get.assert_awaited_once_with(
+            key_id=SERVICE_KEY_ID,
+            tenant_id=TENANT_ID,
+        )
+
+    async def test_exact_lookup_hides_ineligible_key(self):
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = make_api_key(
+            permission=ApiKeyPermission.READ
+        )
+
+        result = await broker.get_client_config_service_key(
+            tenant_id=TENANT_ID,
+            service_key_id=SERVICE_KEY_ID,
+        )
+
+        assert result is None
+
     async def test_accepts_same_tenant_service_sk_with_write_permission(self):
         broker = make_broker()
 
@@ -722,7 +813,7 @@ class TestModuleServiceKeyRegistration:
         )
 
         broker.api_key_repo.get.assert_awaited_once_with(
-            key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID
+            key_id=SERVICE_KEY_ID, tenant_id=TENANT_ID, for_update=True
         )
 
     async def test_rejects_unknown_or_wrong_tenant_key(self):

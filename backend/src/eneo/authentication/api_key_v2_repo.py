@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from eneo.authentication.auth_models import (
+    PERMISSION_LEVEL_ORDER,
+    ApiKeyListCursor,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyV2InDB,
@@ -121,12 +123,18 @@ class ApiKeysV2Repository:
             )
         }
 
-    async def get(self, *, key_id: UUID, tenant_id: UUID) -> Optional[ApiKeyV2InDB]:
+    async def get(
+        self, *, key_id: UUID, tenant_id: UUID, for_update: bool = False
+    ) -> Optional[ApiKeyV2InDB]:
+        """Return the key; with ``for_update`` the row stays locked until the
+        surrounding transaction completes."""
         query = (
             sa.select(self.table)
             .where(self.table.id == key_id)
             .where(self.table.tenant_id == tenant_id)
         )
+        if for_update:
+            query = query.with_for_update()
         record = await self.session.scalar(query)
 
         if record is None:
@@ -179,7 +187,7 @@ class ApiKeysV2Repository:
         *,
         tenant_id: UUID,
         limit: int | None = None,
-        cursor: datetime | None = None,
+        cursor: ApiKeyListCursor | None = None,
         previous: bool = False,
         scope_type: ApiKeyScopeType | None = None,
         scope_id: UUID | None = None,
@@ -190,6 +198,8 @@ class ApiKeysV2Repository:
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        min_permission: str | None = None,
+        effectively_active: bool = False,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -206,17 +216,31 @@ class ApiKeysV2Repository:
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            min_permission=min_permission,
+            effectively_active=effectively_active,
         )
         if cursor is not None:
-            if previous:
-                query = query.where(self.table.created_at > cursor)
+            if cursor.key_id is None:
+                # Rollout compatibility for timestamp-only cursors emitted by
+                # older servers. New cursors always take the total-order path.
+                comparison = (
+                    self.table.created_at >= cursor.created_at
+                    if previous
+                    else self.table.created_at < cursor.created_at
+                )
             else:
-                query = query.where(self.table.created_at < cursor)
+                position = sa.tuple_(self.table.created_at, self.table.id)
+                boundary = sa.tuple_(
+                    sa.literal(cursor.created_at),
+                    sa.literal(cursor.key_id),
+                )
+                comparison = position >= boundary if previous else position < boundary
+            query = query.where(comparison)
 
         if previous:
-            query = query.order_by(self.table.created_at.asc())
+            query = query.order_by(self.table.created_at.asc(), self.table.id.asc())
         else:
-            query = query.order_by(self.table.created_at.desc())
+            query = query.order_by(self.table.created_at.desc(), self.table.id.desc())
 
         if limit is not None:
             query = query.limit(limit + 1)
@@ -271,6 +295,8 @@ class ApiKeysV2Repository:
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
+        min_permission: str | None = None,
+        effectively_active: bool = False,
     ) -> int:
         query = cast(
             Select[Any],
@@ -289,6 +315,8 @@ class ApiKeysV2Repository:
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
+            min_permission=min_permission,
+            effectively_active=effectively_active,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -306,9 +334,33 @@ class ApiKeysV2Repository:
         created_by_user_id: UUID | None,
         search: str | None,
         expires_within_days: int | None,
+        min_permission: str | None = None,
+        effectively_active: bool = False,
     ) -> Select[Any]:
+        effectively_active_predicate = sa.and_(
+            self.table.revoked_at.is_(None),
+            self.table.suspended_at.is_(None),
+            sa.or_(
+                self.table.expires_at.is_(None),
+                self.table.expires_at >= sa.func.now(),
+            ),
+            sa.or_(
+                self.table.rotation_grace_until.is_(None),
+                self.table.rotation_grace_until > sa.func.now(),
+            ),
+        )
+        if effectively_active:
+            query = query.where(effectively_active_predicate)
         if ownership is not None:
             query = query.where(self.table.ownership == ownership)
+        if min_permission is not None:
+            required = PERMISSION_LEVEL_ORDER.get(min_permission, 0)
+            allowed = [
+                permission
+                for permission, level in PERMISSION_LEVEL_ORDER.items()
+                if level >= required
+            ]
+            query = query.where(self.table.permission.in_(allowed))
         if scope_type is not None:
             query = query.where(self.table.scope_type == scope_type.value)
         if scope_id is not None:
@@ -331,10 +383,6 @@ class ApiKeysV2Repository:
                 query = query.where(self.table.state == state.value)
         if key_type is not None:
             query = query.where(self.table.key_type == key_type)
-        if ownership == "service":
-            query = query.where(self.table.owner_user_id.is_(None))
-        elif ownership == "user":
-            query = query.where(self.table.owner_user_id.is_not(None))
         if owner_user_id is not None:
             query = query.where(self.table.owner_user_id == owner_user_id)
         if created_by_user_id is not None:

@@ -1000,6 +1000,35 @@ async def test_iterate_stream_no_pending_event_for_disallowed_tool():
 
 
 @pytest.mark.asyncio
+async def test_iterate_stream_does_not_report_round_limit_without_tool_execution():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": False,
+        },
+    )
+
+    completions = await _collect(
+        adapter,
+        stream,
+        require_tool_approval=False,
+        approval_manager=None,
+        approval_context=None,
+        pending_approval_ids=set(),
+    )
+
+    assert mcp_proxy.calls == []
+    assert not any(c.response_type == ResponseType.ERROR for c in completions)
+    assert completions[-1].stop is True
+
+
+@pytest.mark.asyncio
 async def test_iterate_stream_stops_at_max_rounds():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()

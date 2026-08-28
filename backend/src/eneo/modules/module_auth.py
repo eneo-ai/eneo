@@ -15,13 +15,17 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.api_key_router_helpers import paginate_keys
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
+    ApiKeyListCursor,
+    ApiKeyListResponse,
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyState,
     ApiKeyType,
+    ApiKeyV2,
     ApiKeyV2InDB,
     compute_effective_state,
 )
@@ -202,6 +206,63 @@ class ModuleAuthBroker:
             return "the API key must have write or admin permission"
         return None
 
+    @classmethod
+    def _client_config_service_key_error(cls, api_key: ApiKeyV2InDB) -> str | None:
+        registration_error = cls._service_key_registration_error(api_key)
+        if registration_error is not None:
+            return registration_error
+
+        effective_state = compute_effective_state(
+            revoked_at=api_key.revoked_at,
+            suspended_at=api_key.suspended_at,
+            expires_at=api_key.expires_at,
+            rotation_grace_until=api_key.rotation_grace_until,
+        )
+        if effective_state != ApiKeyState.ACTIVE:
+            return f"the API key is {effective_state.value}"
+        return None
+
+    async def list_client_config_service_keys(
+        self,
+        *,
+        tenant_id: UUID,
+        limit: int,
+        cursor: ApiKeyListCursor | None,
+        search: str | None,
+    ) -> ApiKeyListResponse:
+        """Return one bounded page of keys accepted by module installation."""
+        keys = await self.api_key_repo.list_paginated(
+            tenant_id=tenant_id,
+            limit=limit,
+            cursor=cursor,
+            ownership=ApiKeyOwnership.SERVICE.value,
+            key_type=ApiKeyType.SK.value,
+            min_permission=ApiKeyPermission.WRITE.value,
+            effectively_active=True,
+            search=search,
+        )
+        return ApiKeyListResponse.model_validate(
+            paginate_keys(
+                keys,
+                total_count=None,
+                limit=limit,
+                cursor=cursor,
+                previous=False,
+            )
+        )
+
+    async def get_client_config_service_key(
+        self, *, tenant_id: UUID, service_key_id: UUID
+    ) -> ApiKeyV2 | None:
+        """Resolve one key only when it is eligible at read time."""
+        api_key = await self.api_key_repo.get(
+            key_id=service_key_id,
+            tenant_id=tenant_id,
+        )
+        if api_key is None or self._client_config_service_key_error(api_key):
+            return None
+        return ApiKeyV2.model_validate(api_key)
+
     async def validate_client_config_service_key(
         self, *, tenant_id: UUID, service_key_id: UUID
     ) -> None:
@@ -214,29 +275,24 @@ class ModuleAuthBroker:
         registration remain owned by normal API-key authentication, as do IP
         allowlists and rate limits, and take effect on the next request.
         """
+        # Hold the key row until the caller's transaction commits. Lifecycle
+        # mutations update the same row, so revoke/suspend and installation
+        # are serialized instead of allowing a dead key to be persisted after
+        # validation. The same row is also written by authentication's
+        # last_used_at refresh, so callers must invoke this as late as
+        # possible before persisting the binding.
         api_key = await self.api_key_repo.get(
-            key_id=service_key_id, tenant_id=tenant_id
+            key_id=service_key_id, tenant_id=tenant_id, for_update=True
         )
         if api_key is None:
             raise BadRequestException(
                 "service_key_id must reference an API key in the target tenant."
             )
 
-        registration_error = self._service_key_registration_error(api_key)
-        if registration_error is not None:
+        eligibility_error = self._client_config_service_key_error(api_key)
+        if eligibility_error is not None:
             raise BadRequestException(
-                f"Invalid module service key: {registration_error}."
-            )
-
-        effective_state = compute_effective_state(
-            revoked_at=api_key.revoked_at,
-            suspended_at=api_key.suspended_at,
-            expires_at=api_key.expires_at,
-            rotation_grace_until=getattr(api_key, "rotation_grace_until", None),
-        )
-        if effective_state != ApiKeyState.ACTIVE:
-            raise BadRequestException(
-                f"Invalid module service key: the API key is {effective_state.value}."
+                f"Invalid module service key: {eligibility_error}."
             )
 
     async def issue_ticket(

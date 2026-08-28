@@ -104,8 +104,8 @@ class TestCategoryMappings:
                 f"{action_type} should be mapped to 'user_actions'"
             )
 
-    def test_ai_builder_actions_are_real_lifecycle_audit_events(self):
-        """Builder audit actions must map only to emitted lifecycle events."""
+    def test_ai_builder_actions_are_emitted_audit_events(self):
+        """Builder action types must map only to emitted audit events."""
         expected_actions = {
             ActionType.AI_BUILDER_SESSION_CREATED,
             ActionType.AI_BUILDER_PLAN_APPROVED,
@@ -113,6 +113,7 @@ class TestCategoryMappings:
             ActionType.AI_BUILDER_FLOW_APPLIED,
             ActionType.AI_BUILDER_ATTACHMENT_DETACHED,
             ActionType.AI_BUILDER_SESSION_CANCELLED,
+            ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED,
         }
 
         actual_actions = {
