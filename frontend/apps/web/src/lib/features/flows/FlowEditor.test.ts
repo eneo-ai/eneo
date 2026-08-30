@@ -36,15 +36,15 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial
     published_version: null,
     step_count: 0,
     metadata_json: metadataJson,
-    data_retention_days: null,
     run_history_retention: {
-      state: "days",
+      state: "configured",
       effective_days: 30,
+      mode: "preserve",
       source: "organization",
       contributors: {
-        organization_days: 30,
-        space_days: null,
-        flow_days: null
+        organization: { mode: "preserve", days: 30 },
+        space: null,
+        flow: null
       }
     },
     created_at: null,
@@ -204,10 +204,7 @@ describe("getUnifiedFlowSaveStatus", () => {
 
 describe("FlowEditor basic settings commands", () => {
   it("sets the name while preserving neighboring fields", () => {
-    const flow = makeFlow(
-      { owner: "metadata" },
-      { description: "Description", data_retention_days: 30 }
-    );
+    const flow = makeFlow({ owner: "metadata" }, { description: "Description" });
     const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
       const originalSteps = get(editor.state.update).steps;
@@ -219,7 +216,6 @@ describe("FlowEditor basic settings commands", () => {
       expect(update.description).toBe("Description");
       expect(update.metadata_json).toEqual({ owner: "metadata" });
       expect(update.steps).toBe(originalSteps);
-      expect(update.data_retention_days).toBe(30);
       expect(hasUnsavedChanges).toBe(true);
     } finally {
       editor.destroy();
@@ -242,7 +238,7 @@ describe("FlowEditor basic settings commands", () => {
   it("sets the description string while preserving neighboring fields", () => {
     const flow = makeFlow(
       { owner: "metadata" },
-      { name: "Original name", description: "Original", data_retention_days: 14 }
+      { name: "Original name", description: "Original" }
     );
     const editor = createFlowEditor({ flow, eneo: makeEneo() });
     try {
@@ -255,113 +251,10 @@ describe("FlowEditor basic settings commands", () => {
       expect(update.description).toBe("Updated description");
       expect(update.metadata_json).toEqual({ owner: "metadata" });
       expect(update.steps).toBe(originalSteps);
-      expect(update.data_retention_days).toBe(14);
       expect(hasUnsavedChanges).toBe(true);
 
       editor.setDescription("");
       expect(get(editor.state.update).description).toBe("");
-    } finally {
-      editor.destroy();
-    }
-  });
-
-  it("sets data retention only for the public range while preserving neighboring fields", () => {
-    const flow = makeFlow(
-      { owner: "metadata" },
-      { name: "Flow", description: "Description", data_retention_days: 30 }
-    );
-    const editor = createFlowEditor({ flow, eneo: makeEneo() });
-    try {
-      const originalSteps = get(editor.state.update).steps;
-
-      editor.setDataRetentionDays(0);
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-
-      editor.setDataRetentionDays(2556);
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-
-      editor.setDataRetentionDays(Number.NaN);
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-
-      editor.setDataRetentionDays(7);
-      let update = get(editor.state.update);
-      expect(update.data_retention_days).toBe(7);
-      expect(update.name).toBe("Flow");
-      expect(update.description).toBe("Description");
-      expect(update.metadata_json).toEqual({ owner: "metadata" });
-      expect(update.steps).toBe(originalSteps);
-      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
-
-      editor.setDataRetentionDays(2555);
-      update = get(editor.state.update);
-      expect(update.data_retention_days).toBe(2555);
-
-      editor.setDataRetentionDays(null);
-      const { update: finalUpdate, hasUnsavedChanges } = readEditorState(editor);
-      expect(finalUpdate.data_retention_days).toBeNull();
-      expect(hasUnsavedChanges).toBe(true);
-    } finally {
-      editor.destroy();
-    }
-  });
-
-  it("sets data retention from raw input without lossy numeric coercion", () => {
-    const flow = makeFlow(
-      { owner: "metadata" },
-      { name: "Flow", description: "Description", data_retention_days: 30 }
-    );
-    const editor = createFlowEditor({ flow, eneo: makeEneo() });
-    try {
-      editor.setDataRetentionDaysFromInput("2.9");
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-
-      editor.setDataRetentionDaysFromInput("1e2");
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-
-      editor.setDataRetentionDaysFromInput("0");
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-
-      editor.setDataRetentionDaysFromInput("2556");
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-
-      editor.setDataRetentionDaysFromInput("7");
-      expect(get(editor.state.update).data_retention_days).toBe(7);
-
-      editor.setDataRetentionDaysFromInput("2555");
-      expect(get(editor.state.update).data_retention_days).toBe(2555);
-
-      editor.setDataRetentionDaysFromInput("");
-      expect(get(editor.state.update).data_retention_days).toBeNull();
-    } finally {
-      editor.destroy();
-    }
-  });
-
-  it("keeps a latent Flow contribution read-only without an eligibility window", () => {
-    const editor = createFlowEditor({
-      flow: makeFlow(null, {
-        data_retention_days: 30,
-        run_history_retention: {
-          state: "off",
-          effective_days: null,
-          source: "none",
-          contributors: {
-            organization_days: null,
-            space_days: 14,
-            flow_days: 30
-          }
-        }
-      }),
-      eneo: makeEneo()
-    });
-    try {
-      expect(get(editor.state.canEditDataRetentionDays)).toBe(false);
-
-      editor.setDataRetentionDays(7);
-      editor.setDataRetentionDaysFromInput("");
-
-      expect(get(editor.state.update).data_retention_days).toBe(30);
-      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
     } finally {
       editor.destroy();
     }

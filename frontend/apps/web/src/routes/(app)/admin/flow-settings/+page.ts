@@ -2,6 +2,9 @@ export const load = async (event) => {
   const { eneo } = await event.parent();
   const [
     flowRetentionPolicy,
+    flowRunRetentionPolicy,
+    flowRunRetentionReviewQueue,
+    spaceTargets,
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,
@@ -9,6 +12,9 @@ export const load = async (event) => {
     ragEvidencePolicy
   ] = await Promise.all([
     eneo.settings.getFlowRetentionPolicy(),
+    eneo.settings.getOrganizationFlowRunRetentionPolicy(),
+    eneo.settings.listOrganizationFlowRunRetentionReviewQueue().catch(() => null),
+    eneo.settings.listFlowRunRetentionSpaceTargets({ limit: 200, offset: 0 }),
     eneo.settings.getFlowInputLimits(),
     eneo.settings.getFlowRuntimePolicy(),
     eneo.settings.getMappedExecutionPolicy(),
@@ -17,6 +23,9 @@ export const load = async (event) => {
   ]);
   return {
     flowRetentionPolicy,
+    flowRunRetentionPolicy,
+    flowRunRetentionReviewQueue,
+    spaceTargets,
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,

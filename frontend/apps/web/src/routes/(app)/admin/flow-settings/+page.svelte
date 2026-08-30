@@ -17,8 +17,9 @@
   import { toast } from "$lib/components/toast";
   import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
-  import { FLOW_RETENTION_MAX_DAYS } from "$lib/features/flows/flowRetentionPolicy";
+  import { FLOW_RETENTION_MAX_DAYS } from "$lib/features/flows/flowRunRetentionPolicy";
   import { m } from "$lib/paraglide/messages";
+  import FlowRunRetentionPolicyPanel from "./FlowRunRetentionPolicyPanel.svelte";
   import { saveFlowAdminSettings, type FlowAdminSettingsUpdates } from "./flowSettingsAdminSave";
 
   let { data } = $props();
@@ -43,14 +44,9 @@
   let policy = $state(initial.flowRetentionPolicy);
   let runtimeLimitsOpen = $state(false);
   let saving = $state(false);
+  let runRetentionDirty = $state(false);
 
   // --- Gallring ---
-  const runHistory = new ToggleNumberField({
-    initial: initial.flowRetentionPolicy.flow_run_history_retention_days,
-    min: 1,
-    max: FLOW_RETENTION_MAX_DAYS,
-    suggestion: 365
-  });
   const uploadCleanup = new ToggleNumberField({
     initial: initial.flowRetentionPolicy.flow_runtime_upload_abandonment_days,
     min: 1,
@@ -140,7 +136,6 @@
   });
 
   const form = new SettingsForm([
-    runHistory,
     uploadCleanup,
     fileMaxSize,
     maxFilesPerRun,
@@ -157,7 +152,7 @@
     evidenceStepSize
   ]);
 
-  const retentionDirty = $derived(runHistory.dirty || uploadCleanup.dirty);
+  const retentionDirty = $derived(uploadCleanup.dirty);
 
   const timeoutOrderError = $derived(
     defaultStepTimeout.value != null &&
@@ -168,20 +163,6 @@
   );
 
   const blocked = $derived(form.invalid || timeoutOrderError !== null);
-
-  const runHistoryStatus = $derived.by(() => {
-    if (policy.flow_run_history_retention_days == null) {
-      return { active: false, label: m.flow_retention_status_no_run_history_window() };
-    }
-    const days = policy.flow_run_history_retention_days;
-    return {
-      active: true,
-      label:
-        days != null
-          ? m.flow_retention_status_run_history_eligible_days({ days })
-          : m.flow_retention_status_no_run_history_window()
-    };
-  });
 
   const uploadStatus = $derived.by(() => {
     const days = policy.flow_runtime_upload_abandonment_days;
@@ -319,10 +300,8 @@
   async function persist(patches: Patches) {
     if (patches.retention) {
       policy = await eneo.settings.updateFlowRetentionPolicy({
-        flow_run_history_retention_days: runHistory.value ?? null,
         flow_runtime_upload_abandonment_days: uploadCleanup.value ?? null
       });
-      runHistory.commit(policy.flow_run_history_retention_days);
       uploadCleanup.commit(policy.flow_runtime_upload_abandonment_days);
     }
 
@@ -398,7 +377,7 @@
   });
 
   beforeNavigate((navigation) => {
-    if (form.dirtyCount === 0) return;
+    if (form.dirtyCount === 0 && !runRetentionDirty) return;
     if (!confirm(m.flow_settings_leave_confirm())) navigation.cancel();
   });
 </script>
@@ -419,57 +398,31 @@
   </Page.Header>
   <Page.Main>
     <Page.Tab id="retention">
+      <FlowRunRetentionPolicyPanel
+        initialPolicy={initial.flowRunRetentionPolicy}
+        initialReviewQueue={initial.flowRunRetentionReviewQueue}
+        initialSpaceTargets={initial.spaceTargets}
+        onDirtyChange={(dirty) => (runRetentionDirty = dirty)}
+      />
       <Settings.Page density="compact">
         <Settings.Group
-          title={m.flow_retention_current_group()}
-          description={m.flow_retention_current_description()}
+          title={m.flow_retention_upload_group()}
+          description={m.flow_retention_upload_group_description()}
           density="compact"
         >
-          {#if retentionDirty}
-            <Alert.Root class="mx-4 max-w-3xl lg:mx-0.5">
-              <TriangleAlert aria-hidden="true" />
-              <Alert.Description>{m.flow_retention_status_unsaved_note()}</Alert.Description>
-            </Alert.Root>
-          {/if}
-          <Card.Root size="sm" class="mx-4 gap-0 py-0 lg:mx-0.5">
-            <Card.Content class="grid p-0 sm:grid-cols-2">
-              <div class="border-default flex min-w-0 flex-col gap-2 p-4 sm:border-r">
-                <span class="text-secondary text-xs font-medium">
-                  {m.flow_retention_status_run_history()}
-                </span>
-                <Badge variant={runHistoryStatus.active ? "default" : "secondary"}>
-                  {runHistoryStatus.label}
-                </Badge>
-              </div>
-              <div
-                class="border-default flex min-w-0 flex-col gap-2 border-t p-4 sm:border-t-0 sm:border-r"
-              >
-                <span class="text-secondary text-xs font-medium">
-                  {m.flow_retention_status_uploads()}
-                </span>
-                <Badge variant={uploadStatus.active ? "default" : "secondary"}>
-                  {uploadStatus.label}
-                </Badge>
-              </div>
-            </Card.Content>
-          </Card.Root>
-        </Settings.Group>
-
-        <Settings.Group
-          title={m.flow_retention_group_eligibility()}
-          description={m.flow_retention_group_eligibility_description()}
-          density="compact"
-        >
-          <Settings.ToggleNumberRow
-            title={m.flow_retention_run_history_title()}
-            description={m.flow_retention_run_history_description()}
-            toggleLabel={m.flow_retention_run_history_window_enable()}
-            valueLabel={m.flow_retention_eligibility_after_label()}
-            unit={m.flow_retention_days_suffix()}
-            offStatus={m.flow_retention_run_history_window_off_status()}
-            info={m.flow_retention_run_history_info()}
-            field={runHistory}
-          />
+          <div class="mx-4 flex flex-wrap items-center gap-2 lg:mx-0.5">
+            <span class="text-secondary text-xs font-medium">
+              {m.flow_retention_status_uploads()}
+            </span>
+            <Badge variant={uploadStatus.active ? "default" : "secondary"}>
+              {uploadStatus.label}
+            </Badge>
+            {#if retentionDirty}
+              <span class="text-secondary text-xs">
+                {m.flow_retention_status_unsaved_note()}
+              </span>
+            {/if}
+          </div>
           <Settings.ToggleNumberRow
             title={m.flow_retention_upload_title()}
             description={m.flow_retention_upload_description()}

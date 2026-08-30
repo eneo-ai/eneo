@@ -4,6 +4,14 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const updateMappedExecutionPolicy = vi.hoisted(() => vi.fn());
 const getFlowRetentionPolicy = vi.hoisted(() => vi.fn());
+const replaceOrganizationFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
+const replaceSpaceFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
+const replaceFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
+const getSpaceFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
+const getFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
+const listOrganizationFlowRunRetentionReviewQueue = vi.hoisted(() => vi.fn());
+const listFlowRunRetentionSpaceTargets = vi.hoisted(() => vi.fn());
+const listFlowRunRetentionFlowTargets = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
 
@@ -11,7 +19,15 @@ vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     settings: {
       updateMappedExecutionPolicy,
-      getFlowRetentionPolicy
+      getFlowRetentionPolicy,
+      replaceOrganizationFlowRunRetentionPolicy,
+      replaceSpaceFlowRunRetentionPolicy,
+      replaceFlowRunRetentionPolicy,
+      getSpaceFlowRunRetentionPolicy,
+      getFlowRunRetentionPolicy,
+      listOrganizationFlowRunRetentionReviewQueue,
+      listFlowRunRetentionSpaceTargets,
+      listFlowRunRetentionFlowTargets
     }
   })
 }));
@@ -106,8 +122,34 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
   return {
     flowRetentionPolicy: {
       run_debug_evidence_days: null,
-      flow_run_history_retention_days: null,
       flow_runtime_upload_abandonment_days: null
+    },
+    flowRunRetentionPolicy: {
+      scope: "organization",
+      scope_id: "tenant-1",
+      local_policy: null,
+      inherited_policy: null,
+      effective: {
+        state: "off",
+        mode: null,
+        effective_days: null,
+        source: "none",
+        contributors: { organization: null, space: null, flow: null }
+      }
+    },
+    flowRunRetentionReviewQueue: {
+      items: [],
+      count: 0,
+      has_more: false,
+      next_cursor: null
+    },
+    spaceTargets: {
+      items: [
+        { id: "space-1", name: "Inköp" },
+        { id: "space-2", name: "Juridik" }
+      ],
+      count: 2,
+      has_more: false
     },
     flowInputLimits: {
       file_max_size_bytes: 10 * 1024 * 1024,
@@ -145,9 +187,32 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
   };
 }
 
+function reviewItem(runId: string, flowName: string) {
+  return {
+    run_id: runId,
+    flow_id: `flow-${runId}`,
+    flow_name: flowName,
+    space_id: "space-1",
+    space_name: "Inköp",
+    status: "completed",
+    retention_anchor: "2026-08-01T10:00:00Z",
+    eligible_since: "2026-08-31T10:00:00Z",
+    effective_policy: { mode: "review_required", days: 30 },
+    policy_source: "organization"
+  };
+}
+
 describe("flow settings page — mapped restore lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    listOrganizationFlowRunRetentionReviewQueue.mockResolvedValue(
+      pageData().flowRunRetentionReviewQueue
+    );
+    listFlowRunRetentionSpaceTargets.mockResolvedValue({
+      items: [],
+      count: 0,
+      has_more: false
+    });
   });
 
   test("restores the deployment default and re-baselines without touching other edits", async () => {
@@ -186,22 +251,241 @@ describe("flow settings page — mapped restore lifecycle", () => {
     expect(toastSuccess).toHaveBeenCalled();
   });
 
-  test("shows the saved retention status before editable retention controls", async () => {
+  test("explains the safe retention default before editable controls", async () => {
     render(FlowSettingsPage, pageProps());
 
     const sectionHeadings = Array.from(document.querySelectorAll("h2"), (heading) =>
       heading.textContent?.trim()
     );
 
-    expect(sectionHeadings[0]).toBe("Vad gäller just nu");
-    expect(sectionHeadings).toContain("Villkor för gallring");
-
-    await page.getByRole("switch", { name: "Ange gallringsvillkor för körningshistorik" }).click();
+    expect(sectionHeadings[0]).toBe("Policy för körningshistorik");
+    expect(sectionHeadings).toContain("Undantag för ytor och flöden");
     await expect
-      .element(page.getByText("Visar sparat läge – du har osparade ändringar."))
+      .element(page.getByText("Att spara en policy raderar ingenting.", { exact: false }))
+      .toBeVisible();
+    await expect.element(page.getByText("Ingen tidsgräns", { exact: true })).toBeVisible();
+    expect(page.getByText("Automatisk gallring", { exact: false }).query()).toBeNull();
+  });
+
+  test("saves mode and days together as one Organization policy", async () => {
+    replaceOrganizationFlowRunRetentionPolicy.mockResolvedValue({
+      scope: "organization",
+      scope_id: "tenant-1",
+      local_policy: { mode: "review_required", days: 30 },
+      inherited_policy: null,
+      effective: {
+        state: "configured",
+        mode: "review_required",
+        effective_days: 30,
+        source: "organization",
+        contributors: {
+          organization: { mode: "review_required", days: 30 },
+          space: null,
+          flow: null
+        }
+      }
+    });
+    render(FlowSettingsPage, pageProps());
+
+    await page.getByLabelText("Gallringsbeteende för Organisation").click();
+    await page.getByRole("option", { name: "Granska före gallring" }).click();
+    await page.getByLabelText("Aktuell efter").fill("30");
+    await page.getByRole("button", { name: "Spara policy för Organisation" }).click();
+
+    expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      policy: { mode: "review_required", days: 30 }
+    });
+    await expect
+      .element(page.getByText("30 dagar · Granska före gallring · från Organisation"))
+      .toBeVisible();
+  });
+
+  test("does not discard an unsaved Space policy when scope switching is cancelled", async () => {
+    getSpaceFlowRunRetentionPolicy.mockResolvedValue({
+      scope: "space",
+      scope_id: "space-1",
+      local_policy: null,
+      inherited_policy: null,
+      effective: {
+        state: "off",
+        mode: null,
+        effective_days: null,
+        source: "none",
+        contributors: { organization: null, space: null, flow: null }
+      }
+    });
+    listFlowRunRetentionFlowTargets.mockResolvedValue({
+      items: [],
+      count: 0,
+      has_more: false
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(FlowSettingsPage, pageProps());
+
+    await page.getByRole("button", { name: "Yta", exact: true }).click();
+    await page.getByRole("option", { name: "Inköp" }).click();
+    await expect.element(page.getByText("Policy för ytan: Inköp")).toBeVisible();
+
+    await page.getByLabelText("Gallringsbeteende för Yta").click();
+    await page.getByRole("option", { name: "Granska före gallring" }).click();
+
+    await page.getByRole("button", { name: "Yta", exact: true }).click();
+    await page.getByRole("option", { name: "Juridik" }).click();
+
+    expect(confirmSpy).toHaveBeenCalledOnce();
+    expect(getSpaceFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
+      spaceId: "space-1"
+    });
+    await expect.element(page.getByText("Policy för ytan: Inköp")).toBeVisible();
+    confirmSpy.mockRestore();
+  });
+
+  test("loads Space and Flow targets incrementally", async () => {
+    const initial = pageData();
+    listFlowRunRetentionSpaceTargets.mockResolvedValueOnce({
+      items: [{ id: "space-3", name: "Ekonomi" }],
+      count: 1,
+      has_more: false
+    });
+    getSpaceFlowRunRetentionPolicy.mockResolvedValue({
+      scope: "space",
+      scope_id: "space-1",
+      local_policy: null,
+      inherited_policy: null,
+      effective: {
+        state: "off",
+        mode: null,
+        effective_days: null,
+        source: "none",
+        contributors: { organization: null, space: null, flow: null }
+      }
+    });
+    listFlowRunRetentionFlowTargets
+      .mockResolvedValueOnce({
+        items: [{ id: "flow-1", space_id: "space-1", name: "Första flödet" }],
+        count: 1,
+        has_more: true
+      })
+      .mockResolvedValueOnce({
+        items: [{ id: "flow-2", space_id: "space-1", name: "Andra flödet" }],
+        count: 1,
+        has_more: false
+      });
+
+    render(FlowSettingsPage, {
+      data: {
+        ...initial,
+        spaceTargets: { ...initial.spaceTargets, has_more: true }
+      } as never
+    });
+
+    await page.getByRole("button", { name: "Ladda fler ytor" }).click();
+    expect(listFlowRunRetentionSpaceTargets).toHaveBeenCalledExactlyOnceWith({
+      limit: 200,
+      offset: 2
+    });
+
+    await page.getByRole("button", { name: "Yta", exact: true }).click();
+    await expect.element(page.getByRole("option", { name: "Ekonomi" })).toBeVisible();
+    await page.getByRole("option", { name: "Inköp" }).click();
+    await expect.element(page.getByRole("button", { name: "Ladda fler flöden" })).toBeVisible();
+    await page.getByRole("button", { name: "Ladda fler flöden" }).click();
+
+    expect(listFlowRunRetentionFlowTargets).toHaveBeenNthCalledWith(1, {
+      spaceId: "space-1",
+      limit: 200,
+      offset: 0
+    });
+    expect(listFlowRunRetentionFlowTargets).toHaveBeenNthCalledWith(2, {
+      spaceId: "space-1",
+      limit: 200,
+      offset: 1
+    });
+  });
+
+  test("moves forward and backward through review cursors", async () => {
+    const initial = pageData();
+    const firstQueue = {
+      items: [reviewItem("run-1", "Första flödet")],
+      count: 1,
+      has_more: true,
+      next_cursor: "cursor-2"
+    };
+    const secondQueue = {
+      items: [reviewItem("run-2", "Andra flödet")],
+      count: 1,
+      has_more: false,
+      next_cursor: null
+    };
+    listOrganizationFlowRunRetentionReviewQueue
+      .mockResolvedValueOnce(secondQueue)
+      .mockResolvedValueOnce(firstQueue);
+    render(FlowSettingsPage, {
+      data: { ...initial, flowRunRetentionReviewQueue: firstQueue } as never
+    });
+
+    await page.getByRole("button", { name: "Nästa" }).click();
+    await expect.element(page.getByText("Andra flödet")).toBeVisible();
+    await page.getByRole("button", { name: "Föregående" }).click();
+    await expect.element(page.getByText("Första flödet")).toBeVisible();
+
+    expect(listOrganizationFlowRunRetentionReviewQueue).toHaveBeenNthCalledWith(1, {
+      limit: 50,
+      cursor: "cursor-2"
+    });
+    expect(listOrganizationFlowRunRetentionReviewQueue).toHaveBeenNthCalledWith(2, {
+      limit: 50,
+      cursor: undefined
+    });
+  });
+
+  test("retries the review page that failed", async () => {
+    const initial = pageData();
+    const firstQueue = {
+      items: [reviewItem("run-1", "Första flödet")],
+      count: 1,
+      has_more: true,
+      next_cursor: "cursor-2"
+    };
+    const secondQueue = {
+      items: [reviewItem("run-2", "Andra flödet")],
+      count: 1,
+      has_more: false,
+      next_cursor: null
+    };
+    listOrganizationFlowRunRetentionReviewQueue
+      .mockRejectedValueOnce(new Error("temporary queue failure"))
+      .mockResolvedValueOnce(secondQueue);
+    render(FlowSettingsPage, {
+      data: { ...initial, flowRunRetentionReviewQueue: firstQueue } as never
+    });
+
+    await page.getByRole("button", { name: "Nästa" }).click();
+    await expect.element(page.getByText("Granskningslistan kunde inte hämtas")).toBeVisible();
+    await page.getByRole("button", { name: "Uppdatera listan" }).click();
+    await expect.element(page.getByText("Andra flödet")).toBeVisible();
+
+    expect(listOrganizationFlowRunRetentionReviewQueue).toHaveBeenNthCalledWith(1, {
+      limit: 50,
+      cursor: "cursor-2"
+    });
+    expect(listOrganizationFlowRunRetentionReviewQueue).toHaveBeenNthCalledWith(2, {
+      limit: 50,
+      cursor: "cursor-2"
+    });
+  });
+
+  test("keeps policy controls available when the review queue is unavailable", async () => {
+    render(FlowSettingsPage, {
+      data: { ...pageData(), flowRunRetentionReviewQueue: null } as never
+    });
+
+    await expect.element(page.getByText("Granskningslistan kunde inte hämtas")).toBeVisible();
+    await expect
+      .element(page.getByText("Policy för körningshistorik", { exact: true }))
       .toBeVisible();
     await expect
-      .element(page.getByText("Inget gallringsvillkor på organisationsnivå"))
+      .element(page.getByRole("button", { name: "Spara policy för Organisation" }))
       .toBeVisible();
   });
 

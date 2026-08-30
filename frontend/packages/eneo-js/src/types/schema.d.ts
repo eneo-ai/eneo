@@ -3066,7 +3066,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 169 actions with their enabled status for the modal UI.
+     * @description Retrieve all 170 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -4339,7 +4339,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow
-     * @description Update a draft flow definition, including steps, metadata, and its configured purge eligibility. The Flow value overrides the Space and tenant windows but does not delete Flow data. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Update a draft flow definition, including steps and metadata. Operational retention is managed separately by Organization administrators. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow"];
     trace?: never;
@@ -6938,7 +6938,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the tenant fallback for layered Flow run-history purge eligibility, the runtime-upload eligibility window, and the independent debug-evidence eligibility window. A Flow-specific value overrides its Space value, and a Space value overrides the tenant fallback. Null means no eligibility window at that layer. Reading this endpoint never previews, deletes, or redacts Flow data.
+     * @description Return the independent eligibility windows for stored Flow debug evidence and abandoned runtime uploads. Flow run-history retention is configured through the dedicated hierarchical policy endpoints. Reading this endpoint never previews, deletes, or redacts Flow data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -6948,9 +6948,181 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update tenant Flow purge-eligibility inputs. Omitted fields are unchanged and null removes the tenant input. Flow values override Space values, which override this tenant fallback; run_debug_evidence_days remains independent. Saving these values never deletes or redacts Flow data. Deletion requires a separate explicit administrator purge with preview and confirmation.
+     * @description Update the independent eligibility windows for stored Flow debug evidence and abandoned runtime uploads. Omitted fields are unchanged and null removes the tenant input. Saving these values never deletes or redacts Flow data.
      */
     patch: operations["update_flow_retention_policy"];
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the Organization Flow run-history retention policy
+     * @description Return the Organization default and its effective Flow run-history policy. No configured policy means run history has no age threshold and remains stored.
+     */
+    get: operations["get_organization_flow_run_retention_policy"];
+    /**
+     * Replace the Organization Flow run-history retention policy
+     * @description Replace the complete Organization policy or clear it. The initial modes either preserve eligible data for explicit administrator purge or require human review; neither mode deletes data automatically.
+     */
+    put: operations["replace_organization_flow_run_retention_policy"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a Flow run-history retention policy
+     * @description Return the Flow override, the inherited Space or Organization policy, and the effective policy. A complete Flow policy replaces its inherited policy, which allows one Flow to keep 90 days while its Space keeps 60 and the Organization default remains 30. Reading the policy never deletes run data.
+     */
+    get: operations["get_flow_run_retention_policy"];
+    /**
+     * Replace a Flow run-history retention policy
+     * @description Replace the complete Flow override or clear it to inherit. Operational retention remains editable after a Flow definition is published because it does not mutate the published definition. The initial modes require a later explicit administrator action; saving this policy never schedules deletion.
+     */
+    put: operations["replace_flow_run_retention_policy"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List runs awaiting retention review for one Flow
+     * @description List terminal runs for one Flow whose effective review_required policy has reached its age threshold, including a policy inherited from its Space or Organization. The bounded response deliberately omits inputs and outputs. Reading it is side-effect free and cannot approve or delete run history.
+     */
+    get: operations["list_flow_run_retention_review_queue"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/review-queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Flow runs awaiting Organization retention review
+     * @description List terminal Flow runs whose effective review_required policy has reached its age threshold across the Organization. The bounded page contains only identifiers, names, lifecycle dates, and policy facts; it never returns run inputs or outputs. Reading this queue does not approve or delete anything.
+     */
+    get: operations["list_organization_flow_run_retention_review_queue"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get a Space Flow run-history retention policy
+     * @description Return the Space override, the inherited Organization policy, and the effective policy. A complete Space policy replaces the Organization default for every Flow in that Space unless a Flow has its own complete override. The response names the winning source so an administrator can verify the result before any separate purge action. Reading it never deletes data.
+     */
+    get: operations["get_space_flow_run_retention_policy"];
+    /**
+     * Replace a Space Flow run-history retention policy
+     * @description Replace the complete Space override or clear it to inherit the Organization policy. The mode and day count move together, preventing ambiguous mixed inheritance. This setting controls Flow run history only: it does not change conversation or AI Builder retention, and it never schedules deletion.
+     */
+    put: operations["replace_space_flow_run_retention_policy"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Flow runs awaiting retention review in a Space
+     * @description List terminal Flow runs in one Space whose effective review_required policy has reached its age threshold. A Flow-level preserve override is excluded, even when the surrounding Space requires review. The bounded response omits run content, and reading it never approves or deletes data.
+     */
+    get: operations["list_space_flow_run_retention_review_queue"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/targets/spaces": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Spaces available for Flow retention administration
+     * @description List non-personal Spaces across the caller's Organization, including Spaces where the Organization administrator is not a member. The bounded response contains identifiers and names only.
+     */
+    get: operations["list_flow_run_retention_space_targets"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/targets/spaces/{space_id}/flows": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Flows available for retention administration in a Space
+     * @description List active Flows in one Organization-scoped Space, including Flows the Organization administrator cannot discover through membership-scoped Flow authoring APIs. The bounded response contains identifiers and names only.
+     */
+    get: operations["list_flow_run_retention_flow_targets"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/settings/flow-runtime-policy": {
@@ -10387,6 +10559,7 @@ export interface components {
       | "flow_deleted"
       | "flow_published"
       | "flow_unpublished"
+      | "flow_run_retention_policy_changed"
       | "flow_run_created"
       | "flow_run_completed"
       | "flow_run_failed"
@@ -15849,11 +16022,6 @@ export interface components {
      *     }
      */
     FlowCreateRequest: {
-      /**
-       * Data Retention Days
-       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
-       */
-      data_retention_days?: number | null;
       /** Description */
       description?: string | null;
       /** Metadata Json */
@@ -16886,7 +17054,6 @@ export interface components {
      * @example {
      *       "created_at": "2026-03-17T09:30:00Z",
      *       "created_by_user_id": "00000000-0000-0000-0000-000000000030",
-     *       "data_retention_days": 30,
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "id": "00000000-0000-0000-0000-000000000001",
      *       "input_type": "audio",
@@ -16901,13 +17068,23 @@ export interface components {
      *       "published_version": 3,
      *       "run_history_retention": {
      *         "contributors": {
-     *           "flow_days": 30,
-     *           "organization_days": 90,
-     *           "space_days": 14
+     *           "flow": {
+     *             "days": 30,
+     *             "mode": "preserve"
+     *           },
+     *           "organization": {
+     *             "days": 90,
+     *             "mode": "preserve"
+     *           },
+     *           "space": {
+     *             "days": 14,
+     *             "mode": "review_required"
+     *           }
      *         },
      *         "effective_days": 30,
+     *         "mode": "preserve",
      *         "source": "flow",
-     *         "state": "days"
+     *         "state": "configured"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
      *       "step_count": 2,
@@ -16946,11 +17123,6 @@ export interface components {
       created_at?: string | null;
       /** Created By User Id */
       created_by_user_id?: string | null;
-      /**
-       * Data Retention Days
-       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
-       */
-      data_retention_days?: number | null;
       /** Description */
       description?: string | null;
       /**
@@ -16974,11 +17146,11 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective administrator-requested purge eligibility for Flow run history. A Flow value overrides its Space value, and a Space value overrides the tenant fallback. A days state reports eligibility only and never authorizes deletion; off means that no eligibility window is configured.
+       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval. Off means no eligibility policy is configured.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
-        | components["schemas"]["FlowRunRetentionDays"];
+        | components["schemas"]["FlowRunRetentionConfigured"];
       /**
        * Space Id
        * Format: uuid
@@ -17262,17 +17434,11 @@ export interface components {
     /**
      * FlowRetentionPolicyPublic
      * @example {
-     *       "flow_run_history_retention_days": 30,
      *       "flow_runtime_upload_abandonment_days": 14,
      *       "run_debug_evidence_days": 30
      *     }
      */
     FlowRetentionPolicyPublic: {
-      /**
-       * Flow Run History Retention Days
-       * @description Tenant purge eligibility fallback for Flow run history. A Flow value overrides its Space value, and a Space value overrides this tenant value.
-       */
-      flow_run_history_retention_days: number | null;
       /**
        * Flow Runtime Upload Abandonment Days
        * @description Tenant purge eligibility window for Flow runtime uploads that were never bound to a run input. Null means no tenant window; saving a value never removes uploads.
@@ -17287,17 +17453,11 @@ export interface components {
     /**
      * FlowRetentionPolicyUpdate
      * @example {
-     *       "flow_run_history_retention_days": 30,
      *       "flow_runtime_upload_abandonment_days": 14,
      *       "run_debug_evidence_days": 30
      *     }
      */
     FlowRetentionPolicyUpdate: {
-      /**
-       * Flow Run History Retention Days
-       * @description Tenant purge eligibility fallback for Flow run history. A Flow value overrides its Space value, and a Space value overrides this tenant value.
-       */
-      flow_run_history_retention_days?: number | null;
       /**
        * Flow Runtime Upload Abandonment Days
        * @description Tenant purge eligibility window for Flow runtime uploads that were never bound to a run input. Null means no tenant window; saving a value never removes uploads.
@@ -19705,20 +19865,12 @@ export interface components {
       redispatched_count: number;
       run: components["schemas"]["FlowRunPublic"];
     };
-    /** FlowRunRetentionContributors */
-    FlowRunRetentionContributors: {
-      /** Flow Days */
-      flow_days: number | null;
-      /** Organization Days */
-      organization_days: number | null;
-      /** Space Days */
-      space_days: number | null;
-    };
-    /** FlowRunRetentionDays */
-    FlowRunRetentionDays: {
+    /** FlowRunRetentionConfigured */
+    FlowRunRetentionConfigured: {
       contributors: components["schemas"]["FlowRunRetentionContributors"];
       /** Effective Days */
       effective_days: number;
+      mode: components["schemas"]["FlowRunRetentionMode"];
       /**
        * Source
        * @enum {string}
@@ -19728,23 +19880,310 @@ export interface components {
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
-      state: "days";
+      state: "configured";
     };
+    /** FlowRunRetentionContributors */
+    FlowRunRetentionContributors: {
+      flow: components["schemas"]["FlowRunRetentionPolicy"] | null;
+      organization: components["schemas"]["FlowRunRetentionPolicy"] | null;
+      space: components["schemas"]["FlowRunRetentionPolicy"] | null;
+    };
+    /** FlowRunRetentionFlowTarget */
+    FlowRunRetentionFlowTarget: {
+      /**
+       * Id
+       * Format: uuid
+       * @description Flow available for retention administration.
+       */
+      id: string;
+      /**
+       * Name
+       * @description Current Flow name.
+       */
+      name: string;
+      /**
+       * Space Id
+       * Format: uuid
+       * @description Space that owns the Flow.
+       */
+      space_id: string;
+    };
+    /**
+     * FlowRunRetentionFlowTargetPage
+     * @example {
+     *       "count": 1,
+     *       "has_more": false,
+     *       "items": [
+     *         {
+     *           "id": "00000000-0000-0000-0000-000000000301",
+     *           "name": "Supplier assessment",
+     *           "space_id": "00000000-0000-0000-0000-000000000201"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowRunRetentionFlowTargetPage: {
+      /**
+       * Count
+       * @description Number of Flows returned in this page.
+       */
+      readonly count: number;
+      /** Has More */
+      has_more: boolean;
+      /** Items */
+      items: components["schemas"]["FlowRunRetentionFlowTarget"][];
+    };
+    /**
+     * FlowRunRetentionMode
+     * @enum {string}
+     */
+    FlowRunRetentionMode: "preserve" | "review_required";
     /** FlowRunRetentionOff */
     FlowRunRetentionOff: {
       contributors: components["schemas"]["FlowRunRetentionContributors"];
       /** Effective Days */
-      effective_days: null;
+      effective_days?: null;
+      /** Mode */
+      mode?: null;
       /**
        * Source
+       * @default none
        * @constant
        */
-      source: "none";
+      source?: "none";
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
       state: "off";
+    };
+    /**
+     * FlowRunRetentionPolicy
+     * @example {
+     *       "days": 60,
+     *       "mode": "review_required"
+     *     }
+     */
+    FlowRunRetentionPolicy: {
+      /**
+       * Days
+       * @description Age in days after which completed Flow run history becomes eligible under this policy. Eligibility alone never deletes data.
+       */
+      days: number;
+      /** @description Preserve makes records eligible only for an explicit administrator purge. Review_required additionally requires human approval before that purge. Neither mode schedules automatic deletion. */
+      mode: components["schemas"]["FlowRunRetentionMode"];
+    };
+    /**
+     * FlowRunRetentionPolicyReplaceRequest
+     * @example {
+     *       "policy": {
+     *         "days": 60,
+     *         "mode": "review_required"
+     *       }
+     *     }
+     */
+    FlowRunRetentionPolicyReplaceRequest: {
+      /** @description Complete local policy, or null to clear this level and inherit its parent. */
+      policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
+    };
+    /**
+     * FlowRunRetentionPolicySettings
+     * @example {
+     *       "effective": {
+     *         "contributors": {
+     *           "flow": {
+     *             "days": 90,
+     *             "mode": "preserve"
+     *           },
+     *           "organization": {
+     *             "days": 30,
+     *             "mode": "preserve"
+     *           },
+     *           "space": {
+     *             "days": 60,
+     *             "mode": "review_required"
+     *           }
+     *         },
+     *         "effective_days": 90,
+     *         "mode": "preserve",
+     *         "source": "flow",
+     *         "state": "configured"
+     *       },
+     *       "inherited_policy": {
+     *         "days": 60,
+     *         "mode": "review_required"
+     *       },
+     *       "local_policy": {
+     *         "days": 90,
+     *         "mode": "preserve"
+     *       },
+     *       "scope": "flow",
+     *       "scope_id": "00000000-0000-0000-0000-000000000301"
+     *     }
+     */
+    FlowRunRetentionPolicySettings: {
+      /**
+       * Effective
+       * @description Resolved policy after applying Flow, Space, then Organization precedence.
+       */
+      effective:
+        | components["schemas"]["FlowRunRetentionOff"]
+        | components["schemas"]["FlowRunRetentionConfigured"];
+      /** @description Nearest complete parent policy, or null when no parent policy exists. */
+      inherited_policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
+      /** @description Policy stored at this level, or null when it inherits. */
+      local_policy: components["schemas"]["FlowRunRetentionPolicy"] | null;
+      /** @description Level whose local policy is being inspected. */
+      scope: components["schemas"]["FlowRunRetentionScope"];
+      /**
+       * Scope Id
+       * Format: uuid
+       * @description Organization, Space, or Flow identifier.
+       */
+      scope_id: string;
+    };
+    /** FlowRunRetentionReviewItem */
+    FlowRunRetentionReviewItem: {
+      /** @description Complete review_required policy effective for this run. */
+      effective_policy: components["schemas"]["FlowRunRetentionPolicy"];
+      /**
+       * Eligible Since
+       * Format: date-time
+       * @description Timestamp when the effective review_required age threshold was reached. This is review eligibility, not approval or deletion.
+       */
+      eligible_since: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Flow that owns the run.
+       */
+      flow_id: string;
+      /**
+       * Flow Name
+       * @description Current Flow name for administrator context.
+       */
+      flow_name: string;
+      /**
+       * Policy Source
+       * @description Most-specific level that supplied the effective policy.
+       * @enum {string}
+       */
+      policy_source: "organization" | "space" | "flow";
+      /**
+       * Retention Anchor
+       * Format: date-time
+       * @description Timestamp from which the policy age is measured: finished_at when available, otherwise created_at.
+       */
+      retention_anchor: string;
+      /**
+       * Run Id
+       * Format: uuid
+       * @description Terminal Flow run awaiting retention review.
+       */
+      run_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       * @description Space that owns the Flow.
+       */
+      space_id: string;
+      /**
+       * Space Name
+       * @description Current Space name for administrator context.
+       */
+      space_name: string;
+      /** @description Terminal run status. */
+      status: components["schemas"]["FlowRunStatus"];
+    };
+    /**
+     * FlowRunRetentionReviewPage
+     * @example {
+     *       "count": 1,
+     *       "has_more": true,
+     *       "items": [
+     *         {
+     *           "effective_policy": {
+     *             "days": 60,
+     *             "mode": "review_required"
+     *           },
+     *           "eligible_since": "2026-06-30T10:00:00Z",
+     *           "flow_id": "00000000-0000-0000-0000-000000000301",
+     *           "flow_name": "Supplier assessment",
+     *           "policy_source": "space",
+     *           "retention_anchor": "2026-05-01T10:00:00Z",
+     *           "run_id": "00000000-0000-0000-0000-000000000501",
+     *           "space_id": "00000000-0000-0000-0000-000000000201",
+     *           "space_name": "Procurement",
+     *           "status": "completed"
+     *         }
+     *       ],
+     *       "next_cursor": "v1.eyJyZXRlbnRpb25fYW5jaG9yIjoiMjAyNi0wNS0wMVQxMDowMDowMFoiLCJydW5faWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDA1MDEifQ"
+     *     }
+     */
+    FlowRunRetentionReviewPage: {
+      /**
+       * Count
+       * @description Number of review items returned in this page.
+       */
+      readonly count: number;
+      /**
+       * Has More
+       * @description Whether another page exists after this page.
+       */
+      has_more: boolean;
+      /**
+       * Items
+       * @description Runs eligible for administrator review. Run inputs and outputs are deliberately omitted.
+       */
+      items: components["schemas"]["FlowRunRetentionReviewItem"][];
+      /**
+       * Next Cursor
+       * @description Opaque cursor for the next page, or null on the final page.
+       */
+      next_cursor: string | null;
+    };
+    /**
+     * FlowRunRetentionScope
+     * @enum {string}
+     */
+    FlowRunRetentionScope: "organization" | "space" | "flow";
+    /** FlowRunRetentionSpaceTarget */
+    FlowRunRetentionSpaceTarget: {
+      /**
+       * Id
+       * Format: uuid
+       * @description Space available for Flow retention administration.
+       */
+      id: string;
+      /**
+       * Name
+       * @description Current Space name.
+       */
+      name: string;
+    };
+    /**
+     * FlowRunRetentionSpaceTargetPage
+     * @example {
+     *       "count": 1,
+     *       "has_more": false,
+     *       "items": [
+     *         {
+     *           "id": "00000000-0000-0000-0000-000000000201",
+     *           "name": "Procurement"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowRunRetentionSpaceTargetPage: {
+      /**
+       * Count
+       * @description Number of Spaces returned in this page.
+       */
+      readonly count: number;
+      /** Has More */
+      has_more: boolean;
+      /** Items */
+      items: components["schemas"]["FlowRunRetentionSpaceTarget"][];
     };
     /**
      * FlowRunReviewCheckpointApproveRequest
@@ -21202,7 +21641,6 @@ export interface components {
      * @example {
      *       "created_at": "2026-03-17T09:30:00Z",
      *       "created_by_user_id": "00000000-0000-0000-0000-000000000030",
-     *       "data_retention_days": 30,
      *       "description": "Transcribe a review conversation and return a PDF summary.",
      *       "id": "00000000-0000-0000-0000-000000000001",
      *       "input_type": "audio",
@@ -21217,13 +21655,23 @@ export interface components {
      *       "published_version": 3,
      *       "run_history_retention": {
      *         "contributors": {
-     *           "flow_days": 30,
-     *           "organization_days": 90,
-     *           "space_days": 14
+     *           "flow": {
+     *             "days": 30,
+     *             "mode": "preserve"
+     *           },
+     *           "organization": {
+     *             "days": 90,
+     *             "mode": "preserve"
+     *           },
+     *           "space": {
+     *             "days": 14,
+     *             "mode": "review_required"
+     *           }
      *         },
      *         "effective_days": 30,
+     *         "mode": "preserve",
      *         "source": "flow",
-     *         "state": "days"
+     *         "state": "configured"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
      *       "step_count": 2,
@@ -21236,11 +21684,6 @@ export interface components {
       created_at?: string | null;
       /** Created By User Id */
       created_by_user_id?: string | null;
-      /**
-       * Data Retention Days
-       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
-       */
-      data_retention_days?: number | null;
       /** Description */
       description?: string | null;
       /**
@@ -21264,11 +21707,11 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective administrator-requested purge eligibility for Flow run history. A Flow value overrides its Space value, and a Space value overrides the tenant fallback. A days state reports eligibility only and never authorizes deletion; off means that no eligibility window is configured.
+       * @description Effective Flow run-history retention policy. A complete Flow policy overrides its complete Space policy, and Space overrides the Organization default. Preserve requires an explicit administrator purge; review_required requires human approval. Off means no eligibility policy is configured.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
-        | components["schemas"]["FlowRunRetentionDays"];
+        | components["schemas"]["FlowRunRetentionConfigured"];
       /**
        * Space Id
        * Format: uuid
@@ -25672,7 +26115,6 @@ export interface components {
     /**
      * PartialFlowUpdateRequest
      * @example {
-     *       "data_retention_days": 30,
      *       "description": "Transcribe, redact, and summarize citizen audio submissions.",
      *       "metadata_json": {
      *         "wizard": {
@@ -25695,11 +26137,6 @@ export interface components {
      *     }
      */
     PartialFlowUpdateRequest: {
-      /**
-       * Data Retention Days
-       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
-       */
-      data_retention_days?: number | null;
       /** Description */
       description?: string | null;
       /** Metadata Json */
@@ -25739,7 +26176,7 @@ export interface components {
       completion_models?: components["schemas"]["ModelId"][] | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. For Flow run history, this value overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only. It never authorizes Flow deletion. Set to null to disable the space-level conversation policy and remove the Space eligibility value for Flows. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. It does not govern Flow run history; use the dedicated Flow run-retention Space endpoint for that policy. Set to null to disable the space-level conversation policy. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
       /** Description */
@@ -29288,7 +29725,7 @@ export interface components {
       created_at?: string | null;
       /**
        * Data Retention Days
-       * @description Configured Space retention days. This governs conversation history for assistants and apps. For Flow run history, it overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only; it never authorizes Flow deletion.
+       * @description Configured Space retention days. This governs conversation history for assistants and apps. It does not govern Flow run history, which uses the dedicated Organization, Space, and Flow policy hierarchy.
        */
       data_retention_days?: number | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
@@ -29369,7 +29806,7 @@ export interface components {
       created_at?: string | null;
       /**
        * Data Retention Days
-       * @description Configured Space retention days. This governs conversation history for assistants and apps. For Flow run history, it overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only; it never authorizes Flow deletion.
+       * @description Configured Space retention days. This governs conversation history for assistants and apps. It does not govern Flow run history, which uses the dedicated Organization, Space, and Flow policy hierarchy.
        */
       data_retention_days?: number | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
@@ -29429,7 +29866,7 @@ export interface components {
       created_at?: string | null;
       /**
        * Data Retention Days
-       * @description Configured Space retention days. This governs conversation history for assistants and apps. For Flow run history, it overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only; it never authorizes Flow deletion.
+       * @description Configured Space retention days. This governs conversation history for assistants and apps. It does not govern Flow run history, which uses the dedicated Organization, Space, and Flow policy hierarchy.
        */
       data_retention_days?: number | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
@@ -30255,8 +30692,6 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
-      /** Flow Run History Retention Days */
-      flow_run_history_retention_days?: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days?: number | null;
       /** Flow Settings */
@@ -30652,8 +31087,6 @@ export interface components {
       federation_config?: {
         [key: string]: unknown;
       };
-      /** Flow Run History Retention Days */
-      flow_run_history_retention_days?: number | null;
       /** Flow Runtime Upload Abandonment Days */
       flow_runtime_upload_abandonment_days?: number | null;
       /** Flow Settings */
@@ -46936,7 +47369,6 @@ export interface operations {
            *         {
            *           "created_at": "2026-03-17T09:30:00Z",
            *           "created_by_user_id": "00000000-0000-0000-0000-000000000030",
-           *           "data_retention_days": 30,
            *           "description": "Transcribe a review conversation and return a PDF summary.",
            *           "id": "00000000-0000-0000-0000-000000000001",
            *           "input_type": "audio",
@@ -46951,13 +47383,23 @@ export interface operations {
            *           "published_version": 3,
            *           "run_history_retention": {
            *             "contributors": {
-           *               "flow_days": 30,
-           *               "organization_days": 90,
-           *               "space_days": 14
+           *               "flow": {
+           *                 "days": 30,
+           *                 "mode": "preserve"
+           *               },
+           *               "organization": {
+           *                 "days": 90,
+           *                 "mode": "preserve"
+           *               },
+           *               "space": {
+           *                 "days": 14,
+           *                 "mode": "review_required"
+           *               }
            *             },
            *             "effective_days": 30,
+           *             "mode": "preserve",
            *             "source": "flow",
-           *             "state": "days"
+           *             "state": "configured"
            *           },
            *           "space_id": "00000000-0000-0000-0000-000000000020",
            *           "step_count": 2,
@@ -57584,6 +58026,696 @@ export interface operations {
            *       "code": "insufficient_tenant_permission",
            *       "eneo_error_code": 9001,
            *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_organization_flow_run_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_organization_flow_run_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunRetentionPolicyReplaceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_run_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        flow_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_flow_run_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        flow_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunRetentionPolicyReplaceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_run_retention_review_queue: {
+    parameters: {
+      query?: {
+        limit?: number;
+        /** @description Opaque cursor returned as next_cursor by the previous page. */
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        flow_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionReviewPage"];
+        };
+      };
+      /** @description The Flow retention review cursor is malformed or unsupported. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "invalid_flow_retention_review_cursor",
+           *       "eneo_error_code": 9007,
+           *       "message": "Invalid Flow retention review cursor."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_organization_flow_run_retention_review_queue: {
+    parameters: {
+      query?: {
+        limit?: number;
+        /** @description Opaque cursor returned as next_cursor by the previous page. */
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionReviewPage"];
+        };
+      };
+      /** @description The Flow retention review cursor is malformed or unsupported. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "invalid_flow_retention_review_cursor",
+           *       "eneo_error_code": 9007,
+           *       "message": "Invalid Flow retention review cursor."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_space_flow_run_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Space not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Space not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  replace_space_flow_run_retention_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunRetentionPolicyReplaceRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Space not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Space not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_space_flow_run_retention_review_queue: {
+    parameters: {
+      query?: {
+        limit?: number;
+        /** @description Opaque cursor returned as next_cursor by the previous page. */
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionReviewPage"];
+        };
+      };
+      /** @description The Flow retention review cursor is malformed or unsupported. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "invalid_flow_retention_review_cursor",
+           *       "eneo_error_code": 9007,
+           *       "message": "Invalid Flow retention review cursor."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Space not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Space not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_run_retention_space_targets: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionSpaceTargetPage"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_run_retention_flow_targets: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetentionFlowTargetPage"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Space not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Space not found."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

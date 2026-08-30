@@ -453,6 +453,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_unpublished,
     description: m.audit_action_flow_unpublished_description
   },
+  flow_run_retention_policy_changed: {
+    name: m.audit_action_flow_run_retention_policy_changed,
+    description: m.audit_action_flow_run_retention_policy_changed_description
+  },
   flow_run_created: {
     name: m.audit_action_flow_run_created,
     description: m.audit_action_flow_run_created_description

@@ -127,6 +127,18 @@ export type FlowRagEvidencePolicyUpdate = components["schemas"]["FlowRagEvidence
 export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
 export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
 export type FlowRetentionPolicyUpdate = components["schemas"]["FlowRetentionPolicyUpdate"];
+export type FlowRunRetentionMode = components["schemas"]["FlowRunRetentionMode"];
+export type FlowRunRetentionPolicy = components["schemas"]["FlowRunRetentionPolicy"];
+export type FlowRunRetentionPolicySettings =
+  components["schemas"]["FlowRunRetentionPolicySettings"];
+export type FlowRunRetentionSpaceTarget = components["schemas"]["FlowRunRetentionSpaceTarget"];
+export type FlowRunRetentionSpaceTargetPage =
+  components["schemas"]["FlowRunRetentionSpaceTargetPage"];
+export type FlowRunRetentionFlowTarget = components["schemas"]["FlowRunRetentionFlowTarget"];
+export type FlowRunRetentionFlowTargetPage =
+  components["schemas"]["FlowRunRetentionFlowTargetPage"];
+export type FlowRunRetentionReviewItem = components["schemas"]["FlowRunRetentionReviewItem"];
+export type FlowRunRetentionReviewPage = components["schemas"]["FlowRunRetentionReviewPage"];
 export type FlowRunStatusCapabilities = components["schemas"]["FlowRunStatusCapabilitiesPublic"];
 export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];
 // SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.

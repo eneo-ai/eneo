@@ -228,11 +228,11 @@ export function initFlows(client) {
   return {
     /**
      * Create a new Flow
-     * @param {{spaceId: string, name: string, description?: string, steps?: any[], metadata_json?: any, data_retention_days?: number}} flow
+     * @param {{spaceId: string, name: string, description?: string, steps?: any[], metadata_json?: any}} flow
      * @throws {EneoError}
      */
     create: async (flow) => {
-      const { spaceId, name, description, steps = [], metadata_json, data_retention_days } = flow;
+      const { spaceId, name, description, steps = [], metadata_json } = flow;
       return _fetch("/api/v1/flows/", {
         method: "post",
         requestBody: {
@@ -241,8 +241,7 @@ export function initFlows(client) {
             name,
             description,
             steps,
-            metadata_json,
-            data_retention_days
+            metadata_json
           }
         }
       });

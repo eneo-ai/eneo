@@ -246,6 +246,167 @@ export function initSettings(client) {
     },
 
     /**
+     * Get the Organization default for Flow run-history retention.
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
+     */
+    getOrganizationFlowRunRetentionPolicy: async () => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Replace or clear the Organization default for Flow run-history retention.
+     * @param {{policy: import('../types/resources').FlowRunRetentionPolicy | null}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
+     */
+    replaceOrganizationFlowRunRetentionPolicy: async ({ policy }) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy", {
+        method: "put",
+        requestBody: { "application/json": { policy } }
+      });
+    },
+
+    /**
+     * List non-personal Spaces across the Organization for retention administration.
+     * @param {{limit?: number, offset?: number}} [params]
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionSpaceTargetPage>}
+     */
+    listFlowRunRetentionSpaceTargets: async ({ limit = 200, offset = 0 } = {}) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/targets/spaces", {
+        method: "get",
+        params: { query: { limit, offset } }
+      });
+    },
+
+    /**
+     * List active Flows in a Space for Organization-wide retention administration.
+     * @param {{spaceId: string, limit?: number, offset?: number}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionFlowTargetPage>}
+     */
+    listFlowRunRetentionFlowTargets: async ({ spaceId, limit = 200, offset = 0 }) => {
+      return await client.fetch(
+        "/api/v1/settings/flow-run-retention-policy/targets/spaces/{space_id}/flows",
+        {
+          method: "get",
+          params: {
+            path: { space_id: spaceId },
+            query: { limit, offset }
+          }
+        }
+      );
+    },
+
+    /**
+     * Get one Space's local and effective Flow run-history retention policy.
+     * @param {{spaceId: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
+     */
+    getSpaceFlowRunRetentionPolicy: async ({ spaceId }) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/spaces/{space_id}", {
+        method: "get",
+        params: { path: { space_id: spaceId } }
+      });
+    },
+
+    /**
+     * Replace a Space override, or clear it to inherit the Organization default.
+     * @param {{spaceId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
+     */
+    replaceSpaceFlowRunRetentionPolicy: async ({ spaceId, policy }) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/spaces/{space_id}", {
+        method: "put",
+        params: { path: { space_id: spaceId } },
+        requestBody: { "application/json": { policy } }
+      });
+    },
+
+    /**
+     * Get one Flow's local and effective run-history retention policy.
+     * @param {{flowId: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
+     */
+    getFlowRunRetentionPolicy: async ({ flowId }) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
+        method: "get",
+        params: { path: { flow_id: flowId } }
+      });
+    },
+
+    /**
+     * Replace a Flow override, or clear it to inherit its Space or Organization policy.
+     * @param {{flowId: string, policy: import('../types/resources').FlowRunRetentionPolicy | null}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionPolicySettings>}
+     */
+    replaceFlowRunRetentionPolicy: async ({ flowId, policy }) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}", {
+        method: "put",
+        params: { path: { flow_id: flowId } },
+        requestBody: { "application/json": { policy } }
+      });
+    },
+
+    /**
+     * List Flow runs awaiting retention review across the Organization.
+     * @param {{limit?: number, cursor?: string}} [params]
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionReviewPage>}
+     */
+    listOrganizationFlowRunRetentionReviewQueue: async ({ limit = 50, cursor } = {}) => {
+      return await client.fetch("/api/v1/settings/flow-run-retention-policy/review-queue", {
+        method: "get",
+        params: { query: { limit, cursor } }
+      });
+    },
+
+    /**
+     * List Flow runs awaiting retention review in one Space.
+     * @param {{spaceId: string, limit?: number, cursor?: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionReviewPage>}
+     */
+    listSpaceFlowRunRetentionReviewQueue: async ({ spaceId, limit = 50, cursor }) => {
+      return await client.fetch(
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue",
+        {
+          method: "get",
+          params: {
+            path: { space_id: spaceId },
+            query: { limit, cursor }
+          }
+        }
+      );
+    },
+
+    /**
+     * List runs awaiting retention review for one Flow.
+     * @param {{flowId: string, limit?: number, cursor?: string}} params
+     * @throws {EneoError}
+     * @returns {Promise<import('../types/resources').FlowRunRetentionReviewPage>}
+     */
+    listFlowRunRetentionReviewQueue: async ({ flowId, limit = 50, cursor }) => {
+      return await client.fetch(
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue",
+        {
+          method: "get",
+          params: {
+            path: { flow_id: flowId },
+            query: { limit, cursor }
+          }
+        }
+      );
+    },
+
+    /**
      * Get generated PDF/DOCX render limits for the current tenant.
      * @throws {EneoError}
      * @returns {Promise<import('../types/resources').FlowDocumentRenderLimits>}

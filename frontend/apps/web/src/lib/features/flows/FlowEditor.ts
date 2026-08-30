@@ -54,11 +54,6 @@ import {
   getUnifiedFlowSaveStatus,
   type FlowWizardMetadata
 } from "./flowEditorMetadata";
-import {
-  canEditFlowRetentionContribution,
-  isFlowRetentionDays,
-  parseFlowRetentionDaysInput
-} from "./flowEditorRetention";
 import { stripTemporaryStepId, isValidStepIndex, buildBlankStep } from "./flowStepPayloadShaping";
 import {
   computeStepConfigValidationIssues,
@@ -149,8 +144,7 @@ function createFlowEditor(data: FlowEditorInitData) {
         "input_config",
         "output_config"
       ],
-      metadata_json: true,
-      data_retention_days: true
+      metadata_json: true
     },
     manageAttachements: false
   });
@@ -166,12 +160,6 @@ function createFlowEditor(data: FlowEditorInitData) {
   const isPublished = derived(editor.state.resource, ($resource) => {
     return $resource.published_version != null;
   });
-  const canEditDataRetentionDays = derived(
-    [editor.state.resource, isPublished],
-    ([$resource, $isPublished]) =>
-      canEditFlowRetentionContribution($resource.run_history_retention, $isPublished)
-  );
-
   const assistantErrorPrefix = "assistant:";
   const flowErrorPrefix = "flow:";
   const typedIOValidationPrefix = `${flowErrorPrefix}typed-io:`;
@@ -406,22 +394,6 @@ function createFlowEditor(data: FlowEditorInitData) {
       ...resource,
       description
     }));
-  }
-
-  function setDataRetentionDays(days: number | null): void {
-    if (!get(canEditDataRetentionDays)) return;
-    if (days !== null && !isFlowRetentionDays(days)) return;
-
-    editor.state.update.update((resource) => ({
-      ...resource,
-      data_retention_days: days
-    }));
-  }
-
-  function setDataRetentionDaysFromInput(value: string): void {
-    const days = parseFlowRetentionDaysInput(value);
-    if (days === undefined) return;
-    setDataRetentionDays(days);
   }
 
   function selectStep(stepId: string): void {
@@ -979,8 +951,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       newStepOpenIntent: readonly(newStepOpenIntent),
       validationErrors,
       saveStatus: unifiedSaveStatus,
-      isPublished,
-      canEditDataRetentionDays
+      isPublished
     },
     setResource,
     addStep,
@@ -997,8 +968,6 @@ function createFlowEditor(data: FlowEditorInitData) {
     selectFirstStepIfUnselected,
     setName,
     setDescription,
-    setDataRetentionDays,
-    setDataRetentionDaysFromInput,
     replaceStepAtIndex,
     removeStepAtIndex,
     moveStepAtIndex,

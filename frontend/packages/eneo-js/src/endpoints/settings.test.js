@@ -82,6 +82,141 @@ describe("settings flow policy endpoints", () => {
     });
   });
 
+  it("uses the hierarchical Flow run-retention settings routes", async () => {
+    const fetch = vi.fn(async () => ({ scope: "organization" }));
+    const settings = initSettings({ fetch });
+    const policy = { mode: "review_required", days: 60 };
+
+    await settings.getOrganizationFlowRunRetentionPolicy();
+    await settings.replaceOrganizationFlowRunRetentionPolicy({ policy });
+    await settings.getSpaceFlowRunRetentionPolicy({ spaceId: "space-id" });
+    await settings.replaceSpaceFlowRunRetentionPolicy({ spaceId: "space-id", policy: null });
+    await settings.getFlowRunRetentionPolicy({ flowId: "flow-id" });
+    await settings.replaceFlowRunRetentionPolicy({ flowId: "flow-id", policy });
+
+    expect(fetch.mock.calls).toEqual([
+      ["/api/v1/settings/flow-run-retention-policy", { method: "get" }],
+      [
+        "/api/v1/settings/flow-run-retention-policy",
+        {
+          method: "put",
+          requestBody: { "application/json": { policy } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        {
+          method: "get",
+          params: { path: { space_id: "space-id" } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        {
+          method: "put",
+          params: { path: { space_id: "space-id" } },
+          requestBody: { "application/json": { policy: null } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        {
+          method: "get",
+          params: { path: { flow_id: "flow-id" } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        {
+          method: "put",
+          params: { path: { flow_id: "flow-id" } },
+          requestBody: { "application/json": { policy } }
+        }
+      ]
+    ]);
+  });
+
+  it("lists Organization-wide Flow retention targets", async () => {
+    const fetch = vi.fn(async () => ({ items: [], count: 0, has_more: false }));
+    const settings = initSettings({ fetch });
+
+    await settings.listFlowRunRetentionSpaceTargets({ limit: 100, offset: 200 });
+    await settings.listFlowRunRetentionFlowTargets({
+      spaceId: "space-id",
+      limit: 100,
+      offset: 200
+    });
+
+    expect(fetch.mock.calls).toEqual([
+      [
+        "/api/v1/settings/flow-run-retention-policy/targets/spaces",
+        {
+          method: "get",
+          params: { query: { limit: 100, offset: 200 } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy/targets/spaces/{space_id}/flows",
+        {
+          method: "get",
+          params: {
+            path: { space_id: "space-id" },
+            query: { limit: 100, offset: 200 }
+          }
+        }
+      ]
+    ]);
+  });
+
+  it("lists side-effect-free Flow run-retention review queues", async () => {
+    const fetch = vi.fn(async () => ({ items: [], count: 0, has_more: false }));
+    const settings = initSettings({ fetch });
+
+    await settings.listOrganizationFlowRunRetentionReviewQueue({
+      limit: 25,
+      cursor: "next-cursor"
+    });
+    await settings.listSpaceFlowRunRetentionReviewQueue({
+      spaceId: "space-id",
+      limit: 10,
+      cursor: "space-cursor"
+    });
+    await settings.listFlowRunRetentionReviewQueue({
+      flowId: "flow-id",
+      cursor: "flow-cursor"
+    });
+
+    expect(fetch.mock.calls).toEqual([
+      [
+        "/api/v1/settings/flow-run-retention-policy/review-queue",
+        {
+          method: "get",
+          params: { query: { limit: 25, cursor: "next-cursor" } }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue",
+        {
+          method: "get",
+          params: {
+            path: { space_id: "space-id" },
+            query: { limit: 10, cursor: "space-cursor" }
+          }
+        }
+      ],
+      [
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue",
+        {
+          method: "get",
+          params: {
+            path: { flow_id: "flow-id" },
+            query: { limit: 50, cursor: "flow-cursor" }
+          }
+        }
+      ]
+    ]);
+  });
+
   it("gets flow evidence policy from canonical settings route", async () => {
     const fetch = vi.fn(async () => ({ allow_service_key_raw_export_class3: false }));
     const settings = initSettings({ fetch });

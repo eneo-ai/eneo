@@ -151,18 +151,9 @@
   }
 
   const {
-    state: {
-      resource,
-      update,
-      activeStepId,
-      isPublished,
-      canEditDataRetentionDays,
-      saveStatus,
-      validationErrors
-    }
+    state: { resource, update, activeStepId, isPublished, saveStatus, validationErrors }
   } = flowEditor;
   const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
-  const runHistoryRetention = $derived($resource.run_history_retention);
   const activeProcessingStep = $derived(
     $update.steps.find((step) => step.id === $activeStepId) ?? null
   );
@@ -817,89 +808,6 @@
                           placeholder={m.flow_description_placeholder()}
                         />
                       </Field.Field>
-                      {#if $userMode === "power_user"}
-                        <div
-                          class="border-default -mt-1 border-t pt-5"
-                          transition:slide={{ duration: reducedMotion ? 0 : 200 }}
-                        >
-                          <Field.Field>
-                            <Field.Label for="flow-retention-input">
-                              {m.flow_data_retention_label()}
-                            </Field.Label>
-                            <div class="border-default bg-secondary rounded-md border px-3 py-2.5">
-                              <p class="text-primary text-sm font-medium">
-                                {runHistoryRetention.state === "off"
-                                  ? m.flow_retention_no_eligibility_window()
-                                  : m.flow_retention_eligible_after_days({
-                                      days: runHistoryRetention.effective_days
-                                    })}
-                              </p>
-                              <p class="text-secondary mt-1 text-xs leading-relaxed">
-                                {m.flow_retention_configured_flow_value({
-                                  value:
-                                    $update.data_retention_days === null ||
-                                    $update.data_retention_days === undefined
-                                      ? m.flow_retention_not_configured()
-                                      : m.flow_retention_days_value({
-                                          days: $update.data_retention_days
-                                        })
-                                })}
-                              </p>
-                              <dl class="mt-2 grid grid-cols-3 gap-x-4 gap-y-1 text-xs">
-                                <div class="flex justify-between gap-2">
-                                  <dt class="text-secondary">
-                                    {m.flow_retention_contributor_organization()}
-                                  </dt>
-                                  <dd class="text-primary tabular-nums">
-                                    {runHistoryRetention.contributors.organization_days ?? "—"}
-                                  </dd>
-                                </div>
-                                <div class="flex justify-between gap-2">
-                                  <dt class="text-secondary">
-                                    {m.flow_retention_contributor_space()}
-                                  </dt>
-                                  <dd class="text-primary tabular-nums">
-                                    {runHistoryRetention.contributors.space_days ?? "—"}
-                                  </dd>
-                                </div>
-                                <div class="flex justify-between gap-2">
-                                  <dt class="text-secondary">
-                                    {m.flow_retention_contributor_flow()}
-                                  </dt>
-                                  <dd class="text-primary tabular-nums">
-                                    {runHistoryRetention.contributors.flow_days ?? "—"}
-                                  </dd>
-                                </div>
-                              </dl>
-                            </div>
-                            <div class="flex items-center gap-2.5">
-                              <Input
-                                id="flow-retention-input"
-                                type="number"
-                                min="1"
-                                max="2555"
-                                class="h-10 w-24"
-                                value={$update.data_retention_days ?? ""}
-                                disabled={!$canEditDataRetentionDays}
-                                placeholder="—"
-                                oninput={(e) => {
-                                  flowEditor.setDataRetentionDaysFromInput(e.currentTarget.value);
-                                }}
-                              />
-                              <span class="text-secondary text-sm"
-                                >{m.flow_data_retention_unit()}</span
-                              >
-                            </div>
-                            <Field.Description>
-                              {$isPublished
-                                ? m.flow_retention_published_read_only()
-                                : runHistoryRetention.state === "off"
-                                  ? m.flow_retention_no_eligibility_hint()
-                                  : m.flow_retention_eligibility_override_hint()}
-                            </Field.Description>
-                          </Field.Field>
-                        </div>
-                      {/if}
                     </Field.Group>
                   </Card.Content>
                 </Card.Root>

@@ -90,7 +90,7 @@ export function makeTestFlow(): Flow {
       source: "none",
       state: "off",
       effective_days: null,
-      contributors: { organization_days: null, space_days: null, flow_days: null }
+      contributors: { organization: null, space: null, flow: null }
     }
   };
   return flow;
