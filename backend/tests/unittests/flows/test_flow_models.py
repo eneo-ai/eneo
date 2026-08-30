@@ -279,7 +279,6 @@ def test_flow_update_request_allows_partial_patch_without_steps() -> None:
     assert request.steps is None
 
 
-@pytest.mark.parametrize("value", [None, 1, 30, 2555])
 @pytest.mark.parametrize(
     ("model", "payload"),
     [
@@ -287,31 +286,12 @@ def test_flow_update_request_allows_partial_patch_without_steps() -> None:
         (FlowUpdateRequest, lambda **kwargs: kwargs),
     ],
 )
-def test_flow_request_models_accept_valid_data_retention_days(
+def test_flow_authoring_requests_reject_operational_retention_fields(
     model: type[BaseModel],
     payload,
-    value: int | None,
-) -> None:
-    request = model.model_validate(payload(data_retention_days=value))
-
-    assert request.data_retention_days == value
-
-
-@pytest.mark.parametrize("value", [0, -1, 2556, True, False, "30", 1.5])
-@pytest.mark.parametrize(
-    ("model", "payload"),
-    [
-        (FlowCreateRequest, _flow_create_payload),
-        (FlowUpdateRequest, lambda **kwargs: kwargs),
-    ],
-)
-def test_flow_request_models_reject_invalid_data_retention_days(
-    model: type[BaseModel],
-    payload,
-    value: object,
 ) -> None:
     with pytest.raises(ValidationError):
-        model.model_validate(payload(data_retention_days=value))
+        model.model_validate(payload(data_retention_days=30))
 
 
 def test_flow_request_shell_models_keep_nested_maps_open() -> None:

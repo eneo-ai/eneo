@@ -1,16 +1,13 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, TypeAlias, TypedDict, cast
+from datetime import datetime, timedelta
+from typing import Any, cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.constants import (
-    MIN_RETENTION_DAYS,
-    ORPHANED_SESSION_CLEANUP_DAYS,
-)
+from eneo.data_retention.constants import ORPHANED_SESSION_CLEANUP_DAYS
 from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -34,6 +31,7 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
 from eneo.flows.ai_builder.ai_builder_failure_ledger import MAX_WINDOW_DAYS
+from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
 from eneo.flows.infrastructure.flow_run_history_purge_repo import (
@@ -43,6 +41,10 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
     FlowTemplateAssetPurgeCounts,
     flow_run_undelivered_audit_exists,
     flow_run_unresolved_webhook_exists,
+)
+from eneo.flows.infrastructure.flow_run_retention_policy_query import (
+    effective_flow_run_retention_policy_sql,
+    flow_run_history_due_predicates,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,60 +76,6 @@ def _builder_session_has_no_fresh_send_lock(now: datetime) -> sa.ColumnElement[b
     )
 
 
-class FlowRuntimeCleanupCounts(TypedDict):
-    debug_step_results: int
-    debug_step_attempts: int
-    debug_provider_calls: int
-    debug_resolved_input_aggregates: int
-    debug_resolved_input_edges: int
-    flow_runs_considered: int
-    flow_runs_lock_deferred: int
-    flow_runs_purged: int
-    flow_generated_files_deleted: int
-    flow_runtime_source_candidates: int
-    flow_runtime_source_candidate_bytes: int
-    flow_runtime_source_bindings_deleted: int
-    flow_runtime_source_files_deleted: int
-    flow_runtime_source_bytes_deleted: int
-    flow_webhook_deliveries_deleted: int
-    flow_audit_outbox_rows_deleted: int
-    flow_review_checkpoints_deleted: int
-    flow_template_assets_purged: int
-    flow_template_asset_files_deleted: int
-    flow_template_assets_skipped_published_reference: int
-    flow_template_assets_skipped_undetermined_reference: int
-    flow_runs_skipped_undelivered_audit: int
-    flow_runs_skipped_unresolved_webhook: int
-
-
-def _empty_flow_runtime_cleanup_counts() -> FlowRuntimeCleanupCounts:
-    return {
-        "debug_step_results": 0,
-        "debug_step_attempts": 0,
-        "debug_provider_calls": 0,
-        "debug_resolved_input_aggregates": 0,
-        "debug_resolved_input_edges": 0,
-        "flow_runs_considered": 0,
-        "flow_runs_lock_deferred": 0,
-        "flow_runs_purged": 0,
-        "flow_generated_files_deleted": 0,
-        "flow_runtime_source_candidates": 0,
-        "flow_runtime_source_candidate_bytes": 0,
-        "flow_runtime_source_bindings_deleted": 0,
-        "flow_runtime_source_files_deleted": 0,
-        "flow_runtime_source_bytes_deleted": 0,
-        "flow_webhook_deliveries_deleted": 0,
-        "flow_audit_outbox_rows_deleted": 0,
-        "flow_review_checkpoints_deleted": 0,
-        "flow_template_assets_purged": 0,
-        "flow_template_asset_files_deleted": 0,
-        "flow_template_assets_skipped_published_reference": 0,
-        "flow_template_assets_skipped_undetermined_reference": 0,
-        "flow_runs_skipped_undelivered_audit": 0,
-        "flow_runs_skipped_unresolved_webhook": 0,
-    }
-
-
 @dataclass(frozen=True)
 class _FlowRuntimeRetentionAction:
     run_id: UUID
@@ -153,123 +101,12 @@ class FlowDebugRedactionCounts:
     debug_resolved_input_edges: int = 0
 
 
-FlowRetentionSqlDays: TypeAlias = sa.ColumnElement[int] | sa.ColumnElement[int | None]
-
-
 class DataRetentionService:
     """Service for managing data retention and deletion based on hierarchical policies."""
 
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
         self.session = session
-
-    @staticmethod
-    def flow_run_history_retention_days_sql(
-        *,
-        organization_days: FlowRetentionSqlDays,
-        space_days: FlowRetentionSqlDays,
-        flow_days: FlowRetentionSqlDays,
-    ) -> sa.ColumnElement[int | None]:
-        """Resolve Flow retention using the shared entity → Space → tenant order."""
-        return cast(
-            sa.ColumnElement[int | None],
-            sa.func.coalesce(flow_days, space_days, organization_days),
-        )
-
-    async def cleanup_old_flow_runtime_data(self) -> FlowRuntimeCleanupCounts:
-        now = datetime.now(timezone.utc)
-        counts = _empty_flow_runtime_cleanup_counts()
-
-        purge_result = await self._purge_all_old_flow_run_history(now=now)
-        abandoned_upload_counts = await self.purge_abandoned_flow_runtime_uploads(
-            now=now,
-            limit=RETENTION_BATCH_SIZE,
-        )
-        purge_counts = purge_result.counts.add(abandoned_upload_counts)
-        counts["flow_runs_considered"] += purge_counts.flow_runs_considered
-        counts["flow_runs_lock_deferred"] += purge_counts.flow_runs_lock_deferred
-        counts["flow_runs_purged"] += purge_counts.flow_runs_purged
-        counts["flow_generated_files_deleted"] += (
-            purge_counts.flow_generated_files_deleted
-        )
-        counts["flow_runtime_source_candidates"] += (
-            purge_counts.flow_runtime_source_candidates
-        )
-        counts["flow_runtime_source_candidate_bytes"] += (
-            purge_counts.flow_runtime_source_candidate_bytes
-        )
-        counts["flow_runtime_source_bindings_deleted"] += (
-            purge_counts.flow_runtime_source_bindings_deleted
-        )
-        counts["flow_runtime_source_files_deleted"] += (
-            purge_counts.flow_runtime_source_files_deleted
-        )
-        counts["flow_runtime_source_bytes_deleted"] += (
-            purge_counts.flow_runtime_source_bytes_deleted
-        )
-        counts["flow_webhook_deliveries_deleted"] += (
-            purge_counts.flow_webhook_deliveries_deleted
-        )
-        counts["flow_audit_outbox_rows_deleted"] += (
-            purge_counts.flow_audit_outbox_rows_deleted
-        )
-        counts["flow_review_checkpoints_deleted"] += (
-            purge_counts.flow_review_checkpoints_deleted
-        )
-        template_asset_counts = await self.purge_soft_deleted_flow_template_assets(
-            limit=RETENTION_BATCH_SIZE,
-        )
-        counts["flow_template_assets_purged"] += (
-            template_asset_counts.flow_template_assets_purged
-        )
-        counts["flow_template_asset_files_deleted"] += (
-            template_asset_counts.flow_template_asset_files_deleted
-        )
-        counts["flow_template_assets_skipped_published_reference"] += (
-            template_asset_counts.flow_template_assets_skipped_published_reference
-        )
-        counts["flow_template_assets_skipped_undetermined_reference"] += (
-            template_asset_counts.flow_template_assets_skipped_undetermined_reference
-        )
-        blocked_counts = await self.count_blocked_flow_run_history_purge_candidates(
-            now=now
-        )
-        counts["flow_runs_skipped_undelivered_audit"] += (
-            blocked_counts.skipped_undelivered_audit
-        )
-        counts["flow_runs_skipped_unresolved_webhook"] += (
-            blocked_counts.skipped_unresolved_webhook
-        )
-        if (
-            blocked_counts.skipped_undelivered_audit > 0
-            or blocked_counts.skipped_unresolved_webhook > 0
-        ):
-            logger.info(
-                "Skipped Flow run-history purge candidates "
-                "(undelivered_audit=%s, unresolved_webhook=%s)",
-                blocked_counts.skipped_undelivered_audit,
-                blocked_counts.skipped_unresolved_webhook,
-            )
-
-        if (
-            template_asset_counts.flow_template_assets_skipped_undetermined_reference
-            > 0
-        ):
-            logger.warning(
-                "Skipped Flow template asset purge candidates because published "
-                "definition references could not be determined (count=%s)",
-                template_asset_counts.flow_template_assets_skipped_undetermined_reference,
-            )
-
-        debug_counts = await self.redact_old_flow_debug_evidence(now=now)
-        counts["debug_step_results"] += debug_counts.debug_step_results
-        counts["debug_step_attempts"] += debug_counts.debug_step_attempts
-        counts["debug_provider_calls"] += debug_counts.debug_provider_calls
-        counts["debug_resolved_input_aggregates"] += (
-            debug_counts.debug_resolved_input_aggregates
-        )
-        counts["debug_resolved_input_edges"] += debug_counts.debug_resolved_input_edges
-        return counts
 
     async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
         audit_log_exists = (
@@ -665,29 +502,6 @@ class DataRetentionService:
         result = await self.session.execute(query)
         return result.scalar() or 0
 
-    async def _purge_all_old_flow_run_history(
-        self, *, now: datetime
-    ) -> FlowRunHistoryPurgeResult:
-        total_result = FlowRunHistoryPurgeResult()
-
-        while True:
-            batch_result = await self.purge_old_flow_run_history_batch(
-                now=now,
-                limit=RETENTION_BATCH_SIZE,
-            )
-            total_result = total_result.add(batch_result)
-            if batch_result.counts.flow_runs_lock_deferred > 0:
-                break
-            if (
-                batch_result.counts.flow_runs_purged == 0
-                and batch_result.counts.flow_runs_considered == 0
-            ):
-                break
-            # A nondeferred recheck rejection is mirrored by the next selector,
-            # so this loop advances without polling the same ineligible run.
-
-        return total_result
-
     async def purge_abandoned_flow_runtime_uploads(
         self,
         *,
@@ -770,29 +584,45 @@ class DataRetentionService:
         self, *, now: datetime
     ) -> sa.Select[tuple[UUID]]:
         anchor = self._flow_run_history_retention_anchor()
-        effective_days = self.flow_run_history_retention_days_sql(
+        effective_policy = effective_flow_run_retention_policy_sql(
+            organization_mode=(
+                Tenants.flow_run_history_retention_mode.__clause_element__()
+            ),
             organization_days=(
                 Tenants.flow_run_history_retention_days.__clause_element__()
             ),
-            space_days=Spaces.data_retention_days.__clause_element__(),
-            flow_days=Flows.data_retention_days.__clause_element__(),
+            space_mode=(Spaces.flow_run_history_retention_mode.__clause_element__()),
+            space_days=Spaces.flow_run_history_retention_days.__clause_element__(),
+            flow_mode=Flows.flow_run_history_retention_mode.__clause_element__(),
+            flow_days=Flows.flow_run_history_retention_days.__clause_element__(),
         )
+        effective_days = effective_policy.days
         return (
             sa.select(FlowRuns.id.label("run_id"))
-            .join(Flows, FlowRuns.flow_id == Flows.id)
-            .join(Spaces, Flows.space_id == Spaces.id)
+            .join(
+                Flows,
+                sa.and_(
+                    FlowRuns.flow_id == Flows.id,
+                    FlowRuns.tenant_id == Flows.tenant_id,
+                ),
+            )
+            .join(
+                Spaces,
+                sa.and_(
+                    Flows.space_id == Spaces.id,
+                    Flows.tenant_id == Spaces.tenant_id,
+                ),
+            )
             .join(Tenants, FlowRuns.tenant_id == Tenants.id)
             .where(
                 sa.and_(
                     FlowRuns.status.in_(TERMINAL_FLOW_RUN_STATUS_VALUES),
-                    effective_days.is_not(None),
-                    # Constant lower bound for ix_flow_runs_terminal_retention_anchor;
-                    # safe because every retention source is >= MIN_RETENTION_DAYS.
-                    anchor
-                    <= sa.literal(now)
-                    - sa.func.make_interval(0, 0, 0, MIN_RETENTION_DAYS),
-                    anchor
-                    <= sa.literal(now) - sa.func.make_interval(0, 0, 0, effective_days),
+                    effective_policy.mode == FlowRunRetentionMode.PRESERVE.value,
+                    *flow_run_history_due_predicates(
+                        now=now,
+                        anchor=anchor,
+                        effective_days=effective_days,
+                    ),
                 )
             )
         )
@@ -838,23 +668,23 @@ class DataRetentionService:
                 total_counts = FlowDebugRedactionCounts(
                     debug_step_results=(
                         total_counts.debug_step_results
-                        + debug_counts["debug_step_results"]
+                        + debug_counts.debug_step_results
                     ),
                     debug_step_attempts=(
                         total_counts.debug_step_attempts
-                        + debug_counts["debug_step_attempts"]
+                        + debug_counts.debug_step_attempts
                     ),
                     debug_provider_calls=(
                         total_counts.debug_provider_calls
-                        + debug_counts["debug_provider_calls"]
+                        + debug_counts.debug_provider_calls
                     ),
                     debug_resolved_input_aggregates=(
                         total_counts.debug_resolved_input_aggregates
-                        + debug_counts["debug_resolved_input_aggregates"]
+                        + debug_counts.debug_resolved_input_aggregates
                     ),
                     debug_resolved_input_edges=(
                         total_counts.debug_resolved_input_edges
-                        + debug_counts["debug_resolved_input_edges"]
+                        + debug_counts.debug_resolved_input_edges
                     ),
                 )
 
@@ -894,9 +724,9 @@ class DataRetentionService:
 
     async def _cleanup_old_flow_debug_evidence(
         self, actions_by_run_id: dict[UUID, _FlowRuntimeRetentionAction]
-    ) -> FlowRuntimeCleanupCounts:
+    ) -> FlowDebugRedactionCounts:
         if not actions_by_run_id:
-            return _empty_flow_runtime_cleanup_counts()
+            return FlowDebugRedactionCounts()
 
         run_ids = set(actions_by_run_id)
         step_result_rows = await self.session.execute(
@@ -973,12 +803,12 @@ class DataRetentionService:
             )
             debug_step_attempts = affected_row_count(attempt_result)
 
-        counts = _empty_flow_runtime_cleanup_counts()
-        counts["debug_step_results"] = debug_step_results
-        counts["debug_step_attempts"] = debug_step_attempts
-        counts["debug_provider_calls"] = deleted_provider_calls
-        counts["debug_resolved_input_aggregates"] = deleted_resolved_inputs
-        return counts
+        return FlowDebugRedactionCounts(
+            debug_step_results=debug_step_results,
+            debug_step_attempts=debug_step_attempts,
+            debug_provider_calls=deleted_provider_calls,
+            debug_resolved_input_aggregates=deleted_resolved_inputs,
+        )
 
     async def get_affected_questions_count_for_space(
         self, space_id: UUID, retention_days: int

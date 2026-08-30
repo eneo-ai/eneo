@@ -363,7 +363,6 @@ async def test_get_flow_retention_policy_delegates_to_service() -> None:
     service = AsyncMock()
     service.get_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=7,
-        flow_run_history_retention_days=None,
         flow_runtime_upload_abandonment_days=None,
     )
     container.settings_service.return_value = service
@@ -383,7 +382,6 @@ async def test_patch_flow_retention_policy_delegates_to_service() -> None:
     service = AsyncMock()
     service.update_flow_retention_policy.return_value = FlowRetentionPolicyPublic(
         run_debug_evidence_days=14,
-        flow_run_history_retention_days=None,
         flow_runtime_upload_abandonment_days=None,
     )
     container.settings_service.return_value = service

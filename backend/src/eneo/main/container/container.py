@@ -111,6 +111,9 @@ from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+from eneo.flows.application.flow_run_retention_policy_service import (
+    FlowRunRetentionPolicyService,
+)
 from eneo.flows.application.flow_run_review_checkpoint_service import (
     FlowRunReviewCheckpointService,
 )
@@ -125,6 +128,9 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
+)
+from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
+    FlowRunRetentionPolicyRepository,
 )
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
@@ -842,6 +848,10 @@ class Container(containers.DeclarativeContainer):
         FlowRepository,
         session=session,
     )
+    flow_run_retention_policy_repo = providers.Factory(
+        FlowRunRetentionPolicyRepository,
+        session=session,
+    )
     flow_version_repo = providers.Factory(
         FlowVersionRepository,
         session=session,
@@ -989,6 +999,12 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+    )
+    flow_run_retention_policy_service = providers.Factory(
+        FlowRunRetentionPolicyService,
+        user=user,
+        repository=flow_run_retention_policy_repo,
+        audit_service=audit_service,
     )
 
     # Completion model adapters

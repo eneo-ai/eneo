@@ -10,6 +10,9 @@ from pydantic.json_schema import SkipJsonSchema
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublicLegacy
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.flows.domain.flow_run_retention_policy import (
+    FlowRunRetentionPolicy,
+)
 from eneo.flows.domain.rag_evidence_policy import (
     RAG_EVIDENCE_CEILINGS,
     RAG_EVIDENCE_MAX_PASSAGE_BYTES_KEY,
@@ -701,11 +704,6 @@ FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION = (
     "Tenant purge eligibility window for stored Flow debug evidence. Null means "
     "no tenant window; saving a value never redacts evidence."
 )
-FLOW_RUN_HISTORY_ELIGIBILITY_DESCRIPTION = (
-    "Tenant purge eligibility fallback for Flow run history. A Flow value "
-    "overrides its Space "
-    "value, and a Space value overrides this tenant value."
-)
 FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION = (
     "Tenant purge eligibility window for Flow runtime uploads that were never "
     "bound to a run input. Null means no tenant window; saving a value never "
@@ -719,7 +717,6 @@ class FlowRetentionPolicyPublic(BaseModel):
         json_schema_extra={
             "example": {
                 "run_debug_evidence_days": 30,
-                "flow_run_history_retention_days": 30,
                 "flow_runtime_upload_abandonment_days": 14,
             }
         },
@@ -731,13 +728,6 @@ class FlowRetentionPolicyPublic(BaseModel):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
         description=FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION,
-    )
-    flow_run_history_retention_days: int | None = Field(
-        ...,
-        strict=True,
-        ge=MIN_RETENTION_DAYS,
-        le=MAX_RETENTION_DAYS,
-        description=FLOW_RUN_HISTORY_ELIGIBILITY_DESCRIPTION,
     )
     flow_runtime_upload_abandonment_days: int | None = Field(
         ...,
@@ -754,7 +744,6 @@ class FlowRetentionPolicyUpdate(BaseModel):
         json_schema_extra={
             "example": {
                 "run_debug_evidence_days": 30,
-                "flow_run_history_retention_days": 30,
                 "flow_runtime_upload_abandonment_days": 14,
             }
         },
@@ -768,14 +757,6 @@ class FlowRetentionPolicyUpdate(BaseModel):
         description=FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION,
         json_schema_extra=_strip_json_schema_default,
     )
-    flow_run_history_retention_days: int | None = Field(
-        default=None,
-        strict=True,
-        ge=MIN_RETENTION_DAYS,
-        le=MAX_RETENTION_DAYS,
-        description=FLOW_RUN_HISTORY_ELIGIBILITY_DESCRIPTION,
-        json_schema_extra=_strip_json_schema_default,
-    )
     flow_runtime_upload_abandonment_days: int | None = Field(
         default=None,
         strict=True,
@@ -783,6 +764,21 @@ class FlowRetentionPolicyUpdate(BaseModel):
         le=MAX_RETENTION_DAYS,
         description=FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION,
         json_schema_extra=_strip_json_schema_default,
+    )
+
+
+class FlowRunRetentionPolicyReplaceRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {"policy": {"mode": "review_required", "days": 60}}
+        },
+    )
+
+    policy: FlowRunRetentionPolicy | None = Field(
+        description=(
+            "Complete local policy, or null to clear this level and inherit its parent."
+        )
     )
 
 

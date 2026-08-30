@@ -20,6 +20,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
+from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -28,9 +29,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 @dataclass(frozen=True, slots=True)
 class _EnvelopeCase:
     label: str
+    organization_mode: FlowRunRetentionMode | None
     organization_days: int | None
+    space_mode: FlowRunRetentionMode | None
     space_days: int | None
+    flow_mode: FlowRunRetentionMode | None
     flow_days: int | None
+    effective_mode: FlowRunRetentionMode | None
     effective_days: int | None
     source: str
 
@@ -38,11 +43,55 @@ class _EnvelopeCase:
 @pytest.mark.parametrize(
     "case",
     [
-        _EnvelopeCase("off", None, None, None, None, "none"),
-        _EnvelopeCase("tenant fallback", 30, None, None, 30, "organization"),
-        _EnvelopeCase("space overrides tenant", 30, 20, None, 20, "space"),
-        _EnvelopeCase("flow overrides space", 30, 20, 10, 10, "flow"),
-        _EnvelopeCase("flow can lengthen parent", 10, 20, 40, 40, "flow"),
+        _EnvelopeCase("off", None, None, None, None, None, None, None, None, "none"),
+        _EnvelopeCase(
+            "organization fallback",
+            FlowRunRetentionMode.PRESERVE,
+            30,
+            None,
+            None,
+            None,
+            None,
+            FlowRunRetentionMode.PRESERVE,
+            30,
+            "organization",
+        ),
+        _EnvelopeCase(
+            "space overrides organization",
+            FlowRunRetentionMode.PRESERVE,
+            30,
+            FlowRunRetentionMode.REVIEW_REQUIRED,
+            20,
+            None,
+            None,
+            FlowRunRetentionMode.REVIEW_REQUIRED,
+            20,
+            "space",
+        ),
+        _EnvelopeCase(
+            "flow overrides space",
+            FlowRunRetentionMode.PRESERVE,
+            30,
+            FlowRunRetentionMode.REVIEW_REQUIRED,
+            20,
+            FlowRunRetentionMode.PRESERVE,
+            10,
+            FlowRunRetentionMode.PRESERVE,
+            10,
+            "flow",
+        ),
+        _EnvelopeCase(
+            "flow can lengthen parent",
+            FlowRunRetentionMode.PRESERVE,
+            10,
+            FlowRunRetentionMode.REVIEW_REQUIRED,
+            20,
+            FlowRunRetentionMode.PRESERVE,
+            40,
+            FlowRunRetentionMode.PRESERVE,
+            40,
+            "flow",
+        ),
     ],
     ids=lambda case: case.label,
 )
@@ -57,7 +106,12 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
     await async_session.execute(
         sa.update(Tenants)
         .where(Tenants.id == test_tenant.id)
-        .values(flow_run_history_retention_days=case.organization_days)
+        .values(
+            flow_run_history_retention_mode=(
+                case.organization_mode.value if case.organization_mode else None
+            ),
+            flow_run_history_retention_days=case.organization_days,
+        )
     )
     tenant_space_id = await async_session.scalar(
         sa.select(Spaces.id).where(
@@ -68,26 +122,33 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
     )
     assert tenant_space_id is not None
     space = Spaces(
-        name=f"Inactive Flow retention envelope {uuid4()}",
-        description="Latent child retention values",
+        name=f"Flow retention policy Space {uuid4()}",
+        description="Complete Space retention policy",
         tenant_id=test_tenant.id,
         user_id=None,
         tenant_space_id=tenant_space_id,
         security_classification_id=None,
-        data_retention_days=case.space_days,
+        data_retention_days=7,
+        flow_run_history_retention_mode=(
+            case.space_mode.value if case.space_mode else None
+        ),
+        flow_run_history_retention_days=case.space_days,
     )
     async_session.add(space)
     await async_session.flush()
     flow = Flows(
-        name=f"Inactive Flow retention envelope {uuid4()}",
-        description="Latent Flow retention value",
+        name=f"Flow retention policy {uuid4()}",
+        description="Complete Flow retention policy",
         tenant_id=test_tenant.id,
         space_id=space.id,
         created_by_user_id=admin_user.id,
         owner_user_id=admin_user.id,
         published_version=None,
         metadata_json=None,
-        data_retention_days=case.flow_days,
+        flow_run_history_retention_mode=(
+            case.flow_mode.value if case.flow_mode else None
+        ),
+        flow_run_history_retention_days=case.flow_days,
         created_at=old,
         updated_at=old,
     )
@@ -173,18 +234,35 @@ async def test_flow_retention_envelope_matrix_controls_purge_and_effective_reads
         session=async_session,
     ).get(flow.id, test_tenant.id)
 
-    assert (run.id in due_run_ids) is (case.effective_days is not None)
-    assert (run.id in candidates) is (
-        case.effective_days is not None and not blocked_by_audit
+    purge_eligible = (
+        case.effective_mode is FlowRunRetentionMode.PRESERVE
+        and case.effective_days is not None
     )
+    assert (run.id in due_run_ids) is purge_eligible
+    assert (run.id in candidates) is (purge_eligible and not blocked_by_audit)
     assert projected_flow.run_history_retention is not None
+    assert projected_flow.run_history_retention.mode == case.effective_mode
     assert projected_flow.run_history_retention.effective_days == case.effective_days
     assert projected_flow.run_history_retention.state == (
-        "off" if case.effective_days is None else "days"
+        "off" if case.effective_days is None else "configured"
     )
     assert projected_flow.run_history_retention.source == case.source
-    assert projected_flow.run_history_retention.contributors.model_dump() == {
-        "organization_days": case.organization_days,
-        "space_days": case.space_days,
-        "flow_days": case.flow_days,
+    assert projected_flow.run_history_retention.contributors.model_dump(
+        mode="json"
+    ) == {
+        "organization": (
+            {"mode": case.organization_mode.value, "days": case.organization_days}
+            if case.organization_mode
+            else None
+        ),
+        "space": (
+            {"mode": case.space_mode.value, "days": case.space_days}
+            if case.space_mode
+            else None
+        ),
+        "flow": (
+            {"mode": case.flow_mode.value, "days": case.flow_days}
+            if case.flow_mode
+            else None
+        ),
     }

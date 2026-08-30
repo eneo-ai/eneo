@@ -166,7 +166,6 @@ def test_flow_settings_update_models_reject_unknown_fields() -> None:
     "field_name",
     (
         "run_debug_evidence_days",
-        "flow_run_history_retention_days",
         "flow_runtime_upload_abandonment_days",
     ),
 )
@@ -183,11 +182,9 @@ def test_flow_retention_policy_update_accepts_nullable_range_boundaries() -> Non
     for value in (None, 1, 2555):
         update = FlowRetentionPolicyUpdate(
             run_debug_evidence_days=value,
-            flow_run_history_retention_days=value,
             flow_runtime_upload_abandonment_days=value,
         )
         assert update.run_debug_evidence_days == value
-        assert update.flow_run_history_retention_days == value
         assert update.flow_runtime_upload_abandonment_days == value
 
 
@@ -199,7 +196,6 @@ def test_flow_retention_policy_public_rejects_invalid_debug_evidence_days(
         FlowRetentionPolicyPublic.model_validate(
             {
                 "run_debug_evidence_days": value,
-                "flow_run_history_retention_days": None,
                 "flow_runtime_upload_abandonment_days": None,
             }
         )

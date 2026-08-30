@@ -1011,9 +1011,6 @@ class SettingService:
         policy = resolve_flow_retention_policy(getattr(tenant, "flow_settings", None))
         return FlowRetentionPolicyPublic(
             run_debug_evidence_days=policy.run_debug_evidence_days,
-            flow_run_history_retention_days=getattr(
-                tenant, "flow_run_history_retention_days", None
-            ),
             flow_runtime_upload_abandonment_days=getattr(
                 tenant, "flow_runtime_upload_abandonment_days", None
             ),
@@ -1054,13 +1051,7 @@ class SettingService:
                     code=FLOW_SETTINGS_INVALID_PAYLOAD_CODE,
                 ) from error
 
-        old_history_days = getattr(tenant, "flow_run_history_retention_days", None)
         old_upload_days = getattr(tenant, "flow_runtime_upload_abandonment_days", None)
-        new_history_days = (
-            payload.flow_run_history_retention_days
-            if "flow_run_history_retention_days" in payload.model_fields_set
-            else old_history_days
-        )
         new_upload_days = (
             payload.flow_runtime_upload_abandonment_days
             if "flow_runtime_upload_abandonment_days" in payload.model_fields_set
@@ -1070,7 +1061,6 @@ class SettingService:
             TenantUpdate(
                 id=self.user.tenant_id,
                 flow_settings=next_flow_settings,
-                flow_run_history_retention_days=new_history_days,
                 flow_runtime_upload_abandonment_days=new_upload_days,
             )
         )
@@ -1086,7 +1076,6 @@ class SettingService:
                     "run_debug_evidence_days": (
                         current_debug_policy.run_debug_evidence_days
                     ),
-                    "flow_run_history_retention_days": old_history_days,
                     "flow_runtime_upload_abandonment_days": old_upload_days,
                 },
                 "new_policy": {
@@ -1095,7 +1084,6 @@ class SettingService:
                         if "run_debug_evidence_days" in payload.model_fields_set
                         else current_debug_policy.run_debug_evidence_days
                     ),
-                    "flow_run_history_retention_days": new_history_days,
                     "flow_runtime_upload_abandonment_days": new_upload_days,
                 },
             },

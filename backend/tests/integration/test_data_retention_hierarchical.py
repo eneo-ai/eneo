@@ -569,7 +569,10 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
     await async_session.execute(
         update(Tenants)
         .where(Tenants.id == test_tenant.id)
-        .values(flow_run_history_retention_days=None)
+        .values(
+            flow_run_history_retention_mode=None,
+            flow_run_history_retention_days=None,
+        )
     )
     async_session.add(test_space)
 
@@ -603,7 +606,7 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
         days_old=60,
     )
     flow = Flows(
-        name=f"Latent child Flow retention {uuid4()}",
+        name=f"Flow without run-history retention {uuid4()}",
         description="Space retention remains independent",
         tenant_id=test_tenant.id,
         space_id=test_space.id,
@@ -611,7 +614,8 @@ async def test_space_conversation_and_app_retention_does_not_activate_flow_delet
         owner_user_id=admin_user.id,
         published_version=None,
         metadata_json=None,
-        data_retention_days=7,
+        flow_run_history_retention_mode=None,
+        flow_run_history_retention_days=None,
         created_at=old,
         updated_at=old,
     )

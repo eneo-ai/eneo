@@ -1,12 +1,19 @@
 from typing import Annotated, Protocol, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from eneo.authentication import auth_dependencies
 from eneo.files.mime_support import supported_mimes
+from eneo.flows.domain.flow_run_retention_policy import (
+    FlowRunRetentionFlowTargetPage,
+    FlowRunRetentionPolicySettings,
+    FlowRunRetentionReviewCursor,
+    FlowRunRetentionReviewPage,
+    FlowRunRetentionSpaceTargetPage,
+)
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes
+from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError, PaginatedResponse
 from eneo.roles.permissions import Permission, validate_permission
@@ -32,6 +39,7 @@ from eneo.settings.settings import (
     FlowRagEvidencePolicyUpdate,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
+    FlowRunRetentionPolicyReplaceRequest,
     FlowRuntimePolicyPublic,
     FlowRuntimePolicyUpdate,
     GetModelsResponse,
@@ -50,6 +58,10 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 settings_admin_router = APIRouter()
+FlowRetentionMutationContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
 
 
 class _FlowSettingsServiceProtocol(Protocol):
@@ -119,6 +131,38 @@ def _flow_settings_admin_forbidden_response() -> dict[str, object]:
         message="Insufficient permissions.",
         eneo_error_code=ErrorCodes.UNAUTHORIZED,
         code="insufficient_tenant_permission",
+    )
+
+
+def _flow_retention_review_cursor(
+    value: str | None,
+) -> FlowRunRetentionReviewCursor | None:
+    if value is None:
+        return None
+    try:
+        return FlowRunRetentionReviewCursor.deserialize(value)
+    except ValueError as exc:
+        raise BadRequestException(
+            "Invalid Flow retention review cursor.",
+            code="invalid_flow_retention_review_cursor",
+        ) from exc
+
+
+def _flow_retention_invalid_cursor_response() -> dict[str, object]:
+    return _settings_error_response(
+        description="The Flow retention review cursor is malformed or unsupported.",
+        message="Invalid Flow retention review cursor.",
+        eneo_error_code=ErrorCodes.BAD_REQUEST,
+        code="invalid_flow_retention_review_cursor",
+    )
+
+
+def _flow_retention_not_found_response(entity: str) -> dict[str, object]:
+    return _settings_error_response(
+        description=f"{entity} not found in the administrator's Organization.",
+        message=f"{entity} not found.",
+        eneo_error_code=ErrorCodes.NOT_FOUND,
+        code="not_found",
     )
 
 
@@ -642,12 +686,10 @@ async def update_flow_evidence_policy(
     operation_id="get_flow_retention_policy",
     summary="Get flow retention policy",
     description=(
-        "Return the tenant fallback for layered Flow run-history purge eligibility, "
-        "the runtime-upload eligibility window, and the independent debug-evidence "
-        "eligibility window. A Flow-specific value overrides its Space value, and "
-        "a Space value overrides the tenant fallback. Null means no eligibility "
-        "window at that layer. Reading this endpoint never previews, deletes, or "
-        "redacts Flow data."
+        "Return the independent eligibility windows for stored Flow debug evidence "
+        "and abandoned runtime uploads. Flow run-history retention is configured "
+        "through the dedicated hierarchical policy endpoints. Reading this endpoint "
+        "never previews, deletes, or redacts Flow data."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -665,11 +707,9 @@ async def get_flow_retention_policy(
     operation_id="update_flow_retention_policy",
     summary="Update flow retention policy",
     description=(
-        "Update tenant Flow purge-eligibility inputs. Omitted fields are unchanged "
-        "and null removes the tenant input. Flow values override Space values, which "
-        "override this tenant fallback; run_debug_evidence_days remains independent. "
-        "Saving these values never deletes or redacts Flow data. Deletion requires "
-        "a separate explicit administrator purge with preview and confirmation."
+        "Update the independent eligibility windows for stored Flow debug evidence "
+        "and abandoned runtime uploads. Omitted fields are unchanged and null removes "
+        "the tenant input. Saving these values never deletes or redacts Flow data."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(
@@ -686,6 +726,297 @@ async def update_flow_retention_policy(
     validate_permission(container.user(), Permission.ADMIN)
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_retention_policy(payload)
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy",
+    response_model=FlowRunRetentionPolicySettings,
+    operation_id="get_organization_flow_run_retention_policy",
+    summary="Get the Organization Flow run-history retention policy",
+    description=(
+        "Return the Organization default and its effective Flow run-history policy. "
+        "No configured policy means run history has no age threshold and remains stored."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+async def get_organization_flow_run_retention_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRunRetentionPolicySettings:
+    return await container.flow_run_retention_policy_service().get_organization()
+
+
+@settings_admin_router.put(
+    "/flow-run-retention-policy",
+    response_model=FlowRunRetentionPolicySettings,
+    operation_id="replace_organization_flow_run_retention_policy",
+    summary="Replace the Organization Flow run-history retention policy",
+    description=(
+        "Replace the complete Organization policy or clear it. The initial modes "
+        "either preserve eligible data for explicit administrator purge or require "
+        "human review; neither mode deletes data automatically."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+async def replace_organization_flow_run_retention_policy(
+    payload: FlowRunRetentionPolicyReplaceRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRunRetentionPolicySettings:
+    return await container.flow_run_retention_policy_service().replace_organization(
+        policy=payload.policy
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/targets/spaces",
+    response_model=FlowRunRetentionSpaceTargetPage,
+    operation_id="list_flow_run_retention_space_targets",
+    summary="List Spaces available for Flow retention administration",
+    description=(
+        "List non-personal Spaces across the caller's Organization, including "
+        "Spaces where the Organization administrator is not a member. The bounded "
+        "response contains identifiers and names only."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+async def list_flow_run_retention_space_targets(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(default=200, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> FlowRunRetentionSpaceTargetPage:
+    return await container.flow_run_retention_policy_service().list_space_targets(
+        limit=limit,
+        offset=offset,
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/targets/spaces/{space_id}/flows",
+    response_model=FlowRunRetentionFlowTargetPage,
+    operation_id="list_flow_run_retention_flow_targets",
+    summary="List Flows available for retention administration in a Space",
+    description=(
+        "List active Flows in one Organization-scoped Space, including Flows the "
+        "Organization administrator cannot discover through membership-scoped Flow "
+        "authoring APIs. The bounded response contains identifiers and names only."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Space"),
+    },
+)
+async def list_flow_run_retention_flow_targets(
+    space_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(default=200, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> FlowRunRetentionFlowTargetPage:
+    return await container.flow_run_retention_policy_service().list_flow_targets(
+        space_id=space_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/spaces/{space_id}",
+    response_model=FlowRunRetentionPolicySettings,
+    operation_id="get_space_flow_run_retention_policy",
+    summary="Get a Space Flow run-history retention policy",
+    description=(
+        "Return the Space override, the inherited Organization policy, and the "
+        "effective policy. A complete Space policy replaces the Organization default "
+        "for every Flow in that Space unless a Flow has its own complete override. "
+        "The response names the winning source so an administrator can verify the "
+        "result before any separate purge action. Reading it never deletes data."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Space"),
+    },
+)
+async def get_space_flow_run_retention_policy(
+    space_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRunRetentionPolicySettings:
+    return await container.flow_run_retention_policy_service().get_space(
+        space_id=space_id
+    )
+
+
+@settings_admin_router.put(
+    "/flow-run-retention-policy/spaces/{space_id}",
+    response_model=FlowRunRetentionPolicySettings,
+    operation_id="replace_space_flow_run_retention_policy",
+    summary="Replace a Space Flow run-history retention policy",
+    description=(
+        "Replace the complete Space override or clear it to inherit the Organization "
+        "policy. The mode and day count move together, preventing ambiguous mixed "
+        "inheritance. This setting controls Flow run history only: it does not change "
+        "conversation or AI Builder retention, and it never schedules deletion."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Space"),
+    },
+)
+async def replace_space_flow_run_retention_policy(
+    space_id: UUID,
+    payload: FlowRunRetentionPolicyReplaceRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRunRetentionPolicySettings:
+    return await container.flow_run_retention_policy_service().replace_space(
+        space_id=space_id,
+        policy=payload.policy,
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/flows/{flow_id}",
+    response_model=FlowRunRetentionPolicySettings,
+    operation_id="get_flow_run_retention_policy",
+    summary="Get a Flow run-history retention policy",
+    description=(
+        "Return the Flow override, the inherited Space or Organization policy, and "
+        "the effective policy. A complete Flow policy replaces its inherited policy, "
+        "which allows one Flow to keep 90 days while its Space keeps 60 and the "
+        "Organization default remains 30. Reading the policy never deletes run data."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Flow"),
+    },
+)
+async def get_flow_run_retention_policy(
+    flow_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowRunRetentionPolicySettings:
+    return await container.flow_run_retention_policy_service().get_flow(flow_id=flow_id)
+
+
+@settings_admin_router.put(
+    "/flow-run-retention-policy/flows/{flow_id}",
+    response_model=FlowRunRetentionPolicySettings,
+    operation_id="replace_flow_run_retention_policy",
+    summary="Replace a Flow run-history retention policy",
+    description=(
+        "Replace the complete Flow override or clear it to inherit. Operational "
+        "retention remains editable after a Flow definition is published because it "
+        "does not mutate the published definition. The initial modes require a later "
+        "explicit administrator action; saving this policy never schedules deletion."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Flow"),
+    },
+)
+async def replace_flow_run_retention_policy(
+    flow_id: UUID,
+    payload: FlowRunRetentionPolicyReplaceRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRunRetentionPolicySettings:
+    return await container.flow_run_retention_policy_service().replace_flow(
+        flow_id=flow_id,
+        policy=payload.policy,
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/review-queue",
+    response_model=FlowRunRetentionReviewPage,
+    operation_id="list_organization_flow_run_retention_review_queue",
+    summary="List Flow runs awaiting Organization retention review",
+    description=(
+        "List terminal Flow runs whose effective review_required policy has reached "
+        "its age threshold across the Organization. The bounded page contains only "
+        "identifiers, names, lifecycle dates, and policy facts; it never returns run "
+        "inputs or outputs. Reading this queue does not approve or delete anything."
+    ),
+    responses={
+        400: _flow_retention_invalid_cursor_response(),
+        403: _flow_settings_admin_forbidden_response(),
+    },
+)
+async def list_organization_flow_run_retention_review_queue(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(
+        default=None,
+        max_length=512,
+        description="Opaque cursor returned as next_cursor by the previous page.",
+    ),
+) -> FlowRunRetentionReviewPage:
+    return await container.flow_run_retention_policy_service().list_organization_review_queue(
+        limit=limit,
+        cursor=_flow_retention_review_cursor(cursor),
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/spaces/{space_id}/review-queue",
+    response_model=FlowRunRetentionReviewPage,
+    operation_id="list_space_flow_run_retention_review_queue",
+    summary="List Flow runs awaiting retention review in a Space",
+    description=(
+        "List terminal Flow runs in one Space whose effective review_required policy "
+        "has reached its age threshold. A Flow-level preserve override is excluded, "
+        "even when the surrounding Space requires review. The bounded response omits "
+        "run content, and reading it never approves or deletes data."
+    ),
+    responses={
+        400: _flow_retention_invalid_cursor_response(),
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Space"),
+    },
+)
+async def list_space_flow_run_retention_review_queue(
+    space_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(
+        default=None,
+        max_length=512,
+        description="Opaque cursor returned as next_cursor by the previous page.",
+    ),
+) -> FlowRunRetentionReviewPage:
+    return await container.flow_run_retention_policy_service().list_space_review_queue(
+        space_id=space_id,
+        limit=limit,
+        cursor=_flow_retention_review_cursor(cursor),
+    )
+
+
+@settings_admin_router.get(
+    "/flow-run-retention-policy/flows/{flow_id}/review-queue",
+    response_model=FlowRunRetentionReviewPage,
+    operation_id="list_flow_run_retention_review_queue",
+    summary="List runs awaiting retention review for one Flow",
+    description=(
+        "List terminal runs for one Flow whose effective review_required policy has "
+        "reached its age threshold, including a policy inherited from its Space or "
+        "Organization. The bounded response deliberately omits inputs and outputs. "
+        "Reading it is side-effect free and cannot approve or delete run history."
+    ),
+    responses={
+        400: _flow_retention_invalid_cursor_response(),
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Flow"),
+    },
+)
+async def list_flow_run_retention_review_queue(
+    flow_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(
+        default=None,
+        max_length=512,
+        description="Opaque cursor returned as next_cursor by the previous page.",
+    ),
+) -> FlowRunRetentionReviewPage:
+    return await container.flow_run_retention_policy_service().list_flow_review_queue(
+        flow_id=flow_id,
+        limit=limit,
+        cursor=_flow_retention_review_cursor(cursor),
+    )
 
 
 @settings_admin_router.get(

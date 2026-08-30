@@ -153,7 +153,6 @@ async def create_flow(
         description=flow_in.description,
         steps=[assembler.to_domain_step(step) for step in flow_in.steps],
         metadata_json=flow_in.metadata_json,
-        data_retention_days=flow_in.data_retention_days,
     )
 
     created_flow_id = created.require_persisted_id()
@@ -411,9 +410,8 @@ async def get_published_flow_runtime(
     operation_id="update_flow",
     summary="Update Flow",
     description=(
-        "Update a draft flow definition, including steps, metadata, and its "
-        "configured purge eligibility. The Flow value overrides the Space and "
-        "tenant windows but does not delete Flow data. "
+        "Update a draft flow definition, including steps and metadata. "
+        "Operational retention is managed separately by Organization administrators. "
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
@@ -460,7 +458,6 @@ async def update_flow(
         description=payload.get("description", NOT_PROVIDED),
         steps=steps,
         metadata_json=payload.get("metadata_json", NOT_PROVIDED),
-        data_retention_days=payload.get("data_retention_days", NOT_PROVIDED),
     )
 
     updated_flow_id = updated.require_persisted_id()

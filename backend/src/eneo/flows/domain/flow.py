@@ -21,6 +21,7 @@ from pydantic import (
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionProjection
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -177,41 +178,6 @@ class FlowTemplateAsset(BaseModel):
     updated_at: datetime | None = None
 
 
-class FlowRunRetentionContributors(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    organization_days: int | None
-    space_days: int | None
-    flow_days: int | None
-
-
-FlowRunRetentionSource: TypeAlias = Literal["organization", "space", "flow", "none"]
-
-
-class FlowRunRetentionOff(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    state: Literal["off"]
-    effective_days: None
-    source: Literal["none"]
-    contributors: FlowRunRetentionContributors
-
-
-class FlowRunRetentionDays(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    state: Literal["days"]
-    effective_days: int
-    source: Literal["organization", "space", "flow"]
-    contributors: FlowRunRetentionContributors
-
-
-FlowRunRetentionProjection: TypeAlias = Annotated[
-    FlowRunRetentionOff | FlowRunRetentionDays,
-    Field(discriminator="state"),
-]
-
-
 class FlowSparse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -224,7 +190,6 @@ class FlowSparse(BaseModel):
     owner_user_id: Optional[UUID] = None
     published_version: Optional[int] = None
     metadata_json: FlowPersistedJsonObject | None = None
-    data_retention_days: Optional[int] = None
     run_history_retention: FlowRunRetentionProjection | None = None
     draft_revision: int = 0
     # Sparse list projection of `steps` (see `_derived_step_projection` in

@@ -71,12 +71,6 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
     flow_settings: dict[str, Any] = Field(default_factory=dict)
-    flow_run_history_retention_days: Optional[int] = Field(
-        default=None,
-        strict=True,
-        ge=MIN_RETENTION_DAYS,
-        le=MAX_RETENTION_DAYS,
-    )
     flow_runtime_upload_abandonment_days: Optional[int] = Field(
         default=None,
         strict=True,
@@ -293,12 +287,6 @@ class TenantUpdatePublic(BaseModel):
 class TenantUpdate(TenantUpdatePublic):
     id: UUID
     flow_settings: Optional[dict[str, Any]] = None
-    flow_run_history_retention_days: Optional[int] = Field(
-        default=None,
-        strict=True,
-        ge=MIN_RETENTION_DAYS,
-        le=MAX_RETENTION_DAYS,
-    )
     flow_runtime_upload_abandonment_days: Optional[int] = Field(
         default=None,
         strict=True,

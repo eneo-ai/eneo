@@ -12,9 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.data_retention.infrastructure import (
-    data_retention_service as data_retention_service_module,
-)
-from eneo.data_retention.infrastructure import (
     data_retention_worker,
 )
 from eneo.data_retention.infrastructure.data_retention_service import (
@@ -203,7 +200,10 @@ async def flow_retention_space(
     await async_session.execute(
         update(Tenants)
         .where(Tenants.id == test_tenant.id)
-        .values(flow_run_history_retention_days=2555)
+        .values(
+            flow_run_history_retention_mode="preserve",
+            flow_run_history_retention_days=2555,
+        )
     )
     space = Spaces(
         name=f"Flow retention space {admin_user.id}",
@@ -275,7 +275,10 @@ async def _create_flow_runtime_fixture(
         owner_user_id=user.id,
         published_version=None,
         metadata_json={},
-        data_retention_days=flow_retention_days,
+        flow_run_history_retention_mode=(
+            "preserve" if flow_retention_days is not None else None
+        ),
+        flow_run_history_retention_days=flow_retention_days,
         draft_revision=0,
         deleted_at=created_at if flow_deleted else None,
         created_at=created_at,
@@ -557,7 +560,8 @@ async def _create_flow_template_asset_fixture(
         owner_user_id=user.id,
         published_version=None,
         metadata_json={},
-        data_retention_days=None,
+        flow_run_history_retention_mode=None,
+        flow_run_history_retention_days=None,
         draft_revision=0,
         created_at=now,
         updated_at=now,
@@ -621,7 +625,8 @@ async def _create_unbound_runtime_upload_fixture(
         owner_user_id=user.id,
         published_version=None,
         metadata_json={},
-        data_retention_days=None,
+        flow_run_history_retention_mode=None,
+        flow_run_history_retention_days=None,
     )
     async_session.add(flow)
     await async_session.flush()
@@ -987,6 +992,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             update(Tenants)
             .where(Tenants.id == tenant.id)
             .values(
+                flow_run_history_retention_mode="preserve",
                 flow_run_history_retention_days=1,
                 flow_runtime_upload_abandonment_days=1,
                 flow_settings={
@@ -1263,7 +1269,7 @@ async def test_purge_soft_deleted_flow_template_assets_counts_unknown_schema_ski
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_purges_old_flow_run_history_and_preserves_audit(
+async def test_flow_run_history_purge_preserves_canonical_audit(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1288,25 +1294,25 @@ async def test_cleanup_old_flow_runtime_data_purges_old_flow_run_history_and_pre
         with_audit_log=True,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
+    counts = result.counts
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_considered"] == 1
-    assert counts["flow_runs_lock_deferred"] == 0
-    assert counts["flow_runs_purged"] == 1
-    assert counts["flow_generated_files_deleted"] == 1
-    assert counts["flow_runtime_source_candidates"] == 1
-    assert counts["flow_runtime_source_candidate_bytes"] == 128
-    assert counts["flow_runtime_source_bindings_deleted"] == 1
-    assert counts["flow_runtime_source_files_deleted"] == 1
-    assert counts["flow_runtime_source_bytes_deleted"] == 128
-    assert counts["flow_webhook_deliveries_deleted"] == 1
-    assert counts["flow_audit_outbox_rows_deleted"] == 1
-    assert counts["flow_review_checkpoints_deleted"] == 1
-    assert counts["flow_runs_skipped_undelivered_audit"] == 0
-    assert counts["flow_runs_skipped_unresolved_webhook"] == 0
-    assert counts["debug_step_results"] == 0
-    assert counts["debug_step_attempts"] == 0
+    assert counts.flow_runs_considered == 1
+    assert counts.flow_runs_lock_deferred == 0
+    assert counts.flow_runs_purged == 1
+    assert counts.flow_generated_files_deleted == 1
+    assert counts.flow_runtime_source_candidates == 1
+    assert counts.flow_runtime_source_candidate_bytes == 128
+    assert counts.flow_runtime_source_bindings_deleted == 1
+    assert counts.flow_runtime_source_files_deleted == 1
+    assert counts.flow_runtime_source_bytes_deleted == 128
+    assert counts.flow_webhook_deliveries_deleted == 1
+    assert counts.flow_audit_outbox_rows_deleted == 1
+    assert counts.flow_review_checkpoints_deleted == 1
 
     assert await async_session.get(FlowRuns, fixture.run.id) is None
     assert await async_session.get(FlowStepResults, fixture.step_result.id) is None
@@ -1357,25 +1363,18 @@ async def test_cleanup_old_flow_runtime_data_purges_old_flow_run_history_and_pre
         == 0
     )
 
-    second_counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    second_result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
+    second_counts = second_result.counts
     await _flush_and_clear_identity_map(async_session)
 
-    assert second_counts["flow_runs_considered"] == 0
-    assert second_counts["flow_runs_lock_deferred"] == 0
-    assert second_counts["flow_runs_purged"] == 0
-    assert second_counts["flow_generated_files_deleted"] == 0
-    assert second_counts["flow_runtime_source_candidates"] == 0
-    assert second_counts["flow_runtime_source_candidate_bytes"] == 0
-    assert second_counts["flow_runtime_source_bindings_deleted"] == 0
-    assert second_counts["flow_runtime_source_files_deleted"] == 0
-    assert second_counts["flow_runtime_source_bytes_deleted"] == 0
-    assert second_counts["flow_webhook_deliveries_deleted"] == 0
-    assert second_counts["flow_audit_outbox_rows_deleted"] == 0
-    assert second_counts["flow_review_checkpoints_deleted"] == 0
+    assert second_counts == FlowRunHistoryPurgeCounts()
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_reclaims_only_past_horizon_unbound_uploads(
+async def test_abandoned_upload_purge_reclaims_only_past_horizon_uploads(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1408,9 +1407,11 @@ async def test_cleanup_old_flow_runtime_data_reclaims_only_past_horizon_unbound_
         .values(flow_runtime_upload_abandonment_days=None)
     )
     await async_session.flush()
-    assert (await flow_retention_service.cleanup_old_flow_runtime_data())[
-        "flow_runtime_source_bindings_deleted"
-    ] == 0
+    disabled_counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
+        now=now,
+        limit=10,
+    )
+    assert disabled_counts.flow_runtime_source_bindings_deleted == 0
 
     await async_session.execute(
         update(Tenants)
@@ -1419,25 +1420,27 @@ async def test_cleanup_old_flow_runtime_data_reclaims_only_past_horizon_unbound_
     )
     await async_session.flush()
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
+        now=now,
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runtime_source_candidates"] == 1
-    assert counts["flow_runtime_source_candidate_bytes"] == 321
-    assert counts["flow_runtime_source_bindings_deleted"] == 1
-    assert counts["flow_runtime_source_files_deleted"] == 1
-    assert counts["flow_runtime_source_bytes_deleted"] == 321
+    assert counts.flow_runtime_source_candidates == 1
+    assert counts.flow_runtime_source_candidate_bytes == 321
+    assert counts.flow_runtime_source_bindings_deleted == 1
+    assert counts.flow_runtime_source_files_deleted == 1
+    assert counts.flow_runtime_source_bytes_deleted == 321
     assert await async_session.get(Files, abandoned_file_id) is None
     assert await async_session.get(Files, retained_file_id) is not None
 
-    repeated_counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    repeated_counts = await flow_retention_service.purge_abandoned_flow_runtime_uploads(
+        now=now,
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert repeated_counts["flow_runtime_source_candidates"] == 0
-    assert repeated_counts["flow_runtime_source_candidate_bytes"] == 0
-    assert repeated_counts["flow_runtime_source_bindings_deleted"] == 0
-    assert repeated_counts["flow_runtime_source_files_deleted"] == 0
-    assert repeated_counts["flow_runtime_source_bytes_deleted"] == 0
+    assert repeated_counts == FlowRunHistoryPurgeCounts()
     assert await async_session.get(Files, retained_file_id) is not None
 
 
@@ -1862,7 +1865,7 @@ async def test_flow_run_history_purge_rejects_missing_primary_without_partial_de
     ids=["unclaimed", "active-claim", "expired-claim"],
 )
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_keeps_run_with_pending_webhook(
+async def test_flow_run_history_purge_keeps_run_with_pending_webhook(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1892,11 +1895,19 @@ async def test_cleanup_old_flow_runtime_data_keeps_run_with_pending_webhook(
         ),
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=now,
+        limit=10,
+    )
+    blocked = (
+        await flow_retention_service.count_blocked_flow_run_history_purge_candidates(
+            now=now
+        )
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 0
-    assert counts["flow_runs_skipped_unresolved_webhook"] == 1
+    assert result.counts.flow_runs_purged == 0
+    assert blocked.skipped_unresolved_webhook == 1
     assert await async_session.get(FlowRuns, fixture.run.id)
     assert await async_session.get(
         FlowRunWebhookDeliveries,
@@ -1920,7 +1931,7 @@ async def test_cleanup_old_flow_runtime_data_keeps_run_with_pending_webhook(
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_purges_run_with_dead_lettered_webhook(
+async def test_flow_run_history_purge_removes_run_with_dead_lettered_webhook(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1948,11 +1959,13 @@ async def test_cleanup_old_flow_runtime_data_purges_run_with_dead_lettered_webho
         )
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 1
-    assert counts["flow_runs_skipped_unresolved_webhook"] == 0
+    assert result.counts.flow_runs_purged == 1
     assert await async_session.get(FlowRuns, fixture.run.id) is None
     assert (
         await async_session.get(
@@ -1964,7 +1977,7 @@ async def test_cleanup_old_flow_runtime_data_purges_run_with_dead_lettered_webho
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_keeps_generated_file_shared_with_retained_run(
+async def test_flow_run_history_purge_keeps_generated_file_shared_with_retained_run(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1988,17 +2001,20 @@ async def test_cleanup_old_flow_runtime_data_keeps_generated_file_shared_with_re
         generated_file=fixture.generated_file,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 1
-    assert counts["flow_generated_files_deleted"] == 0
+    assert result.counts.flow_runs_purged == 1
+    assert result.counts.flow_generated_files_deleted == 0
     assert await async_session.get(FlowRuns, fixture.run.id) is None
     assert await async_session.get(Files, fixture.generated_file.id) is not None
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_keeps_generated_file_with_derived_child(
+async def test_flow_run_history_purge_keeps_generated_file_with_derived_child(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2028,18 +2044,21 @@ async def test_cleanup_old_flow_runtime_data_keeps_generated_file_with_derived_c
         parent_file_id=fixture.generated_file.id,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 1
-    assert counts["flow_generated_files_deleted"] == 0
+    assert result.counts.flow_runs_purged == 1
+    assert result.counts.flow_generated_files_deleted == 0
     assert await async_session.get(FlowRuns, fixture.run.id) is None
     assert await async_session.get(Files, fixture.generated_file.id) is not None
     assert await async_session.get(Files, child_file.id) is not None
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_flow_days_override_space_days(
+async def test_flow_run_history_purge_uses_flow_override_instead_of_space_policy(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2047,7 +2066,8 @@ async def test_cleanup_old_flow_runtime_data_flow_days_override_space_days(
     flow_retention_assistant: Assistants,
     flow_retention_service: DataRetentionService,
 ):
-    flow_retention_space.data_retention_days = 1
+    flow_retention_space.flow_run_history_retention_mode = "preserve"
+    flow_retention_space.flow_run_history_retention_days = 1
     larger_flow_value = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
@@ -2067,16 +2087,19 @@ async def test_cleanup_old_flow_runtime_data_flow_days_override_space_days(
         flow_retention_days=1,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 1
+    assert result.counts.flow_runs_purged == 1
     assert await async_session.get(FlowRuns, larger_flow_value.run.id) is not None
     assert await async_session.get(FlowRuns, matching_flow_value.run.id) is None
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_uses_space_default_when_flow_retention_is_null(
+async def test_flow_run_history_purge_uses_space_policy_when_flow_inherits(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2084,7 +2107,8 @@ async def test_cleanup_old_flow_runtime_data_uses_space_default_when_flow_retent
     flow_retention_assistant: Assistants,
     flow_retention_service: DataRetentionService,
 ):
-    flow_retention_space.data_retention_days = 1
+    flow_retention_space.flow_run_history_retention_mode = "preserve"
+    flow_retention_space.flow_run_history_retention_days = 1
     fixture = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
@@ -2095,11 +2119,13 @@ async def test_cleanup_old_flow_runtime_data_uses_space_default_when_flow_retent
         flow_retention_days=None,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 1
-    assert counts["debug_step_results"] == 0
+    assert result.counts.flow_runs_purged == 1
     assert await async_session.get(FlowRuns, fixture.run.id) is None
 
 
@@ -2113,7 +2139,8 @@ async def test_flow_run_history_purge_uses_space_retention_one_day_boundary(
     flow_retention_service: DataRetentionService,
 ):
     now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
-    flow_retention_space.data_retention_days = 1
+    flow_retention_space.flow_run_history_retention_mode = "preserve"
+    flow_retention_space.flow_run_history_retention_days = 1
     retained = await _create_flow_runtime_fixture(
         async_session,
         tenant=test_tenant,
@@ -2211,7 +2238,7 @@ async def test_flow_run_history_purge_skips_old_non_terminal_runs(
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_keeps_runs_without_flow_or_space_retention(
+async def test_flow_run_history_purge_keeps_runs_without_retention_policy(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2229,10 +2256,13 @@ async def test_cleanup_old_flow_runtime_data_keeps_runs_without_flow_or_space_re
         flow_retention_days=None,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=datetime.now(timezone.utc),
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 0
+    assert result.counts.flow_runs_purged == 0
     assert await async_session.get(FlowRuns, fixture.run.id)
 
 
@@ -2244,7 +2274,7 @@ async def test_cleanup_old_flow_runtime_data_keeps_runs_without_flow_or_space_re
     ],
 )
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_skips_runs_with_undelivered_audit_outbox(
+async def test_flow_run_history_purge_skips_runs_with_undelivered_audit_outbox(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2270,11 +2300,20 @@ async def test_cleanup_old_flow_runtime_data_skips_runs_with_undelivered_audit_o
         with_audit_log=False,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    now = datetime.now(timezone.utc)
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=now,
+        limit=10,
+    )
+    blocked = (
+        await flow_retention_service.count_blocked_flow_run_history_purge_candidates(
+            now=now
+        )
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 0
-    assert counts["flow_runs_skipped_undelivered_audit"] == 1
+    assert result.counts.flow_runs_purged == 0
+    assert blocked.skipped_undelivered_audit == 1
     assert await async_session.get(FlowRuns, fixture.run.id)
     assert await async_session.get(FlowStepResults, fixture.step_result.id)
 
@@ -2319,83 +2358,15 @@ async def test_successful_audit_outbox_redrive_delivery_permits_existing_purge_p
         now=now,
     )
     delivery_result = await delivery_service.deliver_due(now=now)
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=now,
+        limit=10,
+    )
     await _flush_and_clear_identity_map(async_session)
 
     assert delivery_result.delivered_count == 1
-    assert counts["flow_runs_skipped_undelivered_audit"] == 0
-    assert counts["flow_runs_purged"] == 1
+    assert result.counts.flow_runs_purged == 1
     assert await async_session.get(FlowRuns, fixture.run.id) is None
-
-
-@pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_paginates_purge_candidates_with_skips(
-    async_session: AsyncSession,
-    test_tenant,
-    admin_user,
-    flow_retention_space: Spaces,
-    flow_retention_assistant: Assistants,
-    flow_retention_service: DataRetentionService,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    monkeypatch.setattr(data_retention_service_module, "RETENTION_BATCH_SIZE", 2)
-    purge_first = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=1,
-        run_id=UUID("00000000-0000-0000-0000-000000000001"),
-    )
-    skipped = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=1,
-        run_id=UUID("00000000-0000-0000-0000-000000000002"),
-    )
-    purge_second = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=1,
-        run_id=UUID("00000000-0000-0000-0000-000000000003"),
-    )
-    purge_third = await _create_flow_runtime_fixture(
-        async_session,
-        tenant=test_tenant,
-        user=admin_user,
-        space=flow_retention_space,
-        assistant=flow_retention_assistant,
-        days_old=3,
-        flow_retention_days=1,
-        run_id=UUID("00000000-0000-0000-0000-000000000004"),
-    )
-    await _add_flow_audit_outbox_row(
-        async_session,
-        run=skipped.run,
-        user_id=admin_user.id,
-        delivery_status=FlowOutboxDeliveryStatus.PENDING.value,
-        with_audit_log=False,
-    )
-
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
-    await _flush_and_clear_identity_map(async_session)
-
-    assert counts["flow_runs_purged"] == 3
-    assert counts["flow_runs_skipped_undelivered_audit"] == 1
-    assert await async_session.get(FlowRuns, purge_first.run.id) is None
-    assert await async_session.get(FlowRuns, purge_second.run.id) is None
-    assert await async_session.get(FlowRuns, purge_third.run.id) is None
-    assert await async_session.get(FlowRuns, skipped.run.id) is not None
 
 
 @pytest.mark.asyncio
@@ -2517,18 +2488,26 @@ async def test_flow_run_history_blocked_counts_use_audit_webhook_precedence(
         with_audit_log=False,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    result = await flow_retention_service.purge_old_flow_run_history_batch(
+        now=now,
+        limit=10,
+    )
+    blocked = (
+        await flow_retention_service.count_blocked_flow_run_history_purge_candidates(
+            now=now
+        )
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 0
-    assert counts["flow_runs_skipped_undelivered_audit"] == 1
-    assert counts["flow_runs_skipped_unresolved_webhook"] == 1
+    assert result.counts.flow_runs_purged == 0
+    assert blocked.skipped_undelivered_audit == 1
+    assert blocked.skipped_unresolved_webhook == 1
     assert await async_session.get(FlowRuns, audit_blocked.run.id)
     assert await async_session.get(FlowRuns, webhook_blocked.run.id)
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_purges_soft_deleted_flow_run_history(
+async def test_flow_run_history_purge_removes_run_for_soft_deleted_flow(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2564,7 +2543,7 @@ async def test_cleanup_old_flow_runtime_data_purges_soft_deleted_flow_run_histor
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_redacts_tenant_debug_before_later_flow_purge(
+async def test_debug_evidence_redaction_precedes_later_flow_purge(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2587,12 +2566,13 @@ async def test_cleanup_old_flow_runtime_data_redacts_tenant_debug_before_later_f
         },
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    counts = await flow_retention_service.redact_old_flow_debug_evidence(
+        now=datetime.now(timezone.utc)
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 0
-    assert counts["debug_step_results"] == 1
-    assert counts["debug_step_attempts"] == 1
+    assert counts.debug_step_results == 1
+    assert counts.debug_step_attempts == 1
 
     refreshed_run = await async_session.get(FlowRuns, fixture.run.id)
     refreshed_step_result = await async_session.get(
@@ -2616,7 +2596,7 @@ async def test_cleanup_old_flow_runtime_data_redacts_tenant_debug_before_later_f
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_redacts_attempt_payloads_without_provenance(
+async def test_debug_evidence_redacts_attempt_payloads_without_provenance(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2641,10 +2621,12 @@ async def test_cleanup_old_flow_runtime_data_redacts_attempt_payloads_without_pr
     fixture.step_attempt.provenance_json = None
     await async_session.flush()
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    counts = await flow_retention_service.redact_old_flow_debug_evidence(
+        now=datetime.now(timezone.utc)
+    )
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["debug_step_attempts"] == 1
+    assert counts.debug_step_attempts == 1
     refreshed_attempt = await async_session.get(
         FlowStepAttempts, fixture.step_attempt.id
     )
@@ -2655,7 +2637,7 @@ async def test_cleanup_old_flow_runtime_data_redacts_attempt_payloads_without_pr
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_does_not_redact_from_flow_retention_before_purge_horizon(
+async def test_debug_evidence_does_not_reuse_flow_run_history_policy(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -2673,7 +2655,9 @@ async def test_cleanup_old_flow_runtime_data_does_not_redact_from_flow_retention
         flow_retention_days=30,
     )
 
-    counts = await flow_retention_service.cleanup_old_flow_runtime_data()
+    counts = await flow_retention_service.redact_old_flow_debug_evidence(
+        now=datetime.now(timezone.utc)
+    )
     await _flush_and_clear_identity_map(async_session)
 
     refreshed_step_result = await async_session.get(
@@ -2683,9 +2667,8 @@ async def test_cleanup_old_flow_runtime_data_does_not_redact_from_flow_retention
         FlowStepAttempts, fixture.step_attempt.id
     )
 
-    assert counts["flow_runs_purged"] == 0
-    assert counts["debug_step_results"] == 0
-    assert counts["debug_step_attempts"] == 0
+    assert counts.debug_step_results == 0
+    assert counts.debug_step_attempts == 0
     assert refreshed_step_result is not None
     assert refreshed_step_result.input_payload_json == {"text": "sensitive input"}
     assert refreshed_step_result.effective_prompt == "Very sensitive prompt"

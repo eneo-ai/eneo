@@ -110,6 +110,7 @@ class ActionType(str, Enum):
     FLOW_DELETED = "flow_deleted"
     FLOW_PUBLISHED = "flow_published"
     FLOW_UNPUBLISHED = "flow_unpublished"
+    FLOW_RUN_RETENTION_POLICY_CHANGED = "flow_run_retention_policy_changed"
     FLOW_RUN_CREATED = "flow_run_created"
     FLOW_RUN_COMPLETED = "flow_run_completed"
     FLOW_RUN_FAILED = "flow_run_failed"

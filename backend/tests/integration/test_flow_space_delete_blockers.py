@@ -88,7 +88,8 @@ async def _create_flow(
         owner_user_id=user_id,
         published_version=None,
         metadata_json={},
-        data_retention_days=None,
+        flow_run_history_retention_mode=None,
+        flow_run_history_retention_days=None,
         draft_revision=0,
         deleted_at=datetime.now(timezone.utc) if deleted else None,
     )

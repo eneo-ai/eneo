@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
@@ -16,6 +16,7 @@ from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.flows.domain.flow_run_retention_policy import FLOW_RUN_RETENTION_MODE_VALUES
 
 if TYPE_CHECKING:
     from eneo.database.tables.app_table import Apps
@@ -32,12 +33,23 @@ SPACE_DATA_RETENTION_DAYS_RANGE_CHECK = (
     f"(data_retention_days >= {MIN_RETENTION_DAYS} "
     f"AND data_retention_days <= {MAX_RETENTION_DAYS})"
 )
+SPACE_FLOW_RUN_RETENTION_DAYS_RANGE_CHECK = (
+    "flow_run_history_retention_days IS NULL OR "
+    f"(flow_run_history_retention_days >= {MIN_RETENTION_DAYS} "
+    f"AND flow_run_history_retention_days <= {MAX_RETENTION_DAYS})"
+)
 
 
 class Spaces(BasePublic):
     name: Mapped[str] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
     data_retention_days: Mapped[Optional[int]] = mapped_column()
+    flow_run_history_retention_mode: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )
+    flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
+        nullable=True
+    )
 
     # Foreign keys
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
@@ -112,6 +124,23 @@ class Spaces(BasePublic):
         CheckConstraint(
             SPACE_DATA_RETENTION_DAYS_RANGE_CHECK,
             name="ck_spaces_data_retention_days_range",
+        ),
+        CheckConstraint(
+            SPACE_FLOW_RUN_RETENTION_DAYS_RANGE_CHECK,
+            name="ck_spaces_flow_run_history_retention_days_range",
+        ),
+        CheckConstraint(
+            "(flow_run_history_retention_mode IS NULL AND "
+            "flow_run_history_retention_days IS NULL) OR "
+            "(flow_run_history_retention_mode IS NOT NULL AND "
+            "flow_run_history_retention_days IS NOT NULL)",
+            name="ck_spaces_flow_run_history_retention_complete",
+        ),
+        CheckConstraint(
+            "flow_run_history_retention_mode IS NULL OR "
+            "flow_run_history_retention_mode IN "
+            f"({','.join(repr(value) for value in FLOW_RUN_RETENTION_MODE_VALUES)})",
+            name="ck_spaces_flow_run_history_retention_mode",
         ),
         Index(
             "uq_spaces_tenant_id_id",

@@ -26,7 +26,6 @@ from eneo.authentication.auth_models import (
 )
 from eneo.authentication.principal_types import PrincipalType
 from eneo.collections.presentation.collection_models import CollectionPublic
-from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.files.file_models import FilePublic, FileRestrictions
 from eneo.flows.api.flow_run_contract_models import (
     FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE as FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
@@ -73,10 +72,10 @@ from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceExportSummary,
 )
 from eneo.flows.domain.flow import (
-    FlowRunRetentionProjection,
     FlowStepRetrievalPolicy,
     parse_flow_step_retrieval_policy,
 )
+from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionProjection
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
     ProviderCallEvidencePage,
@@ -130,19 +129,11 @@ from eneo.questions.question import UseTools
 from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
 
-FLOW_DATA_RETENTION_DAYS_DESCRIPTION = (
-    "Number of days before this Flow's run and step history becomes eligible "
-    "for an administrator-requested purge. Time starts when the run finishes, "
-    "or when it was created if no finish time exists. This Flow value overrides "
-    "the Space value and tenant fallback; null removes the Flow override. "
-    "Saving this value never deletes Flow data. "
-    f"Valid range: {MIN_RETENTION_DAYS}-{MAX_RETENTION_DAYS} days."
-)
 FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
-    "Effective administrator-requested purge eligibility for Flow run history. "
-    "A Flow value overrides its Space value, and a Space value overrides the "
-    "tenant fallback. A days state reports eligibility only and never authorizes "
-    "deletion; off means that no eligibility window is configured."
+    "Effective Flow run-history retention policy. A complete Flow policy overrides "
+    "its complete Space policy, and Space overrides the Organization default. "
+    "Preserve requires an explicit administrator purge; review_required requires "
+    "human approval. Off means no eligibility policy is configured."
 )
 FLOW_SPARSE_STEP_COUNT_DESCRIPTION = (
     "Number of steps in the flow's current step definitions. This reflects "
@@ -181,12 +172,6 @@ class FlowEvidenceExportTooLargeError(BaseModel):
     request_id: str | None = None
     error_id: str | None = None
     details: dict[str, Any] | None = None
-
-
-FlowDataRetentionDays: TypeAlias = Annotated[
-    int,
-    Field(strict=True, ge=MIN_RETENTION_DAYS, le=MAX_RETENTION_DAYS),
-]
 
 
 def _validate_flow_step_output_config(value: object) -> object:
@@ -286,15 +271,15 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
     "input_type": "audio",
     "output_type": "pdf",
     "metadata_json": {"wizard": {"transcription_enabled": True}},
-    "data_retention_days": 30,
     "run_history_retention": {
-        "state": "days",
+        "state": "configured",
+        "mode": "preserve",
         "effective_days": 30,
         "source": "flow",
         "contributors": {
-            "organization_days": 90,
-            "space_days": 14,
-            "flow_days": 30,
+            "organization": {"mode": "preserve", "days": 90},
+            "space": {"mode": "review_required", "days": 14},
+            "flow": {"mode": "preserve", "days": 30},
         },
     },
     "created_at": "2026-03-17T09:30:00Z",
@@ -656,10 +641,6 @@ class FlowCreateRequest(BaseModel):
     description: str | None = None
     steps: list[FlowStepCreateRequest]
     metadata_json: dict[str, Any] | None = None
-    data_retention_days: FlowDataRetentionDays | None = Field(
-        default=None,
-        description=FLOW_DATA_RETENTION_DAYS_DESCRIPTION,
-    )
 
 
 @partial_model
@@ -683,7 +664,6 @@ class FlowUpdateRequest(BaseModel):
                     }
                 ],
                 "metadata_json": {"wizard": {"transcription_enabled": True}},
-                "data_retention_days": 30,
             }
         },
     )
@@ -692,10 +672,6 @@ class FlowUpdateRequest(BaseModel):
     description: str | None
     steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)
-    data_retention_days: FlowDataRetentionDays | None | NotProvided = Field(
-        default=NOT_PROVIDED,
-        description=FLOW_DATA_RETENTION_DAYS_DESCRIPTION,
-    )
 
 
 class FlowStepPublic(BaseModel):
@@ -750,10 +726,6 @@ class FlowSparsePublic(BaseModel):
         description=FLOW_SPARSE_OUTPUT_TYPE_DESCRIPTION,
     )
     metadata_json: dict[str, Any] | None = None
-    data_retention_days: FlowDataRetentionDays | None = Field(
-        default=None,
-        description=FLOW_DATA_RETENTION_DAYS_DESCRIPTION,
-    )
     run_history_retention: FlowRunRetentionProjection = Field(
         description=FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION,
     )

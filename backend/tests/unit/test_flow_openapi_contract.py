@@ -359,6 +359,14 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     "/api/v1/settings/flow-runtime-policy": {"get", "patch"},
     "/api/v1/settings/flow-evidence-policy": {"get", "patch"},
     "/api/v1/settings/flow-retention-policy": {"get", "patch"},
+    "/api/v1/settings/flow-run-retention-policy": {"get", "put"},
+    "/api/v1/settings/flow-run-retention-policy/review-queue": {"get"},
+    "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}": {"get", "put"},
+    "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue": {
+        "get"
+    },
+    "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}": {"get", "put"},
+    "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue": {"get"},
 }
 
 RUNTIME_PATH_FIELD_OPERATIONS = flow_runtime_path_field_operations()
@@ -419,6 +427,11 @@ REQUIRED_SCHEMAS = {
     "FlowMappedExecutionPolicyUpdate",
     "FlowRetentionPolicyPublic",
     "FlowRetentionPolicyUpdate",
+    "FlowRunRetentionPolicy",
+    "FlowRunRetentionPolicyReplaceRequest",
+    "FlowRunRetentionPolicySettings",
+    "FlowRunRetentionReviewItem",
+    "FlowRunRetentionReviewPage",
     "FlowTemplateAssetPublic",
     "FlowTemplateReadinessPublic",
     "FlowTemplateInspectionPublic",
@@ -478,6 +491,42 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
         "/api/v1/settings/flow-retention-policy",
         "patch",
     ): "update_flow_retention_policy",
+    (
+        "/api/v1/settings/flow-run-retention-policy",
+        "get",
+    ): "get_organization_flow_run_retention_policy",
+    (
+        "/api/v1/settings/flow-run-retention-policy",
+        "put",
+    ): "replace_organization_flow_run_retention_policy",
+    (
+        "/api/v1/settings/flow-run-retention-policy/review-queue",
+        "get",
+    ): "list_organization_flow_run_retention_review_queue",
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        "get",
+    ): "get_space_flow_run_retention_policy",
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        "put",
+    ): "replace_space_flow_run_retention_policy",
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue",
+        "get",
+    ): "list_space_flow_run_retention_review_queue",
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        "get",
+    ): "get_flow_run_retention_policy",
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        "put",
+    ): "replace_flow_run_retention_policy",
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue",
+        "get",
+    ): "list_flow_run_retention_review_queue",
 }
 
 REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
@@ -620,6 +669,36 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
         "/api/v1/settings/flow-retention-policy",
         "patch",
     ): {"400", "403", "422"},
+    ("/api/v1/settings/flow-run-retention-policy", "get"): {"403"},
+    ("/api/v1/settings/flow-run-retention-policy", "put"): {"403", "422"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/review-queue",
+        "get",
+    ): {"403", "422"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        "get",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        "put",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue",
+        "get",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        "get",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        "put",
+    ): {"403", "404", "422"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue",
+        "get",
+    ): {"403", "404", "422"},
 }
 
 FLOW_SETTINGS_INVALID_PAYLOAD_MESSAGES: dict[str, str] = {
@@ -738,6 +817,36 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     ("/api/v1/settings/flow-evidence-policy", "patch"): {"400", "403"},
     ("/api/v1/settings/flow-retention-policy", "get"): {"403"},
     ("/api/v1/settings/flow-retention-policy", "patch"): {"400", "403"},
+    ("/api/v1/settings/flow-run-retention-policy", "get"): {"403"},
+    ("/api/v1/settings/flow-run-retention-policy", "put"): {"403"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/review-queue",
+        "get",
+    ): {"403"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        "get",
+    ): {"403", "404"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+        "put",
+    ): {"403", "404"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue",
+        "get",
+    ): {"403", "404"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        "get",
+    ): {"403", "404"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        "put",
+    ): {"403", "404"},
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue",
+        "get",
+    ): {"403", "404"},
 }
 
 
@@ -919,6 +1028,7 @@ def test_openapi_flow_settings_update_requests_reject_unknown_fields(
         "FlowEvidencePolicyUpdate",
         "FlowInputLimitsUpdate",
         "FlowRetentionPolicyUpdate",
+        "FlowRunRetentionPolicyReplaceRequest",
         "FlowRuntimePolicyUpdate",
     }
 
@@ -1001,12 +1111,10 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
 
     assert set(public_properties) == {
         "run_debug_evidence_days",
-        "flow_run_history_retention_days",
         "flow_runtime_upload_abandonment_days",
     }
     assert set(update_properties) == {
         "run_debug_evidence_days",
-        "flow_run_history_retention_days",
         "flow_runtime_upload_abandonment_days",
     }
     assert set(public_schema["required"]) == set(public_properties)
@@ -1015,7 +1123,6 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
 
     for field_name in (
         "run_debug_evidence_days",
-        "flow_run_history_retention_days",
         "flow_runtime_upload_abandonment_days",
     ):
         for properties in (public_properties, update_properties):
@@ -1030,6 +1137,21 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
             assert _schema_allows_null(property_schema)
         assert "default" not in property_schema
 
+    policy_schema = schemas["FlowRunRetentionPolicy"]
+    assert policy_schema.get("additionalProperties") is False
+    assert set(policy_schema["required"]) == {"mode", "days"}
+    assert policy_schema["properties"]["days"]["minimum"] == 1
+    assert policy_schema["properties"]["days"]["maximum"] == 2555
+    mode_schema = _resolve_component_ref(
+        openapi_spec, policy_schema["properties"]["mode"]
+    )
+    assert set(mode_schema["enum"]) == {"preserve", "review_required"}
+
+    replace_schema = schemas["FlowRunRetentionPolicyReplaceRequest"]
+    assert replace_schema.get("additionalProperties") is False
+    assert replace_schema["required"] == ["policy"]
+    assert _schema_allows_null(replace_schema["properties"]["policy"])
+
 
 def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
     openapi_spec: dict,
@@ -1037,18 +1159,34 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
     operations = (
         _get_operation(openapi_spec, "/api/v1/settings/flow-retention-policy", "get"),
         _get_operation(openapi_spec, "/api/v1/settings/flow-retention-policy", "patch"),
+        _get_operation(
+            openapi_spec, "/api/v1/settings/flow-run-retention-policy", "get"
+        ),
+        _get_operation(
+            openapi_spec, "/api/v1/settings/flow-run-retention-policy", "put"
+        ),
+        _get_operation(
+            openapi_spec,
+            "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}",
+            "put",
+        ),
+        _get_operation(
+            openapi_spec,
+            "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+            "put",
+        ),
     )
     descriptions = "\n".join(
         str(operation.get("description", "")) for operation in operations
     )
     normalized = descriptions.lower()
 
-    assert "flow-specific value overrides its space value" in normalized
-    assert "space value" in normalized
-    assert "tenant fallback" in normalized
-    assert "explicit administrator purge" in normalized
+    assert "complete space override" in normalized
+    assert "complete flow override" in normalized
+    assert "organization" in normalized
+    assert "explicit administrator" in normalized
     assert "saving" in normalized
-    assert "never deletes or redacts flow data" in normalized
+    assert "never deletes" in normalized or "never schedules deletion" in normalized
     assert "automatic deletion" not in normalized
     assert "scheduled pass" not in normalized
 
@@ -1057,29 +1195,17 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
         properties = schemas[schema_name]["properties"]
         for field_name in (
             "run_debug_evidence_days",
-            "flow_run_history_retention_days",
             "flow_runtime_upload_abandonment_days",
         ):
             assert "purge eligibility" in properties[field_name]["description"].lower()
 
-    public_retention_descriptions = [
-        schemas[schema_name]["properties"]["data_retention_days"]["description"]
-        for schema_name in (
-            "FlowCreateRequest",
-            "PartialFlowUpdateRequest",
-            "FlowSparsePublic",
-            "FlowPublic",
-            "PartialUpdateSpaceRequest",
-            "SpaceSparse",
-        )
-    ]
     projection_descriptions = [
         schemas[schema_name]["properties"]["run_history_retention"]["description"]
         for schema_name in ("FlowSparsePublic", "FlowPublic")
     ]
-    for description in public_retention_descriptions + projection_descriptions:
+    for description in projection_descriptions:
         normalized_description = description.lower()
-        assert "administrator-requested purge" in normalized_description
+        assert "explicit administrator purge" in normalized_description
         assert "automatic flow run-history deletion" not in normalized_description
         assert "matching classification" not in normalized_description
         assert "minimum/no-purge" not in normalized_description
@@ -1087,9 +1213,15 @@ def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
     flow_update_description = _get_operation(
         openapi_spec, "/api/v1/flows/{id}/", "patch"
     )["description"].lower()
-    assert "purge eligibility" in flow_update_description
-    assert "does not delete flow data" in flow_update_description
-    assert "automatic run-history deletion" not in flow_update_description
+    assert "operational retention is managed separately" in flow_update_description
+
+    for schema_name in (
+        "FlowCreateRequest",
+        "PartialFlowUpdateRequest",
+        "FlowSparsePublic",
+        "FlowPublic",
+    ):
+        assert "data_retention_days" not in schemas[schema_name]["properties"]
 
     template_delete_description = _get_operation(
         openapi_spec,
@@ -1117,11 +1249,84 @@ def test_openapi_flow_retention_surfaces_are_disambiguated(
     organization_description = str(
         organization_retention.get("description", "")
     ).lower()
-    assert "debug-evidence" in organization_description
-    assert "tenant fallback" in organization_description
+    assert "debug evidence" in organization_description
+    assert "dedicated hierarchical policy endpoints" in organization_description
+    flow_run_retention = paths["/api/v1/settings/flow-run-retention-policy"]["get"]
+    assert (
+        "organization default" in str(flow_run_retention.get("description", "")).lower()
+    )
     assert "wi-19" not in organization_description
     assert "/api/v1/settings/flow-retention-policy/preview" not in paths
     assert "/api/v1/settings/flow-classification-retention-policies" not in paths
+
+
+def test_openapi_flow_retention_review_queue_is_read_only_and_content_minimal(
+    openapi_spec: dict,
+) -> None:
+    review_paths = (
+        "/api/v1/settings/flow-run-retention-policy/review-queue",
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/review-queue",
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue",
+    )
+
+    for path in review_paths:
+        operation = _get_operation(openapi_spec, path, "get")
+        description = str(operation.get("description", "")).lower()
+        assert "delete" in description
+        assert "input" in description or "content" in description
+        assert "output" in description or "content" in description
+
+        limit = _find_parameter(operation, name="limit", location="query")
+        assert limit["schema"]["default"] == 50
+        assert limit["schema"]["minimum"] == 1
+        assert limit["schema"]["maximum"] == 200
+        cursor = _find_parameter(operation, name="cursor", location="query")
+        assert cursor.get("required") is not True
+        cursor_string_schema = next(
+            schema
+            for schema in cursor["schema"]["anyOf"]
+            if schema.get("type") == "string"
+        )
+        assert cursor_string_schema["maxLength"] == 512
+        assert "opaque cursor" in cursor["description"].lower()
+        assert "400" in operation["responses"]
+        assert (
+            operation["responses"]["400"]["content"]["application/json"]["example"][
+                "code"
+            ]
+            == "invalid_flow_retention_review_cursor"
+        )
+        assert not any(
+            parameter.get("name") == "offset"
+            for parameter in operation.get("parameters", [])
+        )
+
+        assert set(openapi_spec["paths"][path]) == {"get"}
+
+    schemas = openapi_spec["components"]["schemas"]
+    item_properties = schemas["FlowRunRetentionReviewItem"]["properties"]
+    assert set(item_properties) == {
+        "run_id",
+        "flow_id",
+        "flow_name",
+        "space_id",
+        "space_name",
+        "status",
+        "retention_anchor",
+        "eligible_since",
+        "effective_policy",
+        "policy_source",
+    }
+    assert (
+        "not approval or deletion"
+        in item_properties["eligible_since"]["description"].lower()
+    )
+    page_properties = schemas["FlowRunRetentionReviewPage"]["properties"]
+    assert (
+        "run inputs and outputs are deliberately omitted"
+        in page_properties["items"]["description"].lower()
+    )
+    assert "opaque cursor" in page_properties["next_cursor"]["description"].lower()
 
 
 def test_openapi_flow_classification_retention_policy_contract(
@@ -2550,6 +2755,15 @@ def test_openapi_flow_retention_days_documents_public_range(
 ) -> None:
     schemas = openapi_spec.get("components", {}).get("schemas", {})
 
+    policy_schema = schemas["FlowRunRetentionPolicy"]
+    integer_schema = _integer_schema_option(policy_schema["properties"]["days"])
+    assert integer_schema.get("minimum") == 1
+    assert integer_schema.get("maximum") == 2555
+    assert (
+        "eligibility alone never deletes data"
+        in str(integer_schema.get("description", "")).lower()
+    )
+
     for schema_name in (
         "FlowCreateRequest",
         "PartialFlowUpdateRequest",
@@ -2558,15 +2772,7 @@ def test_openapi_flow_retention_days_documents_public_range(
     ):
         assert schema_name in schemas
         properties = schemas[schema_name].get("properties", {})
-        retention_schema = properties.get("data_retention_days", {})
-        integer_schema = _integer_schema_option(retention_schema)
-
-        assert integer_schema.get("minimum") == 1
-        assert integer_schema.get("maximum") == 2555
-        assert _schema_allows_null(retention_schema)
-        description = str(retention_schema.get("description", ""))
-        assert "administrator-requested purge" in description
-        assert "never deletes Flow data" in description
+        assert "data_retention_days" not in properties
 
 
 def test_openapi_flow_read_models_expose_discriminated_retention_projection(
@@ -2581,36 +2787,35 @@ def test_openapi_flow_read_models_expose_discriminated_retention_projection(
         assert projection["discriminator"] == {
             "propertyName": "state",
             "mapping": {
-                "days": "#/components/schemas/FlowRunRetentionDays",
+                "configured": "#/components/schemas/FlowRunRetentionConfigured",
                 "off": "#/components/schemas/FlowRunRetentionOff",
             },
         }
         assert {option["$ref"] for option in projection["oneOf"]} == {
-            "#/components/schemas/FlowRunRetentionDays",
+            "#/components/schemas/FlowRunRetentionConfigured",
             "#/components/schemas/FlowRunRetentionOff",
         }
 
     off = schemas["FlowRunRetentionOff"]
-    days = schemas["FlowRunRetentionDays"]
+    configured = schemas["FlowRunRetentionConfigured"]
     contributors = schemas["FlowRunRetentionContributors"]
-    shared_required = {
-        "state",
+    assert set(off["required"]) == {"contributors"}
+    assert set(configured["required"]) == {
+        "mode",
         "effective_days",
         "source",
         "contributors",
     }
-    assert set(off["required"]) == shared_required
-    assert set(days["required"]) == shared_required
     assert off["properties"]["state"]["const"] == "off"
     assert off["properties"]["effective_days"]["type"] == "null"
-    assert days["properties"]["state"]["const"] == "days"
-    assert days["properties"]["effective_days"]["type"] == "integer"
+    assert configured["properties"]["state"]["const"] == "configured"
+    assert configured["properties"]["effective_days"]["type"] == "integer"
     assert set(contributors["required"]) == {
-        "organization_days",
-        "space_days",
-        "flow_days",
+        "organization",
+        "space",
+        "flow",
     }
-    assert set(days["properties"]["source"]["enum"]) == {
+    assert set(configured["properties"]["source"]["enum"]) == {
         "organization",
         "space",
         "flow",

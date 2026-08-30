@@ -32,6 +32,7 @@ from eneo.flow_packages.domain.flow_package_import_record import (
     FlowPackageImportStatus,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import PlanStatus, SessionStatus
+from eneo.flows.domain.flow_run_retention_policy import FLOW_RUN_RETENTION_MODE_VALUES
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_KIND_VALUES,
     PROVIDER_CALL_REASON_VALUES,
@@ -74,10 +75,10 @@ FLOW_STEP_OUTPUT_MODE_VALUES = FLOW_OUTPUT_MODE_VALUES
 FLOW_STEP_OUTPUT_TYPE_VALUES = FLOW_OUTPUT_TYPE_VALUES
 FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
 FLOW_RUN_LIFECYCLE_SOURCE_VALUES = tuple(item.value for item in FlowRunLifecycleSource)
-FLOW_DATA_RETENTION_DAYS_RANGE_CHECK = (
-    "data_retention_days IS NULL OR "
-    f"(data_retention_days >= {MIN_RETENTION_DAYS} "
-    f"AND data_retention_days <= {MAX_RETENTION_DAYS})"
+FLOW_RUN_HISTORY_RETENTION_DAYS_RANGE_CHECK = (
+    "flow_run_history_retention_days IS NULL OR "
+    f"(flow_run_history_retention_days >= {MIN_RETENTION_DAYS} "
+    f"AND flow_run_history_retention_days <= {MAX_RETENTION_DAYS})"
 )
 FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
     item.value for item in FlowRunReviewCheckpointState
@@ -186,14 +187,32 @@ class Flows(BasePublic):
     metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
-    data_retention_days: Mapped[Optional[int]] = mapped_column(nullable=True)
+    flow_run_history_retention_mode: Mapped[Optional[str]] = mapped_column(
+        sa.String(32), nullable=True
+    )
+    flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
+        nullable=True
+    )
     draft_revision: Mapped[int] = mapped_column(nullable=False, server_default="0")
     deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint(
-            FLOW_DATA_RETENTION_DAYS_RANGE_CHECK,
-            name="ck_flows_data_retention_days_range",
+            FLOW_RUN_HISTORY_RETENTION_DAYS_RANGE_CHECK,
+            name="ck_flows_flow_run_history_retention_days_range",
+        ),
+        CheckConstraint(
+            "(flow_run_history_retention_mode IS NULL AND "
+            "flow_run_history_retention_days IS NULL) OR "
+            "(flow_run_history_retention_mode IS NOT NULL AND "
+            "flow_run_history_retention_days IS NOT NULL)",
+            name="ck_flows_flow_run_history_retention_complete",
+        ),
+        CheckConstraint(
+            "flow_run_history_retention_mode IS NULL OR "
+            "flow_run_history_retention_mode IN "
+            f"({','.join(repr(value) for value in FLOW_RUN_RETENTION_MODE_VALUES)})",
+            name="ck_flows_flow_run_history_retention_mode",
         ),
         UniqueConstraint("id", "tenant_id", name="uq_flows_id_tenant_id"),
         UniqueConstraint(
@@ -857,7 +876,8 @@ class FlowRuns(BasePublic):
             postgresql_where=sa.text("status = 'running'"),
         ),
         Index(
-            "ix_flow_runs_terminal_retention_anchor",
+            "ix_flow_runs_tenant_terminal_retention_anchor",
+            "tenant_id",
             sa.text("coalesce(finished_at, created_at)"),
             "id",
             postgresql_include=("flow_id",),

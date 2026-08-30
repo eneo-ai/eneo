@@ -107,7 +107,6 @@ class FlowService:
         steps: list[FlowStep],
         description: str | None = None,
         metadata_json: FlowPersistedJsonObject | None = None,
-        data_retention_days: int | None = None,
         owner_user_id: UUID | None = None,
     ) -> Flow:
         normalized_metadata = normalize_flow_metadata_for_write(metadata_json)
@@ -138,7 +137,6 @@ class FlowService:
             owner_user_id=owner_user_id or self.user.id,
             published_version=None,
             metadata_json=normalized_metadata,
-            data_retention_days=data_retention_days,
             created_at=None,
             updated_at=None,
             steps=persisted_steps,
@@ -205,7 +203,6 @@ class FlowService:
         description: str | None | NotProvided = NOT_PROVIDED,
         steps: list[FlowStep] | None = None,
         metadata_json: FlowPersistedJsonObject | None | NotProvided = NOT_PROVIDED,
-        data_retention_days: int | None | NotProvided = NOT_PROVIDED,
         expected_revision: int | None = None,
     ) -> Flow:
         existing = await self.get_flow(flow_id)
@@ -241,10 +238,6 @@ class FlowService:
             metadata_json=next_metadata,
         )
 
-        next_retention = existing.data_retention_days
-        if data_retention_days is not NOT_PROVIDED:
-            next_retention = data_retention_days
-
         normalized_steps = self._normalize_steps_for_tenant(next_steps)
         if steps is not None:
             normalized_steps = self._protect_authored_step_secrets(normalized_steps)
@@ -259,7 +252,6 @@ class FlowService:
                 ),
                 "steps": persisted_steps,
                 "metadata_json": next_metadata,
-                "data_retention_days": next_retention,
             },
         )
         return await self.flow_repo.update(

@@ -25,11 +25,13 @@ from eneo.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
     FlowRun,
-    FlowRunRetentionContributors,
-    FlowRunRetentionOff,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
     FlowStep,
+)
+from eneo.flows.domain.flow_run_retention_policy import (
+    FlowRunRetentionContributors,
+    FlowRunRetentionOff,
 )
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_review_policy import FlowStepReviewMode
@@ -65,15 +67,11 @@ def _flow(flow_id):
         owner_user_id=uuid4(),
         published_version=1,
         metadata_json=None,
-        data_retention_days=None,
         run_history_retention=FlowRunRetentionOff(
-            state="off",
-            effective_days=None,
-            source="none",
             contributors=FlowRunRetentionContributors(
-                organization_days=None,
-                space_days=None,
-                flow_days=None,
+                organization=None,
+                space=None,
+                flow=None,
             ),
         ),
         created_at=now,
