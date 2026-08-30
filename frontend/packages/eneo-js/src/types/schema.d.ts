@@ -634,6 +634,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/info-blobs/{id}/original/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate a signed URL for an uploaded knowledge original
+     * @description Checks knowledge read access and original availability, then returns a short-lived URL for the exact uploaded bytes.
+     */
+    post: operations["generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/info-blobs/{id}/original/download/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download an uploaded knowledge original
+     * @description Streams the exact uploaded bytes using a short-lived, purpose-separated signed token.
+     */
+    get: operations["download_original_api_v1_info_blobs__id__original_download__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/info-blobs/spaces/{space_id}/info-blobs/": {
     parameters: {
       query?: never;
@@ -8305,6 +8345,7 @@ export interface components {
       | "file_deleted"
       | "file_original_download_link_created"
       | "file_signed_url_minted"
+      | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -12202,6 +12243,7 @@ export interface components {
       | "app"
       | "skill"
       | "file"
+      | "info_blob"
       | "website"
       | "tenant_settings"
       | "governance_policy"
@@ -12287,7 +12329,8 @@ export interface components {
       | 9053
       | 9054
       | 9055
-      | 9056;
+      | 9056
+      | 9057;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -13030,6 +13073,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
       /** Score */
       score: number;
     };
@@ -13075,6 +13120,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
       /** Text */
       text: string;
     };
@@ -13094,6 +13141,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
     };
     /** InfoBlobUpdatePublic */
     InfoBlobUpdatePublic: {
@@ -23866,6 +23915,143 @@ export interface operations {
       };
     };
   };
+  generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OriginalSignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_original_api_v1_info_blobs__id__original_download__get: {
+    parameters: {
+      query: {
+        token: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Exact uploaded bytes */
+      200: {
+        headers: {
+          /** @description Requested inline or attachment disposition */
+          "Content-Disposition"?: string;
+          /** @description Original size in bytes */
+          "Content-Length"?: number;
+          /** @description SHA-256 digest of the original representation */
+          "Repr-Digest"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "*/*": string;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_space_info_blobs_api_v1_info_blobs_spaces__space_id__info_blobs__get: {
     parameters: {
       query?: never;
@@ -25512,6 +25698,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -25940,6 +26128,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -26815,6 +27005,8 @@ export interface operations {
                     group_id?: string | null;
                     /** Website Id */
                     website_id?: string | null;
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                   };
@@ -27257,6 +27449,8 @@ export interface operations {
                     group_id?: string | null;
                     /** Website Id */
                     website_id?: string | null;
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                   };
@@ -44477,6 +44671,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -44629,6 +44825,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };

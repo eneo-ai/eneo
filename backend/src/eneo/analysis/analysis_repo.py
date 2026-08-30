@@ -21,6 +21,7 @@ from eneo.database.tables.questions_table import (
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import SessionInDB
 
@@ -115,6 +116,13 @@ class AnalysisRepository:
         self,
         sessions: list[SessionInDB],
     ) -> list[SessionInDB]:
+        info_blobs = [
+            info_blob
+            for session in sessions
+            for question in session.questions
+            for info_blob in question.info_blobs
+        ]
+        await InfoBlobRepository(self.session).hydrate_original_availability(info_blobs)
         await attach_question_files(
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,

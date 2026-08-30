@@ -17,6 +17,7 @@ from eneo.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
+    INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
@@ -215,7 +216,11 @@ router.include_router(
     prefix="/info-blobs",
     tags=["info-blobs"],
     dependencies=[
-        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(
+            require_resource_permission_for_method(
+                "knowledge", read_override_endpoints=INFO_BLOBS_READ_OVERRIDES
+            )
+        ),
         Depends(
             require_api_key_scope_check(resource_type="info_blob", path_param=None)
         ),
