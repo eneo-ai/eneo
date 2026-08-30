@@ -498,7 +498,7 @@ class SessionProxy:
         if session is None:
             raise RuntimeError(
                 "No active session found! You are running in a sessionless container. "
-                "You must wrap this call in 'async with container.session_scope():' "
+                "You must wrap this call in 'async with Container.session_scope():' "
                 "or pass the session explicitly via container.some_repo(session=session)."
             )
         return getattr(session, name)
@@ -509,7 +509,7 @@ class SessionProxy:
         if session is None:
             raise RuntimeError(
                 "Cannot call SessionProxy without active session scope. "
-                "Wrap your code in 'async with container.session_scope():'."
+                "Wrap your code in 'async with Container.session_scope():'."
             )
         # AsyncSession is not callable; the runtime check above prevents reaching
         # this branch in practice. Pyright still flags both the call and the
@@ -1128,8 +1128,7 @@ class Container(containers.DeclarativeContainer):
     crawl_service = providers.Factory(
         CrawlService,
         repo=crawl_run_repo,
-        task_service=task_service,
-        redis_client=redis_client,
+        job_service=job_service,
     )
     crawl_scheduler_service = providers.Factory(
         CrawlSchedulerService, website_sparse_repo=website_sparse_repo
@@ -1150,7 +1149,6 @@ class Container(containers.DeclarativeContainer):
         crawl_run_repo=crawl_run_repo,
         actor_manager=actor_manager,
         crawl_service=crawl_service,
-        tenant_repo=tenant_repo,
     )
     info_blob_service = providers.Factory(
         InfoBlobService,
@@ -1667,7 +1665,7 @@ class Container(containers.DeclarativeContainer):
     # tasks should use this to acquire sessions only when needed (~50-300ms).
     #
     # Usage in tasks:
-    #     async with container.session_scope() as session:
+    #     async with Container.session_scope() as session:
     #         repo = container.some_repo(session=session)  # Override default
     #         await repo.update(...)
     #     # Session returned to pool immediately
@@ -1690,7 +1688,7 @@ class Container(containers.DeclarativeContainer):
         passing session= explicitly - the proxy will find the session.
 
         Example:
-            async with container.session_scope() as session:
+            async with Container.session_scope() as session:
                 # Option 1: Explicit session override (always works)
                 repo = container.crawl_run_repo(session=session)
                 await repo.mark_started(job_id)

@@ -83,10 +83,16 @@ def is_same_origin(url: str, seed_url: str) -> bool:
 
 
 def _content_root(soup: BeautifulSoup) -> Tag:
-    for selector in ("main", "article", "[role='main']", "body"):
-        element = soup.select_one(selector)
+    for element_name in ("main", "article"):
+        element = soup.find(element_name)
         if isinstance(element, Tag):
             return element
+    role_main = soup.find(attrs={"role": "main"})
+    if isinstance(role_main, Tag):
+        return role_main
+    body = soup.find("body")
+    if isinstance(body, Tag):
+        return body
     return soup
 
 
@@ -122,7 +128,7 @@ def extract_html(html: str, url: str) -> ExtractedPage:
             links.append(absolute)
 
     root = _content_root(soup)
-    for element in root.select(", ".join(_NOISE_ELEMENTS)):
+    for element in root.find_all(_NOISE_ELEMENTS):
         element.decompose()
 
     converter = HTML2Text()

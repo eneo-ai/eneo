@@ -110,6 +110,7 @@ async def check_existing_website_url(
     **Features:**
     - Maximum 50 websites per request (safety limit)
     - Individual failures don't stop the batch
+    - A website with an active crawl returns that existing run
     - Returns detailed status for each website
 
     **Example Request:**
@@ -126,15 +127,10 @@ async def check_existing_website_url(
     ```json
     {
       "total": 2,
-      "queued": 1,
-      "failed": 1,
+      "queued": 2,
+      "failed": 0,
       "crawl_runs": [...],
-      "errors": [
-        {
-          "website_id": "123e4567-e89b-12d3-a456-426614174001",
-          "error": "Crawl already in progress for this website"
-        }
-      ]
+      "errors": []
     }
     ```
     """,

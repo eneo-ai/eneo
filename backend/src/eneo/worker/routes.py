@@ -22,8 +22,13 @@ from eneo.jobs.task_models import (
     UpdateUsageStatsTaskParams,
     UploadInfoBlob,
 )
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.websites.application.crawl_dispatch import (
+    CrawlReconciliationResult,
+    reconcile_crawl_work,
+)
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.worker.analysis_tasks import analyze_conversation_insights_task
 from eneo.worker.crawl_tasks import crawl_task, queue_website_crawls
@@ -41,6 +46,7 @@ from eneo.worker.worker import Worker
 
 worker = Worker()
 crawler_worker = Worker()
+crawler_worker.max_jobs = get_settings().effective_crawl_job_concurrency_limit
 logger = get_logger(__name__)
 
 
@@ -133,7 +139,15 @@ async def reconcile_knowledge_job_staging(
         await reconcile_job_staging(session)
 
 
-@crawler_worker.long_running_function()
+@worker.cron_job(manages_own_session=True, run_at_startup=True)
+async def reconcile_crawl_dispatch_and_leases(
+    container: Container,
+) -> CrawlReconciliationResult:
+    del container
+    return await reconcile_crawl_work()
+
+
+@crawler_worker.long_running_function(with_user=False)
 async def crawl(job_id: UUID, params: CrawlTask, container: Container):
     """Crawl task uses long_running_function to avoid DB pool exhaustion.
 
@@ -148,7 +162,8 @@ async def crawl(job_id: UUID, params: CrawlTask, container: Container):
 
 
 @worker.cron_job(
-    minute=0
+    minute=0,
+    manages_own_session=True,
 )  # Hourly at :00 - enables true ~24h scheduling for DAILY websites
 async def crawl_all_websites(container: Container) -> bool:
     """Hourly cron job to check and queue websites based on their update intervals.

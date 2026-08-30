@@ -4656,6 +4656,7 @@ export interface paths {
      *         **Features:**
      *         - Maximum 50 websites per request (safety limit)
      *         - Individual failures don't stop the batch
+     *         - A website with an active crawl returns that existing run
      *         - Returns detailed status for each website
      *
      *         **Example Request:**
@@ -4672,15 +4673,10 @@ export interface paths {
      *         ```json
      *         {
      *           "total": 2,
-     *           "queued": 1,
-     *           "failed": 1,
+     *           "queued": 2,
+     *           "failed": 0,
      *           "crawl_runs": [...],
-     *           "errors": [
-     *             {
-     *               "website_id": "123e4567-e89b-12d3-a456-426614174001",
-     *               "error": "Crawl already in progress for this website"
-     *             }
-     *           ]
+     *           "errors": []
      *         }
      *         ```
      */
@@ -10260,7 +10256,7 @@ export interface components {
       /** Failed */
       failed: number;
       /** Crawl Runs */
-      crawl_runs: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
+      crawl_runs: components["schemas"]["CrawlRunPublic"][];
       /** Errors */
       errors: {
         [key: string]: string;
@@ -10963,6 +10959,75 @@ export interface components {
       sessions: number;
       /** Questions */
       questions: number;
+    };
+    /**
+     * CrawlFailureCode
+     * @enum {string}
+     */
+    CrawlFailureCode:
+      | "dispatch_failed"
+      | "invalid_dispatch"
+      | "worker_interrupted"
+      | "lease_expired"
+      | "remote_unreachable"
+      | "remote_blocked"
+      | "timed_out"
+      | "processing_failed"
+      | "cancelled";
+    /**
+     * CrawlOrigin
+     * @enum {string}
+     */
+    CrawlOrigin: "manual" | "scheduled" | "legacy";
+    /**
+     * CrawlOutcome
+     * @enum {string}
+     */
+    CrawlOutcome:
+      "succeeded" | "unchanged" | "empty" | "partial" | "failed" | "cancelled" | "interrupted";
+    /**
+     * CrawlPhase
+     * @enum {string}
+     */
+    CrawlPhase: "pending_dispatch" | "queued" | "running" | "finalizing" | "stopping" | "terminal";
+    /** CrawlRunPublic */
+    CrawlRunPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Pages Crawled */
+      pages_crawled: number | null;
+      /** Files Downloaded */
+      files_downloaded: number | null;
+      /** Pages Failed */
+      pages_failed: number | null;
+      /** Files Failed */
+      files_failed: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
+      status: components["schemas"]["Status"];
+      phase: components["schemas"]["CrawlPhase"];
+      outcome: components["schemas"]["CrawlOutcome"] | null;
+      origin: components["schemas"]["CrawlOrigin"];
+      /** Result Location */
+      result_location: string | null;
+      /** Finished At */
+      finished_at: string | null;
+      failure_code: components["schemas"]["CrawlFailureCode"] | null;
+      /** Failure Detail */
+      failure_detail: string | null;
+      /** Cancel Requested At */
+      cancel_requested_at: string | null;
+      /** Attempt Count */
+      attempt_count: number;
     };
     /**
      * CrawlType
@@ -15058,7 +15123,7 @@ export interface components {
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
+      items: components["schemas"]["CrawlRunPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -20516,9 +20581,7 @@ export interface components {
       download_files: boolean;
       crawl_type: components["schemas"]["CrawlType"];
       update_interval: components["schemas"]["UpdateInterval"];
-      latest_crawl:
-        | components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"]
-        | null;
+      latest_crawl: components["schemas"]["CrawlRunPublic"] | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
       /**
@@ -20826,65 +20889,6 @@ export interface components {
        */
       set_at: string;
     };
-    /** CrawlRunPublic */
-    eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Pages Crawled */
-      pages_crawled?: number | null;
-      /** Files Downloaded */
-      files_downloaded?: number | null;
-      /** Pages Failed */
-      pages_failed?: number | null;
-      /** Files Failed */
-      files_failed?: number | null;
-      /** Failure Summary */
-      failure_summary?: {
-        [key: string]: number;
-      } | null;
-      /** @default queued */
-      status?: components["schemas"]["Status"] | null;
-      /** Result Location */
-      result_location?: string | null;
-      /** Finished At */
-      finished_at?: string | null;
-    };
-    /** CrawlRunPublic */
-    eneo__websites__presentation__website_models__CrawlRunPublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Pages Crawled */
-      pages_crawled: number | null;
-      /** Files Downloaded */
-      files_downloaded: number | null;
-      /** Pages Failed */
-      pages_failed: number | null;
-      /** Files Failed */
-      files_failed: number | null;
-      /** Failure Summary */
-      failure_summary?: {
-        [key: string]: number;
-      } | null;
-      status: components["schemas"]["Status"];
-      /** Result Location */
-      result_location: string | null;
-      /** Finished At */
-      finished_at: string | null;
-    };
     /** @enum {string} */
     EneoEventType:
       | "generating_image"
@@ -21119,7 +21123,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["CrawlRunPublic"];
         };
       };
       /** @description Not Found */
@@ -37666,7 +37670,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["CrawlRunPublic"];
         };
       };
       /** @description Forbidden */

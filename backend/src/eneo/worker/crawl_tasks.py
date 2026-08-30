@@ -1,16 +1,16 @@
 import asyncio
+import contextlib
 import hashlib
-import random
+import os
+import secrets
 import socket
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Generic, Protocol, TypeVar, cast
 from uuid import UUID
 
-import redis.asyncio as aioredis
 import sqlalchemy as sa
-from arq import Retry
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,37 +25,93 @@ from eneo.crawler.engine import (
     PageFailed,
     PageUnchanged,
 )
-from eneo.database.affected_rows import affected_row_count
-from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.model_providers.infrastructure.litellm_provider import (
+    ResolvedLiteLLMProvider,
+    load_active_litellm_provider,
+)
 from eneo.tenants.crawler_settings_helper import get_crawler_setting
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
+from eneo.websites.domain.crawl_run import (
+    CrawlFailureCode,
+    CrawlOrigin,
+    CrawlOutcome,
+    CrawlPhase,
+    CrawlType,
+)
 from eneo.worker.crawl import (
+    CrawlLeaseLostError,
     HeartbeatFailedError,
     HeartbeatMonitor,
-    JobPreemptedError,
     SessionHolder,
     execute_with_recovery,
     persist_batch,
-    reset_tenant_retry_delay,
-    update_job_retry_stats,
 )
 from eneo.worker.crawl.persistence import CrawlPageData
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
-from eneo.worker.feeder.capacity import CapacityManager
-from eneo.worker.feeder.election import LeaderElection
-from eneo.worker.feeder.queues import CrawlPendingJobData, PendingQueue
-from eneo.worker.redis.lua_scripts import LuaScripts
-from eneo.worker.task_manager import TaskManager
 
 logger = get_logger(__name__)
 
-SCHEDULER_LOCK_KEY = "crawl_scheduler:leader"
-SCHEDULER_LOCK_TTL_SECONDS = 1800
-
 QueueItem = TypeVar("QueueItem")
+
+
+class _ProviderLoader(Protocol):
+    async def __call__(
+        self,
+        *,
+        session: AsyncSession,
+        provider_id: UUID,
+        tenant_id: UUID,
+    ) -> ResolvedLiteLLMProvider: ...
+
+
+async def _build_embedding_model_spec(
+    *,
+    session: AsyncSession,
+    embedding_model: EmbeddingModels,
+    tenant_id: UUID,
+    load_provider: _ProviderLoader = load_active_litellm_provider,
+) -> EmbeddingModelSpec:
+    provider: ResolvedLiteLLMProvider | None = None
+    if embedding_model.provider_id is not None:
+        provider = await load_provider(
+            session=session,
+            provider_id=embedding_model.provider_id,
+            tenant_id=tenant_id,
+        )
+
+    max_input = embedding_model.max_input
+    if max_input is None:
+        raise ValueError("The crawl embedding model has no input limit")
+
+    return EmbeddingModelSpec(
+        id=embedding_model.id,
+        name=embedding_model.name,
+        litellm_model_name=(
+            f"{provider.provider_type}/{embedding_model.name}"
+            if provider is not None
+            else embedding_model.litellm_model_name
+        ),
+        family=embedding_model.family or None,
+        max_input=max_input,
+        max_batch_size=embedding_model.max_batch_size,
+        dimensions=embedding_model.dimensions,
+        open_source=embedding_model.open_source,
+        provider_id=embedding_model.provider_id,
+        provider_type=provider.provider_type if provider is not None else None,
+        provider_credentials=provider.credentials if provider is not None else None,
+        provider_config=provider.config if provider is not None else None,
+    )
+
+
+class _QueueClosed:
+    __slots__ = ()
+
+
+_QUEUE_CLOSED = _QueueClosed()
 
 
 class _ByteBoundedQueue(Generic[QueueItem]):
@@ -68,6 +124,7 @@ class _ByteBoundedQueue(Generic[QueueItem]):
         self._max_bytes = max_bytes
         self._items: deque[tuple[QueueItem, int]] = deque()
         self._retained_bytes = 0
+        self._closed = False
         self._condition = asyncio.Condition()
 
     async def put(self, item: QueueItem, *, weight: int = 0) -> None:
@@ -75,764 +132,348 @@ class _ByteBoundedQueue(Generic[QueueItem]):
             raise ValueError("queue item weight cannot be negative")
         async with self._condition:
             await self._condition.wait_for(
-                lambda: len(self._items) < self._max_items
-                and (
-                    not self._items or self._retained_bytes + weight <= self._max_bytes
+                lambda: self._closed
+                or (
+                    len(self._items) < self._max_items
+                    and (
+                        not self._items
+                        or self._retained_bytes + weight <= self._max_bytes
+                    )
                 )
             )
+            if self._closed:
+                raise RuntimeError("Cannot add events to a closed crawl stream")
             self._items.append((item, weight))
             self._retained_bytes += weight
             self._condition.notify_all()
 
-    async def get(self) -> QueueItem:
+    async def get(self) -> QueueItem | _QueueClosed:
         async with self._condition:
-            await self._condition.wait_for(self._items.__len__)
+            await self._condition.wait_for(lambda: bool(self._items) or self._closed)
+            if not self._items:
+                return _QUEUE_CLOSED
             item, weight = self._items.popleft()
             self._retained_bytes -= weight
             self._condition.notify_all()
             return item
 
+    async def close(self) -> None:
+        """Wake the consumer without waiting for capacity in the data buffer."""
+        async with self._condition:
+            self._closed = True
+            self._condition.notify_all()
 
-def _crawl_was_successful(
+
+def _classify_crawl_outcome(
     *,
-    pages: int,
+    published_pages: int,
     unchanged_pages: int,
-    files: int,
+    published_files: int,
+    unchanged_files: int,
     failed_pages: int,
     failed_files: int,
-    sitemap_skipped: bool,
-) -> bool:
-    if sitemap_skipped:
-        return True
-    total_items = pages + unchanged_pages + files
-    total_failed = failed_pages + failed_files
-    return total_items > 0 and total_failed < total_items
+    partial: bool,
+) -> CrawlOutcome:
+    useful_items = published_pages + unchanged_pages + published_files + unchanged_files
+    failed_items = failed_pages + failed_files
+    if useful_items == 0:
+        return (
+            CrawlOutcome.FAILED if failed_items > 0 or partial else CrawlOutcome.EMPTY
+        )
+    if failed_items > 0 or partial:
+        return CrawlOutcome.PARTIAL
+    if published_pages == 0 and published_files == 0:
+        return CrawlOutcome.UNCHANGED
+    return CrawlOutcome.SUCCEEDED
+
+
+def _failure_code_for_crawl(
+    failure_counts: dict[str, int],
+    termination_reason: str,
+) -> CrawlFailureCode:
+    reasons = {reason.lower() for reason in failure_counts}
+    reasons.add(termination_reason.lower())
+    if any(
+        reason == "robots_disallowed"
+        or reason.startswith(
+            ("http_401", "http_403", "http_407", "http_429", "http_451")
+        )
+        for reason in reasons
+    ):
+        return CrawlFailureCode.REMOTE_BLOCKED
+    if any("timeout" in reason for reason in reasons):
+        return CrawlFailureCode.TIMED_OUT
+    if any(
+        marker in reason
+        for reason in reasons
+        for marker in ("connector", "connection", "dns", "ssl", "certificate")
+    ):
+        return CrawlFailureCode.REMOTE_UNREACHABLE
+    return CrawlFailureCode.PROCESSING_FAILED
+
+
+def _failure_detail(code: CrawlFailureCode, outcome: CrawlOutcome) -> str:
+    if outcome == CrawlOutcome.PARTIAL:
+        return {
+            CrawlFailureCode.REMOTE_BLOCKED: (
+                "The crawl finished with partial results because some resources "
+                "blocked the crawler"
+            ),
+            CrawlFailureCode.REMOTE_UNREACHABLE: (
+                "The crawl finished with partial results because some resources "
+                "could not be reached"
+            ),
+            CrawlFailureCode.TIMED_OUT: (
+                "The crawl finished with partial results after reaching a time limit"
+            ),
+            CrawlFailureCode.PROCESSING_FAILED: (
+                "The crawl finished with partial results because some resources "
+                "could not be processed"
+            ),
+        }[code]
+    return {
+        CrawlFailureCode.REMOTE_BLOCKED: "The website blocked the crawler",
+        CrawlFailureCode.REMOTE_UNREACHABLE: "The website could not be reached",
+        CrawlFailureCode.TIMED_OUT: "The website did not respond within the crawl limit",
+        CrawlFailureCode.PROCESSING_FAILED: "The crawl produced no usable content",
+    }[code]
 
 
 def _should_store_sitemap_state(
     *,
     has_new_state: bool,
     crawl_is_partial: bool,
-    sitemap_skipped: bool,
-    crawl_successful: bool,
+    outcome: CrawlOutcome,
     total_failed: int,
 ) -> bool:
     return (
         has_new_state
         and not crawl_is_partial
-        and not sitemap_skipped
-        and crawl_successful
+        and outcome
+        in {
+            CrawlOutcome.SUCCEEDED,
+            CrawlOutcome.UNCHANGED,
+            CrawlOutcome.EMPTY,
+        }
         and total_failed == 0
     )
 
 
-async def _get_primary_active_job_id(
-    session: AsyncSession,
-    *,
-    website_id: UUID,
-) -> UUID | None:
-    """Return the oldest active crawl job ID for a website.
-
-    Used to ensure newer duplicate crawl jobs yield to the earliest queued or
-    running job, preventing duplicate executions when schedules overlap.
-    """
-    from eneo.database.tables.job_table import Jobs
-    from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
-    from eneo.main.models import Status
-
-    active_statuses = [Status.QUEUED.value, Status.IN_PROGRESS.value]
-    stmt = (
-        sa.select(Jobs.id)
-        .join(CrawlRunsTable, CrawlRunsTable.job_id == Jobs.id)
-        .where(CrawlRunsTable.website_id == website_id)
-        .where(Jobs.status.in_(active_statuses))
-        .order_by(Jobs.created_at.asc())
-        .limit(1)
-    )
-    return await session.scalar(stmt)
-
-
 async def queue_website_crawls(container: Container):
-    """Queue websites for crawling based on their update intervals.
-
-    Why: Uses centralized scheduler service for maintainable interval logic.
-    Properly handles DAILY, EVERY_OTHER_DAY, and WEEKLY intervals.
-
-    Phase 2 Enhancement: When feeder is enabled, adds to pending queue instead
-    of direct ARQ enqueue to prevent burst overload.
-
-    Session Strategy (P0 FIX): Uses SHORT-LIVED sessions for each operation to
-    prevent connection pool exhaustion. Previously held one session for the
-    entire loop (60+ seconds), causing QueuePool limit reached errors.
-
-    Now:
-    - Phase 1: Query websites → release connection immediately
-    - Phase 2: Each website gets its own session → release after each
-    """
+    """Persist due crawls in short transactions, then reconcile one batch."""
     from eneo.database.database import sessionmanager
 
-    settings = get_settings()
+    async with sessionmanager.session() as query_session, query_session.begin():
+        crawl_scheduler_service = container.crawl_scheduler_service()
+        crawl_scheduler_service.website_sparse_repo.session = query_session
+        websites = await crawl_scheduler_service.get_websites_due_for_crawl()
 
-    scheduler_lock = None
-    scheduler_lock_acquired = False
-    scheduler_worker_id = socket.gethostname()
+    logger.info(
+        "Admitting websites due for crawling",
+        extra={"website_count": len(websites)},
+    )
+    admitted = 0
+    failed = 0
+    for website in websites:
+        try:
+            async with (
+                sessionmanager.session() as website_session,
+                website_session.begin(),
+            ):
+                user_repo = container.user_repo()
+                user_repo.session = website_session
+                user = await user_repo.get_user_by_id(website.user_id)
+                assert user is not None
+                website_container = Container(
+                    session=providers.Object(website_session),
+                    user=providers.Object(user),
+                    tenant=providers.Object(user.tenant),
+                )
 
-    try:
-        redis_client = container.redis_client()
-    except Exception as exc:
-        redis_client = None
-        logger.warning(
-            "Failed to initialize Redis client for crawl scheduling",
-            extra={"error": str(exc)},
-        )
+                from eneo.websites.domain.website import Website
 
-    # Scheduler lock: prevent multiple workers from enqueueing the same schedule
-    if redis_client:
-        scheduler_lock = LeaderElection(
-            redis_client,
-            scheduler_worker_id,
-            lock_key=SCHEDULER_LOCK_KEY,
-            ttl_seconds=SCHEDULER_LOCK_TTL_SECONDS,
-        )
-        scheduler_lock_acquired = await scheduler_lock.try_acquire()
-        if not scheduler_lock_acquired:
-            logger.info(
-                "Skipping crawl scheduling; another worker holds the scheduler lock",
+                await website_container.crawl_service().crawl(
+                    cast(Website, website),
+                    origin=CrawlOrigin.SCHEDULED,
+                    reconcile_after_commit=False,
+                )
+            admitted += 1
+        except Exception:
+            failed += 1
+            logger.exception(
+                "Failed to admit scheduled crawl",
                 extra={
-                    "lock_key": SCHEDULER_LOCK_KEY,
-                    "lock_ttl_seconds": SCHEDULER_LOCK_TTL_SECONDS,
-                    "worker_id": scheduler_worker_id,
+                    "website_id": str(website.id),
+                    "tenant_id": str(website.tenant_id),
+                    "space_id": str(website.space_id),
+                    "user_id": str(website.user_id),
                 },
             )
-            return False
-        logger.debug(
-            "Acquired crawl scheduler lock",
-            extra={
-                "lock_key": SCHEDULER_LOCK_KEY,
-                "lock_ttl_seconds": SCHEDULER_LOCK_TTL_SECONDS,
-                "worker_id": scheduler_worker_id,
-            },
-        )
 
-    # Get Redis client for feeder mode (if enabled)
-    if settings.crawl_feeder_enabled and redis_client is None:
-        logger.error(
-            "Feeder enabled but Redis unavailable; falling back to direct enqueue mode."
-        )
+    from eneo.websites.application.crawl_dispatch import reconcile_crawl_work
 
-    try:
-        # PHASE 1: Query due websites with SHORT-LIVED session (~50-200ms)
-        # Release connection immediately after query completes to prevent
-        # "Connection held for 60s" warnings when processing many websites.
-        async with sessionmanager.session() as query_session, query_session.begin():
-            crawl_scheduler_service = container.crawl_scheduler_service()
-            # Inject the short-lived session for this query only
-            crawl_scheduler_service.website_sparse_repo.session = query_session
-            websites = await crawl_scheduler_service.get_websites_due_for_crawl()
-        # Session is now CLOSED - connection returned to pool
-
-        logger.info(
-            f"Processing {len(websites)} websites due for crawling",
-            extra={
-                "feeder_enabled": settings.crawl_feeder_enabled,
-                "mode": "pending_queue"
-                if settings.crawl_feeder_enabled
-                else "direct_enqueue",
-                "website_count": len(websites),
-            },
-        )
-
-        successful_crawls = 0
-        failed_crawls = 0
-
-        # PHASE 2: Process each website with its OWN short-lived session
-        # Each website operation takes ~100-500ms. Without per-website sessions,
-        # 100 websites would hold ONE connection for 10-50 seconds.
-        # With per-website sessions, each connection is held for <500ms.
-        for website in websites:
-            try:
-                # Each website gets its own session scope
-                async with (
-                    sessionmanager.session() as website_session,
-                    website_session.begin(),
-                ):
-                    # Create repos with this session
-                    user_repo = container.user_repo()
-                    user_repo.session = website_session
-
-                    # Get user for this website
-                    user = await user_repo.get_user_by_id(website.user_id)
-                    assert user is not None
-                    cast(Any, container.user).override(providers.Object(user))
-                    cast(Any, container.tenant).override(providers.Object(user.tenant))
-
-                    # Feeder mode: Create crawl run AND job record, then add to pending queue
-                    # Why: Pre-create DB records so feeder only handles ARQ enqueueing
-                    # Deterministic job_id based on run_id prevents duplicate enqueues
-                    if settings.crawl_feeder_enabled and redis_client:
-                        from eneo.jobs.job_models import Job, Task
-                        from eneo.main.models import Status
-                        from eneo.websites.domain.crawl_run import CrawlRun
-
-                        # Step 1: Create crawl run record
-                        crawl_run_repo = container.crawl_run_repo()
-                        crawl_run_repo.session = website_session
-                        crawl_run = CrawlRun.create(website=website)
-                        crawl_run = await crawl_run_repo.add(crawl_run=crawl_run)
-
-                        # Step 2: Create job record in database
-                        # Why: Pre-create so job_id is deterministic and available for feeder
-                        # CRITICAL: Use website_session, not container's outer cron_job session!
-                        # Bug fix: Job and CrawlRun must commit together for watchdog JOIN to work.
-                        # See: watchdog.py zombie reconciliation query joins Jobs with CrawlRuns
-                        job_repo = container.job_repo()
-                        job_repo.delegate.session = (
-                            website_session  # Align with crawl_run_repo
-                        )
-                        job = Job(
-                            task=Task.CRAWL,
-                            name=f"Crawl: {website.name or website.url}",
-                            status=Status.QUEUED,
-                            user_id=website.user_id,
-                        )
-                        job_in_db = await job_repo.add_job(job=job)
-
-                        # Step 3: Link job_id to crawl_run
-                        crawl_run.update(job_id=job_in_db.id)
-                        await crawl_run_repo.update(crawl_run=crawl_run)
-
-                        # Step 4: Prepare job data for pending queue
-                        # Store database job_id for deterministic enqueueing
-                        job_data: CrawlPendingJobData = {
-                            "job_id": str(
-                                job_in_db.id
-                            ),  # Critical: Deterministic ID from DB
-                            "user_id": str(website.user_id),
-                            "website_id": str(website.id),
-                            "run_id": str(crawl_run.id),
-                            "url": website.url,
-                            "download_files": website.download_files,
-                            "crawl_type": website.crawl_type.value,
-                            "origin": "scheduled",
-                        }
-
-                        # Step 5: Add to pending queue with orphaning protection
-                        # If Redis push fails, mark DB records as FAILED
-                        # Why: Prevents orphaned crawl_run/job records that never execute
-                        try:
-                            pending_queue = PendingQueue(redis_client)
-                            if not await pending_queue.add(
-                                tenant_id=user.tenant.id,
-                                job_data=job_data,
-                            ):
-                                raise Exception("Failed to add to pending queue")
-
-                            successful_crawls += 1
-                            logger.debug(
-                                f"Added crawl to pending queue: {website.url}",
-                                extra={
-                                    "feeder_mode": True,
-                                    "job_id": str(job_in_db.id),
-                                    "run_id": str(crawl_run.id),
-                                },
-                            )
-                        except Exception as redis_exc:
-                            # Redis push failed, rollback by marking DB records as FAILED
-                            # Why: Prevents silent data loss and orphaned records
-                            try:
-                                from eneo.main.models import Status
-
-                                job_in_db.status = Status.FAILED
-                                await job_repo.update_job(job_in_db)  # type: ignore[call-overload]
-
-                                crawl_run.status = Status.FAILED
-                                await crawl_run_repo.update(crawl_run)
-                            except Exception as update_exc:
-                                logger.warning(
-                                    "Failed to rollback DB records after Redis error",
-                                    extra={
-                                        "job_id": str(job_in_db.id),
-                                        "error": str(update_exc),
-                                    },
-                                )
-
-                            failed_crawls += 1
-                            logger.error(
-                                f"Failed to add to pending queue: {redis_exc}",
-                                extra={
-                                    "website_id": str(website.id),
-                                    "url": website.url,
-                                    "job_id": str(job_in_db.id),
-                                },
-                            )
-                    else:
-                        # Direct enqueue mode (original behavior when feeder disabled)
-                        from eneo.websites.domain.website import Website
-
-                        crawl_service = container.crawl_service()
-                        await crawl_service.crawl(
-                            cast(Website, website), origin="scheduled"
-                        )
-                        successful_crawls += 1
-
-                        logger.debug(f"Successfully queued crawl for {website.url}")
-
-                # Session is now CLOSED for this website - connection returned to pool
-
-            except Exception as e:
-                # Why: Individual website failures shouldn't stop the entire batch
-                failed_crawls += 1
-                logger.error(
-                    f"Failed to queue crawl for {website.url}: {str(e)}",
-                    extra={
-                        "website_id": str(website.id),
-                        "tenant_id": str(website.tenant_id),
-                        "space_id": str(website.space_id),
-                        "user_id": str(website.user_id),
-                    },
-                )
-                continue
-
-        logger.info(
-            f"Crawl queueing completed: {successful_crawls} successful, {failed_crawls} failed"
-        )
-
-        return True
-    finally:
-        if scheduler_lock and scheduler_lock_acquired:
-            released = await scheduler_lock.release()
-            if not released:
-                logger.debug(
-                    "Failed to release crawl scheduler lock",
-                    extra={
-                        "lock_key": SCHEDULER_LOCK_KEY,
-                        "worker_id": scheduler_worker_id,
-                    },
-                )
+    await reconcile_crawl_work()
+    logger.info(
+        "Scheduled crawl admission completed",
+        extra={"admitted": admitted, "failed": failed},
+    )
+    return failed == 0
 
 
 async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
-    # Normalize job_id - ARQ passes job_id as string in ctx
+    from eneo.database.database import sessionmanager
+    from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
+
     job_id = UUID(str(job_id))
-    # Create TaskManager directly without using container.task_manager()
-    # Why: container.task_manager() tries to resolve job_service which has
-    # transitive dependency: job_service → job_repo → session
-    # With sessionless container (session=None), this fails type validation.
-    #
-    # This is safe because:
-    # 1. crawl_task sets _job_already_handled=True, skipping complete_job/fail_job
-    # 2. Status updates use execute_with_recovery() with its own sessions
-    # 3. fail_job() has fallback to direct SQL when job_service is None
-    #    (ensures jobs are marked failed even when exceptions occur early)
-    task_manager = TaskManager(
-        user=container.user(),
-        job_id=job_id,
-        job_service=None,  # Not needed for crawl_task - status handled via execute_with_recovery
-    )
+    if params.attempt_id is None or params.attempt_number is None:
+        raise ValueError("Crawl execution requires a persisted attempt identity")
+
+    attempt_id = params.attempt_id
     settings = get_settings()
-
-    tenant = None
-    limiter = None
-    acquired = False
-    global_acquired = False
-    redis_client: aioredis.Redis | None = None
-    # Track pre-acquired slot for guaranteed cleanup even if tenant injection fails
-    preacquired_tenant_id: UUID | None = None
-    global_slot_preacquired = False
-
-    # Track sessions for cleanup (addresses session lifecycle leak on recovery)
-    # When we recover from invalid transaction, we create new sessions that must be
-    # closed in the finally block to prevent connection pool exhaustion
+    heartbeat_interval_seconds = settings.crawl_heartbeat_interval_seconds
+    lease_duration = timedelta(
+        seconds=max(
+            heartbeat_interval_seconds * (settings.crawl_heartbeat_max_failures + 1),
+            120,
+        )
+    )
+    lease_owner = f"{socket.gethostname()}:{os.getpid()}:{secrets.token_hex(16)}"
     created_sessions: list[AsyncSession] = []
-    # Use mutable holder so page loop and heartbeat can access current session
-    # This allows session recovery to update the reference mid-processing
     session_holder: SessionHolder = {"session": None, "uploader": None}
+    terminalized = False
+    heartbeat_stop: asyncio.Event | None = None
+    heartbeat_task: asyncio.Task[None] | None = None
 
-    # CRITICAL: Check for pre-acquired slot BEFORE tenant injection
-    # Why: If feeder acquired a slot but tenant injection fails, we must still release
-    # This read is safe even without tenant context
+    async def _stop_heartbeat(*, propagate_failure: bool = False) -> None:
+        if heartbeat_stop is not None:
+            heartbeat_stop.set()
+        if heartbeat_task is None:
+            return
+        if not heartbeat_task.done():
+            heartbeat_task.cancel()
+        result = (await asyncio.gather(heartbeat_task, return_exceptions=True))[0]
+        if (
+            propagate_failure
+            and isinstance(result, BaseException)
+            and not isinstance(result, asyncio.CancelledError)
+        ):
+            raise result
+
     try:
-        _early_redis = container.redis_client()
-        preacquired_key = f"job:{job_id}:slot_preacquired"
-        preacquired_value = await _early_redis.get(preacquired_key)
-        if preacquired_value:
-            # Store tenant_id for guaranteed cleanup in finally block
-            preacquired_tenant_id = UUID(preacquired_value.decode())
-            # NOTE: Do NOT delete flag here - keep it for entire crawl lifecycle
-            # Why: Heartbeat refreshes flag TTL, watchdog uses flag for crash recovery
-            # Flag will be deleted in finally block after slot release
-            logger.debug(
-                "Pre-acquired slot detected, will ensure release",
-                extra={"job_id": str(job_id), "tenant_id": str(preacquired_tenant_id)},
+        async with sessionmanager.session() as claim_session, claim_session.begin():
+            claimed_task = await CrawlRunRepository(claim_session).claim_attempt(
+                attempt_id,
+                dispatch_id=job_id,
+                lease_owner=lease_owner,
+                lease_duration=lease_duration,
             )
-        global_slot_preacquired = bool(
-            await _early_redis.get(LuaScripts.global_crawl_flag_key(job_id))
-        )
-    except Exception as exc:
+    except ValueError:
+        # The failed claim transaction must roll back before terminalizing the
+        # invalid durable payload, otherwise the rejection is rolled back too.
+        async with sessionmanager.session() as reject_session, reject_session.begin():
+            await CrawlRunRepository(reject_session).reject_pending_attempt(
+                attempt_id,
+                failure_code=CrawlFailureCode.INVALID_DISPATCH,
+                failure_detail="Stored crawl execution data is invalid",
+            )
+        raise
+
+    if claimed_task is None:
         logger.warning(
-            "Failed to check pre-acquired slot early",
-            extra={"job_id": str(job_id), "error": str(exc)},
+            "Ignoring crawl delivery because its attempt is no longer claimable",
+            extra={
+                "job_id": str(job_id),
+                "attempt_id": str(attempt_id),
+                "run_id": str(params.run_id),
+            },
         )
+        return {"status": "stale_delivery", "job_id": str(job_id)}
+
+    # The durable attempt payload is the execution identity. The Redis payload
+    # only identifies which attempt delivery arrived and is never trusted for
+    # user, tenant, website, or crawl configuration.
+    params = claimed_task
+
+    async def _finish_attempt(
+        outcome: CrawlOutcome,
+        *,
+        failure_code: CrawlFailureCode | None = None,
+        failure_detail: str | None = None,
+        result_location: str | None = None,
+        pages_crawled: int | None = None,
+        files_downloaded: int | None = None,
+        pages_failed: int | None = None,
+        files_failed: int | None = None,
+        failure_summary: dict[str, int] | None = None,
+    ) -> bool:
+        nonlocal terminalized
+        if terminalized:
+            return True
+        async with sessionmanager.session() as finish_session, finish_session.begin():
+            finished = await CrawlRunRepository(finish_session).finish_attempt(
+                attempt_id,
+                lease_owner=lease_owner,
+                outcome=outcome,
+                failure_code=failure_code,
+                failure_detail=failure_detail,
+                result_location=result_location,
+                pages_crawled=pages_crawled,
+                files_downloaded=files_downloaded,
+                pages_failed=pages_failed,
+                files_failed=files_failed,
+                failure_summary=failure_summary,
+            )
+        terminalized = finished
+        return finished
+
+    async def _require_current_lease(
+        session: AsyncSession,
+        *,
+        expected_phase: CrawlPhase,
+    ) -> None:
+        current = await CrawlRunRepository(session).lock_attempt_lease(
+            attempt_id,
+            lease_owner=lease_owner,
+            expected_phase=expected_phase,
+        )
+        if not current:
+            raise CrawlLeaseLostError(
+                "Crawl attempt lease was lost before a database mutation"
+            )
+
+    num_pages = 0
+    num_published_pages = 0
+    num_not_modified_pages = 0
+    num_files = 0
+    num_failed_pages = 0
+    num_failed_files = 0
+    num_deleted_blobs = 0
+    num_skipped_files = 0
+    failure_counts: dict[str, int] = defaultdict(int)
 
     try:
-        tenant = container.tenant()
-    except Exception:  # pragma: no cover - defensive guard when tenant not injected
-        tenant = None
-
-    if tenant:
-        limiter = container.tenant_concurrency_limiter()
-        try:
-            redis_client = container.redis_client()
-        except Exception:  # pragma: no cover - container guard
-            redis_client = None
-
-        # FALLBACK: If early check failed (transient Redis error), retry now
-        # Why: Early check runs before tenant injection. If it failed, the flag
-        # is still in Redis and we'd double-acquire without this retry.
-        if preacquired_tenant_id is None and redis_client:
-            try:
-                preacquired_key = f"job:{job_id}:slot_preacquired"
-                preacquired_value = await redis_client.get(preacquired_key)
-                if preacquired_value:
-                    preacquired_tenant_id = UUID(preacquired_value.decode())
-                    # NOTE: Do NOT delete flag here - keep it for entire crawl lifecycle
-                    # Flag will be deleted in finally block after slot release
-                    logger.debug(
-                        "Pre-acquired slot detected on retry (early check failed)",
-                        extra={
-                            "job_id": str(job_id),
-                            "tenant_id": str(preacquired_tenant_id),
-                        },
-                    )
-            except Exception:
-                pass  # Best effort - will acquire normally if this fails too
-
-        if not global_slot_preacquired and redis_client:
-            try:
-                global_slot_preacquired = bool(
-                    await redis_client.get(LuaScripts.global_crawl_flag_key(job_id))
-                )
-            except Exception:
-                pass  # Global acquisition below fails closed if Redis is unavailable
-
-        # Check if we already detected a pre-acquired slot in early check
-        # The early check happens BEFORE tenant injection to ensure cleanup even if injection fails
-        if preacquired_tenant_id is not None:
-            if preacquired_tenant_id == tenant.id:
-                # Normal case: feeder pre-acquired slot for this tenant
-                acquired = True
-                logger.debug(
-                    "Slot pre-acquired by feeder, skipping limiter.acquire()",
-                    extra={"job_id": str(job_id), "tenant_id": str(tenant.id)},
-                )
-                # Refresh semaphore TTL - we now own this slot
-                # Why: Normal acquire() refreshes TTL via Lua script. When we skip acquire,
-                # we must manually refresh to prevent semaphore expiry during long queue times.
-                if redis_client:
-                    try:
-                        semaphore_ttl = get_crawler_setting(
-                            "tenant_worker_semaphore_ttl_seconds",
-                            tenant.crawler_settings
-                            if hasattr(tenant, "crawler_settings")
-                            else None,
-                            default=settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                        concurrency_key = f"tenant:{tenant.id}:active_jobs"
-                        await redis_client.expire(concurrency_key, semaphore_ttl)
-                    except Exception:
-                        pass  # Best effort - slot is still valid
-            else:
-                # EDGE CASE: Feeder and worker disagree on tenant_id
-                # This should never happen in normal operation but we handle it defensively
-                logger.error(
-                    "Tenant ID mismatch between feeder and worker",
-                    extra={
-                        "job_id": str(job_id),
-                        "feeder_tenant_id": str(preacquired_tenant_id),
-                        "worker_tenant_id": str(tenant.id),
-                        "action": "releasing_feeder_slot_and_acquiring_new",
-                    },
-                )
-                # Release the mismatched slot to prevent leak
-                if redis_client:
-                    try:
-                        # Use per-tenant TTL if available
-                        semaphore_ttl = get_crawler_setting(
-                            "tenant_worker_semaphore_ttl_seconds",
-                            tenant.crawler_settings
-                            if hasattr(tenant, "crawler_settings")
-                            else None,
-                            default=settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                        release_key = f"tenant:{preacquired_tenant_id}:active_jobs"
-                        await cast(
-                            Any,
-                            redis_client.eval(
-                                LuaScripts.RELEASE_SLOT,
-                                1,
-                                release_key,
-                                str(semaphore_ttl),
-                            ),
-                        )
-                    except Exception:
-                        pass  # Best effort
-                # Clear preacquired_tenant_id so finally block doesn't double-release
-                preacquired_tenant_id = None
-                # Acquire slot for the correct tenant
-                acquired = await limiter.acquire(tenant.id)
-        else:
-            # No pre-acquired slot, acquire normally
-            acquired = await limiter.acquire(tenant.id)
-
-        if acquired:
-            if global_slot_preacquired:
-                global_acquired = True
-                if redis_client:
-                    try:
-                        await redis_client.expire(
-                            LuaScripts.global_crawl_slot_key(),
-                            settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                    except Exception:
-                        pass
-            else:
-                # Jobs queued before global admission was introduced (or while
-                # the feeder was disabled) acquire the reserved-capacity permit
-                # when they start. If capacity is full they are deferred below.
-                global_acquired = bool(
-                    redis_client
-                    and await CapacityManager(
-                        redis_client, settings
-                    ).try_acquire_global_crawl_slot()
-                )
-                if global_acquired and redis_client:
-                    try:
-                        await redis_client.set(
-                            LuaScripts.global_crawl_flag_key(job_id),
-                            "1",
-                            ex=settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                    except Exception:
-                        await LuaScripts.release_global_crawl_slot(
-                            redis_client,
-                            settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                        global_acquired = False
-
-            if not global_acquired:
-                await limiter.release(tenant.id)
-                acquired = False
-                if preacquired_tenant_id is not None and redis_client:
-                    await redis_client.delete(f"job:{job_id}:slot_preacquired")
-                    preacquired_tenant_id = None
-
-        if not acquired:
-            # Enforce max age limit with exponential backoff to prevent infinite retry loops.
-            # Concurrency limit (busy signal) is NOT counted as a failure - only age is checked.
-            # This prevents jobs from being abandoned just because they're waiting for a slot.
-
-            # Get per-tenant max age setting (falls back to env default)
-            tenant_crawler_settings = tenant.crawler_settings if tenant else None
-            max_age_seconds = get_crawler_setting(
-                "crawl_job_max_age_seconds",
-                tenant_crawler_settings,
-                default=settings.crawl_job_max_age_seconds,
-            )
-
-            # Update stats with is_actual_failure=False (this is a busy signal, not a real failure)
-            failure_count, job_age = await update_job_retry_stats(
-                job_id=job_id,
-                redis_client=redis_client,
-                is_actual_failure=False,  # CRITICAL: Don't count busy waits as failures
-                max_age_seconds=max_age_seconds,
-            )
-
-            # Check if max job age exceeded (ONLY age check for busy signals)
-            if job_age > max_age_seconds:
-                # Update crawl_run status before abandoning to prevent orphaned DB records
-                # NOTE: Uses session_scope() for short-lived DB operation (~50ms)
-                try:
-                    async with Container.session_scope():
-                        crawl_run_repo = container.crawl_run_repo()
-                        crawl_run = await crawl_run_repo.one(params.run_id)
-                        from eneo.main.models import Status
-
-                        crawl_run.status = Status.FAILED
-                        await crawl_run_repo.update(crawl_run)
-                except Exception as update_exc:
-                    logger.warning(
-                        "Failed to update crawl_run status on terminal",
-                        extra={"run_id": str(params.run_id), "error": str(update_exc)},
-                    )
-
-                # Cleanup Redis counters to prevent memory leak
-                if redis_client:
-                    try:
-                        await redis_client.delete(
-                            f"job:{job_id}:start_time", f"job:{job_id}:retry_count"
-                        )
-                    except Exception:
-                        pass  # Best effort cleanup
-
-                logger.error(
-                    "Crawl job permanently failed: Maximum retry age exceeded (busy wait)",
-                    extra={
-                        "job_id": str(job_id),
-                        "tenant_id": str(tenant.id),
-                        "tenant_slug": tenant.slug,
-                        "website_id": str(params.website_id),
-                        "url": params.url,
-                        "job_age_seconds": job_age,
-                        "max_age_seconds": max_age_seconds,
-                        "failure_count": failure_count,
-                        "failure_reason": "max_age_exceeded_busy",
-                        "metric_name": "crawl.job.abandoned.max_age",
-                        "metric_value": 1,
-                    },
-                )
-                raise RuntimeError(
-                    f"Crawl job {job_id} abandoned after {job_age:.0f}s "
-                    f"(max: {max_age_seconds}s) - still waiting for concurrency slot"
-                )
-
-            # Calculate shorter backoff for busy signals (we're just waiting for a slot, not a failure)
-            # Use random jitter to prevent thundering herd when slots open up
-            retry_delay = random.uniform(10, 30)  # Short random delay for busy waits
-
-            # Get per-tenant concurrency limit for logging
-            concurrency_limit = get_crawler_setting(
-                "tenant_worker_concurrency_limit",
-                tenant_crawler_settings,
-                default=settings.tenant_worker_concurrency_limit,
-            )
-
-            logger.warning(
-                "Crawl capacity reached, requeueing crawl (busy wait)",
-                extra={
-                    "job_id": str(job_id),
-                    "tenant_id": str(tenant.id),
-                    "tenant_slug": tenant.slug,
-                    "website_id": str(params.website_id),
-                    "url": params.url,
-                    "max_concurrent": concurrency_limit,
-                    "global_crawl_limit": settings.effective_crawl_job_concurrency_limit,
-                    "failure_count": failure_count,
-                    "retry_delay_seconds": retry_delay,
-                    "job_age_seconds": job_age,
-                    "signal_type": "busy",
-                    "metric_name": "tenant.limiter.requeued",
-                    "metric_value": 1,
-                },
-            )
-            raise Retry(defer=retry_delay)
-
-    primary_job_id: UUID | None = None
-    if tenant is not None:
-        try:
-            async with Container.session_scope() as session:
-                primary_job_id = await _get_primary_active_job_id(
-                    session,
-                    website_id=params.website_id,
-                )
-
-                if primary_job_id and primary_job_id != job_id:
-                    from eneo.database.tables.job_table import Jobs
-                    from eneo.main.models import Status
-
-                    skip_message = (
-                        f"Skipped duplicate crawl; active job {primary_job_id}"
-                    )
-                    stmt = (
-                        sa.update(Jobs)
-                        .where(Jobs.id == job_id)
-                        .where(
-                            Jobs.status.in_(
-                                [Status.QUEUED.value, Status.IN_PROGRESS.value]
-                            )
-                        )
-                        .values(
-                            status=Status.FAILED.value,
-                            finished_at=datetime.now(timezone.utc),
-                            result_location=skip_message,
-                        )
-                    )
-                    result = await session.execute(stmt)
-                    if affected_row_count(result) == 0:
-                        logger.debug(
-                            "Duplicate crawl skip ignored; job status already changed",
-                            extra={
-                                "job_id": str(job_id),
-                                "website_id": str(params.website_id),
-                            },
-                        )
-
-            if primary_job_id and primary_job_id != job_id:
-                logger.warning(
-                    "Skipping duplicate crawl job; another active job exists",
-                    extra={
-                        "job_id": str(job_id),
-                        "primary_job_id": str(primary_job_id),
-                        "website_id": str(params.website_id),
-                        "url": params.url,
-                        "metric_name": "crawl.job.duplicate_skipped",
-                        "metric_value": 1,
-                    },
-                )
-                task_manager.mark_job_handled()
-                return {
-                    "status": "duplicate_skipped",
-                    "job_id": str(job_id),
-                    "primary_job_id": str(primary_job_id),
-                }
-        except Exception as exc:
-            logger.warning(
-                "Failed to evaluate duplicate crawl guard; proceeding with crawl",
-                extra={
-                    "job_id": str(job_id),
-                    "website_id": str(params.website_id),
-                    "error": str(exc),
-                },
-            )
-
-    try:
-        # CRITICAL: Atomic status check to prevent worker resurrection
-        # Why: Safe Watchdog may have marked this job FAILED while it was in ARQ queue.
-        # Without this check, we'd blindly set IN_PROGRESS, "resurrecting" a dead job.
-        # This uses Compare-and-Swap: only transitions QUEUED → IN_PROGRESS
-        # NOTE: Uses session_scope() for short-lived DB operation (~50ms)
         async with Container.session_scope():
-            job_repo_for_atomic_check = container.job_repo()
-            job_started = await job_repo_for_atomic_check.mark_job_started(job_id)
+            user = await container.user_repo().get_user_by_id(params.user_id)
+        if user is None:
+            raise ValueError("The crawl attempt user no longer exists")
 
-        if not job_started:
-            # Job status changed externally (likely FAILED by watchdog)
-            # We must NOT process this job - abort immediately
-            logger.warning(
-                "Worker resurrection prevented: job status changed externally",
-                extra={
-                    "job_id": str(job_id),
-                    "website_id": str(params.website_id),
-                    "url": params.url,
-                    "tenant_id": str(tenant.id) if tenant else None,
-                    "acquired_new_slot": acquired and preacquired_tenant_id is None,
-                    "metric_name": "crawl.worker.resurrection_prevented",
-                    "metric_value": 1,
-                },
+        from eneo.main.container.container_overrides import override_user
+
+        override_user(container=container, user=user)
+        tenant = container.tenant()
+        heartbeat_interval_seconds = get_crawler_setting(
+            "crawl_heartbeat_interval_seconds",
+            tenant.crawler_settings,
+            default=settings.crawl_heartbeat_interval_seconds,
+        )
+        lease_duration = timedelta(
+            seconds=max(
+                heartbeat_interval_seconds
+                * (settings.crawl_heartbeat_max_failures + 1),
+                120,
             )
-
-            # CRITICAL: Prevent finally block from releasing slot!
-            # The Watchdog ALREADY released the slot when it marked job FAILED.
-            # If we release again, we'd "steal" a slot from another running job.
-            # Clear both flags to ensure neither finally path triggers:
-            # - Primary path: if acquired → release (blocked by acquired=False)
-            # - Fallback path: elif preacquired_tenant_id and not acquired → release (blocked by None)
-            acquired = False
-            preacquired_tenant_id = None
-
-            return {"status": "resurrection_prevented", "job_id": str(job_id)}
-
-        # Job successfully transitioned to IN_PROGRESS, pass flag to skip redundant update
-        async with task_manager.set_status_on_exception(status_already_set=True):
+        )
+        async with contextlib.AsyncExitStack():
             # Initialize timing tracking for performance analysis
             timings = {
                 "fetch_existing_titles": 0.0,
@@ -843,16 +484,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 "update_size": 0.0,
             }
 
-            # Get resources (these don't need a session)
+            # Resolve the execution engine. File extraction is initialized only
+            # when a downloaded file is actually processed.
             crawler = container.crawler()
-            uploader = container.text_processor()
 
             # Initialize session holder for recovery support
             # NOTE: Starts with None - sessions are created on-demand by execute_with_recovery
             # This is the "sessionless container" pattern for long-running tasks
             # Each DB operation creates its own short-lived session (~50-300ms)
             session_holder["session"] = None
-            session_holder["uploader"] = uploader
 
             # BOOTSTRAP PHASE: Short-lived session for initial queries (~50-100ms)
             # Extract all needed data as primitives BEFORE the long crawl so the
@@ -870,7 +510,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             existing_titles: list[str] = []
             existing_publications: dict[str, tuple[bytes, UUID]] = {}
             existing_validators: dict[str, tuple[str | None, str | None]] = {}
-            stored_sitemap_state: dict[str, Any] | None = None
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -900,24 +539,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 if website_row is None:
                     raise Exception(f"Website {params.website_id} not found")
 
-                website: Any = website_row
+                website = website_row
                 website_url = website_row.url  # Save for logging after session closes
-                stored_sitemap_state = website_row.sitemap_state
-
-                # CRITICAL: Verify tenant isolation
-                if website_row.tenant_id != current_tenant.id:
-                    logger.error(
-                        "Tenant isolation violation detected",
-                        extra={
-                            "website_id": str(params.website_id),
-                            "website_tenant_id": str(website_row.tenant_id),
-                            "container_tenant_id": str(current_tenant.id),
-                        },
-                    )
-                    raise Exception(
-                        f"Tenant isolation violation: website {params.website_id} "
-                        f"belongs to tenant {website_row.tenant_id}, not {current_tenant.id}"
-                    )
 
                 # Extract HTTP auth credentials if present
                 # NOTE: Using ORM columns directly (http_auth_username, encrypted_auth_password)
@@ -971,55 +594,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 orm_embedding_model = website_row.embedding_model
                 embedding_model_spec: EmbeddingModelSpec | None = None
                 if orm_embedding_model:
-                    family_str: str | None = orm_embedding_model.family or None
-
-                    # Pre-resolve provider data while session is active
-                    provider_type = None
-                    provider_credentials = None
-                    provider_config = None
-                    if orm_embedding_model.provider_id:
-                        provider_result = await bootstrap_session.execute(
-                            sa.select(ModelProviders).where(
-                                ModelProviders.id == orm_embedding_model.provider_id
-                            )
-                        )
-                        provider_db = provider_result.scalar_one_or_none()
-                        if provider_db and provider_db.is_active:
-                            provider_type = provider_db.provider_type
-                            provider_credentials = provider_db.credentials
-                            provider_config = provider_db.config
-                        elif provider_db and not provider_db.is_active:
-                            logger.warning(
-                                "Embedding model provider is inactive",
-                                extra={
-                                    "model_name": orm_embedding_model.name,
-                                    "provider_id": str(orm_embedding_model.provider_id),
-                                },
-                            )
-
-                    # Compute litellm_model_name: prefer provider-derived name,
-                    # fall back to value stored on the model
-                    litellm_model_name = orm_embedding_model.litellm_model_name
-                    if provider_type:
-                        litellm_model_name = (
-                            f"{provider_type}/{orm_embedding_model.name}"
-                        )
-
-                    assert orm_embedding_model.max_input is not None
-
-                    embedding_model_spec = EmbeddingModelSpec(
-                        id=orm_embedding_model.id,
-                        name=orm_embedding_model.name,
-                        litellm_model_name=litellm_model_name,
-                        family=family_str,
-                        max_input=orm_embedding_model.max_input,
-                        max_batch_size=orm_embedding_model.max_batch_size,
-                        dimensions=orm_embedding_model.dimensions,
-                        open_source=orm_embedding_model.open_source,
-                        provider_id=orm_embedding_model.provider_id,
-                        provider_type=provider_type,
-                        provider_credentials=provider_credentials,
-                        provider_config=provider_config,
+                    embedding_model_spec = await _build_embedding_model_spec(
+                        session=bootstrap_session,
+                        embedding_model=orm_embedding_model,
+                        tenant_id=current_tenant.id,
                     )
 
                 # Build CrawlContext DTO from ORM objects
@@ -1029,6 +607,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     tenant_id=website.tenant_id,
                     tenant_slug=tenant.slug if tenant else None,
                     user_id=container.user().id,
+                    attempt_id=attempt_id,
+                    lease_owner=lease_owner,
                     # Embedding model - use EmbeddingModelSpec DTO (already extracted)
                     embedding_model_id=embedding_model_spec.id
                     if embedding_model_spec
@@ -1108,48 +688,32 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             # Do task
             logger.info(f"Running crawl with params: {params}")
 
-            num_pages = 0
-            num_files = 0
-            num_failed_pages = 0
-            num_failed_files = 0
-            num_deleted_blobs = 0
-            num_skipped_files = 0  # Files with unchanged content (hash match)
-
-            # Aggregate failure reasons across all batches
-            # Maps FailureReason codes to counts for final storage in failure_summary
-            failure_counts: dict[str, int] = defaultdict(int)
-
             # Use set for O(1) membership tests
             crawled_titles: set[str] = set()
             failed_titles: set[str] = set()  # Failed URLs excluded from stale deletion
 
-            # Get per-tenant settings for heartbeat BEFORE starting crawl
-            # This ensures heartbeat runs during the entire crawl phase
             current_tenant = container.tenant()
-            heartbeat_interval_seconds = get_crawler_setting(
-                "crawl_heartbeat_interval_seconds",
-                current_tenant.crawler_settings if current_tenant else None,
-                default=settings.crawl_heartbeat_interval_seconds,
-            )
-            semaphore_ttl_seconds = get_crawler_setting(
-                "tenant_worker_semaphore_ttl_seconds",
-                tenant.crawler_settings
-                if tenant is not None and hasattr(tenant, "crawler_settings")
-                else None,
-                default=settings.tenant_worker_semaphore_ttl_seconds,
-            )
 
-            # Start heartbeats before the HTTP stream; large sites can run for hours.
+            async def _renew_lease() -> bool:
+                async with (
+                    sessionmanager.session() as heartbeat_session,
+                    heartbeat_session.begin(),
+                ):
+                    return await CrawlRunRepository(
+                        heartbeat_session
+                    ).renew_attempt_lease(
+                        attempt_id,
+                        lease_owner=lease_owner,
+                        lease_duration=lease_duration,
+                    )
+
             heartbeat_monitor = HeartbeatMonitor(
-                job_id=job_id,
-                redis_client=redis_client,
-                tenant=tenant,
+                renew_lease=_renew_lease,
                 interval_seconds=heartbeat_interval_seconds,
                 max_failures=settings.crawl_heartbeat_max_failures,
-                semaphore_ttl_seconds=semaphore_ttl_seconds,
             )
 
-            tenant_crawler_settings = tenant.crawler_settings if tenant else None
+            tenant_crawler_settings = tenant.crawler_settings
             crawl_request = CrawlRequest(
                 url=params.url,
                 crawl_type=params.crawl_type,
@@ -1197,9 +761,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             crawl_is_partial = False
             crawl_termination_reason = "completed"
-            num_not_modified_pages = 0
             new_sitemap_state: dict[str, Any] | None = None
-            sitemap_skipped = False
 
             # Session-per-batch page processing: persist_batch opens a fresh,
             # short-lived persistence session for each flushed batch. The
@@ -1210,7 +772,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             processing_file_seconds = 0.0
 
             async def _flush_pages() -> None:
-                nonlocal num_failed_pages, page_buffer_bytes, processing_page_seconds
+                nonlocal num_failed_pages, num_published_pages
+                nonlocal page_buffer_bytes, processing_page_seconds
                 if not page_buffer:
                     return
                 batch = list(page_buffer)
@@ -1220,7 +783,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 (
                     success_count,
                     failed_count,
-                    successful_urls,
+                    successful_titles,
                     batch_failures_by_reason,
                 ) = await persist_batch(
                     page_buffer=batch,
@@ -1230,10 +793,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     existing_publications=existing_publications,
                 )
                 processing_page_seconds += time.time() - flush_started
-                crawled_titles.update(successful_urls)
-                for reason, urls in batch_failures_by_reason.items():
-                    failure_counts[reason] += len(urls)
-                    failed_titles.update(urls)
+                num_published_pages += success_count
+                crawled_titles.update(successful_titles)
+                for reason, titles in batch_failures_by_reason.items():
+                    failure_counts[reason] += len(titles)
+                    failed_titles.update(titles)
                 num_failed_pages += failed_count
                 logger.debug(
                     "Flushed crawled page batch",
@@ -1253,8 +817,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 num_files += 1
                 filename = event.path.stem
                 try:
-                    file_bytes = event.path.read_bytes()
-                    new_file_hash = hashlib.sha256(file_bytes).digest()
+                    extracted_text = await asyncio.to_thread(
+                        container.text_extractor().extract,
+                        event.path,
+                        None,
+                        event.path.name,
+                    )
+                    new_file_hash = hashlib.sha256(
+                        extracted_text.encode("utf-8")
+                    ).digest()
                     existing_file = existing_publications.get(filename)
                     if embedding_model_spec is not None and existing_file == (
                         new_file_hash,
@@ -1264,32 +835,34 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         crawled_titles.add(filename)
                         return
 
-                    async def _process_single_file(sess: AsyncSession) -> None:
-                        session_provider = cast(Any, container.session)
-                        session_provider.override(providers.Object(sess))
-                        file_uploader = container.text_processor()
-                        embedding_model_repo = container.embedding_model_repo2()
-                        embedding_model_id = crawl_context.embedding_model_id
-                        assert embedding_model_id is not None
-                        file_embedding_model = await embedding_model_repo.one(
-                            embedding_model_id
-                        )
-                        await file_uploader.process_file(
-                            filepath=event.path,
-                            filename=filename,
-                            website_id=params.website_id,
-                            embedding_model=file_embedding_model,
-                            content_hash=new_file_hash,
-                        )
-
-                    await execute_with_recovery(
+                    (
+                        success_count,
+                        failed_count,
+                        successful_titles,
+                        file_failures,
+                    ) = await persist_batch(
+                        page_buffer=[
+                            {
+                                "url": event.url,
+                                "title": filename,
+                                "content": extracted_text,
+                                "content_hash": new_file_hash,
+                            }
+                        ],
+                        ctx=crawl_context,
+                        embedding_model=embedding_model_spec,
                         container=container,
-                        session_holder=session_holder,
-                        created_sessions=created_sessions,
-                        operation_name=f"process_file_{filename}",
-                        operation=_process_single_file,
+                        existing_publications=existing_publications,
                     )
-                    crawled_titles.add(filename)
+                    if success_count:
+                        crawled_titles.update(successful_titles)
+                    if failed_count:
+                        num_failed_files += failed_count
+                        for reason, titles in file_failures.items():
+                            failure_counts[reason] += len(titles)
+                            failed_titles.update(titles)
+                except CrawlLeaseLostError:
+                    raise
                 except Exception:
                     failed_titles.add(filename)
                     num_failed_files += 1
@@ -1309,71 +882,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 max_items=max(crawl_context.batch_size * 2, 2),
                 max_bytes=crawl_context.max_batch_content_bytes,
             )
-            stream_complete = object()
-
-            if (
-                params.crawl_type.value == "sitemap"
-                and params.origin == "scheduled"
-                and settings.crawl_sitemap_skip_enabled
-                and stored_sitemap_state is not None
-            ):
-                try:
-                    sitemap_probe = await crawler.probe_sitemap(crawl_request)
-                except Exception:
-                    sitemap_probe = None
-                    logger.warning(
-                        "Sitemap change probe failed; running the scheduled crawl",
-                        exc_info=True,
-                        extra={"website_id": str(params.website_id)},
-                    )
-                captured_at_raw = stored_sitemap_state.get("captured_at")
-                captured_at: datetime | None = None
-                if isinstance(captured_at_raw, str):
-                    try:
-                        captured_at = datetime.fromisoformat(captured_at_raw)
-                    except ValueError:
-                        captured_at = None
-                if captured_at is not None and captured_at.tzinfo is None:
-                    captured_at = captured_at.replace(tzinfo=timezone.utc)
-                state_fresh = bool(
-                    captured_at is not None
-                    and datetime.now(timezone.utc) - captured_at
-                    < timedelta(hours=settings.crawl_sitemap_skip_max_age_hours)
-                )
-                sitemap_skipped = bool(
-                    sitemap_probe is not None
-                    and state_fresh
-                    and stored_sitemap_state.get("fingerprint")
-                    == sitemap_probe.fingerprint
-                )
-                if sitemap_skipped:
-                    crawled_titles.update(existing_titles)
-                    num_not_modified_pages = len(existing_titles)
-                    logger.info(
-                        "Skipping scheduled crawl because sitemap is unchanged",
-                        extra={
-                            "website_id": str(params.website_id),
-                            "sitemap_entries": sitemap_probe.entry_count
-                            if sitemap_probe
-                            else 0,
-                        },
-                    )
 
             async def _produce_events() -> None:
                 try:
-                    if sitemap_skipped:
-                        await queue.put(
-                            (
-                                CrawlFinished(
-                                    status="completed",
-                                    pages_crawled=0,
-                                    pages_failed=0,
-                                    pages_unchanged=num_not_modified_pages,
-                                ),
-                                None,
-                            ),
-                        )
-                        return
                     async for event in crawler.crawl(crawl_request):
                         acknowledgement = (
                             asyncio.Event()
@@ -1389,7 +900,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         if acknowledgement is not None:
                             await acknowledgement.wait()
                 finally:
-                    await queue.put((stream_complete, None))
+                    await queue.close()
 
             heartbeat_stop = asyncio.Event()
 
@@ -1418,9 +929,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         queue_get_task.cancel()
                         await asyncio.gather(queue_get_task, return_exceptions=True)
                         heartbeat_task.result()
-                    event, acknowledgement = queue_get_task.result()
-                    if event is stream_complete:
+                    queue_item = queue_get_task.result()
+                    if isinstance(queue_item, _QueueClosed):
                         break
+                    event, acknowledgement = queue_item
                     try:
                         if isinstance(event, PageCrawled):
                             num_pages += 1
@@ -1469,35 +981,21 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 await producer_task
                 await _flush_pages()
-            except HeartbeatFailedError as exc:
-                return {
-                    "status": "heartbeat_failed",
-                    "pages_crawled": num_pages,
-                    "consecutive_failures": exc.consecutive_failures,
-                }
-            except JobPreemptedError:
+            except (HeartbeatFailedError, CrawlLeaseLostError):
                 logger.warning(
-                    "Detected job preemption during crawl",
+                    "Crawl lease heartbeat stopped execution",
                     extra={
                         "job_id": str(job_id),
+                        "attempt_id": str(attempt_id),
                         "website_id": str(params.website_id),
                         "pages_processed": num_pages,
                     },
                 )
-                return {
-                    "status": "preempted_during_crawl",
-                    "pages_crawled": num_pages,
-                }
+                raise
             finally:
-                heartbeat_stop.set()
-                for task in (producer_task, heartbeat_task):
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(
-                    producer_task,
-                    heartbeat_task,
-                    return_exceptions=True,
-                )
+                if not producer_task.done():
+                    producer_task.cancel()
+                await asyncio.gather(producer_task, return_exceptions=True)
 
             total_crawl_seconds = time.time() - crawl_started
             timings["process_pages"] = processing_page_seconds
@@ -1507,12 +1005,71 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 0.0,
             )
 
+            published_files = max(
+                num_files - num_failed_files - num_skipped_files,
+                0,
+            )
+            crawl_outcome = _classify_crawl_outcome(
+                published_pages=num_published_pages,
+                unchanged_pages=num_not_modified_pages,
+                published_files=published_files,
+                unchanged_files=num_skipped_files,
+                failed_pages=num_failed_pages,
+                failed_files=num_failed_files,
+                partial=crawl_is_partial,
+            )
+            crawl_has_usable_result = crawl_outcome in {
+                CrawlOutcome.SUCCEEDED,
+                CrawlOutcome.UNCHANGED,
+                CrawlOutcome.EMPTY,
+                CrawlOutcome.PARTIAL,
+            }
+            crawl_completed_authoritatively = crawl_outcome in {
+                CrawlOutcome.SUCCEEDED,
+                CrawlOutcome.UNCHANGED,
+                CrawlOutcome.EMPTY,
+            }
+            crawl_failure_code = (
+                _failure_code_for_crawl(failure_counts, crawl_termination_reason)
+                if crawl_outcome in {CrawlOutcome.FAILED, CrawlOutcome.PARTIAL}
+                else None
+            )
+            crawl_failure_detail = (
+                _failure_detail(crawl_failure_code, crawl_outcome)
+                if crawl_failure_code is not None
+                else None
+            )
+
+            async with (
+                sessionmanager.session() as finalizing_session,
+                finalizing_session.begin(),
+            ):
+                finalizing = await CrawlRunRepository(
+                    finalizing_session
+                ).mark_finalizing(attempt_id, lease_owner=lease_owner)
+            if not finalizing:
+                raise CrawlLeaseLostError(
+                    "Crawl attempt lease was lost before finalization"
+                )
+
             # Cleanup phase: delete stale blobs (batch for performance)
             cleanup_start = time.time()
-            # Exclude failed_titles - their original data was preserved by transaction rollback
+            authoritative_empty_sitemap = bool(
+                crawl_outcome == CrawlOutcome.EMPTY
+                and params.crawl_type == CrawlType.SITEMAP
+                and new_sitemap_state is not None
+            )
+            cleanup_is_safe = (
+                crawl_outcome
+                in {
+                    CrawlOutcome.SUCCEEDED,
+                    CrawlOutcome.UNCHANGED,
+                }
+                or authoritative_empty_sitemap
+            )
             stale_titles = (
                 []
-                if crawl_is_partial or num_failed_pages or num_failed_files
+                if not cleanup_is_safe
                 else [
                     title
                     for title in existing_titles
@@ -1524,6 +1081,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             if stale_titles:
 
                 async def _do_stale_blob_cleanup(sess: AsyncSession) -> int:
+                    await _require_current_lease(
+                        sess,
+                        expected_phase=CrawlPhase.FINALIZING,
+                    )
                     # Get fresh repo with this session
                     session_provider = cast(Any, container.session)
                     session_provider.override(providers.Object(sess))
@@ -1556,6 +1117,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             update_start = time.time()
 
             async def _do_update_size(sess: AsyncSession) -> None:
+                await _require_current_lease(
+                    sess,
+                    expected_phase=CrawlPhase.FINALIZING,
+                )
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 # NOTE: Use crawl_context primitives, NOT detached ORM website object
                 from eneo.database.tables.info_blobs_table import (
@@ -1608,17 +1173,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
 
             async def _do_timestamp_update(sess: AsyncSession) -> None:
+                await _require_current_lease(
+                    sess,
+                    expected_phase=CrawlPhase.FINALIZING,
+                )
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 # No need for transaction check - execute_with_recovery handles it
                 await sess.execute(last_crawled_stmt)
 
-            await execute_with_recovery(
-                container=container,
-                session_holder=session_holder,
-                created_sessions=created_sessions,
-                operation_name="last_crawled_at_update",
-                operation=_do_timestamp_update,
-            )
+            if crawl_completed_authoritatively:
+                await execute_with_recovery(
+                    container=container,
+                    session_holder=session_holder,
+                    created_sessions=created_sessions,
+                    operation_name="last_crawled_at_update",
+                    operation=_do_timestamp_update,
+                )
 
             # Calculate file skip rate for performance analysis
             file_skip_rate = (
@@ -1671,98 +1241,22 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 },
             )
 
-            # Preemption check: Verify job wasn't marked FAILED while we were crawling.
-            # If preempted, don't write results - a new crawl is already running.
-            from eneo.database.tables.job_table import Jobs
-            from eneo.main.models import Status as JobStatus
-
-            async def _do_suicide_check(sess: AsyncSession) -> str | None:
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                result = await sess.execute(
-                    sa.select(Jobs.status).where(Jobs.id == job_id)
-                )
-                return result.scalar_one_or_none()
-
-            job_status_value = await execute_with_recovery(
-                container=container,
-                session_holder=session_holder,
-                created_sessions=created_sessions,
-                operation_name="suicide_check",
-                operation=_do_suicide_check,
-            )
-
-            if job_status_value == JobStatus.FAILED.value:
-                logger.warning(
-                    "Crawl job was preempted during execution - aborting without writing results",
-                    extra={
-                        "job_id": str(job_id),
-                        "website_id": str(params.website_id),
-                        "pages_crawled": num_pages,
-                        "files_crawled": num_files,
-                    },
-                )
-                # Don't write results - exit gracefully
-                # Note: Downloaded pages/files were already processed, but we won't update
-                # the crawl_run or website stats since a new crawl should handle that
-                return {"status": "preempted", "pages_crawled": num_pages}
-
-            # Update crawl run with recovery wrapper
-            from eneo.database.tables.websites_table import CrawlRuns
-
-            # Convert failure_counts defaultdict to regular dict for JSONB storage
-            # Only store if there are any failures
             failure_summary = dict(failure_counts) if failure_counts else None
-
-            async def _do_crawl_run_update(sess: AsyncSession) -> None:
-                # Session provided by execute_with_recovery (session-per-operation pattern)
-                stmt = (
-                    sa.update(CrawlRuns)
-                    .where(
-                        CrawlRuns.id == params.run_id,
-                        CrawlRuns.tenant_id == crawl_context.tenant_id,
-                    )
-                    .values(
-                        pages_crawled=num_pages,
-                        files_downloaded=num_files,
-                        pages_failed=num_failed_pages,
-                        files_failed=num_failed_files,
-                        failure_summary=failure_summary,
-                    )
-                )
-                await sess.execute(stmt)
-
-            await execute_with_recovery(
-                container=container,
-                session_holder=session_holder,
-                created_sessions=created_sessions,
-                operation_name="crawl_run_update",
-                operation=_do_crawl_run_update,
-            )
-
-            # Circuit breaker: Update failure tracking and exponential backoff
-
-            # Determine if crawl was successful
-            # Success = at least one item (page or file) AND not everything failed
             total_failed = num_failed_pages + num_failed_files
-            crawl_successful = _crawl_was_successful(
-                pages=num_pages,
-                unchanged_pages=num_not_modified_pages,
-                files=num_files,
-                failed_pages=num_failed_pages,
-                failed_files=num_failed_files,
-                sitemap_skipped=sitemap_skipped,
-            )
 
             if _should_store_sitemap_state(
                 has_new_state=new_sitemap_state is not None,
                 crawl_is_partial=crawl_is_partial,
-                sitemap_skipped=sitemap_skipped,
-                crawl_successful=crawl_successful,
+                outcome=crawl_outcome,
                 total_failed=total_failed,
             ):
                 assert new_sitemap_state is not None
 
                 async def _store_sitemap_state(sess: AsyncSession) -> None:
+                    await _require_current_lease(
+                        sess,
+                        expected_phase=CrawlPhase.FINALIZING,
+                    )
                     await sess.execute(
                         sa.update(WebsitesTable)
                         .where(
@@ -1782,9 +1276,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             async def _do_circuit_breaker_update(sess: AsyncSession) -> None:
                 """Update circuit breaker state with appropriate backoff/reset."""
+                await _require_current_lease(
+                    sess,
+                    expected_phase=CrawlPhase.FINALIZING,
+                )
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 # NOTE: Use crawl_context primitives, NOT detached ORM website object
-                if crawl_successful:
+                if crawl_completed_authoritatively:
                     # Success: Reset circuit breaker
                     logger.info(
                         f"Crawl successful, resetting circuit breaker for website {params.website_id}"
@@ -1875,191 +1373,122 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 operation=_do_circuit_breaker_update,
             )
 
-            # Audit logging for website crawl
-            from eneo.audit.domain.action_types import ActionType
-            from eneo.audit.domain.entity_types import EntityType
-
-            audit_service = container.audit_service()
-
-            # Determine actor (crawl is typically triggered by a user or system)
-            # Use website owner or system actor
-            actor_id = (
-                website.user_id
-                if hasattr(website, "user_id") and website.user_id
-                else current_tenant.id
+            await _stop_heartbeat(propagate_failure=True)
+            result_location = f"/api/v1/websites/{params.website_id}/info-blobs/"
+            finished = await _finish_attempt(
+                crawl_outcome,
+                failure_code=crawl_failure_code,
+                failure_detail=crawl_failure_detail,
+                result_location=result_location if crawl_has_usable_result else None,
+                pages_crawled=num_pages,
+                files_downloaded=num_files,
+                pages_failed=num_failed_pages,
+                files_failed=num_failed_files,
+                failure_summary=failure_summary,
             )
-
-            await audit_service.log_async(
-                tenant_id=current_tenant.id,
-                actor_id=actor_id,
-                action=ActionType.WEBSITE_CRAWLED,
-                entity_type=EntityType.WEBSITE,
-                entity_id=params.website_id,
-                description=f"Website crawled: {website.url} - {'Success' if crawl_successful else 'Failed'}",
-                metadata={
-                    "target": {
-                        "website_id": str(params.website_id),
-                        "url": website.url,
-                        "name": getattr(website, "name", website.url),
-                    },
-                    "crawl_stats": {
-                        "pages_crawled": num_pages,
-                        "pages_failed": num_failed_pages,
-                        "files_downloaded": num_files,
-                        "files_failed": num_failed_files,
-                        "files_skipped": num_skipped_files,
-                        "blobs_deleted": num_deleted_blobs,
-                        "successful": crawl_successful,
-                    },
-                },
-            )
-
-            task_manager.result_location = (
-                f"/api/v1/websites/{params.website_id}/info-blobs/"
-            )
-
-            # Complete job with session-per-operation pattern
-            async def _do_complete_job(sess: AsyncSession) -> None:
-                """Complete the job with session provided by execute_with_recovery."""
-                from eneo.database.tables.job_table import Jobs
-                from eneo.main.models import Status
-
-                stmt = (
-                    sa.update(Jobs)
-                    .where(Jobs.id == job_id)
-                    .values(
-                        status=Status.COMPLETE.value,
-                        finished_at=datetime.now(timezone.utc),
-                        result_location=task_manager.result_location,
-                    )
-                )
-                await sess.execute(stmt)
-                # No explicit commit - execute_with_recovery handles it
-
-                logger.debug(
-                    "Job completed via session-per-operation pattern",
-                    extra={"job_id": str(job_id)},
+            if not finished:
+                raise CrawlLeaseLostError(
+                    "Crawl attempt lease was lost during terminalization"
                 )
 
-            await execute_with_recovery(
-                container=container,
-                session_holder=session_holder,
-                created_sessions=created_sessions,
-                operation_name="complete_job",
-                operation=_do_complete_job,
-            )
-
-            # Signal task_manager to skip its complete_job() call
-            # Why: We've already completed the job with a fresh session above,
-            # task_manager's job_service has stale session references
-            task_manager.mark_job_handled()
-
-        return task_manager.successful()
-    finally:
-        # Primary path: normal release when everything worked
-        if limiter is not None and tenant is not None and acquired:
-            await limiter.release(tenant.id)
-            if global_acquired and redis_client is not None:
-                await LuaScripts.release_global_crawl_slot(
-                    redis_client,
-                    settings.tenant_worker_semaphore_ttl_seconds,
-                )
-            await reset_tenant_retry_delay(
-                tenant_id=tenant.id, redis_client=redis_client
-            )
-            # Delete pre-acquired flag after slot release
-            # Why: Flag must persist during crawl for heartbeat TTL refresh and watchdog crash recovery
-            # Deleting here (not earlier) ensures flag exists for entire crawl lifecycle
-            if redis_client and job_id:
-                try:
-                    await redis_client.delete(
-                        f"job:{job_id}:slot_preacquired",
-                        LuaScripts.global_crawl_flag_key(job_id),
-                    )
-                except Exception:
-                    pass  # Best effort cleanup
-        # Fallback path: release pre-acquired slot if tenant injection failed
-        # This ensures we don't leak slots when the worker fails early
-        elif preacquired_tenant_id is not None and not acquired:
-            # Feeder acquired slot but we never set acquired=True
-            # Must release directly via Redis to prevent leak
-            logger.warning(
-                "Releasing pre-acquired slot due to early failure",
-                extra={
-                    "job_id": str(job_id),
-                    "tenant_id": str(preacquired_tenant_id),
-                    "reason": "tenant_injection_failed"
-                    if tenant is None
-                    else "acquired_not_set",
-                },
-            )
+            # Audit delivery is secondary to the authoritative crawl transition.
+            # It must not reverse a crawl after content and lifecycle have committed.
             try:
-                # Try to get redis client if we don't have one
-                _fallback_redis = redis_client
-                if _fallback_redis is None:
-                    try:
-                        _fallback_redis = container.redis_client()
-                    except Exception:
-                        pass
-                if _fallback_redis is not None:
-                    if global_slot_preacquired:
-                        await LuaScripts.release_crawl_slots(
-                            _fallback_redis,
-                            preacquired_tenant_id,
-                            settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                    else:
-                        await LuaScripts.release_slot(
-                            _fallback_redis,
-                            preacquired_tenant_id,
-                            settings.tenant_worker_semaphore_ttl_seconds,
-                        )
-                    # Delete pre-acquired flag after fallback slot release
-                    if job_id:
-                        try:
-                            await _fallback_redis.delete(
-                                f"job:{job_id}:slot_preacquired",
-                                LuaScripts.global_crawl_flag_key(job_id),
-                            )
-                        except Exception:
-                            pass  # Best effort cleanup
-            except Exception as release_exc:
-                logger.error(
-                    "Failed to release pre-acquired slot in fallback",
-                    extra={
-                        "job_id": str(job_id),
-                        "tenant_id": str(preacquired_tenant_id),
-                        "error": str(release_exc),
-                    },
-                )
-        # Third fallback: emergency flag read when both paths unavailable
-        # Trigger: Both early Redis check AND tenant injection failed, leaving
-        # tenant=None and preacquired_tenant_id=None, which skips both paths above.
-        # This prevents slot leak until TTL in dual-failure scenarios.
-        # Safety: Watchdog deletes flag when releasing, so if flag exists, slot needs release.
-        elif (
-            tenant is None and preacquired_tenant_id is None and not acquired and job_id
-        ):
-            # Get redis client with fallback to container
-            _emergency_redis = redis_client
-            if _emergency_redis is None:
-                try:
-                    _emergency_redis = container.redis_client()
-                except Exception:
-                    pass
-            if _emergency_redis is not None:
-                capacity_mgr = CapacityManager(_emergency_redis, settings)
-                await capacity_mgr.emergency_release_slot(job_id)
+                from eneo.audit.domain.action_types import ActionType
+                from eneo.audit.domain.entity_types import EntityType
+                from eneo.audit.domain.outcome import Outcome
 
-        # Cleanup Redis retry counters to prevent memory leak
-        if redis_client and job_id:
-            try:
-                await redis_client.delete(
-                    f"job:{job_id}:start_time", f"job:{job_id}:retry_count"
+                audit_failed = crawl_outcome == CrawlOutcome.FAILED
+
+                await container.audit_service().log_async(
+                    tenant_id=current_tenant.id,
+                    user=user,
+                    action=ActionType.WEBSITE_CRAWLED,
+                    entity_type=EntityType.WEBSITE,
+                    entity_id=params.website_id,
+                    description=(
+                        f"Website crawled: {website.url} - {crawl_outcome.value}"
+                    ),
+                    metadata={
+                        "target": {
+                            "website_id": str(params.website_id),
+                            "url": website.url,
+                            "name": website.name or website.url,
+                        },
+                        "crawl_stats": {
+                            "pages_crawled": num_pages,
+                            "pages_failed": num_failed_pages,
+                            "files_downloaded": num_files,
+                            "files_failed": num_failed_files,
+                            "files_skipped": num_skipped_files,
+                            "blobs_deleted": num_deleted_blobs,
+                            "outcome": crawl_outcome.value,
+                        },
+                    },
+                    outcome=Outcome.FAILURE if audit_failed else Outcome.SUCCESS,
+                    error_message=crawl_failure_detail if audit_failed else None,
                 )
             except Exception:
-                pass  # Best effort cleanup
+                logger.exception(
+                    "Crawl completed but its audit event could not be recorded",
+                    extra={
+                        "attempt_id": str(attempt_id),
+                        "website_id": str(params.website_id),
+                    },
+                )
 
+        return {
+            "status": crawl_outcome.value,
+            "pages_crawled": num_pages,
+            "files_downloaded": num_files,
+        }
+    except CrawlLeaseLostError:
+        logger.warning(
+            "Crawl worker stopped after losing its attempt lease",
+            extra={"job_id": str(job_id), "attempt_id": str(attempt_id)},
+        )
+        raise
+    except HeartbeatFailedError:
+        await _stop_heartbeat()
+        await _finish_attempt(
+            CrawlOutcome.INTERRUPTED,
+            failure_code=CrawlFailureCode.WORKER_INTERRUPTED,
+            failure_detail="The crawler could not renew its database lease",
+            pages_crawled=num_pages,
+            files_downloaded=num_files,
+            pages_failed=num_failed_pages,
+            files_failed=num_failed_files,
+            failure_summary=dict(failure_counts) if failure_counts else None,
+        )
+        raise
+    except asyncio.CancelledError:
+        await _stop_heartbeat()
+        await _finish_attempt(
+            CrawlOutcome.INTERRUPTED,
+            failure_code=CrawlFailureCode.WORKER_INTERRUPTED,
+            failure_detail="The crawler worker stopped before completion",
+            pages_crawled=num_pages,
+            files_downloaded=num_files,
+            pages_failed=num_failed_pages,
+            files_failed=num_failed_files,
+            failure_summary=dict(failure_counts) if failure_counts else None,
+        )
+        raise
+    except Exception:
+        await _stop_heartbeat()
+        await _finish_attempt(
+            CrawlOutcome.FAILED,
+            failure_code=CrawlFailureCode.PROCESSING_FAILED,
+            failure_detail="The crawler stopped because of an internal processing error",
+            pages_crawled=num_pages,
+            files_downloaded=num_files,
+            pages_failed=num_failed_pages,
+            files_failed=num_failed_files,
+            failure_summary=dict(failure_counts) if failure_counts else None,
+        )
+        raise
+    finally:
+        await _stop_heartbeat()
         # Clean up recovery sessions to prevent connection pool exhaustion
         for recovery_session in created_sessions:
             try:

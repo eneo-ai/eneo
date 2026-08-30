@@ -332,16 +332,11 @@ class TestHeartbeatTTLTiming:
         """HeartbeatMonitor.tick() should skip if called before interval."""
         from eneo.worker.crawl.heartbeat import HeartbeatMonitor
 
-        job_id = uuid4()
-
         # Create monitor with long interval
         monitor = HeartbeatMonitor(
-            job_id=job_id,
-            redis_client=None,
-            tenant=None,
+            renew_lease=AsyncMock(return_value=True),
             interval_seconds=300,  # 5 minutes
             max_failures=3,
-            semaphore_ttl_seconds=600,
         )
 
         # First tick should execute

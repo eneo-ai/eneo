@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
 import os
 from functools import wraps
@@ -281,54 +280,8 @@ class Worker:
         settings = get_settings()
         _log_startup_diagnostics(settings)
 
-        # Start crawl feeder as background task if enabled
-        # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
-        # Uses leader election to ensure only ONE feeder runs across all workers
-        if settings.crawl_feeder_enabled:
-            from eneo.worker.crawl_feeder import CrawlFeeder
-
-            try:
-                # CrawlFeeder is now container-independent
-                # Why: It manages its own DB sessions and Redis client to avoid
-                # session lifecycle issues (session closing while feeder runs)
-                feeder = CrawlFeeder()
-
-                # Start feeder as background task
-                # Why: Runs concurrently with worker jobs in same event loop
-                task = asyncio.create_task(feeder.run_forever())
-
-                # Store references for cleanup on shutdown
-                # Why: Allows graceful cancellation and prevents GC
-                ctx["feeder_task"] = task
-                ctx["feeder"] = feeder  # Store feeder for proper stop() call
-
-                logger.info(
-                    "Started crawl feeder background task with leader election",
-                    extra={"feeder_enabled": True},
-                )
-            except Exception as exc:
-                logger.error(
-                    f"Failed to start crawl feeder: {exc}. Continuing without feeder.",
-                    extra={"feeder_enabled": False},
-                )
-
     async def shutdown(self, ctx: ARQContext) -> None:
-        # Stop feeder gracefully if running
-        # Why: Prevents orphaned background tasks and closes Redis connection
-        if "feeder" in ctx:
-            feeder = cast(Any, ctx["feeder"])
-            logger.info("Stopping crawl feeder background task")
-            await feeder.stop()  # Gracefully stop and close Redis
-
-        if "feeder_task" in ctx:
-            task = cast(asyncio.Task[Any], ctx["feeder_task"])
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass  # Expected on cancellation
-
+        del ctx
         await lifespan.shutdown()
 
     def function(self, with_user: bool = True, *, keep_result: int | None = None):
@@ -379,7 +332,7 @@ class Worker:
             @worker.long_running_function()
             async def crawl(job_id, params, container):
                 # NO session held here - use session_scope for DB ops:
-                async with container.session_scope() as session:
+                async with Container.session_scope() as session:
                     repo = container.some_repo(session=session)
                     await repo.update(...)
                 # Session returned to pool immediately

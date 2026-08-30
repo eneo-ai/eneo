@@ -8,7 +8,7 @@ from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_protocol import sanitize_filename
 from eneo.files.file_size_service import FileSizeService
 from eneo.files.text import TextMimeTypes
-from eneo.jobs.job_models import JobInDb, Task
+from eneo.jobs.job_models import Task
 from eneo.jobs.job_service import JobService
 from eneo.jobs.job_staging import stage_job_file
 from eneo.jobs.task_models import (
@@ -27,8 +27,6 @@ from eneo.object_content.deployment_policy import (
     UploadLimitUseCase,
 )
 from eneo.users.user import UserInDB
-from eneo.websites.crawl_dependencies.crawl_models import CrawlOrigin, CrawlTask
-from eneo.websites.domain.crawl_run import CrawlType
 
 
 class TaskService:
@@ -159,30 +157,3 @@ class TaskService:
             raise
 
         return job
-
-    async def queue_crawl(
-        self,
-        name: str,
-        run_id: UUID,
-        url: str,
-        download_files: bool = False,
-        crawl_type: CrawlType = CrawlType.CRAWL,
-        website_id: UUID | None = None,
-        enqueue: bool = True,
-        origin: CrawlOrigin = "manual",
-    ) -> JobInDb:
-        # CrawlTask.website_id is UUID (non-optional); callers always provide a value
-        assert website_id is not None, "website_id is required for crawl tasks"
-        params = CrawlTask(
-            user_id=self.user.id,
-            run_id=run_id,
-            url=url,
-            download_files=download_files,
-            crawl_type=crawl_type,
-            website_id=website_id,
-            origin=origin,
-        )
-
-        return await self.job_service.queue_job(
-            Task.CRAWL, name=name, task_params=params, enqueue=enqueue
-        )

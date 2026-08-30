@@ -9,8 +9,12 @@
   let cls = "";
   export { cls as class };
 
-  const successPages = (crawl.pages_crawled ?? 0) - (crawl.pages_failed ?? 0);
-  const successFiles = (crawl.files_downloaded ?? 0) - (crawl.files_failed ?? 0);
+  $: pagesCrawled = crawl.pages_crawled ?? 0;
+  $: filesDownloaded = crawl.files_downloaded ?? 0;
+  $: pagesFailed = crawl.pages_failed ?? 0;
+  $: filesFailed = crawl.files_failed ?? 0;
+  $: successPages = pagesCrawled - pagesFailed;
+  $: successFiles = filesDownloaded - filesFailed;
   const SKIPPED_PREFIX = "skipped duplicate crawl";
 
   // Map failure reason codes to i18n labels
@@ -43,18 +47,18 @@
   }
 
   function totalLabel(): { label: string; color: Label.LabelColor } {
-    if ((crawl.files_downloaded ?? 0) > 0) {
+    if (filesDownloaded > 0) {
       return {
         color: "blue",
         label: m.crawled_pages_and_files({
-          pages: crawl.pages_crawled,
-          files: crawl.files_downloaded
+          pages: pagesCrawled,
+          files: filesDownloaded
         })
       };
     } else {
       return {
         color: "blue",
-        label: m.crawled_pages({ count: crawl.pages_crawled })
+        label: m.crawled_pages({ count: pagesCrawled })
       };
     }
   }
@@ -62,22 +66,22 @@
   function failedLabel(): { label: string; color: Label.LabelColor; tooltip?: string } {
     const tooltip = getFailureTooltip();
 
-    if (crawl.pages_failed && crawl.files_failed) {
+    if (pagesFailed && filesFailed) {
       return {
         color: "orange",
-        label: m.pages_and_files_failed({ pages: crawl.pages_failed, files: crawl.files_failed }),
+        label: m.pages_and_files_failed({ pages: pagesFailed, files: filesFailed }),
         tooltip
       };
-    } else if (crawl.pages_failed) {
+    } else if (pagesFailed) {
       return {
         color: "orange",
-        label: m.pages_failed({ count: crawl.pages_failed }),
+        label: m.pages_failed({ count: pagesFailed }),
         tooltip
       };
     } else {
       return {
         color: "orange",
-        label: m.files_failed({ count: crawl.files_failed }),
+        label: m.files_failed({ count: filesFailed }),
         tooltip
       };
     }

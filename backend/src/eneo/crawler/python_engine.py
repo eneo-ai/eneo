@@ -748,7 +748,7 @@ class PythonCrawlEngine:
                                 PageFailed(
                                     url=current,
                                     status_code=response.status,
-                                    reason="sitemap_fetch_failed",
+                                    reason=f"http_{response.status}",
                                 )
                             )
                             continue

@@ -40,7 +40,7 @@ from eneo.database.tables.org_space_assistant_roles_table import (
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.websites_table import CrawlRuns, Websites
+from eneo.database.tables.websites_table import Websites
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
@@ -368,9 +368,9 @@ class AssistantRepository:
         return [
             selectinload(Assistants.user).selectinload(Users.tenant),
             selectinload(Assistants.user).selectinload(Users.roles),
-            selectinload(Assistants.websites)
-            .selectinload(Websites.latest_crawl)  # type: ignore[attr-defined]
-            .selectinload(CrawlRuns.job),
+            selectinload(Assistants.websites).selectinload(
+                Websites.latest_crawl  # type: ignore[attr-defined]
+            ),
             selectinload(Assistants.websites).selectinload(Websites.embedding_model),
             selectinload(Assistants.attachments).selectinload(AssistantsFiles.file),
             selectinload(Assistants.template).selectinload(

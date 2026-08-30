@@ -5,6 +5,7 @@ from uuid import uuid4
 from arq.worker import Function, create_worker
 
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
+from eneo.main.config import get_settings
 from eneo.worker.arq import CrawlerWorkerSettings, WorkerSettings
 from eneo.worker.worker import _job_id_from_ctx
 
@@ -33,7 +34,7 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.redis_settings == general.redis_settings
     assert crawler.retry_jobs == general.retry_jobs is False
     assert crawler.job_timeout_s == general.job_timeout_s
-    assert crawler.max_jobs == general.max_jobs
+    assert crawler.max_jobs == get_settings().effective_crawl_job_concurrency_limit
     assert crawler.health_check_interval == general.health_check_interval
     assert crawler._job_completion_wait == general._job_completion_wait
     assert crawler.allow_abort_jobs == general.allow_abort_jobs is True

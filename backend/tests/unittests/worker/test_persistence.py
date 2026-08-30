@@ -9,12 +9,21 @@ Tests the crawl/persistence.py module directly to ensure:
 Run with: pytest tests/unittests/worker/test_persistence.py -v
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
+
+
+@pytest.fixture(autouse=True)
+def current_crawl_lease():
+    with patch(
+        "eneo.websites.domain.crawl_run_repo.CrawlRunRepository.lock_attempt_lease",
+        AsyncMock(return_value=True),
+    ):
+        yield
 
 
 def create_mock_container(embeddings_service):
@@ -70,6 +79,8 @@ class TestPersistenceModuleSemantics:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,
@@ -115,6 +126,8 @@ class TestPersistenceModuleSemantics:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,
@@ -208,6 +221,8 @@ async def test_validator_refresh_is_tenant_and_website_scoped(monkeypatch):
         tenant_id=uuid4(),
         tenant_slug="test",
         user_id=uuid4(),
+        attempt_id=uuid4(),
+        lease_owner="test-worker",
         embedding_model_id=uuid4(),
         embedding_model_name="test-model",
         embedding_model_open_source=False,
@@ -258,6 +273,8 @@ class TestCrawlContextDataclass:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,
@@ -276,6 +293,8 @@ class TestCrawlContextDataclass:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,

@@ -26,6 +26,16 @@ import pytest
 
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
 
+
+@pytest.fixture(autouse=True)
+def current_crawl_lease():
+    with patch(
+        "eneo.websites.domain.crawl_run_repo.CrawlRunRepository.lock_attempt_lease",
+        AsyncMock(return_value=True),
+    ):
+        yield
+
+
 # =============================================================================
 # HELPER: Mock Session Manager
 # =============================================================================
@@ -78,14 +88,11 @@ def create_mock_result():
 
 def create_mock_sessionmanager(mock_session):
     """
-    Create a properly structured mock for sessionmanager.session() and create_session().
+    Create a properly structured mock for sessionmanager.session().
 
     The real pattern is: async with sessionmanager.session() as session, session.begin():
     This requires sessionmanager.session() to return an async context manager,
     and session.begin() to also return an async context manager.
-
-    Additionally, persist_batch uses sessionmanager.create_session() to create a session
-    for the embedding service initialization.
 
     CRITICAL: We use side_effect with a factory function so that EACH call to
     sessionmanager.session() returns a FRESH async context manager. Using
@@ -104,13 +111,6 @@ def create_mock_sessionmanager(mock_session):
     # Use side_effect with a lambda that creates fresh context managers
     mock_sm.session.side_effect = lambda: mock_session_context()
 
-    # Mock create_session() for embedding service initialization
-    # This returns a mock session that supports async methods
-    embedding_session_mock = MagicMock()
-    embedding_session_mock.begin = AsyncMock()
-    embedding_session_mock.close = AsyncMock()
-    mock_sm.create_session = MagicMock(return_value=embedding_session_mock)
-
     return mock_sm
 
 
@@ -118,9 +118,8 @@ def create_mock_container(embeddings_service):
     """
     Create a mock Container for persist_batch testing.
 
-    The container provides:
-    - session.override(): For injecting a session into the embedding service
-    - create_embeddings_service(): Returns the provided mock service
+    The container provides create_embeddings_service(), which returns the supplied
+    session-independent mock service.
 
     Args:
         embeddings_service: Mock CreateEmbeddingsService to return
@@ -129,11 +128,6 @@ def create_mock_container(embeddings_service):
         Mock container with properly configured session override and service factory
     """
     mock_container = MagicMock()
-
-    # Mock session.override() pattern
-    mock_session_provider = MagicMock()
-    mock_session_provider.override = MagicMock()
-    mock_container.session = mock_session_provider
 
     # Mock create_embeddings_service() to return the provided service
     mock_container.create_embeddings_service = MagicMock(
@@ -156,6 +150,8 @@ def crawl_context():
         tenant_id=uuid4(),
         tenant_slug="test-tenant",
         user_id=uuid4(),
+        attempt_id=uuid4(),
+        lease_owner="test-worker",
         embedding_model_id=uuid4(),
         embedding_model_name="test-embedding-model",
         embedding_model_open_source=False,
@@ -366,6 +362,8 @@ class TestEmbeddingSemaphoreBehavior:
             tenant_id=crawl_context.tenant_id,
             tenant_slug=crawl_context.tenant_slug,
             user_id=crawl_context.user_id,
+            attempt_id=crawl_context.attempt_id,
+            lease_owner=crawl_context.lease_owner,
             embedding_model_id=crawl_context.embedding_model_id,
             embedding_model_name=crawl_context.embedding_model_name,
             embedding_model_open_source=crawl_context.embedding_model_open_source,
@@ -419,15 +417,15 @@ class TestMemoryCapsEnforcement:
     """Tests for memory cap enforcement during Phase 1."""
 
     @pytest.mark.asyncio
-    async def test_embedding_bytes_cap_triggers_early_exit(
+    async def test_embedding_bytes_cap_flushes_without_dropping_tail(
         self, crawl_context, embedding_model_spec
     ):
         """
         INVARIANT: When embedding bytes exceed max_batch_embedding_bytes,
-        Phase 1 should exit early and process only prepared pages.
+        the prepared subset is flushed and every remaining page is continued.
 
         Scenario: 10 pages, but embedding cap set very low (1KB)
-        Expected: Only first few pages prepared before cap triggers exit
+        Expected: All pages are attempted across bounded embedding batches
         """
         # Each embedding is ~1536 floats * 4 bytes = 6KB per chunk
         # With multiple chunks per page, cap should trigger quickly
@@ -445,6 +443,8 @@ class TestMemoryCapsEnforcement:
             tenant_id=crawl_context.tenant_id,
             tenant_slug=crawl_context.tenant_slug,
             user_id=crawl_context.user_id,
+            attempt_id=crawl_context.attempt_id,
+            lease_owner=crawl_context.lease_owner,
             embedding_model_id=crawl_context.embedding_model_id,
             embedding_model_name=crawl_context.embedding_model_name,
             embedding_model_open_source=crawl_context.embedding_model_open_source,
@@ -499,10 +499,7 @@ class TestMemoryCapsEnforcement:
                 container=create_mock_container(service),
             )
 
-        # Should have stopped early due to embedding bytes cap
-        assert pages_embedded < 10, (
-            f"Expected early exit due to embedding cap, but processed {pages_embedded} pages"
-        )
+        assert pages_embedded == 10
 
 
 # =============================================================================
@@ -879,6 +876,43 @@ class TestPhaseIsolation:
     """Tests that verify Phase 1 has ZERO database operations."""
 
     @pytest.mark.asyncio
+    async def test_lost_attempt_lease_prevents_page_publication(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        mock_session = create_mock_session()
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(1),
+            ),
+            patch(
+                "eneo.websites.domain.crawl_run_repo.CrawlRunRepository.lock_attempt_lease",
+                AsyncMock(return_value=False),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl.heartbeat import CrawlLeaseLostError
+            from eneo.worker.crawl_tasks import persist_batch
+
+            with pytest.raises(CrawlLeaseLostError):
+                await persist_batch(
+                    page_buffer=[
+                        {
+                            "url": "https://example.com/stale-worker",
+                            "content": "Content from a worker whose lease expired",
+                        }
+                    ],
+                    ctx=crawl_context,
+                    embedding_model=embedding_model_spec,
+                    container=create_mock_container(mock_embeddings_service),
+                )
+
+        mock_session.execute.assert_not_awaited()
+        mock_session.begin_nested.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_unchanged_page_skips_embedding_and_database_write(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
@@ -904,6 +938,39 @@ class TestPhaseIsolation:
             )
 
         assert (success, failed, persisted_urls, failures) == (1, 0, [url], {})
+        mock_embeddings_service.get_embeddings.assert_not_awaited()
+        mock_sm.session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_file_identity_can_use_title_and_extracted_content_hash(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service
+    ):
+        source_url = "https://example.com/files/agenda.pdf"
+        title = "agenda"
+        content = "Extracted meeting agenda"
+        content_hash = sha256(content.encode("utf-8")).digest()
+        mock_session = create_mock_session()
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with patch("eneo.database.database.sessionmanager", mock_sm):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, persisted_titles, failures = await persist_batch(
+                page_buffer=[
+                    {
+                        "url": source_url,
+                        "title": title,
+                        "content": content,
+                        "content_hash": content_hash,
+                    }
+                ],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_publications={title: (content_hash, embedding_model_spec.id)},
+            )
+
+        assert (success, failed, persisted_titles, failures) == (1, 0, [title], {})
         mock_embeddings_service.get_embeddings.assert_not_awaited()
         mock_sm.session.assert_not_called()
 
@@ -1011,12 +1078,6 @@ class TestPhaseIsolation:
             # Use tracking context manager for sessionmanager.session()
             mock_sm.session.return_value = TrackingContextManager(mock_session)
 
-            # Mock create_session() for embedding service initialization
-            embedding_session_mock = MagicMock()
-            embedding_session_mock.begin = AsyncMock()
-            embedding_session_mock.close = AsyncMock()
-            mock_sm.create_session = MagicMock(return_value=embedding_session_mock)
-
             from eneo.worker.crawl_tasks import persist_batch
 
             await persist_batch(
@@ -1029,6 +1090,7 @@ class TestPhaseIsolation:
         # Verify embedding completed BEFORE session was opened
         assert embedding_completed_at is not None, "Embedding should have completed"
         assert session_opened_at is not None, "Session should have been opened"
+        mock_sm.create_session.assert_not_called()
         assert embedding_completed_at < session_opened_at, (
             f"Embedding must complete before session opens. "
             f"Embedding ended at {embedding_completed_at}, session opened at {session_opened_at}. "
@@ -1058,6 +1120,8 @@ class TestTransactionWallTimeGuard:
             tenant_id=crawl_context.tenant_id,
             tenant_slug=crawl_context.tenant_slug,
             user_id=crawl_context.user_id,
+            attempt_id=crawl_context.attempt_id,
+            lease_owner=crawl_context.lease_owner,
             embedding_model_id=crawl_context.embedding_model_id,
             embedding_model_name=crawl_context.embedding_model_name,
             embedding_model_open_source=crawl_context.embedding_model_open_source,

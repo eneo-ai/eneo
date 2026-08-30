@@ -68,7 +68,6 @@ from eneo.database.tables.spaces_table import (
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
-from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata
@@ -1243,9 +1242,7 @@ class SpaceRepository:
                     ),
                 )
             )
-            .options(
-                selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),  # type: ignore[attr-defined]
-            )
+            .options(selectinload(ws.latest_crawl))  # type: ignore[attr-defined]
             .order_by(ws.created_at)
         )
 

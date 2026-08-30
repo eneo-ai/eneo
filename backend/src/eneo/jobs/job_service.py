@@ -1,9 +1,7 @@
-import asyncio
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import event
-
+from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Job, JobInDb, JobUpdate, Task
 from eneo.jobs.job_repo import JobRepository
@@ -87,35 +85,11 @@ class JobService:
                     extra={"job_id": str(job_in_db.id), "task": task.value},
                 )
 
-        outer_committed = False
-        active = True
-
-        def after_commit(_session: object) -> None:
-            nonlocal outer_committed
-            if active and not session.in_nested_transaction():
-                outer_committed = True
-
-        def remove_listeners() -> None:
-            if event.contains(session, "after_commit", after_commit):
-                event.remove(session, "after_commit", after_commit)
-            if event.contains(session, "after_transaction_end", after_transaction_end):
-                event.remove(session, "after_transaction_end", after_transaction_end)
-
-        def after_transaction_end(_session: object, transaction: object) -> None:
-            nonlocal active
-            if not active or getattr(transaction, "parent", None) is not None:
-                return
-
-            active = False
-            loop = asyncio.get_running_loop()
-            if outer_committed:
-                loop.create_task(dispatch_after_commit())
-            else:
-                cleanup_after_rollback()
-            loop.call_soon(remove_listeners)
-
-        event.listen(session, "after_commit", after_commit)
-        event.listen(session, "after_transaction_end", after_transaction_end)
+        after_outer_transaction(
+            session,
+            on_commit=dispatch_after_commit,
+            on_rollback=cleanup_after_rollback,
+        )
         return job_in_db
 
     async def set_status(self, job_id: UUID, status: Status):

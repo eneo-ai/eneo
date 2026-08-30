@@ -465,8 +465,6 @@ class Settings(BaseSettings):
     crawl_page_max_size: int = Field(
         default=10 * 1024 * 1024, ge=64 * 1024, le=1024 * 1024 * 1024
     )
-    crawl_sitemap_skip_enabled: bool = True
-    crawl_sitemap_skip_max_age_hours: int = Field(default=168, gt=0, le=24 * 365)
     autothrottle_enabled: bool = True  # Pace bounded request batches conservatively
     # Crawl job age limit (prevents infinite retry loops)
     crawl_job_max_age_seconds: int = 1800  # Maximum retry window (30 minutes)

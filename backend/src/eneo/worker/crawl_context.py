@@ -102,6 +102,8 @@ class CrawlContext:
     tenant_id: UUID
     tenant_slug: str | None
     user_id: UUID
+    attempt_id: UUID
+    lease_owner: str
 
     # Embedding model - extract ALL fields to avoid lazy-load
     embedding_model_id: UUID | None

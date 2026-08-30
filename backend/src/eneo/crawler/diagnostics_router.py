@@ -88,7 +88,9 @@ async def get_crawler_diagnostics(container: ContainerDep) -> CrawlerDiagnostics
             reserved_worker_jobs=settings.reserved_worker_jobs,
         ),
         limits=_effective_limits(container),
-        sitemap_change_detection=settings.crawl_sitemap_skip_enabled,
+        # Whole-sitemap skipping is intentionally disabled until discovery edges
+        # can be restored without re-reading unchanged parent pages.
+        sitemap_change_detection=False,
         websites=[
             CrawlerWebsiteModel(
                 id=website.id,

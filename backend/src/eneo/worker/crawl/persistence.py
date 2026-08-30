@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
-from dependency_injector import providers
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing_extensions import NotRequired, TypedDict
 
@@ -34,6 +33,9 @@ from eneo.info_blobs.info_blob import InfoBlobChunk
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.websites.domain.crawl_run import CrawlPhase
+from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
+from eneo.worker.crawl.heartbeat import CrawlLeaseLostError
 from eneo.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
@@ -42,6 +44,8 @@ from eneo.worker.crawl_context import (
 )
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from eneo.main.container.container import Container
 
 logger = get_logger(__name__)
@@ -65,8 +69,25 @@ _embedding_semaphore: asyncio.Semaphore | None = None
 class CrawlPageData(TypedDict):
     url: str
     content: str
+    title: NotRequired[str]
+    content_hash: NotRequired[bytes]
     etag: NotRequired[str | None]
     last_modified: NotRequired[str | None]
+
+
+async def _require_current_publication_lease(
+    session: "AsyncSession",
+    ctx: CrawlContext,
+) -> None:
+    current = await CrawlRunRepository(session).lock_attempt_lease(
+        ctx.attempt_id,
+        lease_owner=ctx.lease_owner,
+        expected_phase=CrawlPhase.RUNNING,
+    )
+    if not current:
+        raise CrawlLeaseLostError(
+            "Crawl attempt lease was lost before publishing content"
+        )
 
 
 async def _refresh_http_validators(
@@ -81,13 +102,14 @@ async def _refresh_http_validators(
 
     values = [
         {
-            "b_title": row["url"],
+            "b_title": row.get("title", row["url"]),
             "b_etag": row.get("etag"),
             "b_last_modified": row.get("last_modified"),
         }
         for row in rows
     ]
     async with sessionmanager.session() as session, session.begin():
+        await _require_current_publication_lease(session, ctx)
         await session.execute(
             sa.update(InfoBlobs)
             .where(
@@ -125,13 +147,13 @@ def _get_embedding_semaphore() -> asyncio.Semaphore:
     return _embedding_semaphore
 
 
-async def persist_batch(
+async def _persist_bounded_batch(
     page_buffer: list[CrawlPageData],
     ctx: CrawlContext,
     embedding_model: EmbeddingModelSpec | None,
     container: "Container",
     existing_publications: dict[str, tuple[bytes, UUID]] | None = None,
-) -> tuple[int, int, list[str], dict[str, list[str]]]:
+) -> tuple[int, int, list[str], dict[str, list[str]], int]:
     """
     Persist a batch of pages using the TWO-PHASE pattern.
 
@@ -159,35 +181,37 @@ async def persist_batch(
         page_buffer: List of page dicts with 'url' and 'content' keys
         ctx: CrawlContext DTO with all primitives (no ORM objects!)
         embedding_model: EmbeddingModelSpec frozen dataclass (session-independent)
-        container: DI container for creating embedding service with proper session
+        container: DI container for creating the embedding service
 
     Returns:
-        Tuple of (success_count, failed_count, successful_urls, failures_by_reason)
+        Tuple of (success_count, failed_count, successful_identities,
+        failures_by_reason, consumed_count)
         - success_count: Number of pages successfully persisted
         - failed_count: Number of pages that failed to persist
-        - successful_urls: List of URLs persisted or confirmed unchanged
-        - failures_by_reason: Dict mapping FailureReason codes to lists of failed URLs
+        - successful_identities: Page URLs or file titles persisted or unchanged
+        - failures_by_reason: FailureReason codes mapped to page URLs or file titles
+        - consumed_count: Number of input pages inspected before a bounded flush
 
     Note:
         - Publication serializes concurrent updates for the same website page.
         - A failed replacement rolls back to the previous active version.
-        - CRITICAL: Only URLs in successful_urls should be marked as crawled
-        - CRITICAL: URLs in failures_by_reason should NOT be deleted as stale
+        - Only successful identities should be marked as crawled.
+        - Failed identities must not be deleted as stale.
     """
     from eneo.database.database import sessionmanager
 
     if not page_buffer:
-        return 0, 0, [], {}
+        return 0, 0, [], {}, 0
 
     # Track failures by reason code for detailed reporting
     failures_by_reason: dict[str, list[str]] = {}
 
-    def add_failure(reason: FailureReason, url: str) -> None:
+    def add_failure(reason: FailureReason, identity: str) -> None:
         """Track a failure by reason code."""
         reason_key = reason.value
         if reason_key not in failures_by_reason:
             failures_by_reason[reason_key] = []
-        failures_by_reason[reason_key].append(url)
+        failures_by_reason[reason_key].append(identity)
 
     if embedding_model is None:
         logger.warning(
@@ -195,36 +219,43 @@ async def persist_batch(
             extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
         )
         for page in page_buffer:
-            add_failure(FailureReason.NO_EMBEDDING_MODEL, page["url"])
-        return 0, len(page_buffer), [], failures_by_reason
+            add_failure(
+                FailureReason.NO_EMBEDDING_MODEL,
+                page.get("title", page["url"]),
+            )
+        return 0, len(page_buffer), [], failures_by_reason, len(page_buffer)
 
-    # Validate embedding model has required provider_id for credential lookup
-    if not getattr(embedding_model, "provider_id", None):
+    # Provider data is resolved during the short bootstrap transaction. A database
+    # fallback here would retain a connection during embedding-provider network I/O.
+    if (
+        embedding_model.provider_id is None
+        or not embedding_model.provider_type
+        or embedding_model.provider_credentials is None
+    ):
         logger.error(
-            "Embedding model missing provider_id - cannot load API credentials",
+            "Embedding model provider configuration was not resolved",
             extra={
                 "website_id": str(ctx.website_id),
-                "embedding_model_name": getattr(embedding_model, "name", None),
-                "embedding_model_id": str(getattr(embedding_model, "id", None)),
+                "embedding_model_name": embedding_model.name,
+                "embedding_model_id": str(embedding_model.id),
             },
         )
         for page in page_buffer:
-            add_failure(FailureReason.MISSING_PROVIDER, page["url"])
-        return 0, len(page_buffer), [], failures_by_reason
+            add_failure(
+                FailureReason.MISSING_PROVIDER,
+                page.get("title", page["url"]),
+            )
+        return 0, len(page_buffer), [], failures_by_reason, len(page_buffer)
 
     success_count = 0
     failed_count = 0
-    successful_urls: list[str] = []
+    successful_identities: list[str] = []
     prepared_pages: list[PreparedPage] = []
     buffer_embedding_bytes = 0
     validator_refreshes: list[CrawlPageData] = []
+    processed_count = 0
 
-    # Create a short-lived session for embedding service to load provider credentials
-    embedding_session = sessionmanager.create_session()
     try:
-        await embedding_session.begin()
-        session_provider = cast(Any, container.session)
-        session_provider.override(providers.Object(embedding_session))
         create_embeddings_service = container.create_embeddings_service()
     except Exception as e:
         logger.error(
@@ -235,10 +266,12 @@ async def persist_batch(
                 "error_type": type(e).__name__,
             },
         )
-        await embedding_session.close()
         for page in page_buffer:
-            add_failure(FailureReason.EMBEDDING_ERROR, page["url"])
-        return 0, len(page_buffer), [], failures_by_reason
+            add_failure(
+                FailureReason.EMBEDDING_ERROR,
+                page.get("title", page["url"]),
+            )
+        return 0, len(page_buffer), [], failures_by_reason, len(page_buffer)
 
     # Create text splitter (matching datastore.py pattern)
     splitter = RecursiveCharacterTextSplitter(
@@ -247,9 +280,7 @@ async def persist_batch(
         length_function=count_tokens,
     )
 
-    # PHASE 1: Compute embeddings (uses embedding_session for provider credentials)
-    # The embedding session is used to load API credentials from DB, but the actual
-    # embedding API calls are external network I/O, not DB operations.
+    # PHASE 1: Compute embeddings without retaining a database connection.
     logger.debug(
         "Phase 1: Computing embeddings for batch",
         extra={
@@ -261,7 +292,9 @@ async def persist_batch(
 
     try:
         for page_data in page_buffer:
+            processed_count += 1
             url = page_data["url"]
+            title = page_data.get("title", url)
             content = page_data["content"]
 
             if not content.strip():
@@ -275,18 +308,21 @@ async def persist_batch(
                     },
                 )
                 failed_count += 1
-                add_failure(FailureReason.EMPTY_CONTENT, url)
+                add_failure(FailureReason.EMPTY_CONTENT, title)
                 continue
 
             try:
                 # 1. Compute content hash (local operation)
-                content_hash = hashlib.sha256(content.encode("utf-8")).digest()
-                if (existing_publications or {}).get(url) == (
+                content_hash = (
+                    page_data.get("content_hash")
+                    or hashlib.sha256(content.encode("utf-8")).digest()
+                )
+                if (existing_publications or {}).get(title) == (
                     content_hash,
                     embedding_model.id,
                 ):
                     success_count += 1
-                    successful_urls.append(url)
+                    successful_identities.append(title)
                     if (
                         page_data.get("etag") is not None
                         or page_data.get("last_modified") is not None
@@ -310,7 +346,7 @@ async def persist_batch(
                         },
                     )
                     failed_count += 1
-                    add_failure(FailureReason.NO_CHUNKS, url)
+                    add_failure(FailureReason.NO_CHUNKS, title)
                     continue
 
                 # 3. Create InfoBlobChunk objects for embedding service
@@ -332,7 +368,7 @@ async def persist_batch(
                         async with asyncio.timeout(ctx.embedding_timeout_seconds):
                             chunk_embedding_list = (
                                 await create_embeddings_service.get_embeddings(
-                                    model=cast(Any, embedding_model),
+                                    model=embedding_model,
                                     chunks=chunk_objects,
                                 )
                             )
@@ -347,18 +383,13 @@ async def persist_batch(
                             },
                         )
                         failed_count += 1
-                        add_failure(FailureReason.EMBEDDING_TIMEOUT, url)
+                        add_failure(FailureReason.EMBEDDING_TIMEOUT, title)
                         continue
 
-                # 5. Extract embeddings from ChunkEmbeddingList
+                # 5. Copy embeddings out of the temporary ChunkEmbeddingList.
                 embeddings: list[list[float]] = []
                 for _, embedding in chunk_embedding_list:
-                    # ChunkEmbeddingList returns numpy arrays, convert to list
-                    embeddings.append(
-                        embedding.tolist()  # type: ignore[attr-defined]
-                        if hasattr(embedding, "tolist")
-                        else list(embedding)
-                    )
+                    embeddings.append(list(embedding))
 
                 # 6. Track embedding memory for early flush
                 embedding_bytes = sum(
@@ -371,7 +402,7 @@ async def persist_batch(
                 assert embedding_model_id is not None
                 prepared = PreparedPage(
                     url=url,
-                    title=url,  # URL as title, matching existing crawler pattern
+                    title=title,
                     content=content,
                     content_hash=content_hash,
                     http_etag=page_data.get("etag"),
@@ -388,7 +419,7 @@ async def persist_batch(
                 # Check memory cap for early flush
                 if buffer_embedding_bytes >= ctx.max_batch_embedding_bytes:
                     logger.info(
-                        f"Embedding memory cap reached ({buffer_embedding_bytes} bytes), stopping Phase 1 early",
+                        "Embedding memory cap reached; flushing the prepared subset",
                         extra={
                             "website_id": str(ctx.website_id),
                             "pages_prepared": len(prepared_pages),
@@ -407,26 +438,37 @@ async def persist_batch(
                     },
                 )
                 failed_count += 1
-                add_failure(FailureReason.EMBEDDING_ERROR, url)
+                add_failure(FailureReason.EMBEDDING_ERROR, title)
                 continue
-    finally:
-        # Close embedding session after Phase 1 completes
-        # This returns the connection to the pool before Phase 2 starts
-        await embedding_session.close()
+    except asyncio.CancelledError:
+        logger.info(
+            "Embedding preparation cancelled",
+            extra={
+                "website_id": str(ctx.website_id),
+                "pages_processed": processed_count,
+            },
+        )
+        raise
 
-    confirmed_unchanged_urls = successful_urls.copy()
+    confirmed_unchanged_identities = successful_identities.copy()
     await _refresh_http_validators(ctx=ctx, rows=validator_refreshes)
     if not prepared_pages:
-        log = logger.debug if successful_urls else logger.warning
+        log = logger.debug if successful_identities else logger.warning
         log(
             "No pages require publication after Phase 1",
             extra={
                 "website_id": str(ctx.website_id),
-                "unchanged_count": len(successful_urls),
+                "unchanged_count": len(successful_identities),
                 "failed_count": failed_count,
             },
         )
-        return success_count, failed_count, successful_urls, failures_by_reason
+        return (
+            success_count,
+            failed_count,
+            successful_identities,
+            failures_by_reason,
+            processed_count,
+        )
 
     # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
     # This is the only part that holds a database connection.
@@ -443,6 +485,7 @@ async def persist_batch(
     try:
         async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
             async with sessionmanager.session() as session, session.begin():
+                await _require_current_publication_lease(session, ctx)
                 tenant_limit, user_limit = (
                     await session.execute(
                         sa.select(Tenants.quota_limit, Users.quota_limit)
@@ -519,7 +562,7 @@ async def persist_batch(
                             )
                             await savepoint.commit()
                             success_count += 1
-                            successful_urls.append(prepared.url)
+                            successful_identities.append(prepared.title)
                             continue
 
                         chunk_sizes = [
@@ -614,14 +657,12 @@ async def persist_batch(
                         tenant_usage += stored_size
                         user_usage += stored_size
                         success_count += 1
-                        successful_urls.append(
-                            prepared.url
-                        )  # Track this URL as actually persisted
+                        successful_identities.append(prepared.title)
 
                     except Exception as e:
                         await savepoint.rollback()
                         failed_count += 1
-                        add_failure(FailureReason.DB_ERROR, prepared.url)
+                        add_failure(FailureReason.DB_ERROR, prepared.title)
                         logger.error(
                             f"Phase 2: Failed to persist page {prepared.url}: {e}",
                             extra={
@@ -642,6 +683,9 @@ async def persist_batch(
             },
         )
 
+    except CrawlLeaseLostError:
+        raise
+
     except asyncio.TimeoutError:
         logger.error(
             f"Phase 2: Transaction wall-time exceeded ({ctx.max_transaction_wall_time_seconds}s)",
@@ -651,10 +695,10 @@ async def persist_batch(
             },
         )
         # Mark all unpersisted pages as failed with DB_ERROR
-        successful_urls = confirmed_unchanged_urls
-        success_count = len(confirmed_unchanged_urls)
+        successful_identities = confirmed_unchanged_identities
+        success_count = len(confirmed_unchanged_identities)
         for page in prepared_pages:
-            add_failure(FailureReason.DB_ERROR, page.url)
+            add_failure(FailureReason.DB_ERROR, page.title)
         failed_count += len(prepared_pages)
 
     except Exception as e:
@@ -666,10 +710,57 @@ async def persist_batch(
             },
         )
         # Mark all unpersisted pages as failed with DB_ERROR
-        successful_urls = confirmed_unchanged_urls
-        success_count = len(confirmed_unchanged_urls)
+        successful_identities = confirmed_unchanged_identities
+        success_count = len(confirmed_unchanged_identities)
         for page in prepared_pages:
-            add_failure(FailureReason.DB_ERROR, page.url)
+            add_failure(FailureReason.DB_ERROR, page.title)
         failed_count += len(prepared_pages)
 
-    return success_count, failed_count, successful_urls, failures_by_reason
+    return (
+        success_count,
+        failed_count,
+        successful_identities,
+        failures_by_reason,
+        processed_count,
+    )
+
+
+async def persist_batch(
+    page_buffer: list[CrawlPageData],
+    ctx: CrawlContext,
+    embedding_model: EmbeddingModelSpec | None,
+    container: "Container",
+    existing_publications: dict[str, tuple[bytes, UUID]] | None = None,
+) -> tuple[int, int, list[str], dict[str, list[str]]]:
+    """Persist every page across memory-bounded embedding batches."""
+    remaining = page_buffer
+    total_success = 0
+    total_failed = 0
+    successful_identities: list[str] = []
+    failures_by_reason: dict[str, list[str]] = {}
+
+    while remaining:
+        (
+            success_count,
+            failed_count,
+            batch_successful_identities,
+            batch_failures,
+            consumed_count,
+        ) = await _persist_bounded_batch(
+            page_buffer=remaining,
+            ctx=ctx,
+            embedding_model=embedding_model,
+            container=container,
+            existing_publications=existing_publications,
+        )
+        if consumed_count <= 0:
+            raise RuntimeError("Bounded crawl persistence made no progress")
+
+        total_success += success_count
+        total_failed += failed_count
+        successful_identities.extend(batch_successful_identities)
+        for reason, identities in batch_failures.items():
+            failures_by_reason.setdefault(reason, []).extend(identities)
+        remaining = remaining[consumed_count:]
+
+    return total_success, total_failed, successful_identities, failures_by_reason
