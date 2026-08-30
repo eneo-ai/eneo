@@ -156,7 +156,7 @@ services:
         condition: service_completed_successfully
 
   worker:
-    # Background task processor (crawls, uploads, integrations)
+    # General background task processor (uploads, integrations, and control jobs)
     # Uses same image as backend but runs ARQ worker instead of HTTP server
     # The RUN_AS_WORKER env var tells run.sh to start ARQ instead of Gunicorn
     image: ghcr.io/eneo-ai/eneo-backend:latest
@@ -164,6 +164,7 @@ services:
     restart: unless-stopped
     environment:
       - RUN_AS_WORKER=true  # Runs today's ARQ adapter; task logic is queue-neutral
+      - WORKER_ROLE=general
       - OBJECT_CONTENT_ENDPOINT_URL
       - OBJECT_CONTENT_REGION
       - OBJECT_CONTENT_BUCKET
@@ -176,6 +177,40 @@ services:
     volumes:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp  # Shared with backend for audit log exports (/tmp/exports)
+    networks:
+      - proxy_tier
+      - data_net
+    depends_on:
+      - backend
+
+  crawler-worker:
+    # Dedicated consumer for long-running website crawls on arq:crawler.
+    image: ghcr.io/eneo-ai/eneo-backend:latest
+    restart: unless-stopped
+    stop_grace_period: 70s
+    healthcheck:
+      test: ["CMD", "arq", "--check", "src.eneo.worker.arq.CrawlerWorkerSettings"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    environment:
+      - RUN_AS_WORKER=true
+      - WORKER_ROLE=crawler
+      # The existing feeder remains owned by the general worker during Gate 1.
+      - CRAWL_FEEDER_ENABLED=false
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
+    env_file:
+      - env_backend.env
+    volumes:
+      - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
     networks:
       - proxy_tier
       - data_net

@@ -287,10 +287,10 @@ DB_POOL_PRE_PING=true
 # Controls ARQ (Async Redis Queue) worker pool and per-tenant concurrency fairness.
 # ARQ processes background jobs like web crawling, document processing, etc.
 #
-# NOTE: RUN_AS_WORKER is set in docker-compose.yml to run the container as
-# a background task processor instead of HTTP server. Both backend and worker
-# containers use the same image; run.sh detects RUN_AS_WORKER=true to launch
-# the ARQ worker instead of Gunicorn.
+# NOTE: RUN_AS_WORKER is set in docker-compose.yml to run the container as a
+# background task processor instead of the HTTP server. WORKER_ROLE selects
+# either the general queue or the isolated crawler queue. The Compose services
+# set these values; operators normally do not need to add them to this file.
 #
 # VOLUMES: Ensure both backend and worker services have these volumes in docker-compose.yml:
 #   - eneo_backend_data:/app/data

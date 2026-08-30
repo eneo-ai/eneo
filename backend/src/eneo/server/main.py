@@ -631,6 +631,7 @@ def get_application():
         Args:
             include_all: If True, return all tenant queue lengths instead of top-10.
         """
+        from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME
         from eneo.worker.redis.client import get_redis
 
         redis_client = cast(Any, get_redis())
@@ -652,11 +653,12 @@ def get_application():
 
         try:
             # 1. Parse ARQ health with age (for debugging) + fetch TTL (for status)
-            arq_raw = await redis_client.get("arq:queue:health-check") or ""
+            health_key = f"{CRAWLER_QUEUE_NAME}:health-check"
+            arq_raw = await redis_client.get(health_key) or ""
             if isinstance(arq_raw, bytes):
                 arq_raw = arq_raw.decode()
             arq_health = _parse_arq_health_string(arq_raw)
-            arq_heartbeat_ttl = await redis_client.ttl("arq:queue:health-check")
+            arq_heartbeat_ttl = await redis_client.ttl(health_key)
 
             # 2. Get watchdog metrics
             watchdog_raw = await redis_client.get("crawl_watchdog:last_metrics")
@@ -904,7 +906,7 @@ def get_application():
                 arq_timestamp=arq_health.get("timestamp"),
                 watchdog_timestamp=watchdog_metrics.get("timestamp"),
                 redis_db=redis_db,
-                queue_name="arq:queue",
+                queue_name=CRAWLER_QUEUE_NAME,
             ),
         )
 

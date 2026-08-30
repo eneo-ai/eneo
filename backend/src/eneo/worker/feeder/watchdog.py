@@ -714,12 +714,16 @@ class OrphanWatchdog:
         """
         from arq.jobs import Job, JobStatus
 
-        from eneo.jobs.job_manager import job_manager
+        from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, job_manager
         from eneo.jobs.job_models import Task
         from eneo.websites.crawl_dependencies.crawl_models import CrawlTask, CrawlType
 
         # Check ARQ status first
-        arq_job = Job(job_id=str(job_id), redis=self._redis)
+        arq_job = Job(
+            job_id=str(job_id),
+            redis=self._redis,
+            _queue_name=CRAWLER_QUEUE_NAME,
+        )
         try:
             status = await arq_job.status()
         except Exception:
@@ -742,7 +746,17 @@ class OrphanWatchdog:
         )
 
         try:
-            await job_manager.enqueue(task=Task.CRAWL, job_id=job_id, params=params)
+            enqueued_job = await job_manager.enqueue(
+                task=Task.CRAWL,
+                job_id=job_id,
+                params=params,
+            )
+            if enqueued_job is None:
+                logger.warning(
+                    "ARQ rejected duplicate crawl re-queue",
+                    extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},
+                )
+                return False
             logger.info(
                 "Re-queued stuck job to ARQ",
                 extra={"job_id": str(job_id), "tenant_id": str(tenant_id)},

@@ -40,6 +40,7 @@ from eneo.worker.usage_stats_tasks import (
 from eneo.worker.worker import Worker
 
 worker = Worker()
+crawler_worker = Worker()
 logger = get_logger(__name__)
 
 
@@ -132,7 +133,7 @@ async def reconcile_knowledge_job_staging(
         await reconcile_job_staging(session)
 
 
-@worker.long_running_function()
+@crawler_worker.long_running_function()
 async def crawl(job_id: UUID, params: CrawlTask, container: Container):
     """Crawl task uses long_running_function to avoid DB pool exhaustion.
 

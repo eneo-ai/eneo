@@ -238,6 +238,74 @@ class TestWatchdogPhase2RescueStuck:
         assert len(result.jobs_to_requeue) == 0
 
 
+class TestWatchdogCrawlerQueueRouting:
+    @pytest.mark.asyncio
+    async def test_checks_the_crawler_queue_before_requeueing(self):
+        from arq.jobs import JobStatus
+
+        from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
+
+        redis_mock = MagicMock()
+        watchdog = OrphanWatchdog(redis_mock, MagicMock())
+        arq_job = MagicMock()
+        arq_job.status = AsyncMock(return_value=JobStatus.queued)
+
+        with (
+            patch("arq.jobs.Job", return_value=arq_job) as job_class,
+            patch(
+                "eneo.jobs.job_manager.job_manager.enqueue",
+                new_callable=AsyncMock,
+            ) as enqueue,
+        ):
+            rescued = await watchdog._requeue_job(
+                job_id=uuid4(),
+                user_id=uuid4(),
+                run_id=uuid4(),
+                tenant_id=uuid4(),
+                website_id=uuid4(),
+                url="https://example.com",
+                download_files=False,
+                crawl_type="crawl",
+            )
+
+        assert rescued is False
+        job_class.assert_called_once()
+        assert job_class.call_args.kwargs["_queue_name"] == CRAWLER_QUEUE_NAME
+        enqueue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_enqueue_is_not_reported_as_rescued(self):
+        from arq.jobs import JobStatus
+
+        from eneo.worker.feeder.watchdog import OrphanWatchdog
+
+        watchdog = OrphanWatchdog(MagicMock(), MagicMock())
+        arq_job = MagicMock()
+        arq_job.status = AsyncMock(return_value=JobStatus.not_found)
+
+        with (
+            patch("arq.jobs.Job", return_value=arq_job),
+            patch(
+                "eneo.jobs.job_manager.job_manager.enqueue",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            rescued = await watchdog._requeue_job(
+                job_id=uuid4(),
+                user_id=uuid4(),
+                run_id=uuid4(),
+                tenant_id=uuid4(),
+                website_id=uuid4(),
+                url="https://example.com",
+                download_files=False,
+                crawl_type="crawl",
+            )
+
+        assert rescued is False
+
+
 class TestWatchdogPhase3FailLongRunning:
     """Tests for Phase 3: Fail long-running IN_PROGRESS jobs."""
 

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, NamedTuple, cast
 
 import redis.asyncio as aioredis
+from eneo.jobs.job_manager import DEFAULT_QUEUE_NAME
 from eneo.main.config import get_settings
 from eneo.redis.connection import build_redis_pool_kwargs
 
@@ -64,15 +65,14 @@ class WorkerHealth(NamedTuple):
     details: str | None
 
 
-async def get_worker_health() -> WorkerHealth:
+async def get_worker_health(queue_name: str = DEFAULT_QUEUE_NAME) -> WorkerHealth:
     """Check the health status of the arq worker via Redis health check key.
 
     Returns:
         WorkerHealth: Contains status, last_heartbeat timestamp, and details
     """
     try:
-        # Default queue name in arq is "arq:queue", health check key is "{queue_name}:health-check"
-        health_key = "arq:queue:health-check"
+        health_key = f"{queue_name}:health-check"
         worker_health_data = await r.get(health_key)
 
         if worker_health_data:
