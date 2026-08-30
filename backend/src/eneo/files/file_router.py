@@ -1,12 +1,11 @@
 import base64
 import time
-import unicodedata
 from typing import Annotated, cast
-from urllib.parse import quote
+from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -41,6 +40,10 @@ from eneo.main.models import GeneralError, PaginatedResponse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.server.protocol.downloads import (
+    ClosingStreamingResponse,
+    content_disposition_header,
+)
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -303,9 +306,8 @@ async def generate_original_signed_url(
             },
         ),
     )
-    base_url = str(request.base_url).rstrip("/")
     return SignedURLResponse(
-        url=f"{base_url}/api/v1/files/{id}/original/download/?token={token}",
+        url=f"{request.url_for('download_original_file_signed', id=str(id))}?{urlencode({'token': token})}",
         expires_at=expires_at,
     )
 
@@ -331,43 +333,15 @@ def _validate_download_claims(
     return ContentDisposition(str(payload["content_disposition"])), expected_tenant_id
 
 
-def _content_disposition_header(
-    disposition: ContentDisposition,
-    filename: str,
-) -> str:
-    safe_ascii = bool(filename) and all(
-        0x20 <= ord(character) <= 0x7E and character not in {'"', "\\"}
-        for character in filename
-    )
-    if safe_ascii:
-        return f'{disposition.value}; filename="{filename}"'
-
-    ascii_name = (
-        unicodedata.normalize("NFKD", filename)
-        .encode("ascii", errors="ignore")
-        .decode("ascii")
-    )
-    fallback = "".join(
-        character
-        if 0x20 <= ord(character) <= 0x7E and character not in {'"', "\\"}
-        else "_"
-        for character in ascii_name
-    )
-    fallback = fallback or "download"
-    encoded = quote(filename, safe="", encoding="utf-8", errors="strict")
-    return f"{disposition.value}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
-
-
 def _download_response(
     download: FileDownload,
     *,
     content_disposition: ContentDisposition,
     include_repr_digest: bool = False,
-) -> StreamingResponse:
+) -> ClosingStreamingResponse:
     headers = {
-        "Content-Disposition": _content_disposition_header(
-            content_disposition,
-            download.filename,
+        "Content-Disposition": content_disposition_header(
+            content_disposition.value, download.filename
         ),
         "Content-Length": str(download.content_length),
     }
@@ -379,15 +353,9 @@ def _download_response(
     if download.content_range is not None:
         headers["Content-Range"] = download.content_range
 
-    async def response_chunks():
-        try:
-            async for chunk in download.chunks:
-                yield chunk
-        finally:
-            await download.aclose()
-
-    return StreamingResponse(
-        response_chunks(),
+    return ClosingStreamingResponse(
+        download.chunks,
+        close=download.aclose,
         status_code=206 if download.content_range is not None else 200,
         media_type=download.media_type,
         headers=headers,
@@ -482,7 +450,7 @@ async def download_original_file_signed(
         Depends(get_container(with_transaction=False)),
     ],
     range: Annotated[str | None, Header()] = None,
-) -> StreamingResponse | Response:
+) -> ClosingStreamingResponse | Response:
     content_disposition, expected_tenant_id = _validate_download_claims(
         file_id=id,
         payload=verify_file_original_download_token(token),

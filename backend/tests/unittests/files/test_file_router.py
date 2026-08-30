@@ -253,7 +253,9 @@ async def test_original_signed_url_audits_the_attributable_access_grant(
             return user
 
     request = MagicMock()
-    request.base_url = "https://eneo.example.eu/"
+    request.url_for.return_value = (
+        f"https://eneo.example.eu/api/v1/files/{file_id}/original/download/"
+    )
     monkeypatch.setattr(file_router.time, "time", lambda: 1_000)
     monkeypatch.setattr(
         file_router,
@@ -625,8 +627,8 @@ async def test_download_response_preserves_safe_ascii_filename_and_closes_once()
     )
     assert "accept-ranges" not in response.headers
     assert b"".join([chunk async for chunk in response.body_iterator]) == b"content"
-    await response.body_iterator.aclose()
-    await response.body_iterator.aclose()
+    await response.aclose()
+    await response.aclose()
     closed.assert_awaited_once()
 
 
@@ -667,6 +669,7 @@ async def test_download_response_safely_encodes_untrusted_filename(filename: str
     assert "filename*=UTF-8''" in header
     assert await anext(response.body_iterator) == b"content"
     await response.body_iterator.aclose()
+    await response.aclose()
     closed.assert_awaited_once()
 
 
@@ -690,6 +693,7 @@ async def test_audio_download_advertises_range_support():
 
     assert response.headers["accept-ranges"] == "bytes"
     await response.body_iterator.aclose()
+    await response.aclose()
 
 
 def test_original_download_openapi_declares_json_error_contracts():

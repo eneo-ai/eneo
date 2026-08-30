@@ -68,6 +68,7 @@ async def test_public_icon_response_consumes_the_downstream_stream_incrementally
     assert response.headers["cache-control"] == "public, max-age=31536000"
 
     await iterator.aclose()
+    await response.aclose()
     assert closed
 
 
