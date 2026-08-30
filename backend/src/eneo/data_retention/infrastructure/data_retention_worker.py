@@ -7,16 +7,7 @@ from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
-from eneo.data_retention.infrastructure.data_retention_service import (
-    RETENTION_BATCH_SIZE,
-    FlowDebugRedactionCounts,
-    FlowRunHistoryPurgeBlockedCounts,
-    FlowTemplateAssetPurgeCounts,
-)
 from eneo.database.database import sessionmanager
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeCounts,
-)
 from eneo.main.container.container import Container
 from eneo.worker.worker import Worker
 
@@ -31,30 +22,6 @@ class DeletedCounts(TypedDict):
     sessions: int
     builder_sessions: int
     builder_client_errors: int
-    flow_debug_rows: int
-    flow_attempt_provenance: int
-    flow_provider_calls: int
-    flow_resolved_input_aggregates: int
-    flow_resolved_input_edges: int
-    flow_runs_considered: int
-    flow_runs_lock_deferred: int
-    flow_runs_purged: int
-    flow_generated_files_deleted: int
-    flow_runtime_source_candidates: int
-    flow_runtime_source_candidate_bytes: int
-    flow_runtime_source_bindings_deleted: int
-    flow_runtime_source_files_deleted: int
-    flow_runtime_source_bytes_deleted: int
-    flow_webhook_deliveries_deleted: int
-    flow_audit_outbox_rows_deleted: int
-    flow_review_checkpoints_deleted: int
-    flow_template_assets_purged: int
-    flow_template_asset_files_deleted: int
-    flow_template_assets_skipped_published_reference: int
-    flow_template_assets_skipped_undetermined_reference: int
-    flow_runs_skipped_undelivered_audit: int
-    flow_runs_skipped_unresolved_webhook: int
-    flow_audit_outbox_delivered_rows: int
     total: int
 
 
@@ -85,67 +52,12 @@ async def _run_cleanup_step(
         return None
 
 
-def _record_flow_run_history_purge_counts(
-    deleted: DeletedCounts, counts: FlowRunHistoryPurgeCounts
-) -> None:
-    deleted["flow_runs_considered"] += counts.flow_runs_considered
-    deleted["flow_runs_lock_deferred"] += counts.flow_runs_lock_deferred
-    deleted["flow_runs_purged"] += counts.flow_runs_purged
-    deleted["flow_generated_files_deleted"] += counts.flow_generated_files_deleted
-    deleted["flow_runtime_source_candidates"] += counts.flow_runtime_source_candidates
-    deleted["flow_runtime_source_candidate_bytes"] += (
-        counts.flow_runtime_source_candidate_bytes
-    )
-    deleted["flow_runtime_source_bindings_deleted"] += (
-        counts.flow_runtime_source_bindings_deleted
-    )
-    deleted["flow_runtime_source_files_deleted"] += (
-        counts.flow_runtime_source_files_deleted
-    )
-    deleted["flow_runtime_source_bytes_deleted"] += (
-        counts.flow_runtime_source_bytes_deleted
-    )
-    deleted["flow_webhook_deliveries_deleted"] += counts.flow_webhook_deliveries_deleted
-    deleted["flow_audit_outbox_rows_deleted"] += counts.flow_audit_outbox_rows_deleted
-    deleted["flow_review_checkpoints_deleted"] += counts.flow_review_checkpoints_deleted
-
-
-def _record_flow_template_asset_purge_counts(
-    deleted: DeletedCounts, counts: FlowTemplateAssetPurgeCounts
-) -> None:
-    deleted["flow_template_assets_purged"] += counts.flow_template_assets_purged
-    deleted["flow_template_asset_files_deleted"] += (
-        counts.flow_template_asset_files_deleted
-    )
-    deleted["flow_template_assets_skipped_published_reference"] += (
-        counts.flow_template_assets_skipped_published_reference
-    )
-    deleted["flow_template_assets_skipped_undetermined_reference"] += (
-        counts.flow_template_assets_skipped_undetermined_reference
-    )
-
-
-def _record_flow_run_history_blocked_counts(
-    deleted: DeletedCounts, counts: FlowRunHistoryPurgeBlockedCounts
-) -> None:
-    deleted["flow_runs_skipped_undelivered_audit"] = counts.skipped_undelivered_audit
-    deleted["flow_runs_skipped_unresolved_webhook"] = counts.skipped_unresolved_webhook
-
-
-def _record_flow_debug_redaction_counts(
-    deleted: DeletedCounts, counts: FlowDebugRedactionCounts
-) -> None:
-    deleted["flow_debug_rows"] += counts.debug_step_results
-    deleted["flow_attempt_provenance"] += counts.debug_step_attempts
-    deleted["flow_provider_calls"] += counts.debug_provider_calls
-    deleted["flow_resolved_input_aggregates"] += counts.debug_resolved_input_aggregates
-    deleted["flow_resolved_input_edges"] += counts.debug_resolved_input_edges
-
-
 @worker.cron_job(hour=3, minute=0)
 async def cleanup_old_data(container: Container) -> CleanupResults:
-    """
-    Daily cleanup of old data based on retention policies.
+    """Run the daily cleanup for non-Flow retention policies.
+
+    Flow-owned data is deliberately excluded. Flow retention settings determine
+    purge eligibility, but deletion requires a separate administrator action.
 
     Uses explicit sessionmanager.session() to avoid nested transaction issues
     when cron wrapper already has a transaction open.
@@ -166,30 +78,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "sessions": 0,
             "builder_sessions": 0,
             "builder_client_errors": 0,
-            "flow_debug_rows": 0,
-            "flow_attempt_provenance": 0,
-            "flow_provider_calls": 0,
-            "flow_resolved_input_aggregates": 0,
-            "flow_resolved_input_edges": 0,
-            "flow_runs_considered": 0,
-            "flow_runs_lock_deferred": 0,
-            "flow_runs_purged": 0,
-            "flow_generated_files_deleted": 0,
-            "flow_runtime_source_candidates": 0,
-            "flow_runtime_source_candidate_bytes": 0,
-            "flow_runtime_source_bindings_deleted": 0,
-            "flow_runtime_source_files_deleted": 0,
-            "flow_runtime_source_bytes_deleted": 0,
-            "flow_webhook_deliveries_deleted": 0,
-            "flow_audit_outbox_rows_deleted": 0,
-            "flow_review_checkpoints_deleted": 0,
-            "flow_template_assets_purged": 0,
-            "flow_template_asset_files_deleted": 0,
-            "flow_template_assets_skipped_published_reference": 0,
-            "flow_template_assets_skipped_undetermined_reference": 0,
-            "flow_runs_skipped_undelivered_audit": 0,
-            "flow_runs_skipped_unresolved_webhook": 0,
-            "flow_audit_outbox_delivered_rows": 0,
             "total": 0,
         },
         "errors": [],
@@ -273,117 +161,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 if not client_errors_batch:
                     break
                 results["deleted"]["builder_client_errors"] += client_errors_batch
-
-            flow_runtime_now = start_time
-            flow_purge_drained = True
-            while True:
-                purge_result = await _run_cleanup_step(
-                    session=session,
-                    results=results,
-                    error_prefix="Failed to purge old Flow run history batch",
-                    action=lambda: retention_service.purge_old_flow_run_history_batch(
-                        now=flow_runtime_now,
-                        limit=RETENTION_BATCH_SIZE,
-                    ),
-                )
-                if purge_result is None:
-                    flow_purge_drained = False
-                    break
-
-                _record_flow_run_history_purge_counts(
-                    results["deleted"],
-                    purge_result.counts,
-                )
-                if purge_result.counts.flow_runs_lock_deferred > 0:
-                    flow_purge_drained = False
-                    logger.warning(
-                        "Deferred Flow run-history purge candidates because of "
-                        "concurrent locks (count=%s); a later cleanup run will retry",
-                        purge_result.counts.flow_runs_lock_deferred,
-                    )
-                    break
-                if (
-                    purge_result.counts.flow_runs_purged == 0
-                    and purge_result.counts.flow_runs_considered == 0
-                ):
-                    break
-
-            if flow_purge_drained:
-                blocked_counts = await _run_cleanup_step(
-                    session=session,
-                    results=results,
-                    error_prefix="Failed to count blocked Flow run-history purge candidates",
-                    action=lambda: retention_service.count_blocked_flow_run_history_purge_candidates(
-                        now=flow_runtime_now,
-                    ),
-                )
-                if blocked_counts is not None:
-                    _record_flow_run_history_blocked_counts(
-                        results["deleted"],
-                        blocked_counts,
-                    )
-
-            abandoned_upload_counts = await _run_cleanup_step(
-                session=session,
-                results=results,
-                error_prefix="Failed to reclaim abandoned Flow runtime uploads",
-                action=lambda: retention_service.purge_abandoned_flow_runtime_uploads(
-                    now=flow_runtime_now,
-                    limit=RETENTION_BATCH_SIZE,
-                ),
-            )
-            if abandoned_upload_counts is not None:
-                _record_flow_run_history_purge_counts(
-                    results["deleted"],
-                    abandoned_upload_counts,
-                )
-
-            template_asset_counts = await _run_cleanup_step(
-                session=session,
-                results=results,
-                error_prefix="Failed to purge soft-deleted Flow template assets",
-                action=lambda: retention_service.purge_soft_deleted_flow_template_assets(
-                    limit=RETENTION_BATCH_SIZE,
-                ),
-            )
-            if template_asset_counts is not None:
-                _record_flow_template_asset_purge_counts(
-                    results["deleted"],
-                    template_asset_counts,
-                )
-                if (
-                    template_asset_counts.flow_template_assets_skipped_undetermined_reference
-                    > 0
-                ):
-                    logger.warning(
-                        "Skipped Flow template asset purge candidates because "
-                        "published definition references could not be determined "
-                        "(count=%s)",
-                        template_asset_counts.flow_template_assets_skipped_undetermined_reference,
-                    )
-
-            redaction_counts = await _run_cleanup_step(
-                session=session,
-                results=results,
-                error_prefix="Failed to redact old Flow debug evidence",
-                action=lambda: retention_service.redact_old_flow_debug_evidence(
-                    now=flow_runtime_now,
-                ),
-            )
-            if redaction_counts is not None:
-                _record_flow_debug_redaction_counts(
-                    results["deleted"],
-                    redaction_counts,
-                )
-
-            outbox_count = await _run_cleanup_step(
-                session=session,
-                results=results,
-                error_prefix="Failed to delete delivered Flow audit outbox rows",
-                action=retention_service.delete_old_delivered_flow_audit_outbox_rows,
-            )
-            if outbox_count is not None:
-                results["deleted"]["flow_audit_outbox_delivered_rows"] = outbox_count
         finally:
             # Later worker calls must not inherit this job's scoped session.
             container.session.reset_override()
@@ -399,20 +176,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["sessions"]
         + results["deleted"]["builder_sessions"]
         + results["deleted"]["builder_client_errors"]
-        + results["deleted"]["flow_debug_rows"]
-        + results["deleted"]["flow_attempt_provenance"]
-        + results["deleted"]["flow_provider_calls"]
-        + results["deleted"]["flow_resolved_input_aggregates"]
-        + results["deleted"]["flow_runs_purged"]
-        + results["deleted"]["flow_generated_files_deleted"]
-        + results["deleted"]["flow_runtime_source_bindings_deleted"]
-        + results["deleted"]["flow_runtime_source_files_deleted"]
-        + results["deleted"]["flow_webhook_deliveries_deleted"]
-        + results["deleted"]["flow_audit_outbox_rows_deleted"]
-        + results["deleted"]["flow_review_checkpoints_deleted"]
-        + results["deleted"]["flow_template_assets_purged"]
-        + results["deleted"]["flow_template_asset_files_deleted"]
-        + results["deleted"]["flow_audit_outbox_delivered_rows"]
     )
 
     if results["success"]:
@@ -423,50 +186,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"app_runs: {results['deleted']['app_runs']}, "
             f"sessions: {results['deleted']['sessions']}, "
             f"builder_sessions: {results['deleted']['builder_sessions']}, "
-            f"builder_client_errors: {results['deleted']['builder_client_errors']}, "
-            f"flow_debug_rows: {results['deleted']['flow_debug_rows']}, "
-            f"flow_attempt_provenance: {results['deleted']['flow_attempt_provenance']}, "
-            f"flow_provider_calls: {results['deleted']['flow_provider_calls']}, "
-            f"flow_resolved_input_aggregates: "
-            f"{results['deleted']['flow_resolved_input_aggregates']}, "
-            f"flow_resolved_input_edges: "
-            f"{results['deleted']['flow_resolved_input_edges']}, "
-            f"flow_runs_considered: {results['deleted']['flow_runs_considered']}, "
-            f"flow_runs_lock_deferred: "
-            f"{results['deleted']['flow_runs_lock_deferred']}, "
-            f"flow_runs_purged: {results['deleted']['flow_runs_purged']}, "
-            f"flow_generated_files_deleted: "
-            f"{results['deleted']['flow_generated_files_deleted']}, "
-            f"flow_runtime_source_candidates: "
-            f"{results['deleted']['flow_runtime_source_candidates']}, "
-            f"flow_runtime_source_candidate_bytes: "
-            f"{results['deleted']['flow_runtime_source_candidate_bytes']}, "
-            f"flow_runtime_source_bindings_deleted: "
-            f"{results['deleted']['flow_runtime_source_bindings_deleted']}, "
-            f"flow_runtime_source_files_deleted: "
-            f"{results['deleted']['flow_runtime_source_files_deleted']}, "
-            f"flow_runtime_source_bytes_deleted: "
-            f"{results['deleted']['flow_runtime_source_bytes_deleted']}, "
-            f"flow_webhook_deliveries_deleted: "
-            f"{results['deleted']['flow_webhook_deliveries_deleted']}, "
-            f"flow_audit_outbox_rows_deleted: "
-            f"{results['deleted']['flow_audit_outbox_rows_deleted']}, "
-            f"flow_review_checkpoints_deleted: "
-            f"{results['deleted']['flow_review_checkpoints_deleted']}, "
-            f"flow_template_assets_purged: "
-            f"{results['deleted']['flow_template_assets_purged']}, "
-            f"flow_template_asset_files_deleted: "
-            f"{results['deleted']['flow_template_asset_files_deleted']}, "
-            f"flow_template_assets_skipped_published_reference: "
-            f"{results['deleted']['flow_template_assets_skipped_published_reference']}, "
-            f"flow_template_assets_skipped_undetermined_reference: "
-            f"{results['deleted']['flow_template_assets_skipped_undetermined_reference']}, "
-            f"flow_runs_skipped_undelivered_audit: "
-            f"{results['deleted']['flow_runs_skipped_undelivered_audit']}, "
-            f"flow_runs_skipped_unresolved_webhook: "
-            f"{results['deleted']['flow_runs_skipped_unresolved_webhook']}, "
-            f"flow_audit_outbox_delivered_rows: "
-            f"{results['deleted']['flow_audit_outbox_delivered_rows']})"
+            f"builder_client_errors: {results['deleted']['builder_client_errors']})"
         )
     else:
         logger.warning(

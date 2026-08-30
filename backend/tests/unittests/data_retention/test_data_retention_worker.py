@@ -2,31 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import inspect
-import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from datetime import datetime
-from typing import cast
-from uuid import uuid4
+from typing import Never
 
 import pytest
-from sqlalchemy.exc import DBAPIError
 
 from eneo.data_retention.infrastructure import data_retention_worker
-from eneo.data_retention.infrastructure.data_retention_service import (
-    RETENTION_BATCH_SIZE,
-    FlowDebugRedactionCounts,
-    FlowRunHistoryPurgeBlockedCounts,
-    FlowTemplateAssetPurgeCounts,
-)
-from eneo.flows.infrastructure.flow_run_history_purge_repo import (
-    FlowRunHistoryPurgeCounts,
-    FlowRunHistoryPurgeResult,
-)
-
-_SENSITIVE_FLOW_ID = uuid4()
-_SENSITIVE_TENANT_ID = uuid4()
-_SENSITIVE_FILE_ID = uuid4()
-_SENSITIVE_PAYLOAD = "confidential runtime source payload"
 
 
 class _TransactionContext:
@@ -60,63 +42,18 @@ class _SessionProvider:
 
 
 class _DataRetentionService:
-    def __init__(
-        self,
-        *,
-        purge_batches: list[FlowRunHistoryPurgeResult | Exception] | None = None,
-    ) -> None:
-        self.purge_batches = purge_batches or [
-            FlowRunHistoryPurgeResult(
-                counts=FlowRunHistoryPurgeCounts(
-                    flow_runs_considered=2,
-                    flow_runs_purged=2,
-                    flow_generated_files_deleted=3,
-                    flow_runtime_source_candidates=5,
-                    flow_runtime_source_candidate_bytes=500,
-                    flow_runtime_source_bindings_deleted=2,
-                    flow_runtime_source_files_deleted=1,
-                    flow_runtime_source_bytes_deleted=100,
-                    flow_webhook_deliveries_deleted=5,
-                    flow_audit_outbox_rows_deleted=7,
-                    flow_review_checkpoints_deleted=11,
-                ),
-                affected_flow_tenant_ids=frozenset(
-                    {(_SENSITIVE_FLOW_ID, _SENSITIVE_TENANT_ID)}
-                ),
-            ),
-            FlowRunHistoryPurgeResult(
-                counts=FlowRunHistoryPurgeCounts(
-                    flow_runs_considered=1,
-                    flow_runs_purged=1,
-                    flow_generated_files_deleted=13,
-                    flow_runtime_source_candidates=7,
-                    flow_runtime_source_candidate_bytes=700,
-                    flow_runtime_source_bindings_deleted=3,
-                    flow_runtime_source_files_deleted=2,
-                    flow_runtime_source_bytes_deleted=200,
-                    flow_webhook_deliveries_deleted=17,
-                    flow_audit_outbox_rows_deleted=19,
-                    flow_review_checkpoints_deleted=23,
-                ),
-                affected_flow_tenant_ids=frozenset(
-                    {(_SENSITIVE_FLOW_ID, _SENSITIVE_TENANT_ID)}
-                ),
-            ),
-            FlowRunHistoryPurgeResult(),
-        ]
-        self.purge_now_values: list[datetime] = []
-        self.purge_limits: list[int] = []
-        self.template_asset_purge_limits: list[int] = []
-        self.abandoned_upload_calls: list[tuple[datetime, int]] = []
-        self.blocked_now_values: list[datetime] = []
-        self.redaction_now_values: list[datetime] = []
+    def __init__(self, *, app_runs_error: Exception | None = None) -> None:
+        self.app_runs_error = app_runs_error
         self.builder_now_values: list[datetime] = []
         self.builder_client_error_now_values: list[datetime] = []
+        self.flow_destructive_calls: list[str] = []
 
     async def delete_old_questions(self) -> int:
         return 2
 
     async def delete_old_app_runs(self) -> int:
+        if self.app_runs_error is not None:
+            raise self.app_runs_error
         return 3
 
     async def delete_old_sessions(self) -> int:
@@ -128,64 +65,35 @@ class _DataRetentionService:
 
     async def delete_expired_builder_client_errors_batch(self, *, now: datetime) -> int:
         self.builder_client_error_now_values.append(now)
-        # Two batches, then drained: proves the worker loops per batch.
         return 2 if len(self.builder_client_error_now_values) <= 2 else 0
 
-    async def purge_old_flow_run_history_batch(
-        self, *, now: datetime, limit: int
-    ) -> FlowRunHistoryPurgeResult:
-        self.purge_now_values.append(now)
-        self.purge_limits.append(limit)
-        next_batch = self.purge_batches.pop(0)
-        if isinstance(next_batch, Exception):
-            raise next_batch
-        return next_batch
+    def _reject_flow_destructive_call(self, name: str) -> Never:
+        self.flow_destructive_calls.append(name)
+        raise AssertionError(f"Scheduled cleanup called {name}")
 
-    async def purge_soft_deleted_flow_template_assets(
-        self, *, limit: int
-    ) -> FlowTemplateAssetPurgeCounts:
-        self.template_asset_purge_limits.append(limit)
-        return FlowTemplateAssetPurgeCounts(
-            flow_template_assets_purged=29,
-            flow_template_asset_files_deleted=31,
-            flow_template_assets_skipped_published_reference=41,
-            flow_template_assets_skipped_undetermined_reference=43,
-        )
+    async def purge_old_flow_run_history_batch(self, **_: object) -> Never:
+        self._reject_flow_destructive_call("purge_old_flow_run_history_batch")
 
     async def count_blocked_flow_run_history_purge_candidates(
-        self, *, now: datetime
-    ) -> FlowRunHistoryPurgeBlockedCounts:
-        self.blocked_now_values.append(now)
-        return FlowRunHistoryPurgeBlockedCounts(
-            skipped_undelivered_audit=31,
-            skipped_unresolved_webhook=41,
+        self, **_: object
+    ) -> Never:
+        self._reject_flow_destructive_call(
+            "count_blocked_flow_run_history_purge_candidates"
         )
 
-    async def purge_abandoned_flow_runtime_uploads(
-        self, *, now: datetime, limit: int
-    ) -> FlowRunHistoryPurgeCounts:
-        self.abandoned_upload_calls.append((now, limit))
-        return FlowRunHistoryPurgeCounts(
-            flow_runtime_source_candidates=4,
-            flow_runtime_source_candidate_bytes=400,
-            flow_runtime_source_files_deleted=2,
-            flow_runtime_source_bytes_deleted=400,
-        )
+    async def purge_abandoned_flow_runtime_uploads(self, **_: object) -> Never:
+        self._reject_flow_destructive_call("purge_abandoned_flow_runtime_uploads")
 
-    async def redact_old_flow_debug_evidence(
-        self, *, now: datetime
-    ) -> FlowDebugRedactionCounts:
-        self.redaction_now_values.append(now)
-        return FlowDebugRedactionCounts(
-            debug_step_results=7,
-            debug_step_attempts=11,
-            debug_provider_calls=13,
-            debug_resolved_input_aggregates=17,
-            debug_resolved_input_edges=19,
-        )
+    async def purge_soft_deleted_flow_template_assets(self, **_: object) -> Never:
+        self._reject_flow_destructive_call("purge_soft_deleted_flow_template_assets")
 
-    async def delete_old_delivered_flow_audit_outbox_rows(self) -> int:
-        return 23
+    async def redact_old_flow_debug_evidence(self, **_: object) -> Never:
+        self._reject_flow_destructive_call("redact_old_flow_debug_evidence")
+
+    async def delete_old_delivered_flow_audit_outbox_rows(self) -> Never:
+        self._reject_flow_destructive_call(
+            "delete_old_delivered_flow_audit_outbox_rows"
+        )
 
 
 class _Container:
@@ -198,217 +106,9 @@ class _Container:
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_data_runs_flow_purge_batches_in_separate_transactions(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-):
-    monkeypatch.setattr(data_retention_worker.logger, "disabled", False)
-    monkeypatch.setattr(data_retention_worker.logger, "propagate", True)
-    caplog.set_level(logging.INFO, logger=data_retention_worker.logger.name)
-    session = _Session()
-
-    @contextlib.asynccontextmanager
-    async def session_context() -> AsyncIterator[_Session]:
-        yield session
-
-    monkeypatch.setattr(
-        data_retention_worker.sessionmanager, "session", session_context
-    )
-
-    cleanup_old_data = cast(
-        Callable[..., Awaitable[data_retention_worker.CleanupResults]],
-        getattr(data_retention_worker.cleanup_old_data, "__wrapped__"),
-    )
-    container = _Container()
-    service = container._service
-
-    result = await cleanup_old_data(container=container)
-    expected_independent_cleanup_transactions = 15
-
-    assert result["success"] is True
-    assert result["deleted"]["builder_sessions"] == 13
-    assert result["deleted"]["builder_client_errors"] == 4
-    assert len(service.builder_client_error_now_values) == 3
-    assert result["deleted"]["flow_audit_outbox_delivered_rows"] == 23
-    assert result["deleted"]["flow_runs_considered"] == 3
-    assert result["deleted"]["flow_runs_lock_deferred"] == 0
-    assert result["deleted"]["flow_runs_purged"] == 3
-    assert result["deleted"]["flow_generated_files_deleted"] == 16
-    assert result["deleted"]["flow_runtime_source_candidates"] == 16
-    assert result["deleted"]["flow_runtime_source_candidate_bytes"] == 1600
-    assert result["deleted"]["flow_runtime_source_bindings_deleted"] == 5
-    assert result["deleted"]["flow_runtime_source_files_deleted"] == 5
-    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 700
-    assert result["deleted"]["flow_webhook_deliveries_deleted"] == 22
-    assert result["deleted"]["flow_audit_outbox_rows_deleted"] == 26
-    assert result["deleted"]["flow_review_checkpoints_deleted"] == 34
-    assert result["deleted"]["flow_template_assets_purged"] == 29
-    assert result["deleted"]["flow_template_asset_files_deleted"] == 31
-    assert result["deleted"]["flow_template_assets_skipped_published_reference"] == 41
-    assert (
-        result["deleted"]["flow_template_assets_skipped_undetermined_reference"] == 43
-    )
-    assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 31
-    assert result["deleted"]["flow_runs_skipped_unresolved_webhook"] == 41
-    assert result["deleted"]["flow_provider_calls"] == 13
-    assert result["deleted"]["flow_resolved_input_aggregates"] == 17
-    assert result["deleted"]["flow_resolved_input_edges"] == 19
-    assert result["deleted"]["total"] == 269
-    assert "flow_runtime_source_candidate_bytes: 1600" in caplog.text
-    assert "flow_runtime_source_bytes_deleted: 700" in caplog.text
-    assert "flow_runs_considered: 3" in caplog.text
-    assert "flow_runs_lock_deferred: 0" in caplog.text
-    assert "flow_provider_calls: 13" in caplog.text
-    assert "flow_resolved_input_aggregates: 17" in caplog.text
-    assert "flow_resolved_input_edges: 19" in caplog.text
-    assert "flow_runs_skipped_unresolved_webhook: 41" in caplog.text
-    assert str(_SENSITIVE_FLOW_ID) not in caplog.text
-    assert str(_SENSITIVE_TENANT_ID) not in caplog.text
-    assert session.transaction_count == expected_independent_cleanup_transactions
-    assert container.session.reset_count == 1
-    assert service.purge_limits == [RETENTION_BATCH_SIZE] * 3
-    assert service.template_asset_purge_limits == [RETENTION_BATCH_SIZE]
-    all_flow_runtime_now_values = (
-        service.purge_now_values
-        + service.blocked_now_values
-        + service.redaction_now_values
-    )
-    assert len(set(all_flow_runtime_now_values)) == 1
-    assert service.builder_now_values == service.purge_now_values[:1]
-
-
-@pytest.mark.asyncio
-async def test_cleanup_old_data_reclaims_abandoned_flow_runtime_uploads(
+async def test_cleanup_old_data_never_runs_flow_destructive_retention(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The scheduled cleanup must actually run the abandoned-upload reclaim.
-
-    The tenant abandonment horizon and its byte-accurate impact preview are
-    operator-facing settings, and the only sequence that reclaimed those uploads
-    had no caller outside tests — so an administrator could set the horizon,
-    confirm the preview, and have nothing ever deleted.
-    """
-    session = _Session()
-
-    @contextlib.asynccontextmanager
-    async def session_context() -> AsyncIterator[_Session]:
-        yield session
-
-    monkeypatch.setattr(
-        data_retention_worker.sessionmanager, "session", session_context
-    )
-
-    cleanup_old_data = cast(
-        Callable[..., Awaitable[data_retention_worker.CleanupResults]],
-        getattr(data_retention_worker.cleanup_old_data, "__wrapped__"),
-    )
-    container = _Container()
-    service = container._service
-
-    result = await cleanup_old_data(container=container)
-
-    assert result["success"] is True
-    assert len(service.abandoned_upload_calls) == 1
-    reclaim_now, reclaim_limit = service.abandoned_upload_calls[0]
-    assert reclaim_limit == data_retention_worker.RETENTION_BATCH_SIZE
-    # The reclaim shares the run's clock with the rest of the Flow sweep.
-    assert reclaim_now == service.purge_now_values[0]
-    # Its reclaimed bytes reach the operator-visible payload.
-    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 700
-
-
-@pytest.mark.asyncio
-async def test_cleanup_old_data_preserves_committed_flow_purge_counts_after_later_batch_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-):
-    monkeypatch.setattr(data_retention_worker.logger, "disabled", False)
-    monkeypatch.setattr(data_retention_worker.logger, "propagate", True)
-    caplog.set_level(logging.INFO, logger=data_retention_worker.logger.name)
-    session = _Session()
-
-    @contextlib.asynccontextmanager
-    async def session_context() -> AsyncIterator[_Session]:
-        yield session
-
-    monkeypatch.setattr(
-        data_retention_worker.sessionmanager, "session", session_context
-    )
-
-    cleanup_old_data = cast(
-        Callable[..., Awaitable[data_retention_worker.CleanupResults]],
-        getattr(data_retention_worker.cleanup_old_data, "__wrapped__"),
-    )
-    service = _DataRetentionService(
-        purge_batches=[
-            FlowRunHistoryPurgeResult(
-                counts=FlowRunHistoryPurgeCounts(
-                    flow_runs_considered=2,
-                    flow_runs_purged=2,
-                    flow_generated_files_deleted=3,
-                    flow_runtime_source_candidates=5,
-                    flow_runtime_source_candidate_bytes=500,
-                    flow_runtime_source_bindings_deleted=2,
-                    flow_runtime_source_files_deleted=1,
-                    flow_runtime_source_bytes_deleted=100,
-                )
-            ),
-            DBAPIError(
-                statement="DELETE FROM files WHERE id = ANY(:file_ids)",
-                params={
-                    "file_ids": [_SENSITIVE_FILE_ID],
-                    "flow_id": _SENSITIVE_FLOW_ID,
-                    "tenant_id": _SENSITIVE_TENANT_ID,
-                },
-                orig=RuntimeError(_SENSITIVE_PAYLOAD),
-                connection_invalidated=False,
-            ),
-        ]
-    )
-    container = _Container(service=service)
-
-    result = await cleanup_old_data(container=container)
-
-    assert result["success"] is False
-    assert result["errors"] == [
-        "Failed to purge old Flow run history batch: DBAPIError"
-    ]
-    assert result["deleted"]["flow_runs_considered"] == 2
-    assert result["deleted"]["flow_runs_lock_deferred"] == 0
-    assert result["deleted"]["flow_runs_purged"] == 2
-    assert result["deleted"]["flow_generated_files_deleted"] == 3
-    assert result["deleted"]["flow_runtime_source_candidates"] == 9
-    assert result["deleted"]["flow_runtime_source_candidate_bytes"] == 900
-    assert result["deleted"]["flow_runtime_source_bindings_deleted"] == 2
-    assert result["deleted"]["flow_runtime_source_files_deleted"] == 3
-    assert result["deleted"]["flow_runtime_source_bytes_deleted"] == 500
-    assert result["deleted"]["flow_template_assets_purged"] == 29
-    assert result["deleted"]["flow_template_asset_files_deleted"] == 31
-    assert result["deleted"]["builder_sessions"] == 13
-    assert result["deleted"]["flow_runs_skipped_undelivered_audit"] == 0
-    assert result["deleted"]["flow_runs_skipped_unresolved_webhook"] == 0
-    assert result["deleted"]["flow_debug_rows"] == 7
-    assert result["deleted"]["flow_attempt_provenance"] == 11
-    assert result["deleted"]["flow_audit_outbox_delivered_rows"] == 23
-    sanitized_output = "\n".join((*result["errors"], caplog.text))
-    assert str(_SENSITIVE_FILE_ID) not in sanitized_output
-    assert str(_SENSITIVE_FLOW_ID) not in sanitized_output
-    assert str(_SENSITIVE_TENANT_ID) not in sanitized_output
-    assert _SENSITIVE_PAYLOAD not in sanitized_output
-    assert "DELETE FROM files" not in sanitized_output
-    assert service.blocked_now_values == []
-    assert session.transaction_count == 13
-    assert container.session.reset_count == 1
-
-
-@pytest.mark.asyncio
-async def test_cleanup_old_data_reports_lock_deferred_page_without_polling(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    monkeypatch.setattr(data_retention_worker.logger, "disabled", False)
-    monkeypatch.setattr(data_retention_worker.logger, "propagate", True)
-    caplog.set_level(logging.INFO, logger=data_retention_worker.logger.name)
     session = _Session()
 
     @contextlib.asynccontextmanager
@@ -419,30 +119,57 @@ async def test_cleanup_old_data_reports_lock_deferred_page_without_polling(
         data_retention_worker.sessionmanager, "session", session_context
     )
     cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
-    service = _DataRetentionService(
-        purge_batches=[
-            FlowRunHistoryPurgeResult(
-                counts=FlowRunHistoryPurgeCounts(
-                    flow_runs_considered=1,
-                    flow_runs_lock_deferred=1,
-                )
-            ),
-            FlowRunHistoryPurgeResult(
-                counts=FlowRunHistoryPurgeCounts(
-                    flow_runs_considered=1,
-                    flow_runs_purged=1,
-                )
-            ),
-        ]
-    )
-    container = _Container(service=service)
+    container = _Container()
+    service = container._service
 
     result = await cleanup_old_data(container=container)
 
     assert result["success"] is True
-    assert result["deleted"]["flow_runs_considered"] == 1
-    assert result["deleted"]["flow_runs_lock_deferred"] == 1
-    assert result["deleted"]["flow_runs_purged"] == 0
-    assert service.purge_limits == [RETENTION_BATCH_SIZE]
-    assert service.blocked_now_values == []
-    assert "concurrent locks (count=1)" in caplog.text
+    assert result["deleted"] == {
+        "questions": 2,
+        "app_runs": 3,
+        "sessions": 5,
+        "builder_sessions": 13,
+        "builder_client_errors": 4,
+        "total": 27,
+    }
+    assert service.flow_destructive_calls == []
+    assert len(service.builder_client_error_now_values) == 3
+    assert service.builder_now_values == service.builder_client_error_now_values[:1]
+    assert session.transaction_count == 7
+    assert container.session.reset_count == 1
+
+
+@pytest.mark.asyncio
+async def test_cleanup_old_data_keeps_non_flow_partial_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _Session()
+
+    @contextlib.asynccontextmanager
+    async def session_context() -> AsyncIterator[_Session]:
+        yield session
+
+    monkeypatch.setattr(
+        data_retention_worker.sessionmanager, "session", session_context
+    )
+    cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
+    service = _DataRetentionService(app_runs_error=RuntimeError("sensitive value"))
+    container = _Container(service=service)
+
+    result = await cleanup_old_data(container=container)
+
+    assert result["success"] is False
+    assert result["errors"] == ["Failed to delete old app runs: RuntimeError"]
+    assert result["deleted"] == {
+        "questions": 2,
+        "app_runs": 0,
+        "sessions": 5,
+        "builder_sessions": 13,
+        "builder_client_errors": 4,
+        "total": 24,
+    }
+    assert "sensitive value" not in "\n".join(result["errors"])
+    assert service.flow_destructive_calls == []
+    assert session.transaction_count == 7
+    assert container.session.reset_count == 1

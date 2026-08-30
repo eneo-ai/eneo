@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -12,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.data_retention.infrastructure import (
     data_retention_service as data_retention_service_module,
+)
+from eneo.data_retention.infrastructure import (
+    data_retention_worker,
 )
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
@@ -68,6 +72,7 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
+from eneo.main.container.container import Container
 from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
 
 
@@ -965,6 +970,149 @@ async def _flow_runtime_upload_exists(
 async def _flush_and_clear_identity_map(async_session: AsyncSession) -> None:
     await async_session.flush()
     async_session.expunge_all()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_cleanup_preserves_all_flow_owned_data(
+    db_container,
+    db_session,
+    completion_model_factory,
+) -> None:
+    now = datetime.now(timezone.utc)
+    async with db_container() as setup_container:
+        session = setup_container.session()
+        tenant = setup_container.tenant()
+        user = setup_container.user()
+        await session.execute(
+            update(Tenants)
+            .where(Tenants.id == tenant.id)
+            .values(
+                flow_run_history_retention_days=1,
+                flow_runtime_upload_abandonment_days=1,
+                flow_settings={
+                    "retention_policy": {
+                        "run_debug_evidence_days": 1,
+                    }
+                },
+            )
+        )
+        space = Spaces(
+            name=f"Scheduled Flow preservation {uuid4()}",
+            description="Flow data must survive scheduled retention",
+            tenant_id=tenant.id,
+            user_id=user.id,
+            tenant_space_id=None,
+            data_retention_days=None,
+        )
+        session.add(space)
+        await session.flush()
+        completion_model = await completion_model_factory(session, "gpt-4")
+        assistant = Assistants(
+            name="Scheduled Flow preservation assistant",
+            description="Flow data must survive scheduled retention",
+            user_id=user.id,
+            space_id=space.id,
+            completion_model_id=completion_model.id,
+            completion_model_kwargs={},
+            logging_enabled=True,
+            is_default=False,
+            published=False,
+            data_retention_days=None,
+        )
+        session.add(assistant)
+        await session.flush()
+
+        runtime = await _create_flow_runtime_fixture(
+            session,
+            tenant=tenant,
+            user=user,
+            space=space,
+            assistant=assistant,
+            days_old=10,
+            flow_retention_days=1,
+        )
+        outbox_id = await _add_flow_audit_outbox_row(
+            session,
+            run=runtime.run,
+            user_id=user.id,
+            delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
+            with_audit_log=False,
+        )
+        abandoned = await _create_unbound_runtime_upload_fixture(
+            session,
+            tenant=tenant,
+            user=user,
+            space=space,
+            uploaded_at=now - timedelta(days=10),
+            size=321,
+        )
+        template = await _create_flow_template_asset_fixture(
+            session,
+            tenant=tenant,
+            user=user,
+            space=space,
+            deleted=True,
+        )
+        tenant_id = tenant.id
+        run_id = runtime.run.id
+        flow_id = runtime.flow.id
+        step_result_id = runtime.step_result.id
+        step_attempt_id = runtime.step_attempt.id
+        review_checkpoint_id = runtime.review_checkpoint.id
+        webhook_delivery_id = runtime.webhook_delivery.id
+        generated_file_id = runtime.generated_file.id
+        runtime_input_file_id = runtime.runtime_input_file.id
+        abandoned_flow_id = abandoned.flow.id
+        abandoned_file_id = abandoned.file.id
+        template_asset_id = template.template_asset.id
+        template_file_id = template.template_file.id
+
+    cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
+    result = await cleanup_old_data(container=Container())
+
+    assert result["success"] is True
+    assert not any(key.startswith("flow_") for key in result["deleted"])
+
+    async with db_session() as session:
+        assert await session.get(FlowRuns, run_id) is not None
+        step_result = await session.get(FlowStepResults, step_result_id)
+        assert step_result is not None
+        assert step_result.input_payload_json == {"text": "sensitive input"}
+        step_attempt = await session.get(FlowStepAttempts, step_attempt_id)
+        assert step_attempt is not None
+        assert step_attempt.provenance_json == {"artifacts": {"items": ["debug"]}}
+        review_checkpoint = await session.get(
+            FlowRunReviewCheckpoints, review_checkpoint_id
+        )
+        assert review_checkpoint is not None
+        assert review_checkpoint.state == FlowRunReviewCheckpointState.RESUMED.value
+        assert review_checkpoint.current_payload_json == {"text": "review final"}
+        webhook_delivery = await session.get(
+            FlowRunWebhookDeliveries, webhook_delivery_id
+        )
+        assert webhook_delivery is not None
+        assert (
+            webhook_delivery.delivery_status == FlowOutboxDeliveryStatus.DELIVERED.value
+        )
+        assert webhook_delivery.payload_ref == "step_output"
+        assert await session.get(Files, generated_file_id) is not None
+        assert await session.get(Files, runtime_input_file_id) is not None
+        assert await _flow_runtime_upload_exists(
+            session,
+            file_id=runtime_input_file_id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
+        assert await session.get(Files, abandoned_file_id) is not None
+        assert await _flow_runtime_upload_exists(
+            session,
+            file_id=abandoned_file_id,
+            flow_id=abandoned_flow_id,
+            tenant_id=tenant_id,
+        )
+        assert await session.get(FlowTemplateAssets, template_asset_id) is not None
+        assert await session.get(Files, template_file_id) is not None
+        assert await session.get(FlowRunAuditOutbox, outbox_id) is not None
 
 
 @pytest.mark.asyncio
@@ -1891,7 +2039,7 @@ async def test_cleanup_old_flow_runtime_data_keeps_generated_file_with_derived_c
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_flow_runtime_data_flow_days_cannot_loosen_space_days(
+async def test_cleanup_old_flow_runtime_data_flow_days_override_space_days(
     async_session: AsyncSession,
     test_tenant,
     admin_user,
@@ -1922,8 +2070,8 @@ async def test_cleanup_old_flow_runtime_data_flow_days_cannot_loosen_space_days(
     counts = await flow_retention_service.cleanup_old_flow_runtime_data()
     await _flush_and_clear_identity_map(async_session)
 
-    assert counts["flow_runs_purged"] == 2
-    assert await async_session.get(FlowRuns, larger_flow_value.run.id) is None
+    assert counts["flow_runs_purged"] == 1
+    assert await async_session.get(FlowRuns, larger_flow_value.run.id) is not None
     assert await async_session.get(FlowRuns, matching_flow_value.run.id) is None
 
 
