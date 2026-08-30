@@ -35,7 +35,10 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_repository import PreparedContent
-from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.content_service import (
+    ObjectContentService,
+    detach_content_read,
+)
 from eneo.spaces.utils.space_utils import effective_space_ids
 from eneo.users.user import UserInDB
 
@@ -89,51 +92,23 @@ async def open_info_blob_original_download(
             raise InfoBlobOriginalUnavailableError()
         if reference.tenant_id != expected_tenant_id:
             raise UnauthorizedException("Token not valid for this InfoBlob")
-    read_context = object_content.open_content(
-        ContentReadGrant(
-            content_id=reference.content_id,
-            tenant_id=reference.tenant_id,
-            access_class=reference.access_class,
+    opened = await detach_content_read(
+        object_content.open_content(
+            ContentReadGrant(
+                content_id=reference.content_id,
+                tenant_id=reference.tenant_id,
+                access_class=reference.access_class,
+            )
         )
     )
-    opened = await read_context.__aenter__()
-    closed = False
-
-    async def exit_read_context(
-        error: BaseException | None = None,
-    ) -> bool | None:
-        nonlocal closed
-        if closed:
-            return None
-        closed = True
-        if error is None:
-            return await read_context.__aexit__(None, None, None)
-        return await read_context.__aexit__(
-            type(error),
-            error,
-            error.__traceback__,
-        )
-
-    async def stream() -> AsyncGenerator[bytes, None]:
-        try:
-            async for chunk in opened.chunks:
-                yield chunk
-        except BaseException as error:
-            if not await exit_read_context(error):
-                raise
-        else:
-            await exit_read_context()
-
-    async def close() -> None:
-        await exit_read_context()
 
     return InfoBlobDownload(
-        chunks=stream(),
+        chunks=opened.chunks,
         content_length=opened.content_length,
         media_type=opened.media_type,
         filename=reference.original_filename,
         sha256=reference.sha256,
-        _close=close,
+        _close=opened.aclose,
     )
 
 

@@ -1,6 +1,5 @@
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -20,7 +19,7 @@ from eneo.info_blobs.info_blob_protocol import to_info_blob_public
 from eneo.info_blobs.info_blob_repo import InfoBlobOriginal
 from eneo.info_blobs.info_blob_service import open_info_blob_original_download
 from eneo.main.exceptions import UnauthorizedException
-from eneo.object_content.content import ContentAccessClass, ContentState
+from eneo.object_content.content import ContentAccessClass, ContentRead, ContentState
 from eneo.questions.question import Question
 from eneo.questions.question_protocol import to_question_public
 from eneo.server.exception_handlers import add_exception_handlers
@@ -73,10 +72,11 @@ async def _open_download(chunks: AsyncGenerator[bytes, None]):
     )
     read_context = MagicMock()
     read_context.__aenter__ = AsyncMock(
-        return_value=SimpleNamespace(
+        return_value=ContentRead(
             chunks=chunks,
             content_length=10,
             media_type="application/pdf",
+            content_range=None,
         )
     )
     read_context.__aexit__ = AsyncMock(return_value=None)

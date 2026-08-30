@@ -1,6 +1,6 @@
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterable, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from secrets import token_hex
@@ -87,6 +87,61 @@ class VerifiedObjectUpload:
     size_bytes: int
     declared_media_type: str
     verified_media_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class DetachedContentRead:
+    chunks: AsyncGenerator[bytes, None]
+    content_length: int
+    media_type: str
+    content_range: str | None
+    _close: Callable[[], Awaitable[None]] = field(repr=False)
+
+    async def aclose(self) -> None:
+        await self._close()
+
+
+async def detach_content_read(
+    read_context: AbstractAsyncContextManager[ContentRead],
+) -> DetachedContentRead:
+    """Keep a content read open until its stream or explicit handle closes."""
+    opened = await read_context.__aenter__()
+    exit_task: asyncio.Task[bool | None] | None = None
+
+    async def exit_read_context(error: BaseException | None = None) -> bool | None:
+        nonlocal exit_task
+        if exit_task is None:
+            exit_task = asyncio.create_task(
+                read_context.__aexit__(None, None, None)
+                if error is None
+                else read_context.__aexit__(
+                    type(error),
+                    error,
+                    error.__traceback__,
+                )
+            )
+        return await asyncio.shield(exit_task)
+
+    async def stream() -> AsyncGenerator[bytes, None]:
+        try:
+            async for chunk in opened.chunks:
+                yield chunk
+        except BaseException as error:
+            if not await exit_read_context(error):
+                raise
+        else:
+            await exit_read_context()
+
+    async def close() -> None:
+        await exit_read_context()
+
+    return DetachedContentRead(
+        chunks=stream(),
+        content_length=opened.content_length,
+        media_type=opened.media_type,
+        content_range=opened.content_range,
+        _close=close,
+    )
 
 
 @dataclass(frozen=True, slots=True)
