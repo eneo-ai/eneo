@@ -1,15 +1,15 @@
 # Flow launch scope and lifecycle
 
 > **Historical record.** The final Flow tidy supersedes this ADR where it
-> describes classification-based retention, retention preview/confirmation,
-> tombstones, or user/service partial rerun. Current behavior is documented in
-> [Flow architecture](../flows/architecture.md): simple inherited retention and
-> a new complete run to repeat work. The remaining decisions below explain
-> historical intent and must not override the shipped implementation.
+> describes classification-based retention, tombstones, or user/service partial
+> rerun. Section 14 records the replacement retention decision. Current behavior
+> is summarized in [Flow architecture](../flows/architecture.md). The remaining
+> decisions explain historical intent and must not override the shipped
+> implementation.
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Last revised:** 2026-07-24
+- **Last revised:** 2026-08-30
 - **Decision owners:** Product, security, and architecture
 - **Scope:** Flow and Flow AI Builder launch behavior, destructive retention
   activation, and the portable-package platform boundary
@@ -525,89 +525,55 @@ WI-MKT-02.
 - **Revision rule:** Never extend retention accidentally through incomplete cascade
   or weaken it by deleting shared files without the global fence.
 
-### 14. Tenant administration activates automatic Flow deletion
+### 14. Flow run-history policies classify data but do not delete it
 
-- **Decision:** Automatic Flow run-content deletion is off unless an optional
-  tenant organization policy (`T`) or the optional policy for the Space's
-  matching tenant security classification (`C`) applies. Let `A` be the minimum
-  configured value of `T` and `C`; if both are absent, `A` is off. When `A` is
-  active, effective Flow run days are the minimum configured value of `A`, Space
-  days, and Flow days. Space and Flow values can tighten but cannot activate,
-  lengthen, or disable the admin envelope. Classification-only activation is
-  deliberate and affects only matching classified Spaces.
-- **Persistence:** Add nullable, `1..2555` CHECK-constrained tenant columns
-  `flow_run_history_retention_days` and
-  `flow_runtime_upload_abandonment_days`. Keep matching classification days in
-  the existing relational policy table. Do not put either destructive selector
-  input in `tenant.flow_settings` JSONB. Keep
-  `run_debug_evidence_days` in that existing versioned JSONB owner because its
-  cleanup is already Python-resolved. Reuse the typed ADMIN-only settings,
-  classification, and audit surfaces as control-plane adapters;
-  `DataRetentionService` remains the sole deletion decision-maker and owns one
-  SQL envelope expression reused by purge, preview, and effective-policy reads.
-- **Safe activation:** Every organization or classification change that enables
-  or shortens Flow deletion uses the same preview/confirm gate. Preview and purge
-  share predicates and clock anchor and expose counts, bytes, existing-data
-  impact, latent Space/Flow values, and lifecycle blockers. Confirmation is bound
-  to exact proposed values, current policy revision or expected state, and the
-  exact preview result; a concurrent admin change fails compare-and-set. Audit
-  records actor, old/new values, preview summary, and activation time without
-  payloads or secrets. Disabling or lengthening needs no destructive
-  confirmation. No pending-policy table is introduced.
-- **Space and Flow behavior:** `Spaces.data_retention_days` continues to control
-  conversation and App-run retention. Space UI shows that behavior separately
-  from Flow behavior: the same value is inert for Flow while `A` is off and
-  tighten-only while `A` is active. Activation preview includes all latent Space
-  and Flow values. Release one keeps Flow overrides pre-publish-only; a published
-  Flow displays configured/effective values read-only and gains no hidden
-  retention-only mutation path. A dedicated Space Flow-retention column is
-  deferred until a customer needs conversation and Flow horizons to differ.
-- **Never-attached uploads:** WI-19 runs only when
-  `flow_runtime_upload_abandonment_days` is present for the tenant and anchors age
-  to persisted upload `created_at`. Absence produces no abandonment candidates or
-  deletion I/O. No Space, Flow, step, classification, or global grace contributes.
-  Attached sources follow run-history policy and WI-03's final-reference fence.
-  Reuse the daily worker, ordered bounded batches, bind-versus-sweep lock, final
-  reference recheck, retry convergence, and one transaction owner.
-- **Deployment and UX:** Preflight is bidirectional on representative PostgreSQL:
-  count runs newly eligible under the envelope and runs eligible today only
-  through Space/Flow values that become inert. The local zero-row database is not
-  representative evidence. Release notes and admin UI state both changes. Add
-  **Admin > Governance > Flow data retention**, not an Audit logs panel, with
-  organization Flow history and unattached-upload Off/N days, classification
-  links, anchors, affected data, preview/confirm, audit actor, and preservation/
-  hold caveat. Classification edits remain under Security classifications and
-  call the shared gate; Space and Flow show configured values, effective off/days,
-  and all contributors. Copy says “Automatic deletion is off” in Swedish and
-  English, not “no limit,” and makes no compliance claim.
-- **Retained surface:** Information classification selects an admin policy but
-  does not hard-code a clock. Audit and AI-log retention remain separately owned.
-  Legal/records holds remain a future purge blocker. A dedicated Flow with a
-  one-day policy is the honest first-release stricter option.
-- **Removed or unavailable surface:** Numeric or seven-day defaults, class-3
-  defaults, silent grace periods, Space/Flow-only activation, global upload
-  abandonment, automatic Builder attachment deletion, day-zero finalization,
-  pre-launch step retention, and claims that deletion is immediate.
-- **Implementation owner:** WI-19A owns relational tenant policy, typed admin
-  control plane, preview/confirm/CAS/audit, generated contract, and admin UI.
-  WI-19B owns the canonical envelope/effective projection, Space/Flow behavior,
-  copy, docs, and bidirectional rollout preflight. WI-19 then owns only the
-  never-attached-upload sweep. WI-24 follows the final retention/finalization
-  ownership.
-- **Deferred triggers:** A real customer or contractual requirement for sub-daily
-  erasure earns a separate typed mode with bounded sub-daily cadence, terminal
-  blockers, recovery and backup/PITR limits, and real-process proof. Step-level
-  deletion requires a concrete mixed-sensitivity Flow plus typed partial-run
-  provenance, redaction, retry, export, and audit semantics. A legal/records hold
-  requires its own authority and purge-blocker contract.
-- **Cadence consequence:** The current daily 03:00 worker would make a
-  finalization-anchored mode approximately `0..24h` and a one-day policy
-  approximately `24..48h`. They are not interchangeable. Launch keeps the
-  honest one-day option instead of adding a mode, constraint, index, and cadence
-  contract without a customer trigger.
-- **Revision rule:** No adapter, child setting, classification label, or fallback
-  may activate destructive Flow retention outside this envelope. Revise this
-  record before adding another activator, clock, hold, or deletion mode.
+- **Decision:** An Organization administrator may set a complete `{mode, days}`
+  policy at Organization, Space, or individual Flow scope. Resolution checks
+  Flow, then Space, then Organization; the first complete policy wins. A child
+  inherits its complete parent pair or replaces both fields. The Organization
+  policy is a default, not a minimum or maximum, so one Flow may keep history for
+  90 days while its Space uses 60 days and the Organization default is 30 days.
+- **Modes:** `preserve` makes terminal history eligible for a later explicit
+  administrator purge after the threshold. `review_required` places eligible
+  history in a read-only review queue and requires a human approval step in any
+  future purge workflow. Neither mode schedules or performs deletion. With no
+  configured policy, Flow run history has no age threshold.
+- **Persistence:** Tenant, Space, and Flow each own nullable
+  `flow_run_history_retention_mode` and
+  `flow_run_history_retention_days` columns. Database constraints require both
+  fields to be null or both to be set, restrict days to `1..2555`, and allow only
+  the two launch modes. `Spaces.data_retention_days` remains the separate owner
+  for conversation and App retention. Flow debug evidence and never-attached
+  upload settings remain separate controls.
+- **Deployment assumption:** The pre-production migration is a coordinated
+  cutover and renames the old Flow duration column in place. Updated application
+  processes must not run against the previous schema during that cutover. If
+  mixed-version rolling deployment becomes a requirement, replace this step with
+  an additive expand/backfill/contract migration before production rollout.
+- **Control plane:** The typed ADMIN-only settings API and admin UI expose local,
+  inherited, and effective policy. Operational policy remains editable after a
+  Flow is published because it is not part of the immutable Flow definition.
+  Every real change writes a required audit event in the same transaction;
+  saving the same value is a no-op. The review queue is bounded, tenant-scoped,
+  read-only, and omits inputs, outputs, evidence, and file content.
+- **Deletion boundary:** The scheduled retention worker must not select or delete
+  Flow-owned history, debug evidence, or files. A future manual purge must add
+  preview and confirmation, require approval for `review_required`, re-evaluate
+  the effective policy at execution time, use bounded tenant-scoped batches,
+  honor lifecycle and audit-outbox blockers, reference-fence shared files, and
+  write an immutable purge receipt. Automatic deletion requires a separate
+  explicit mode, admin UX, operational safeguards, and a revision to this record.
+- **Separate data classes:** Conversation, App, Flow AI Builder session, audit-log,
+  backup, external-export, and object-storage retention are not governed by this
+  hierarchy. In particular, current Builder sessions may still be removed by
+  their Space/conversation cleanup path and require their own production decision.
+- **Removed or unavailable surface:** Classification-driven retention, minimum-
+  retention barriers, hidden defaults, partial policies, automatic Flow deletion,
+  a purge or approval button in the current settings surface, and claims that age
+  eligibility means data has been deleted.
+- **Revision rule:** No adapter, child setting, classification label, scheduler,
+  or fallback may activate destructive Flow retention. Revise this record before
+  adding a deletion mode, purge authority, hold, clock, or automatic cadence.
 
 ### 15. Service-key rerun is an explicit own-run capability
 

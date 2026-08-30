@@ -49,6 +49,12 @@ Closest supported alternative: Convert the image into a supported document or te
 - Mid-run files: use review design or rerun overrides; do not inject files into an executing step.
 - Results: read per-step results as they complete and use final output for the terminal answer.
 
+### Does setting Flow retention delete old runs automatically?
+
+No. Flow run-history policies set an age threshold and either manual purge eligibility or a human-review queue. Saving a policy, reaching the threshold, and reading the review queue do not delete anything. The most specific complete Flow, Space, or Organization policy wins.
+
+Conversation history, Flow AI Builder sessions, and audit logs have separate retention behavior. Read [Data retention and deletion](/guides/data-retention) before making a production-wide claim, and use [Flow run-history retention](/guides/flows/retention-policy) for the complete Flow policy.
+
 <Callout type="warning">
 
 **Not supported: Run-status webhooks.**

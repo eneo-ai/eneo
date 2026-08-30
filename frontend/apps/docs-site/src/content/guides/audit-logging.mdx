@@ -1,6 +1,6 @@
 # Audit Logging Guide
 
-import { Callout, Tabs } from 'nextra/components'
+import { Callout, Tabs } from "nextra/components";
 
 Audit logging helps organizations track sensitive actions, meet compliance requirements, and investigate incidents. This guide explains how to enable, configure, and use audit logs in Eneo.
 
@@ -81,13 +81,17 @@ Conversation data (questions and app runs) follows a hierarchy that can be tuned
 1. Assistant or App `data_retention_days` (if set)
 2. Space `data_retention_days`
 3. Tenant-level conversation retention (if enabled internally)
-4. `null` means keep forever
+4. no effective policy means keep indefinitely
 
 **How to use it:**
 
 - Set retention at the **space** level to give all new assistants/apps a default policy.
 - Override retention at the **assistant** or **app** level when a specific workflow needs shorter retention.
-- Set `data_retention_days` to `null` to remove an override.
+- Set `data_retention_days` to `null` to remove a child override and fall back to its parent.
+
+The shared daily retention worker removes conversation data after its effective configured period. Under the current model, Flow AI Builder conversation sessions can also follow Space/conversation retention. This is separate from Flow run-history policy.
+
+Flow run and step history is never deleted by that scheduled worker. Its dedicated Organization → Space → Flow policy only sets eligibility or a human-review queue. See [Data retention and deletion](/guides/data-retention).
 
 ## Exporting audit logs
 
@@ -100,7 +104,14 @@ Exported files are retained for 24 hours before cleanup.
 
 ## UI walkthrough
 
-<Tabs items={['Access justification', 'Logs & filters', 'Configuration', 'Log details']}>
+<Tabs
+  items={[
+    "Access justification",
+    "Logs & filters",
+    "Configuration",
+    "Log details",
+  ]}
+>
   <Tabs.Tab>
     <div className="space-y-4">
       <a
@@ -133,7 +144,12 @@ Exported files are retained for 24 hours before cleanup.
   </Tabs.Tab>
   <Tabs.Tab>
     <div className="space-y-4">
-      <a href="/images/audit/logs-view.png" target="_blank" rel="noreferrer" className="block">
+      <a
+        href="/images/audit/logs-view.png"
+        target="_blank"
+        rel="noreferrer"
+        className="block"
+      >
         <img
           src="/images/audit/logs-view.png"
           alt="Audit logs view"
@@ -141,7 +157,12 @@ Exported files are retained for 24 hours before cleanup.
           className="w-full rounded-lg border border-slate-200 dark:border-slate-700"
         />
       </a>
-      <a href="/images/audit/user-filter.png" target="_blank" rel="noreferrer" className="block">
+      <a
+        href="/images/audit/user-filter.png"
+        target="_blank"
+        rel="noreferrer"
+        className="block"
+      >
         <img
           src="/images/audit/user-filter.png"
           alt="User search filter"
@@ -149,7 +170,12 @@ Exported files are retained for 24 hours before cleanup.
           className="w-full rounded-lg border border-slate-200 dark:border-slate-700"
         />
       </a>
-      <a href="/images/audit/action-filter.png" target="_blank" rel="noreferrer" className="block">
+      <a
+        href="/images/audit/action-filter.png"
+        target="_blank"
+        rel="noreferrer"
+        className="block"
+      >
         <img
           src="/images/audit/action-filter.png"
           alt="Action multi-select filter"
@@ -190,7 +216,12 @@ Exported files are retained for 24 hours before cleanup.
     </div>
   </Tabs.Tab>
   <Tabs.Tab>
-    <a href="/images/audit/log-details.png" target="_blank" rel="noreferrer" className="block">
+    <a
+      href="/images/audit/log-details.png"
+      target="_blank"
+      rel="noreferrer"
+      className="block"
+    >
       <img
         src="/images/audit/log-details.png"
         alt="Audit log details panel"
@@ -213,5 +244,6 @@ Exported files are retained for 24 hours before cleanup.
 We plan to support external audit sinks (e.g., SIEM or analytics pipelines) so long-term storage can be moved out of the primary database when needed.
 
 <Callout type="info">
-  Need developer details? See the [Audit Logging (Technical)](/docs/audit-logging) documentation.
+  Need developer details? See the [Audit Logging
+  (Technical)](/docs/audit-logging) documentation.
 </Callout>

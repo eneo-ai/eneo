@@ -1374,13 +1374,20 @@ export class EneoFlows {
       body = JSON.stringify(init.body);
     }
     // Trailing slashes are load-bearing: without them the API answers 307.
-    const res = await fetch(`${this.apiBase}${path}`, { method, headers, body });
+    const res = await fetch(`${this.apiBase}${path}`, {
+      method,
+      headers,
+      body,
+    });
     const text = await res.text();
     const parsed: unknown = text ? JSON.parse(text) : null;
     if (!res.ok) {
       throw new EneoApiError(
         res.status,
-        (parsed ?? { message: res.statusText, code: "unknown" }) as EneoErrorBody,
+        (parsed ?? {
+          message: res.statusText,
+          code: "unknown",
+        }) as EneoErrorBody,
       );
     }
     return parsed as T;
@@ -1395,7 +1402,11 @@ export class EneoFlows {
   upload(flowId: string, stepId: string, file: File): Promise<{ id: string }> {
     const form = new FormData();
     form.append("upload_file", file, file.name);
-    return this.call("POST", `/flows/${flowId}/steps/${stepId}/runtime-files/`, { form });
+    return this.call(
+      "POST",
+      `/flows/${flowId}/steps/${stepId}/runtime-files/`,
+      { form },
+    );
   }
 
   /** Creating a run also starts it. There is no separate start call. */
@@ -1408,7 +1419,10 @@ export class EneoFlows {
     },
     idempotencyKey: string,
   ): Promise<FlowRun> {
-    return this.call("POST", `/flows/${flowId}/runs/`, { body: payload, idempotencyKey });
+    return this.call("POST", `/flows/${flowId}/runs/`, {
+      body: payload,
+      idempotencyKey,
+    });
   }
 
   getRun(flowId: string, runId: string): Promise<FlowRun> {
@@ -1421,8 +1435,14 @@ export class EneoFlows {
   }
 
   /** Answers 200 with a literal null body when no checkpoint is open. */
-  activeCheckpoint(flowId: string, runId: string): Promise<ReviewCheckpoint | null> {
-    return this.call("GET", `/flows/${flowId}/runs/${runId}/review-checkpoints/active/`);
+  activeCheckpoint(
+    flowId: string,
+    runId: string,
+  ): Promise<ReviewCheckpoint | null> {
+    return this.call(
+      "GET",
+      `/flows/${flowId}/runs/${runId}/review-checkpoints/active/`,
+    );
   }
 
   /**
@@ -1443,7 +1463,9 @@ export class EneoFlows {
     }
     if (checkpoint.current_payload_json.text_overflow !== undefined) {
       // The output lives in a generated file this endpoint cannot replace.
-      throw new Error("file-backed output: flow_review_edit_file_backed_unsupported");
+      throw new Error(
+        "file-backed output: flow_review_edit_file_backed_unsupported",
+      );
     }
     return this.call(
       "PATCH",
@@ -1499,7 +1521,10 @@ export class EneoFlows {
     return this.call(
       "POST",
       `/flows/${flowId}/runs/${runId}/review-checkpoints/${checkpointId}/resume/`,
-      { body: { expected_checkpoint_revision: expectedRevision }, idempotencyKey },
+      {
+        body: { expected_checkpoint_revision: expectedRevision },
+        idempotencyKey,
+      },
     );
   }
 
@@ -1536,12 +1561,19 @@ export class EneoFlows {
     for (;;) {
       const run = await this.getRun(flowId, runId);
       opts.onUpdate?.(run);
-      if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+      if (
+        run.status === "completed" ||
+        run.status === "failed" ||
+        run.status === "cancelled"
+      ) {
         return run;
       }
       if (run.status === "awaiting_review") return run; // hand control to the reviewer
-      if (Date.now() > deadline) throw new Error(`run ${runId} still ${run.status} at deadline`);
-      await new Promise((resolve) => setTimeout(resolve, interval(Date.now() - start)));
+      if (Date.now() > deadline)
+        throw new Error(`run ${runId} still ${run.status} at deadline`);
+      await new Promise((resolve) =>
+        setTimeout(resolve, interval(Date.now() - start)),
+      );
     }
   }
 }
@@ -1625,11 +1657,13 @@ A single limit governs both: **1 MiB of UTF-8 bytes**, deployment-configurable t
 
 ### Retention
 
-Run-history settings define when data becomes eligible for an administrator-requested purge. Configuring a window does not delete anything, and no scheduled worker purges Flow-owned data. Runs and their files persist until an administrator explicitly previews, confirms, and starts a purge. Because create-run idempotency replay is tied to the retained run row, a completed purge also ends replay against that historical row.
+Run-history policy resolves one complete `{mode, days}` pair from Flow, Space, then Organization. `preserve` defines manual purge eligibility; `review_required` adds a read-only human-review queue. Configuring a policy, reaching its age threshold, or reading that queue does not delete anything. No scheduled worker purges Flow-owned data, and this release exposes no administrator run-history purge action from the settings surface.
+
+Runs and their files therefore remain stored, and create-run idempotency replay remains tied to the retained run row. Do not infer deletion from an eligibility timestamp.
 
 Abandoned uploads that were never attached to a run are not swept automatically. Delete them yourself with `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; a file already bound to a run returns `409 flow_runtime_file_attached`.
 
-Once an administrator-requested purge has removed a run row, its create-run `Idempotency-Key` no longer matches anything, so replaying that key creates a new run instead of returning the old one. Keep the run id, not the key, as your durable handle.
+Conversation history, Flow AI Builder sessions, and audit logs have separate retention behavior. Read [Flow run-history retention](/guides/flows/retention-policy) for the hierarchy and [Data retention and deletion](/guides/data-retention) before making a system-wide retention claim.
 
 ## What this API does not offer
 

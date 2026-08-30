@@ -7,8 +7,8 @@ A Flow is a multi-step AI pipeline you build inside a space. You design it as a 
 <Callout type="info">
   If you want to build on Flows from your own application, read this page first
   and then continue with the{" "}
-  <a href="/guides/flows">Eneo Flows API consumer guide</a>. If you want to draft a
-  Flow conversationally, read <a href="/docs/ai-builder">AI Builder</a>.
+  <a href="/guides/flows">Eneo Flows API consumer guide</a>. If you want to
+  draft a Flow conversationally, read <a href="/docs/ai-builder">AI Builder</a>.
 </Callout>
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
@@ -41,10 +41,12 @@ The rest of this page explains those three layers in order.
 
 A flow definition lives inside a space and contains:
 
-- top-level metadata such as name, description, retention, creator, and owner
+- top-level authoring metadata such as name, description, creator, and owner
 - an ordered list of steps
 - optional form fields and runtime input requirements for published runs
 - optional DOCX template assets for document assembly
+
+Run-history retention is an operational administrator policy, not part of the Flow definition. See [Flow run-history retention](/guides/flows/retention-policy).
 
 ### Three separate objects
 
@@ -100,13 +102,13 @@ _A worked example: audio goes in, a DOCX document comes out. Each step declares 
 
 ### Core step fields
 
-| Field                            | What it controls                                   | Common values                                                                                      | Default behavior  |
-| -------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------- |
-| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`                                    | Explicit per step |
+| Field                            | What it controls                                   | Common values                                                                                                                  | Default behavior  |
+| -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
+| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`                                                                | Explicit per step |
 | `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `any`. `image` exists in the enum but the runtime rejects it; do not build on it. | Explicit per step |
-| `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill` | Explicit per step |
-| `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                      | Explicit per step |
-| `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                                          | No override       |
+| `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill`                             | Explicit per step |
+| `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                                                  | Explicit per step |
+| `output_classification_override` | Optional higher classification for the step output | integer override, often discussed as levels such as K1-K4                                                                      | No override       |
 
 ### Step chaining
 
@@ -436,8 +438,8 @@ That split is deliberate. A service key is a **runtime principal**, not a draft 
   runtime-safe projection with{" "}
   <code>GET /api/v1/flows/{"{id}"}/published/</code>. Do <strong>not</strong>{" "}
   treat <code>GET /api/v1/flows/{"{id}"}/</code> as a service-key discovery
-  endpoint; it serves the draft/current-definition view, and a non-admin
-  service key receives <code>403</code> with{" "}
+  endpoint; it serves the draft/current-definition view, and a non-admin service
+  key receives <code>403</code> with{" "}
   <code>flow_service_key_admin_required</code>.
 </Callout>
 
@@ -501,13 +503,14 @@ When `care_data_policy.sensitive = true`, JSON evidence export remains blocked b
 
 Flow retention settings define eligibility, not authorization to delete:
 
-- Run-history eligibility resolves the first configured value in Flow → Space → organization order. Values accept `1..2555` days; no value means there is no eligibility window.
+- Run-history policy resolves the first complete `{mode, days}` pair in Flow → Space → Organization order. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`; no policy means there is no age threshold.
+- A Space or Flow either inherits its complete parent policy or replaces the complete pair. Parent values are defaults, not maximums, so one Flow can retain history longer than its Space.
 - Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible, and `flow_runtime_upload_abandonment_days` does the same for unbound runtime uploads.
-- Saving any of these values never deletes or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data.
-- An administrator-requested purge must preview the exact scope, require confirmation and a reason, execute in bounded tenant-scoped batches, and leave an immutable audit receipt.
-- A purge remains blocked while related audit events or webhook deliveries are unresolved, and shared generated files must remain until reference-safe deletion is possible.
+- `review_required` exposes matching terminal runs through a bounded, read-only queue that omits inputs and outputs. Reading it has no side effects.
+- Saving any policy never deletes, approves, schedules, or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data.
+- The current settings surface has no Flow run-history purge action. A future purge must preview the exact scope, require confirmation and a reason, execute in bounded tenant-scoped batches, respect audit/webhook blockers, and leave an immutable audit receipt.
 
-Until an administrator starts an explicit purge, eligible Flow data remains stored.
+Eligible Flow data remains stored until that separate purge workflow exists and an administrator explicitly completes it.
 
 Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
 

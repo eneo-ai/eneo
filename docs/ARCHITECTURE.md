@@ -703,7 +703,9 @@ Eneo implements security at every layer to protect sensitive public sector data 
 - **Tenant Data Encryption**: Fernet encryption for tenant credentials and federation configs
 - **Password Security**: Bcrypt hashing with secure salts
 - **Audit Trails**: All actions logged for compliance
-- **Data Retention**: Automatic deletion per policy
+- **Data Retention**: Data-class-specific policy and cleanup. Configured
+  conversation and audit retention can run automatically; Flow run-history
+  policy does not authorize automatic deletion in the current release.
 
 **Multi-Tenant Security:**
 - Database isolation with row-level security

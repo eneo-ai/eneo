@@ -20,15 +20,15 @@ databases must be rebuilt rather than migrated through the deleted history.
 
 ## Core aggregates
 
-| Aggregate | Tables | Ownership |
-| --- | --- | --- |
-| Draft and publication | `flows`, `flow_steps`, `flow_versions`, `flow_template_assets`, `flow_resource_bindings` | Mutable authoring is separated from immutable published snapshots. |
-| Execution and evidence | `flow_runs`, `flow_step_results`, `flow_step_attempts`, `flow_step_attempt_resolved_inputs`, `flow_provider_calls` | A run executes one published version. Attempts and provider calls preserve evidence across retries and recovery. |
-| Runtime files | `flow_runtime_uploaded_files`, `flow_run_step_input_files`, `flow_run_step_result_files` | File identity remains in the platform `files` table; Flow rows record tenant-scoped use and provenance. |
-| Review | `flow_run_review_checkpoints` | Revisioned review state, actor attribution, edited payloads, and resume idempotency. |
-| Delivery | `flow_run_audit_outbox`, `flow_run_webhook_deliveries` | Transactional intents are written with lifecycle state and delivered asynchronously. |
-| Portability | `flow_package_imports` | Import state for validated `.eneopkg` archives. Imported definitions remain drafts. |
-| Shared platform integration | `service_principals`, `provider_token_usages` | Principal and token-usage records shared with non-Flow consumers. |
+| Aggregate                   | Tables                                                                                                             | Ownership                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Draft and publication       | `flows`, `flow_steps`, `flow_versions`, `flow_template_assets`, `flow_resource_bindings`                           | Mutable authoring is separated from immutable published snapshots.                                               |
+| Execution and evidence      | `flow_runs`, `flow_step_results`, `flow_step_attempts`, `flow_step_attempt_resolved_inputs`, `flow_provider_calls` | A run executes one published version. Attempts and provider calls preserve evidence across retries and recovery. |
+| Runtime files               | `flow_runtime_uploaded_files`, `flow_run_step_input_files`, `flow_run_step_result_files`                           | File identity remains in the platform `files` table; Flow rows record tenant-scoped use and provenance.          |
+| Review                      | `flow_run_review_checkpoints`                                                                                      | Revisioned review state, actor attribution, edited payloads, and resume idempotency.                             |
+| Delivery                    | `flow_run_audit_outbox`, `flow_run_webhook_deliveries`                                                             | Transactional intents are written with lifecycle state and delivered asynchronously.                             |
+| Portability                 | `flow_package_imports`                                                                                             | Import state for validated `.eneopkg` archives. Imported definitions remain drafts.                              |
+| Shared platform integration | `service_principals`, `provider_token_usages`                                                                      | Principal and token-usage records shared with non-Flow consumers.                                                |
 
 There are no partial-rerun operation or invalidation tables, no
 classification-retention policy tables, and no Flow retention tombstones in the
@@ -69,18 +69,26 @@ the repository transition that depends on the constraint.
 
 ## Retention
 
-Run-history retention is a simple effective number of days resolved in this
-order:
+Run-history retention resolves one complete policy in this order:
 
-1. Flow `data_retention_days`
-2. Space `data_retention_days`
-3. Tenant Flow-run-history default
+1. Flow `flow_run_history_retention_mode` and `flow_run_history_retention_days`
+2. Space `flow_run_history_retention_mode` and `flow_run_history_retention_days`
+3. Organization `flow_run_history_retention_mode` and `flow_run_history_retention_days`
 
-The first configured value wins. No value means there is no run-history purge
-eligibility window. These values never authorize scheduled deletion: the shared
-retention worker does not mutate Flow-owned data. A separate administrator purge
-must own preview, confirmation, execution, and the immutable audit receipt while
+At every level both columns are null (inherit) or both are present (replace the
+complete parent policy). The first complete policy wins. `preserve` marks age
+eligibility for a later explicit purge; `review_required` additionally routes
+matching terminal runs to the read-only review queue. No policy means there is
+no run-history age threshold.
+
+These values never authorize scheduled deletion: the shared retention worker
+does not mutate Flow-owned data, and the current settings surface has no purge
+action. A later administrator purge must own preview, confirmation, approval
+where required, bounded execution, and the immutable audit receipt while
 continuing to respect audit and webhook delivery blockers.
+
+Space `data_retention_days` remains the separate conversation/App policy and is
+not a Flow run-history fallback.
 
 ## JSONB ownership
 

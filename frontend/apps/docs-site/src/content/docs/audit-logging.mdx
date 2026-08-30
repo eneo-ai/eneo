@@ -76,9 +76,11 @@ Conversation data (questions and app runs) follows a hierarchical retention poli
 1. Assistant or App `data_retention_days` (if set)
 2. Space `data_retention_days`
 3. Tenant-level conversation retention (if enabled internally)
-4. `null` means keep forever
+4. no effective policy means keep indefinitely
 
-Use assistant/app-level overrides when you need shorter retention than the space default.
+Use assistant/app-level overrides when you need a different period from the Space default. A null child value removes that override and falls back to its parent. The shared daily retention worker removes conversation data after its effective configured period; under the current model this can include Flow AI Builder conversation sessions.
+
+Flow run and step history is separate. Its dedicated Organization → Space → Flow policy never authorizes scheduled deletion and only sets eligibility or a human-review queue. See [Data retention and deletion](/guides/data-retention).
 
 ## Export formats
 

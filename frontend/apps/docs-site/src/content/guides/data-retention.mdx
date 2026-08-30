@@ -1,0 +1,93 @@
+import { Callout } from "nextra/components";
+
+# Data retention and deletion
+
+Eneo does not have one global retention switch. Each data class has its own owner, scope, and deletion behavior. Configure the data class you mean, and verify the effective policy before relying on it for compliance.
+
+<Callout type="warning">
+
+**A retention value does not always mean automatic deletion.**
+
+Flow run-history policies never start deletion in this release. Conversation history and audit logs have separate cleanup behavior, so do not infer one from the other.
+
+</Callout>
+
+## Current behavior at a glance
+
+| Data class                                 | Where it is configured                                         | What the value does today                                                       | Automatic deletion                                    |
+| ------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Flow run and step history                  | Organization, Space, or individual Flow                        | Resolves an age threshold and either manual eligibility or a human-review queue | **No**                                                |
+| Unused Flow runtime uploads                | Organization Flow settings                                     | Marks never-attached uploads as eligible for a separate administrator cleanup   | **No Flow-owned scheduled deletion**                  |
+| Flow debug evidence                        | Organization Flow settings                                     | Marks debug evidence as eligible for a separate administrator cleanup           | **No Flow-owned scheduled deletion**                  |
+| Conversation and App history               | Assistant or App, then Space, then the conversation default    | Controls the existing conversation-retention cleanup path                       | **May be automatic when configured**                  |
+| Flow AI Builder sessions                   | Currently follows separate Space/conversation cleanup behavior | Controls Builder conversation-session history, not Flow run history             | **May be automatic when configured**                  |
+| Audit logs                                 | Organization audit-log settings                                | Sets how long audit rows remain available                                       | **Yes; the daily audit cleanup removes expired rows** |
+| Export files and other temporary artifacts | Their owning feature                                           | Uses that feature's documented lifetime                                         | Depends on the feature                                |
+
+The words **Organization** and **tenant** refer to the same top-level administrative scope in the current API. The product UI uses Organization.
+
+## Flow run-history policy
+
+Flow run history has its own policy and does not reuse the Space conversation-retention number. An Organization administrator can set a complete policy at three levels:
+
+1. Organization default
+2. Space override
+3. Flow override
+
+The most specific complete policy wins. A child either inherits its complete parent policy or replaces both fields with its own complete policy.
+
+| Example scope            | Configured policy                      | Effective result                                                        |
+| ------------------------ | -------------------------------------- | ----------------------------------------------------------------------- |
+| Organization             | Manual purge eligibility after 30 days | Default for Flows without a more specific policy                        |
+| Procurement Space        | Review before purge after 60 days      | Every Flow in Procurement inherits 60 days unless it has its own policy |
+| Supplier assessment Flow | Manual purge eligibility after 90 days | This Flow alone uses 90 days; neighboring Flows remain at 60 days       |
+
+This design lets one Flow retain history for 90 days without forcing every Flow in the Organization to retain it for 90 days.
+
+The two modes are:
+
+- **Manual purge eligibility (`preserve`)**: after the age threshold, an administrator may include the history in a separately requested purge. No human retention review is required.
+- **Review before purge (`review_required`)**: after the threshold, the run appears in the read-only retention review queue. A future purge must require explicit human approval.
+
+Neither mode schedules or performs deletion. If no policy is configured at any level, Flow run history has no age threshold and remains stored.
+
+Read the [Flow run-history retention guide](/guides/flows/retention-policy) for the UI, API, inheritance examples, and review-queue contract.
+
+## What saving a Flow policy does
+
+Saving or clearing a Flow run-history policy:
+
+- updates the complete mode-and-days policy at exactly one scope;
+- recalculates the effective policy for descendants;
+- writes a mandatory audit event containing policy metadata, not run content;
+- never deletes, redacts, approves, or schedules data;
+- remains available after a Flow is published because it is operational governance, not part of the published Flow definition.
+
+The review queue is also side-effect free. Reading or refreshing it cannot approve or delete anything, and its rows omit Flow inputs and outputs.
+
+## Sensitive and regulated information
+
+For confidential, security-classified, or regulated data, define the retention decision before production use:
+
+1. Identify every data class the workflow creates: run history, uploaded and generated files, evidence, conversations, Builder sessions, and audit logs.
+2. Set the Organization default, then add only the Space and Flow exceptions you need.
+3. Use **Review before purge** when a person must verify the scope before a future deletion.
+4. Verify conversation, Flow AI Builder, and audit-log settings separately. A safe Flow run-history policy does not override them.
+5. Treat backups, legal holds, object-storage lifecycle rules, and external exports as separate controls unless your deployment documentation explicitly says otherwise.
+
+<Callout type="info">
+
+**Flow AI Builder is a separate retention workstream.** Builder conversation sessions can contain sensitive source material. They are not governed by the Flow run-history hierarchy described here, and their current Space/conversation cleanup behavior must be reviewed separately before handling sensitive production data.
+
+</Callout>
+
+## Administrator checklist
+
+- Confirm which role can change the policy. Flow run-history settings require an Organization administrator.
+- Record the business or legal reason for every exception outside the Organization default.
+- Check the effective source shown in the UI after saving.
+- Review audit logs for `flow_run_retention_policy_changed`.
+- Do not describe data as deleted merely because it passed an eligibility date.
+- Revisit the policy when a Flow's information classification or business purpose changes.
+
+Next: [Configure Flow run-history retention](/guides/flows/retention-policy).

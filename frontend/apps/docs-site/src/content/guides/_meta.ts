@@ -8,6 +8,7 @@ const meta: MetaRecord = {
   "oidc-federation": "OIDC Federation",
   "scim-provisioning": "SCIM Provisioning",
   "audit-logging": "Audit Logging",
+  "data-retention": "Data Retention & Deletion",
   skills: "Skills",
   "ai-providers": "AI Provider Configuration",
   "mcp-servers": "MCP Servers",

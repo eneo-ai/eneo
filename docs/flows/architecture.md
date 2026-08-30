@@ -16,7 +16,7 @@ The final product deliberately has:
 - one complete run per execution request;
 - retry and recovery attempts within that run;
 - no partial-step rerun or result-invalidation API;
-- simple Flow → Space → Tenant retention-day inheritance;
+- complete Flow → Space → Organization run-history policy inheritance;
 - no classification-retention control plane, preview workflow, or tombstones;
 - platform-owned task execution and maintenance, with no Flow-private worker or
   scheduler process.
@@ -72,7 +72,7 @@ not repeated automatically.
 | Audit delivery | audit-outbox repository and delivery service |
 | Webhook delivery | webhook repository and delivery service |
 | Portable Flow packages | `eneo/flow_packages` |
-| Retention policy | `flows/flow_retention_policy.py` and retention service |
+| Retention policy | `flows/domain/flow_run_retention_policy.py` and `flows/application/flow_run_retention_policy_service.py` |
 
 API adapters parse, authorize, and delegate. Application services own use-case
 transactions. Repositories own tenant-scoped persistence and locks. Domain
@@ -126,10 +126,20 @@ older than 90 days.
 
 ## Retention and deletion
 
-Retention is a single effective number of days resolved from Flow, then Space,
-then Tenant. Cleanup follows parent ownership and database foreign keys. Pending
-or dead-lettered audit delivery blocks deletion so required audit state is not
-lost. There is no separate classification policy plane or retention tombstone.
+Flow run history uses a complete `{mode, days}` policy resolved from Flow, then
+Space, then Organization. A child either inherits the complete parent policy or
+replaces both fields. The most specific policy wins, so a Flow may deliberately
+retain history longer than its Space or Organization default. Dedicated Flow
+policy columns keep this independent from `Spaces.data_retention_days`, which
+continues to govern conversations and App runs.
+
+The current modes mark history for a later explicit administrator workflow:
+`preserve` makes aged history eligible for manual purge, while
+`review_required` places it in a read-only human-review queue. Neither mode
+schedules deletion, and saving or reading a policy never deletes data. A future
+purge path must retain parent ownership and foreign-key safety, block on pending
+or dead-lettered audit delivery, and produce an immutable audit receipt. There
+is no classification policy plane or retention tombstone.
 
 ## Tenancy and audit invariants
 

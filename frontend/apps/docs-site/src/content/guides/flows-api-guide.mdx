@@ -33,9 +33,9 @@ For the underlying auth model, see:
 - <a href="/guides/authentication">Authentication & OIDC</a>
 
 <Callout type="warning">
-  Service keys do not get broad operator access. If a service key needs access to its own run
-  evidence, it needs <code>flows &gt;= read</code> plus the appropriate explicit{" "}
-  <code>flow_evidence</code> capability on the key.
+  Service keys do not get broad operator access. If a service key needs access
+  to its own run evidence, it needs <code>flows &gt;= read</code> plus the
+  appropriate explicit <code>flow_evidence</code> capability on the key.
 </Callout>
 
 ## Authentication and principal model
@@ -57,30 +57,30 @@ That distinction matters because service keys and ordinary human members are int
 
 ### Endpoint families that require a user principal
 
-| Endpoint family                           | Why it requires a user principal                                                        |
-| ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| Draft CRUD (`POST/PATCH/DELETE /flows/…`) | Drafts are user-principal-owned authoring objects                                       |
-| Publish / unpublish                       | Publishing is part of authoring governance                                              |
-| Template management and inspection        | Template configuration belongs to draft authoring                                       |
-| Flow-assistant authoring                  | Step-assistant configuration belongs to draft authoring                                 |
+| Endpoint family                           | Why it requires a user principal                        |
+| ----------------------------------------- | ------------------------------------------------------- |
+| Draft CRUD (`POST/PATCH/DELETE /flows/…`) | Drafts are user-principal-owned authoring objects       |
+| Publish / unpublish                       | Publishing is part of authoring governance              |
+| Template management and inspection        | Template configuration belongs to draft authoring       |
+| Flow-assistant authoring                  | Step-assistant configuration belongs to draft authoring |
 
 ### Service-key runtime endpoint families
 
-| Endpoint family                                           | Current service-key rule                                                                                                                                  |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/flows/?space_id=...`                         | Allowed for published-flow discovery in the key's scoped space                                                                                            |
-| `GET /api/v1/flows/{id}/published/`                       | Allowed for a runtime-safe single-flow published projection                                                                                               |
+| Endpoint family                                           | Current service-key rule                                                                                                                                   |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/flows/?space_id=...`                         | Allowed for published-flow discovery in the key's scoped space                                                                                             |
+| `GET /api/v1/flows/{id}/published/`                       | Allowed for a runtime-safe single-flow published projection                                                                                                |
 | `GET /api/v1/flows/{id}/`                                 | Allowed only when the key's space role is admin or owner. It returns the draft/current-definition view, so a runtime app should read `/published/` instead |
-| `GET /run-contract/`                                      | Allowed for published-flow runtime discovery                                                                                                              |
-| `GET /graph/`                                             | Allowed for published/runtime-safe topology and own-run snapshots                                                                                         |
-| Runtime uploads and orphan upload cleanup                 | Allowed for published flows                                                                                                                               |
-| Run creation                                              | Allowed for published flows                                                                                                                               |
-| List / get / cancel / redispatch runs                     | Own runs only                                                                                                                                             |
-| Rerun a completed step                                    | Own runs only                                                                                                                                             |
-| Review checkpoints: active, edit, approve, reject, resume | Own runs only, and the key needs `resource_permissions.flows = write`                                                                                     |
-| Step outputs                                              | Own runs only                                                                                                                                             |
-| Artifact downloads                                        | Own runs only                                                                                                                                             |
-| Evidence                                                  | Own runs only, and only when explicit evidence capability allows it                                                                                       |
+| `GET /run-contract/`                                      | Allowed for published-flow runtime discovery                                                                                                               |
+| `GET /graph/`                                             | Allowed for published/runtime-safe topology and own-run snapshots                                                                                          |
+| Runtime uploads and orphan upload cleanup                 | Allowed for published flows                                                                                                                                |
+| Run creation                                              | Allowed for published flows                                                                                                                                |
+| List / get / cancel / redispatch runs                     | Own runs only                                                                                                                                              |
+| Rerun a completed step                                    | Own runs only                                                                                                                                              |
+| Review checkpoints: active, edit, approve, reject, resume | Own runs only, and the key needs `resource_permissions.flows = write`                                                                                      |
+| Step outputs                                              | Own runs only                                                                                                                                              |
+| Artifact downloads                                        | Own runs only                                                                                                                                              |
+| Evidence                                                  | Own runs only, and only when explicit evidence capability allows it                                                                                        |
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
 
@@ -198,15 +198,16 @@ Eneo also exposes **tenant-level Flow runtime settings** for operators and platf
 
 These are admin surfaces, not end-user runtime endpoints:
 
-| Setting area                | Endpoint                                                                           | Purpose                                                                                                                  |
-| --------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                     | Control maximum file/audio sizes and file-count limits                                                                   |
-| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                           | Control generated PDF/DOCX rendering limits                                                                              |
-| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                                   | Control runtime step execution timeouts                                                                                  |
-| Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                          | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
-| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                                  | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
-| Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                              | Control how much retrieval evidence a run records and exposes                                                            |
-| Flow retention policy       | `GET/PATCH /api/v1/settings/flow-retention-policy`                                 | Inspect and change organization run-history, never-attached-upload, and debug-evidence settings                          |
+| Setting area                | Endpoint                                                                       | Purpose                                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                 | Control maximum file/audio sizes and file-count limits                                                                   |
+| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                       | Control generated PDF/DOCX rendering limits                                                                              |
+| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                               | Control runtime step execution timeouts                                                                                  |
+| Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                      | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
+| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control sensitive-flow export defaults and stricter raw evidence export behavior, especially for classification-3 spaces |
+| Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                          | Control how much retrieval evidence a run records and exposes                                                            |
+| Flow data eligibility       | `GET/PATCH /api/v1/settings/flow-retention-policy`                             | Inspect and change never-attached-upload and debug-evidence eligibility                                                  |
+| Flow run-history retention  | `GET/PUT /api/v1/settings/flow-run-retention-policy` and its Space/Flow routes | Inspect, replace, or inherit complete run-history policies and read the review queue                                     |
 
 Mapped execution has two independent positive-integer ceilings:
 
@@ -217,17 +218,41 @@ PATCH requests distinguish omission from null: omit a field to preserve it, or s
 
 ### Flow retention policy shape
 
-`GET /api/v1/settings/flow-retention-policy` exposes three inputs:
+`GET /api/v1/settings/flow-retention-policy` exposes two independent Organization-level eligibility inputs:
 
 - `run_debug_evidence_days`
-- `flow_run_history_retention_days`
 - `flow_runtime_upload_abandonment_days`
 
-The inputs are nullable integers in the range `1..2555`; there is no default or backfill. `flow_run_history_retention_days` is the tenant fallback for completed run and step history. A Flow value overrides its Space value, and a Space value overrides the tenant value. `flow_runtime_upload_abandonment_days` separately sets eligibility for runtime uploads that were never attached to a run input. Debug-evidence eligibility remains independently configured.
+The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` sets eligibility for runtime uploads that were never attached to a run input. Debug-evidence eligibility remains independently configured. Saving either value does not delete or redact Flow data, and the shared scheduled retention worker does not mutate Flow-owned data.
 
-The values define purge eligibility; saving them never deletes or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data. Deletion requires a separate administrator-initiated purge with an explicit scope, preview, confirmation, reason, and audit receipt. Until an administrator starts that operation, eligible data remains stored. Undelivered audit events and unresolved webhooks continue to block a purge. Every Flow response includes a `run_history_retention` projection with `state`, `effective_days`, `source`, and the three contributors; it makes no per-run purge-eligibility claim.
+Run and step history uses dedicated hierarchical endpoints:
 
-An administrator-requested purge deletes the full run and step history. Evidence export therefore reports deletion provenance as not tracked: a missing row may have been purged or may never have been recorded, and the export does not claim which occurred. Use the tenant evidence policy for export controls.
+| Scope        | Read                                                               | Replace or clear                                                   |
+| ------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Organization | `GET /api/v1/settings/flow-run-retention-policy`                   | `PUT /api/v1/settings/flow-run-retention-policy`                   |
+| Space        | `GET /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` | `PUT /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` |
+| Flow         | `GET /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   | `PUT /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   |
+
+Each write replaces one complete local policy:
+
+```json
+{
+  "policy": {
+    "mode": "review_required",
+    "days": 60
+  }
+}
+```
+
+Send `{ "policy": null }` to clear the local value and inherit. Partial policies are invalid. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`. The most specific complete Flow, Space, or Organization policy wins. A Flow can therefore use 90 days while its Space uses 60 and the Organization default remains 30.
+
+`preserve` makes history eligible for a later explicit administrator purge without a separate review requirement. `review_required` adds eligible terminal runs to the read-only retention review queue. Neither mode schedules or performs deletion, and this release exposes no administrator Flow run-history purge action from the settings surface.
+
+Queue reads are available at the Organization route ending in `/review-queue` and equivalent Space and Flow routes. They accept a bounded `limit` and an opaque keyset `cursor`, omit run inputs and outputs, and cannot approve or delete data. When `has_more` is true, pass `next_cursor` unchanged as the next request's `cursor`.
+
+Every Flow response includes a `run_history_retention` projection with `state`, `mode`, `effective_days`, `source`, and complete Organization, Space, and Flow contributors. The projection reports policy resolution; it does not claim that a particular run has been approved or purged.
+
+See [Flow run-history retention](/guides/flows/retention-policy) for the administrator workflow and [Data retention and deletion](/guides/data-retention) for the separate conversation, AI Builder, and audit-log behavior.
 
 ### Flow evidence policy shape
 
@@ -316,8 +341,9 @@ Example response:
 ```
 
 <Callout type="info">
-  Runtime paths are <strong>server-relative</strong> (for example <code>/api/v1/...</code>), so
-  callers should prepend their API base URL when needed.
+  Runtime paths are <strong>server-relative</strong> (for example{" "}
+  <code>/api/v1/...</code>), so callers should prepend their API base URL when
+  needed.
 </Callout>
 
 The full `runtime_paths` object includes `run_contract`, `graph`,
@@ -337,8 +363,9 @@ GET /api/v1/flows/{flow_id}/run-contract/
 ```
 
 <Callout type="info">
-  If you are integrating with a service key, the recommended discovery path is: list published flows
-  in the scoped space, fetch <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
+  If you are integrating with a service key, the recommended discovery path is:
+  list published flows in the scoped space, fetch{" "}
+  <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
   <code>run-contract</code>. Do not build service-key discovery around{" "}
   <code>GET /api/v1/flows/{"{flow_id}"}/</code>.
 </Callout>
@@ -438,8 +465,8 @@ Response shape:
 ```
 
 <Callout type="info">
-  If your UI caches flow configuration, pass <code>published_flow_version</code> back into run
-  creation so the server can reject stale submissions cleanly.
+  If your UI caches flow configuration, pass <code>published_flow_version</code>{" "}
+  back into run creation so the server can reject stale submissions cleanly.
 </Callout>
 
 ### 2) Upload files
@@ -598,20 +625,22 @@ Example:
 
 ```js
 const stepInputs = {
-  [stepId]: { file_ids: [runtimeUpload.id] }
+  [stepId]: { file_ids: [runtimeUpload.id] },
 };
 
-const idempotencyKey = await client.flows.runs.deriveUploadIntentIdempotencyKey({
+const idempotencyKey = await client.flows.runs.deriveUploadIntentIdempotencyKey(
+  {
     flowId,
     expectedFlowVersion: runContract.published_flow_version,
-  step_inputs: stepInputs
-});
+    step_inputs: stepInputs,
+  },
+);
 
 await client.flows.runs.create({
   flow: { id: flowId },
   expected_flow_version: runContract.published_flow_version,
   step_inputs: stepInputs,
-  idempotencyKey
+  idempotencyKey,
 });
 ```
 
@@ -666,7 +695,7 @@ const page = await client.flows.runs.list({
   flowId,
   status: ["completed", "failed", "completed"],
   limit: 50,
-  offset: 0
+  offset: 0,
 });
 ```
 
@@ -782,10 +811,10 @@ directly rather than being retried behind your back.
 When a Flow audit delivery exhausts its own budget it is dead-lettered, and the
 recovery surface is a sysadmin one, not part of the consumer runtime:
 
-| Purpose                                | Endpoint                                                        | Operation                                     |
-| -------------------------------------- | --------------------------------------------------------------- | --------------------------------------------- |
-| List dead-lettered Flow audit deliveries | `GET /api/v1/sysadmin/flows/audit-outbox/dead-letters/`         | `list_flow_run_audit_outbox_dead_letters`     |
-| Redrive one delivery                     | `POST /api/v1/sysadmin/flows/audit-outbox/{outbox_id}/redrive/` | `redrive_flow_run_audit_outbox_delivery`      |
+| Purpose                                  | Endpoint                                                        | Operation                                 |
+| ---------------------------------------- | --------------------------------------------------------------- | ----------------------------------------- |
+| List dead-lettered Flow audit deliveries | `GET /api/v1/sysadmin/flows/audit-outbox/dead-letters/`         | `list_flow_run_audit_outbox_dead_letters` |
+| Redrive one delivery                     | `POST /api/v1/sysadmin/flows/audit-outbox/{outbox_id}/redrive/` | `redrive_flow_run_audit_outbox_delivery`  |
 
 Redrive takes the generation token returned by the list response. A stale token
 returns `409` with code `flow_audit_outbox_redrive_conflict`; list again and
@@ -921,13 +950,13 @@ Consumer sequence:
 `Idempotency-Key` behaves differently across these five endpoints, and getting it
 wrong is the most common integration mistake:
 
-| Endpoint                     | `Idempotency-Key`         | Note                                                                                       |
-| ---------------------------- | ------------------------- | ------------------------------------------------------------------------------------------ |
-| `POST .../runs/`             | Optional, recommended     | Same key + same body replays the existing run; same key + different body returns `400 flow_run_idempotency_conflict` |
-| `PATCH .../{checkpoint_id}/` | Not accepted              | Concurrency is controlled by `expected_checkpoint_revision`                                |
-| `POST .../approve/`          | Not accepted              | Same                                                                                        |
-| `POST .../reject/`           | Not accepted              | Same                                                                                        |
-| `POST .../resume/`           | **Required**              | Missing it returns `400 flow_review_idempotency_key_required`                               |
+| Endpoint                     | `Idempotency-Key`     | Note                                                                                                                 |
+| ---------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `POST .../runs/`             | Optional, recommended | Same key + same body replays the existing run; same key + different body returns `400 flow_run_idempotency_conflict` |
+| `PATCH .../{checkpoint_id}/` | Not accepted          | Concurrency is controlled by `expected_checkpoint_revision`                                                          |
+| `POST .../approve/`          | Not accepted          | Same                                                                                                                 |
+| `POST .../reject/`           | Not accepted          | Same                                                                                                                 |
+| `POST .../resume/`           | **Required**          | Missing it returns `400 flow_review_idempotency_key_required`                                                        |
 
 Generate the resume key **once per logical resume** and keep reusing that same
 key for every retry of that resume. Minting a new key on retry throws away the
@@ -1189,7 +1218,7 @@ const page = await client.flows.runs.providerCalls({
   flowId,
   limit: 250,
   afterEventId,
-  attemptId
+  attemptId,
 });
 ```
 
@@ -1318,7 +1347,7 @@ const evidence = await client.flows.runs.exportEvidence({
   id: runId,
   flowId,
   detail: "raw",
-  reason: "Investigate incident 42"
+  reason: "Investigate incident 42",
 });
 ```
 
@@ -1350,21 +1379,21 @@ In the web UI, that same trace can open the source document and highlight the ex
 
 Use this table as the canonical quick-reference for runtime access decisions.
 
-| Endpoint family                                | Service key                                                 | Editor                              | Viewer                               | Space owner / admin         | Tenant admin              |
-| ---------------------------------------------- | ----------------------------------------------------------- | ----------------------------------- | ------------------------------------ | --------------------------- | ------------------------- |
-| Draft CRUD                                     | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
-| Publish / unpublish                            | No                                                          | No                                  | No                                   | Yes                         | Yes                       |
-| Template management / flow-assistant authoring | No                                                          | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
-| List published flows in a space                | Yes, published only in scoped space                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
-| `GET /api/v1/flows/{id}/published/`            | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
-| `GET /api/v1/flows/{id}/`                      | Only with an admin or owner space role                      | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
-| Run contract / runtime-safe graph              | Yes                                                         | Yes                                 | Yes                                  | Yes                         | Yes                       |
-| Runtime uploads / orphan cleanup               | Own uploads for published Flows                             | Yes                                 | No                                   | Yes                         | Yes                       |
-| Create run                                     | Yes                                                         | Yes                                 | No                                   | Yes                         | Yes                       |
-| List / get / cancel / redispatch / rerun runs  | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
-| Review checkpoints: active / edit / approve / reject / resume | Own runs only, `resource_permissions.flows = write` required | Own runs only          | No                                   | In-scope runs               | Tenant-wide runs          |
-| Step outputs / artifacts                       | Own runs only                                               | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
-| Evidence view / export                         | Own runs only, explicit `flow_evidence` capability required | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
+| Endpoint family                                               | Service key                                                  | Editor                              | Viewer                               | Space owner / admin         | Tenant admin              |
+| ------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------- | ------------------------------------ | --------------------------- | ------------------------- |
+| Draft CRUD                                                    | No                                                           | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| Publish / unpublish                                           | No                                                           | No                                  | No                                   | Yes                         | Yes                       |
+| Template management / flow-assistant authoring                | No                                                           | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| List published flows in a space                               | Yes, published only in scoped space                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/published/`                           | Yes                                                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/`                                     | Only with an admin or owner space role                       | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
+| Run contract / runtime-safe graph                             | Yes                                                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| Runtime uploads / orphan cleanup                              | Own uploads for published Flows                              | Yes                                 | No                                   | Yes                         | Yes                       |
+| Create run                                                    | Yes                                                          | Yes                                 | No                                   | Yes                         | Yes                       |
+| List / get / cancel / redispatch / rerun runs                 | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Review checkpoints: active / edit / approve / reject / resume | Own runs only, `resource_permissions.flows = write` required | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Step outputs / artifacts                                      | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Evidence view / export                                        | Own runs only, explicit `flow_evidence` capability required  | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
 
 ### Principal visibility rules
 
@@ -1453,22 +1482,22 @@ GET  /api/v1/flows/{flow_id}/runs/{run_id}/evidence/        (optional)
 
 For short capability answers and operational choices, see [Flows FAQ](/guides/flows/flows-faq). For Flow-specific codes, use [Flow error reference](/guides/flows/reference/errors) and branch on `code`, not message text.
 
-| Status | What it means on the Flow runtime surface                                                                                                                          | What to do                                                                                                                    |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `200`  | Success. Also returned by `cancel` on an already-terminal run, and by the active-checkpoint endpoint with a body of literal `null` when no checkpoint is open       | Read the response body; do not infer state from the status alone                                                              |
-| `201`  | A run or a runtime file was created                                                                                                                                | Keep the returned id                                                                                                           |
-| `202`  | Resume and step rerun were accepted for asynchronous execution                                                                                                     | Poll the run; the work has not finished                                                                                        |
-| `204`  | A runtime file or template file was deleted                                                                                                                        | No body to read                                                                                                                |
-| `400`  | The request shape, a state precondition, or the Flow contract is invalid. This is also where stale revisions and idempotency conflicts land                         | Read the Flow error `code` and follow its recovery. Reuse an idempotency key only for the request it belongs to                |
-| `401`  | No credential (`authentication_error`) or an unusable one (`invalid_api_key`)                                                                                      | Fix the credential; do not retry the same key                                                                                  |
-| `403`  | Scope, space permission, run ownership, or evidence policy refused the request, before the resource was resolved                                                   | Fix the principal or policy. A `403` does not tell you whether the resource exists                                             |
-| `409`  | Only four endpoints use it: deleting an attached runtime file (`flow_runtime_file_attached`), redispatch (`flow_run_redispatch_conflict`), deleting a template in use (`flow_template_in_use`), and the operator audit-outbox redrive | Reload the resource and retry. Stale runs and checkpoints use `400`, not `409`                                                  |
-| `410`  | The artifact's bytes were purged by retention; only its metadata remains                                                                                           | Show the file as unavailable. `availability` already said `content_purged`                                                     |
-| `413`  | An upload exceeded the step's `max_file_size_bytes`, or an evidence export exceeded its bound                                                                       | Read the effective limit from the run contract; page `provider-calls/` instead of exporting                                    |
-| `415`  | An upload's declared or sniffed `Content-Type` is not in the step's `accepted_mimetypes`                                                                            | Set the part's `Content-Type` from the run contract                                                                            |
-| `422`  | FastAPI request validation rejected the payload shape before Flow logic ran                                                                                        | Fix the request body against the schema                                                                                        |
-| `429`  | The tenant already has the maximum number of active runs                                                                                                           | Honor `Retry-After` (60 seconds), poll existing runs, then resubmit                                                            |
-| `503`  | An evidence, provider-call, or redispatch dependency was unavailable                                                                                               | Retry with backoff                                                                                                             |
+| Status | What it means on the Flow runtime surface                                                                                                                                                                                             | What to do                                                                                                      |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `200`  | Success. Also returned by `cancel` on an already-terminal run, and by the active-checkpoint endpoint with a body of literal `null` when no checkpoint is open                                                                         | Read the response body; do not infer state from the status alone                                                |
+| `201`  | A run or a runtime file was created                                                                                                                                                                                                   | Keep the returned id                                                                                            |
+| `202`  | Resume and step rerun were accepted for asynchronous execution                                                                                                                                                                        | Poll the run; the work has not finished                                                                         |
+| `204`  | A runtime file or template file was deleted                                                                                                                                                                                           | No body to read                                                                                                 |
+| `400`  | The request shape, a state precondition, or the Flow contract is invalid. This is also where stale revisions and idempotency conflicts land                                                                                           | Read the Flow error `code` and follow its recovery. Reuse an idempotency key only for the request it belongs to |
+| `401`  | No credential (`authentication_error`) or an unusable one (`invalid_api_key`)                                                                                                                                                         | Fix the credential; do not retry the same key                                                                   |
+| `403`  | Scope, space permission, run ownership, or evidence policy refused the request, before the resource was resolved                                                                                                                      | Fix the principal or policy. A `403` does not tell you whether the resource exists                              |
+| `409`  | Only four endpoints use it: deleting an attached runtime file (`flow_runtime_file_attached`), redispatch (`flow_run_redispatch_conflict`), deleting a template in use (`flow_template_in_use`), and the operator audit-outbox redrive | Reload the resource and retry. Stale runs and checkpoints use `400`, not `409`                                  |
+| `410`  | The artifact's bytes were purged by retention; only its metadata remains                                                                                                                                                              | Show the file as unavailable. `availability` already said `content_purged`                                      |
+| `413`  | An upload exceeded the step's `max_file_size_bytes`, or an evidence export exceeded its bound                                                                                                                                         | Read the effective limit from the run contract; page `provider-calls/` instead of exporting                     |
+| `415`  | An upload's declared or sniffed `Content-Type` is not in the step's `accepted_mimetypes`                                                                                                                                              | Set the part's `Content-Type` from the run contract                                                             |
+| `422`  | FastAPI request validation rejected the payload shape before Flow logic ran                                                                                                                                                           | Fix the request body against the schema                                                                         |
+| `429`  | The tenant already has the maximum number of active runs                                                                                                                                                                              | Honor `Retry-After` (60 seconds), poll existing runs, then resubmit                                             |
+| `503`  | An evidence, provider-call, or redispatch dependency was unavailable                                                                                                                                                                  | Retry with backoff                                                                                              |
 
 ## Practical takeaway
 

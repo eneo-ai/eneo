@@ -12,6 +12,7 @@ matters.
 | Upgrade legacy File/Icon storage  | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade) |
 | Choose where durable bytes live   | [Choose Content Storage](/guides/object-content-storage)         |
 | Configure login and access        | [Authentication & OIDC](/guides/authentication)                  |
+| Decide what data is retained      | [Data Retention & Deletion](/guides/data-retention)              |
 | Connect an AI provider            | [AI Provider Configuration](/guides/ai-providers)                |
 | Add documents to a knowledge base | [Document Processing](/guides/document-processing)               |
 | Connect SharePoint or OneDrive    | [SharePoint Integration](/guides/sharepoint-integration)         |
@@ -19,13 +20,24 @@ matters.
 ## All guides
 
 ### [Eneo Flows for API consumers](/guides/flows)
+
 Build applications on top of published flows:
+
 - Discover the run contract
 - Upload files and create runs safely with idempotency
 - Poll run status, steps, graph, artifacts, and evidence
 - Understand service keys, permissions, and evidence export
 
 Use the [Flow Runtime API Reference](/guides/flows-api-guide) for complete field and endpoint details.
+
+### [Data Retention & Deletion](/guides/data-retention)
+
+Understand which Eneo data classes can be deleted automatically and which only become eligible for a later administrator action:
+
+- Separate Flow run history from conversations, AI Builder sessions, and audit logs
+- Configure Organization, Space, and Flow run-history policies
+- Apply the 30/60/90-day override model without changing every Flow
+- Choose when human review must precede a future purge
 
 ### [Authentication & OIDC](/guides/authentication)
 
