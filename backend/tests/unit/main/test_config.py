@@ -8,26 +8,24 @@ def _with_worker_capacity(settings: Settings, **updates: int | None) -> Settings
     return settings.model_copy(update=updates)
 
 
-def test_crawl_capacity_reserves_twenty_percent_of_worker_slots() -> None:
+def test_crawl_capacity_defaults_to_the_dedicated_worker_capacity() -> None:
     settings = _with_worker_capacity(
         get_settings(),
         worker_max_jobs=15,
         crawl_job_concurrency_limit=None,
     )
 
-    assert settings.effective_crawl_job_concurrency_limit == 12
-    assert settings.reserved_worker_jobs == 3
+    assert settings.effective_crawl_job_concurrency_limit == 15
 
 
-def test_crawl_capacity_reserves_at_least_one_worker_slot() -> None:
+def test_single_slot_dedicated_worker_can_execute_one_crawl() -> None:
     settings = _with_worker_capacity(
         get_settings(),
-        worker_max_jobs=2,
+        worker_max_jobs=1,
         crawl_job_concurrency_limit=None,
     )
 
     assert settings.effective_crawl_job_concurrency_limit == 1
-    assert settings.reserved_worker_jobs == 1
 
 
 def test_explicit_crawl_capacity_supports_multi_worker_clusters() -> None:
@@ -38,7 +36,6 @@ def test_explicit_crawl_capacity_supports_multi_worker_clusters() -> None:
     )
 
     assert settings.effective_crawl_job_concurrency_limit == 30
-    assert settings.reserved_worker_jobs is None
 
 
 def test_crawler_env_templates_only_publish_runtime_settings() -> None:

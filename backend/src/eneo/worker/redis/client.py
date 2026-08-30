@@ -9,12 +9,15 @@ from eneo.jobs.job_manager import DEFAULT_QUEUE_NAME
 from eneo.main.config import get_settings
 from eneo.redis.connection import build_redis_pool_kwargs
 
+CRAWL_RECONCILIATION_HEALTH_KEY = "crawler:reconciliation:health"
+CRAWL_RECONCILIATION_HEALTH_TTL_SECONDS = 180
+
 
 def _get_redis_connection() -> aioredis.Redis:
     """Lazy initialization of Redis connection using current settings.
 
     Honors settings.redis_db to ensure health endpoint reads from the same
-    Redis database as the worker/feeder.
+    Redis database as the background workers.
     """
     settings = get_settings()
     redis_url = f"redis://{settings.redis_host}:{settings.redis_port}"
@@ -34,6 +37,15 @@ def get_redis() -> aioredis.Redis:
     if _redis_client is None:
         _redis_client = _get_redis_connection()
     return _redis_client
+
+
+async def mark_crawl_reconciliation_healthy() -> None:
+    """Record that the durable crawl reconciliation cycle completed."""
+    await get_redis().set(
+        CRAWL_RECONCILIATION_HEALTH_KEY,
+        "ok",
+        ex=CRAWL_RECONCILIATION_HEALTH_TTL_SECONDS,
+    )
 
 
 def reset_redis_client() -> aioredis.Redis:

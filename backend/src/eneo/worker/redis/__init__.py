@@ -1,7 +1,7 @@
 """Redis utilities for worker operations.
 
 This package provides:
-- LuaScripts: Centralized atomic Lua scripts for Redis operations
+- LuaScripts: Owner-checked lease operations
 - redis_lease: Self-renewing, owner-checked distributed lock
 - r: Legacy lazy proxy for the Redis client (attribute access only)
 - get_redis: Factory function for Redis client — prefer this in new code

@@ -92,14 +92,7 @@
                     })}
                   </Card.Title>
                   <Card.Description>
-                    {#if data.diagnostics.capacity.reserved_worker_jobs !== null}
-                      {m.crawler_admin_reserved_jobs({
-                        reserved: data.diagnostics.capacity.reserved_worker_jobs,
-                        total: data.diagnostics.capacity.worker_jobs_per_process
-                      })}
-                    {:else}
-                      {m.crawler_admin_cluster_override()}
-                    {/if}
+                    {m.crawler_admin_isolated_queue()}
                   </Card.Description>
                 </div>
               </Card.Header>

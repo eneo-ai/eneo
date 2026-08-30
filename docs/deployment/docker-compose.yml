@@ -197,8 +197,6 @@ services:
     environment:
       - RUN_AS_WORKER=true
       - WORKER_ROLE=crawler
-      # The existing feeder remains owned by the general worker during Gate 1.
-      - CRAWL_FEEDER_ENABLED=false
       - OBJECT_CONTENT_ENDPOINT_URL
       - OBJECT_CONTENT_REGION
       - OBJECT_CONTENT_BUCKET

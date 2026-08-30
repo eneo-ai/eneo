@@ -399,7 +399,6 @@ from eneo.websites.infrastructure.update_website_size_service import (
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
 from eneo.worker.task_manager import TaskManager
-from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 from eneo.workflows.step_repo import StepRepository
 
 _logger = get_logger(__name__)
@@ -413,15 +412,6 @@ def _create_redis_client() -> aioredis.Redis:
     # redis-py stubs declare Redis.from_url(**kwargs: Unknown), so pyright marks the
     # call as partially unknown even though the return type is concrete.
     return aioredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType]
-
-
-def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimiter:
-    settings = get_settings()
-    return TenantConcurrencyLimiter(
-        redis=redis_client,
-        max_concurrent=settings.tenant_worker_concurrency_limit,
-        ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
-    )
 
 
 def _build_crawl_engine() -> PythonCrawlEngine:
@@ -544,10 +534,6 @@ class Container(containers.DeclarativeContainer):
     )
 
     redis_client = providers.Singleton(_create_redis_client)
-    tenant_concurrency_limiter = providers.Factory(
-        _build_tenant_limiter, redis_client=redis_client
-    )
-
     # Factories
     prompt_factory = providers.Factory(PromptFactory)
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)

@@ -7987,41 +7987,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
-    /**
-     * ARQHealth
-     * @description Parsed ARQ health metrics (clean view).
-     */
-    ARQHealth: {
-      /** Heartbeat Ttl Seconds */
-      heartbeat_ttl_seconds?: number | null;
-      /** Age Seconds */
-      age_seconds?: number | null;
-      /**
-       * J Complete
-       * @default 0
-       */
-      j_complete?: number;
-      /**
-       * J Failed
-       * @default 0
-       */
-      j_failed?: number;
-      /**
-       * J Retried
-       * @default 0
-       */
-      j_retried?: number;
-      /**
-       * J Ongoing
-       * @default 0
-       */
-      j_ongoing?: number;
-      /**
-       * Queued
-       * @default 0
-       */
-      queued?: number;
-    };
     /** AcceptedFileType */
     AcceptedFileType: {
       /** Mimetype */
@@ -10975,6 +10940,33 @@ export interface components {
       | "processing_failed"
       | "cancelled";
     /**
+     * CrawlLifecycleHealth
+     * @description Authoritative active crawl state from PostgreSQL.
+     */
+    CrawlLifecycleHealth: {
+      /**
+       * Database Ok
+       * @default true
+       */
+      database_ok?: boolean;
+      /** Pending Dispatch */
+      pending_dispatch?: number | null;
+      /** Queued */
+      queued?: number | null;
+      /** Running */
+      running?: number | null;
+      /** Finalizing */
+      finalizing?: number | null;
+      /** Stopping */
+      stopping?: number | null;
+      /** Active Total */
+      active_total?: number | null;
+      /** Expired Leases */
+      expired_leases?: number | null;
+      /** Oldest Active Age Seconds */
+      oldest_active_age_seconds?: number | null;
+    };
+    /**
      * CrawlOrigin
      * @enum {string}
      */
@@ -11034,40 +11026,22 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
-    /**
-     * CrawlerActivity
-     * @description Real-time crawler activity from multiple sources.
-     */
-    CrawlerActivity: {
-      /** Db In Progress */
-      db_in_progress?: number | null;
-      /**
-       * Db Query Ok
-       * @default true
-       */
-      db_query_ok?: boolean;
-      /**
-       * Arq Ongoing
-       * @default 0
-       */
-      arq_ongoing?: number;
-      /** Delta */
-      delta?: number | null;
-    };
     /** CrawlerCapacity */
     CrawlerCapacity: {
       /** Max Http Requests Per Process */
       max_http_requests_per_process: number;
       /** Requests Per Crawl */
       requests_per_crawl: number;
-      /** Crawl Jobs Per Tenant */
-      crawl_jobs_per_tenant: number;
-      /** Worker Jobs Per Process */
-      worker_jobs_per_process: number;
       /** Max Concurrent Crawl Jobs */
       max_concurrent_crawl_jobs: number;
-      /** Reserved Worker Jobs */
-      reserved_worker_jobs: number | null;
+    };
+    /**
+     * CrawlerCapacityHealth
+     * @description Configured cluster-wide crawl admission capacity.
+     */
+    CrawlerCapacityHealth: {
+      /** Max Concurrent Crawl Jobs */
+      max_concurrent_crawl_jobs: number;
     };
     /** CrawlerDiagnosticsModel */
     CrawlerDiagnosticsModel: {
@@ -11096,12 +11070,27 @@ export interface components {
       websites: components["schemas"]["CrawlerWebsiteModel"][];
     };
     /**
+     * CrawlerHealthDebugInfo
+     * @description Queue names and Redis database used by the health snapshot.
+     */
+    CrawlerHealthDebugInfo: {
+      /** Redis Db */
+      redis_db?: number | null;
+      /** Dispatcher Queue Name */
+      dispatcher_queue_name: string;
+      /** Executor Queue Name */
+      executor_queue_name: string;
+    };
+    /**
      * CrawlerHealthResponse
      * @description Crawler health status with operator-friendly signals.
      */
     CrawlerHealthResponse: {
-      /** Status */
-      status: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNKNOWN";
       /** Status Flags */
       status_flags?: string[];
       /**
@@ -11111,13 +11100,10 @@ export interface components {
       status_reason?: string;
       /** Response Timestamp Utc */
       response_timestamp_utc: string;
-      crawler_activity?: components["schemas"]["CrawlerActivity"];
-      arq?: components["schemas"]["ARQHealth"];
-      watchdog?: components["schemas"]["WatchdogMetrics"];
-      feeder?: components["schemas"]["FeederLeader"];
-      pending?: components["schemas"]["PendingQueueSummary"];
-      thresholds: components["schemas"]["HealthThresholds"];
-      debug?: components["schemas"]["DebugInfo"];
+      lifecycle?: components["schemas"]["CrawlLifecycleHealth"];
+      transport?: components["schemas"]["CrawlerTransportHealth"];
+      capacity: components["schemas"]["CrawlerCapacityHealth"];
+      debug: components["schemas"]["CrawlerHealthDebugInfo"];
     };
     /** CrawlerLimitsModel */
     CrawlerLimitsModel: {
@@ -11188,13 +11174,8 @@ export interface components {
      *                 "closespider_itemcount": 20000,
      *                 "obey_robots": true,
      *                 "autothrottle_enabled": true,
-     *                 "tenant_worker_concurrency_limit": 4,
-     *                 "crawl_stale_threshold_minutes": 30,
      *                 "crawl_heartbeat_interval_seconds": 300,
-     *                 "crawl_feeder_enabled": false,
-     *                 "crawl_feeder_interval_seconds": 10,
-     *                 "crawl_feeder_batch_size": 10,
-     *                 "crawl_job_max_age_seconds": 1800
+     *                 "crawl_page_batch_size": 100
      *             },
      *             "overrides": ["download_timeout", "dns_timeout"],
      *             "updated_at": "2025-10-22T10:00:00+00:00"
@@ -11213,19 +11194,14 @@ export interface components {
        * @example {
        *       "autothrottle_enabled": true,
        *       "closespider_itemcount": 20000,
-       *       "crawl_feeder_batch_size": 10,
-       *       "crawl_feeder_enabled": false,
-       *       "crawl_feeder_interval_seconds": 10,
        *       "crawl_heartbeat_interval_seconds": 300,
-       *       "crawl_job_max_age_seconds": 1800,
        *       "crawl_max_length": 14400,
-       *       "crawl_stale_threshold_minutes": 30,
+       *       "crawl_page_batch_size": 100,
        *       "dns_timeout": 30,
        *       "download_max_size": 10485760,
        *       "download_timeout": 90,
        *       "obey_robots": true,
-       *       "retry_times": 2,
-       *       "tenant_worker_concurrency_limit": 4
+       *       "retry_times": 2
        *     }
        */
       settings: {
@@ -11265,13 +11241,8 @@ export interface components {
      *             "closespider_itemcount": 20000,
      *             "obey_robots": true,
      *             "autothrottle_enabled": true,
-     *             "tenant_worker_concurrency_limit": 4,
-     *             "crawl_stale_threshold_minutes": 30,
      *             "crawl_heartbeat_interval_seconds": 300,
-     *             "crawl_feeder_enabled": false,
-     *             "crawl_feeder_interval_seconds": 10,
-     *             "crawl_feeder_batch_size": 10,
-     *             "crawl_job_max_age_seconds": 1800
+     *             "crawl_page_batch_size": 100
      *         }
      *
      *     Example - Partial update (adjust timeouts only):
@@ -11330,47 +11301,29 @@ export interface components {
        */
       autothrottle_enabled?: boolean | null;
       /**
-       * Tenant Worker Concurrency Limit
-       * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
-       * @example 4
-       */
-      tenant_worker_concurrency_limit?: number | null;
-      /**
-       * Crawl Stale Threshold Minutes
-       * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
-       * @example 30
-       */
-      crawl_stale_threshold_minutes?: number | null;
-      /**
        * Crawl Heartbeat Interval Seconds
        * @description Heartbeat interval to signal job is alive (30s to 1 hour)
        * @example 300
        */
       crawl_heartbeat_interval_seconds?: number | null;
       /**
-       * Crawl Feeder Enabled
-       * @description Enable crawl feeder service for rate-limited job enqueueing
-       * @example false
+       * Crawl Page Batch Size
+       * @description Commit after every N pages during crawl (10 to 1000)
+       * @example 100
        */
-      crawl_feeder_enabled?: boolean | null;
-      /**
-       * Crawl Feeder Interval Seconds
-       * @description Feeder check interval in seconds (5s to 5 min)
-       * @example 10
-       */
-      crawl_feeder_interval_seconds?: number | null;
-      /**
-       * Crawl Feeder Batch Size
-       * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
-       * @example 10
-       */
-      crawl_feeder_batch_size?: number | null;
-      /**
-       * Crawl Job Max Age Seconds
-       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
-       * @example 1800
-       */
-      crawl_job_max_age_seconds?: number | null;
+      crawl_page_batch_size?: number | null;
+    };
+    /**
+     * CrawlerTransportHealth
+     * @description Dedicated queue depth and liveness of both crawler worker roles.
+     */
+    CrawlerTransportHealth: {
+      /** Reconciliation Heartbeat Ttl Seconds */
+      reconciliation_heartbeat_ttl_seconds?: number | null;
+      /** Executor Heartbeat Ttl Seconds */
+      executor_heartbeat_ttl_seconds?: number | null;
+      /** Queued */
+      queued?: number | null;
     };
     /** CrawlerWebsiteModel */
     CrawlerWebsiteModel: {
@@ -11662,28 +11615,6 @@ export interface components {
     /** Dashboard */
     Dashboard: {
       spaces: components["schemas"]["PaginatedResponse_SpaceDashboard_"];
-    };
-    /**
-     * DebugInfo
-     * @description Raw data for debugging - noisy, not for quick reads.
-     */
-    DebugInfo: {
-      /**
-       * Arq Raw
-       * @default
-       */
-      arq_raw?: string;
-      /** Arq Timestamp */
-      arq_timestamp?: string | null;
-      /** Watchdog Timestamp */
-      watchdog_timestamp?: string | null;
-      /** Redis Db */
-      redis_db?: number | null;
-      /**
-       * Queue Name
-       * @default arq:queue
-       */
-      queue_name?: string;
     };
     /** DefaultAssistant */
     DefaultAssistant: {
@@ -12610,21 +12541,6 @@ export interface components {
       /** Tenant Count */
       tenant_count: number;
     };
-    /**
-     * FeederLeader
-     * @description Feeder leader election status.
-     */
-    FeederLeader: {
-      /** Leader Id */
-      leader_id?: string | null;
-      /** Leader Ttl Seconds */
-      leader_ttl_seconds?: number | null;
-      /**
-       * Status
-       * @default UNKNOWN
-       */
-      status?: string;
-    };
     /** FileDeletionPreview */
     FileDeletionPreview: {
       /**
@@ -12989,18 +12905,6 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
-    };
-    /**
-     * HealthThresholds
-     * @description Thresholds used for status decisions - helps explain status.
-     */
-    HealthThresholds: {
-      /** Feeder Interval Seconds */
-      feeder_interval_seconds: number;
-      /** Watchdog Stale Threshold Seconds */
-      watchdog_stale_threshold_seconds: number;
-      /** Heartbeat Ttl Expected Seconds */
-      heartbeat_ttl_expected_seconds: number;
     };
     /**
      * HelperKind
@@ -15901,26 +15805,6 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
-    };
-    /**
-     * PendingQueueSummary
-     * @description Pending crawl queue summary.
-     */
-    PendingQueueSummary: {
-      /**
-       * Total
-       * @default 0
-       */
-      total?: number;
-      /**
-       * Tenant Count
-       * @default 0
-       */
-      tenant_count?: number;
-      /** Top Tenants */
-      top_tenants?: {
-        [key: string]: number;
-      };
     };
     /**
      * Permission
@@ -20412,44 +20296,6 @@ export interface components {
        * @default false
        */
       user_confirmed?: boolean;
-    };
-    /**
-     * WatchdogMetrics
-     * @description Watchdog activity metrics.
-     */
-    WatchdogMetrics: {
-      /** Age Seconds */
-      age_seconds?: number | null;
-      /**
-       * Zombies Reconciled
-       * @default 0
-       */
-      zombies_reconciled?: number;
-      /**
-       * Expired Killed
-       * @default 0
-       */
-      expired_killed?: number;
-      /**
-       * Rescued
-       * @default 0
-       */
-      rescued?: number;
-      /**
-       * Early Zombies Failed
-       * @default 0
-       */
-      early_zombies_failed?: number;
-      /**
-       * Long Running Failed
-       * @default 0
-       */
-      long_running_failed?: number;
-      /**
-       * Slots Released
-       * @default 0
-       */
-      slots_released?: number;
     };
     /** WebSearchResultPublic */
     WebSearchResultPublic: {
@@ -47819,9 +47665,7 @@ export interface operations {
   };
   crawler_health_api_healthz_crawler_get: {
     parameters: {
-      query?: {
-        include_all?: boolean;
-      };
+      query?: never;
       header?: never;
       path?: never;
       cookie?: never;
@@ -47835,15 +47679,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerHealthResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

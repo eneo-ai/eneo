@@ -464,7 +464,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         heartbeat_interval_seconds = get_crawler_setting(
             "crawl_heartbeat_interval_seconds",
             tenant.crawler_settings,
-            default=settings.crawl_heartbeat_interval_seconds,
         )
         lease_duration = timedelta(
             seconds=max(
@@ -636,7 +635,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     batch_size=get_crawler_setting(
                         "crawl_page_batch_size",
                         tenant.crawler_settings if tenant else None,
-                        default=settings.crawl_page_batch_size,
                     ),
                 )
 

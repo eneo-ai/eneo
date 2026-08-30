@@ -689,7 +689,7 @@ class TenantRepository:
         self,
         tenant_id: UUID,
     ) -> TenantInDB | None:
-        """Clear all crawler settings for a tenant, reverting to defaults.
+        """Clear active settings while retaining rollback-only JSONB keys.
 
         Args:
             tenant_id: The UUID of the tenant
@@ -697,11 +697,17 @@ class TenantRepository:
         Returns:
             Updated TenantInDB instance
         """
+        from eneo.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
+
+        settings_without_active_keys = func.coalesce(
+            Tenants.crawler_settings, sa_cast({}, JSONB)
+        ).op("-")(sa_cast(list(CRAWLER_SETTING_SPECS), postgresql.ARRAY(sa.Text)))
+
         stmt = (
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
             .values(
-                crawler_settings={},
+                crawler_settings=settings_without_active_keys,
                 updated_at=datetime.now(timezone.utc),
             )
             .returning(Tenants)

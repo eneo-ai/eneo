@@ -421,6 +421,62 @@ async def test_expired_lease_becomes_a_terminal_interruption(
         assert recovered.status == Status.FAILED
 
 
+async def test_health_snapshot_reports_authoritative_phase_and_expired_lease(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+
+        pending = await repo.health_snapshot()
+        assert pending.pending_dispatch == 1
+        assert pending.active_total == 1
+        assert pending.expired_leases == 0
+        assert pending.oldest_active_age_seconds is not None
+        assert pending.oldest_active_age_seconds >= 0
+
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(
+                website=website,
+                run_id=run.id,
+                attempt_id=attempt_id,
+                job=job,
+            ),
+        )
+        assert await repo.mark_dispatched(attempt_id) is True
+        queued = await repo.health_snapshot()
+        assert queued.pending_dispatch == 0
+        assert queued.queued == 1
+        assert queued.active_total == 1
+
+        claimed = await repo.claim_attempt(
+            attempt_id,
+            dispatch_id=job.id,
+            lease_owner="health-worker",
+            lease_duration=timedelta(minutes=5),
+        )
+        assert claimed is not None
+        await session.execute(
+            sa.update(CrawlAttempts)
+            .where(CrawlAttempts.id == attempt_id)
+            .values(lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        )
+
+        running = await repo.health_snapshot()
+        assert running.queued == 0
+        assert running.running == 1
+        assert running.active_total == 1
+        assert running.expired_leases == 1
+
+
 async def test_lease_lock_prevents_sweeper_overlap_and_stale_overwrite(
     db_session,
     admin_user,

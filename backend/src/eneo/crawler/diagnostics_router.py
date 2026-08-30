@@ -82,10 +82,7 @@ async def get_crawler_diagnostics(container: ContainerDep) -> CrawlerDiagnostics
         capacity=CrawlerCapacity(
             max_http_requests_per_process=settings.crawl_global_http_concurrency,
             requests_per_crawl=settings.crawl_fetch_concurrency,
-            crawl_jobs_per_tenant=settings.tenant_worker_concurrency_limit,
-            worker_jobs_per_process=settings.worker_max_jobs,
             max_concurrent_crawl_jobs=(settings.effective_crawl_job_concurrency_limit),
-            reserved_worker_jobs=settings.reserved_worker_jobs,
         ),
         limits=_effective_limits(container),
         # Whole-sitemap skipping is intentionally disabled until discovery edges

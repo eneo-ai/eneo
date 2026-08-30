@@ -118,7 +118,7 @@ class TestSettingsPropagation:
             # Verify defaults present for non-overridden settings
             assert all_settings["retry_times"] == 2  # Hardcoded default
             assert "crawl_max_length" in all_settings
-            assert "tenant_worker_concurrency_limit" in all_settings
+            assert "crawl_page_batch_size" in all_settings
 
             # Should have ALL settings from CRAWLER_SETTING_SPECS
             assert len(all_settings) == len(CRAWLER_SETTING_SPECS)
@@ -306,41 +306,13 @@ class TestBooleanAndRangeSettings:
             assert obey_robots is False
             assert autothrottle is False
 
-    async def test_concurrency_limit_setting_propagates(
+    async def test_page_batch_size_setting_propagates(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """tenant_worker_concurrency_limit setting affects worker behavior.
-
-        This setting controls how many concurrent jobs a tenant can run.
-        """
-        # Set custom concurrency limit
+        """Persistence batch size reaches the crawl worker settings."""
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"tenant_worker_concurrency_limit": 3},
-            headers={"X-API-Key": super_admin_token},
-        )
-
-        async with db_container() as container:
-            tenant_repo = container.tenant_repo()
-            tenant = await tenant_repo.get(test_tenant.id)
-
-            limit = get_crawler_setting(
-                "tenant_worker_concurrency_limit",
-                tenant.crawler_settings,
-            )
-            assert limit == 3, "Custom concurrency limit should propagate"
-
-    async def test_feeder_batch_size_setting_propagates(
-        self, client: AsyncClient, test_tenant, super_admin_token, db_container
-    ):
-        """crawl_feeder_batch_size setting controls feeder enqueueing.
-
-        This setting controls how many jobs the feeder enqueues per cycle.
-        """
-        # Set custom batch size
-        await client.put(
-            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"crawl_feeder_batch_size": 5},
+            json={"crawl_page_batch_size": 250},
             headers={"X-API-Key": super_admin_token},
         )
 
@@ -349,10 +321,30 @@ class TestBooleanAndRangeSettings:
             tenant = await tenant_repo.get(test_tenant.id)
 
             batch_size = get_crawler_setting(
-                "crawl_feeder_batch_size",
+                "crawl_page_batch_size",
                 tenant.crawler_settings,
             )
-            assert batch_size == 5, "Custom batch size should propagate"
+            assert batch_size == 250
+
+    async def test_max_pages_setting_propagates(
+        self, client: AsyncClient, test_tenant, super_admin_token, db_container
+    ):
+        """Maximum page count reaches the crawl worker settings."""
+        await client.put(
+            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+            json={"closespider_itemcount": 5000},
+            headers={"X-API-Key": super_admin_token},
+        )
+
+        async with db_container() as container:
+            tenant_repo = container.tenant_repo()
+            tenant = await tenant_repo.get(test_tenant.id)
+
+            max_pages = get_crawler_setting(
+                "closespider_itemcount",
+                tenant.crawler_settings,
+            )
+            assert max_pages == 5000
 
 
 @pytest.mark.asyncio
@@ -381,14 +373,13 @@ class TestHeartbeatAndTimeoutSettings:
             )
             assert interval == 600, "Custom heartbeat interval should propagate"
 
-    async def test_stale_threshold_setting_propagates(
+    async def test_request_timeout_setting_propagates(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """crawl_stale_threshold_minutes setting for stale job detection."""
-        # Set custom stale threshold
+        """Request timeout reaches the crawl worker settings."""
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"crawl_stale_threshold_minutes": 15},
+            json={"download_timeout": 120},
             headers={"X-API-Key": super_admin_token},
         )
 
@@ -396,20 +387,19 @@ class TestHeartbeatAndTimeoutSettings:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            threshold = get_crawler_setting(
-                "crawl_stale_threshold_minutes",
+            timeout = get_crawler_setting(
+                "download_timeout",
                 tenant.crawler_settings,
             )
-            assert threshold == 15, "Custom stale threshold should propagate"
+            assert timeout == 120
 
-    async def test_job_max_age_setting_propagates(
+    async def test_max_crawl_duration_setting_propagates(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """crawl_job_max_age_seconds setting for retry age limits."""
-        # Set custom max age
+        """Maximum crawl duration reaches the crawl worker settings."""
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
-            json={"crawl_job_max_age_seconds": 1800},  # 30 minutes
+            json={"crawl_max_length": 7200},
             headers={"X-API-Key": super_admin_token},
         )
 
@@ -417,8 +407,8 @@ class TestHeartbeatAndTimeoutSettings:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            max_age = get_crawler_setting(
-                "crawl_job_max_age_seconds",
+            max_duration = get_crawler_setting(
+                "crawl_max_length",
                 tenant.crawler_settings,
             )
-            assert max_age == 1800, "Custom max age should propagate"
+            assert max_duration == 7200

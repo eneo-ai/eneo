@@ -36,6 +36,7 @@ from eneo.worker.object_content_tasks import (
     ObjectContentReconciliationSummary,
     reconcile_object_content_task,
 )
+from eneo.worker.redis.client import mark_crawl_reconciliation_healthy
 from eneo.worker.upload_tasks import transcription_task, upload_info_blob_task
 from eneo.worker.usage_stats_tasks import (
     recalculate_all_tenants_usage_stats,
@@ -46,7 +47,7 @@ from eneo.worker.worker import Worker
 
 worker = Worker()
 crawler_worker = Worker()
-crawler_worker.max_jobs = get_settings().effective_crawl_job_concurrency_limit
+crawler_worker.max_jobs = get_settings().worker_max_jobs
 logger = get_logger(__name__)
 
 
@@ -144,7 +145,14 @@ async def reconcile_crawl_dispatch_and_leases(
     container: Container,
 ) -> CrawlReconciliationResult:
     del container
-    return await reconcile_crawl_work()
+    return await _reconcile_crawl_dispatch_and_record_health()
+
+
+async def _reconcile_crawl_dispatch_and_record_health() -> CrawlReconciliationResult:
+    result = await reconcile_crawl_work()
+    if result.delivery_errors == 0:
+        await mark_crawl_reconciliation_healthy()
+    return result
 
 
 @crawler_worker.long_running_function(with_user=False)

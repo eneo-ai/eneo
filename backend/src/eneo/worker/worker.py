@@ -80,9 +80,6 @@ def _log_startup_diagnostics(settings: Settings) -> None:
     """
     # Common env var typos and naming mismatches to detect
     typo_checks = [
-        ("CRAWL_STALE_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
-        ("CRAWL_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
-        ("TENANT_WORKER_CONCURENCY_LIMIT", "TENANT_WORKER_CONCURRENCY_LIMIT"),
         ("CRAWL_HEARBEAT_INTERVAL_SECONDS", "CRAWL_HEARTBEAT_INTERVAL_SECONDS"),
         ("WORKER_MAX_CONCURRENT_JOBS", "WORKER_MAX_JOBS"),  # naming mismatch
     ]
@@ -103,10 +100,6 @@ def _log_startup_diagnostics(settings: Settings) -> None:
     logger.info(
         "Worker startup diagnostics - effective settings",
         extra={
-            # Feeder settings
-            "crawl_feeder_enabled": settings.crawl_feeder_enabled,
-            "crawl_feeder_interval_seconds": settings.crawl_feeder_interval_seconds,
-            "crawl_feeder_batch_size": settings.crawl_feeder_batch_size,
             # Redis settings (connection resilience)
             "redis_host": settings.redis_host,
             "redis_port": settings.redis_port,
@@ -122,17 +115,10 @@ def _log_startup_diagnostics(settings: Settings) -> None:
             "crawl_job_concurrency_limit": (
                 settings.effective_crawl_job_concurrency_limit
             ),
-            "reserved_worker_jobs": settings.reserved_worker_jobs,
-            "tenant_worker_concurrency_limit": settings.tenant_worker_concurrency_limit,
-            "tenant_worker_semaphore_ttl_seconds": settings.tenant_worker_semaphore_ttl_seconds,
             # Crawl settings
             "crawl_max_length": settings.crawl_max_length,
-            "crawl_stale_threshold_minutes": settings.crawl_stale_threshold_minutes,
             "crawl_heartbeat_interval_seconds": settings.crawl_heartbeat_interval_seconds,
             "crawl_heartbeat_max_failures": settings.crawl_heartbeat_max_failures,
-            "crawl_job_max_age_seconds": settings.crawl_job_max_age_seconds,
-            # Cleanup settings
-            "orphan_crawl_run_timeout_hours": settings.orphan_crawl_run_timeout_hours,
         },
     )
 

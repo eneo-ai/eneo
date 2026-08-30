@@ -56,6 +56,27 @@ class CrawlDispatchCandidate:
     origin: str
 
 
+@dataclass(frozen=True, slots=True)
+class CrawlLifecycleSnapshot:
+    pending_dispatch: int
+    queued: int
+    running: int
+    finalizing: int
+    stopping: int
+    expired_leases: int
+    oldest_active_age_seconds: int | None
+
+    @property
+    def active_total(self) -> int:
+        return (
+            self.pending_dispatch
+            + self.queued
+            + self.running
+            + self.finalizing
+            + self.stopping
+        )
+
+
 class CrawlRunRepository:
     """Canonical persistence owner for crawl admission and execution state."""
 
@@ -74,6 +95,51 @@ class CrawlRunRepository:
             sa.select(CrawlRunsTable).where(CrawlRunsTable.id == id)
         )
         return CrawlRun.to_domain(record=record) if record is not None else None
+
+    async def health_snapshot(self) -> CrawlLifecycleSnapshot:
+        """Return aggregate state using the same current-attempt invariants as repair."""
+        phase_rows = (
+            await self.session.execute(
+                sa.select(
+                    CrawlRunsTable.phase,
+                    sa.func.count(),
+                    sa.func.extract(
+                        "epoch",
+                        sa.func.now() - sa.func.min(CrawlRunsTable.created_at),
+                    ),
+                )
+                .where(CrawlRunsTable.phase != CrawlPhase.TERMINAL.value)
+                .group_by(CrawlRunsTable.phase)
+            )
+        ).all()
+        counts: dict[str, int] = {}
+        oldest_active_age_seconds: int | None = None
+        for phase, count, oldest_age_seconds in phase_rows:
+            counts[str(phase)] = int(count)
+            if oldest_age_seconds is not None:
+                phase_age_seconds = max(0, int(oldest_age_seconds))
+                oldest_active_age_seconds = max(
+                    oldest_active_age_seconds or 0,
+                    phase_age_seconds,
+                )
+        expired = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(CrawlAttempts)
+            .join(CrawlRunsTable, CrawlRunsTable.id == CrawlAttempts.crawl_run_id)
+            .where(CrawlAttempts.finished_at.is_(None))
+            .where(CrawlAttempts.lease_expires_at < sa.func.now())
+            .where(CrawlRunsTable.phase != CrawlPhase.TERMINAL.value)
+            .where(CrawlRunsTable.attempt_count == CrawlAttempts.attempt_number)
+        )
+        return CrawlLifecycleSnapshot(
+            pending_dispatch=counts.get(CrawlPhase.PENDING_DISPATCH.value, 0),
+            queued=counts.get(CrawlPhase.QUEUED.value, 0),
+            running=counts.get(CrawlPhase.RUNNING.value, 0),
+            finalizing=counts.get(CrawlPhase.FINALIZING.value, 0),
+            stopping=counts.get(CrawlPhase.STOPPING.value, 0),
+            expired_leases=int(expired or 0),
+            oldest_active_age_seconds=oldest_active_age_seconds,
+        )
 
     @staticmethod
     def _values(crawl_run: CrawlRun) -> dict[str, object]:
