@@ -187,6 +187,35 @@ def _classify_crawl_outcome(
     return CrawlOutcome.SUCCEEDED
 
 
+def _crawl_has_usable_result(outcome: CrawlOutcome) -> bool:
+    return outcome in {
+        CrawlOutcome.SUCCEEDED,
+        CrawlOutcome.UNCHANGED,
+        CrawlOutcome.EMPTY,
+        CrawlOutcome.PARTIAL,
+    }
+
+
+def _crawl_resets_failure_backoff(
+    outcome: CrawlOutcome,
+    termination_reason: str,
+    *,
+    useful_items: int,
+    failed_items: int,
+) -> bool:
+    if outcome in {
+        CrawlOutcome.SUCCEEDED,
+        CrawlOutcome.UNCHANGED,
+        CrawlOutcome.EMPTY,
+    }:
+        return True
+    return (
+        outcome == CrawlOutcome.PARTIAL
+        and termination_reason in {"page_limit", "timeout"}
+        and failed_items <= useful_items
+    )
+
+
 def _failure_code_for_crawl(
     failure_counts: dict[str, int],
     termination_reason: str,
@@ -1016,12 +1045,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 failed_files=num_failed_files,
                 partial=crawl_is_partial,
             )
-            crawl_has_usable_result = crawl_outcome in {
-                CrawlOutcome.SUCCEEDED,
-                CrawlOutcome.UNCHANGED,
-                CrawlOutcome.EMPTY,
-                CrawlOutcome.PARTIAL,
-            }
+            crawl_has_usable_result = _crawl_has_usable_result(crawl_outcome)
             crawl_completed_authoritatively = crawl_outcome in {
                 CrawlOutcome.SUCCEEDED,
                 CrawlOutcome.UNCHANGED,
@@ -1280,10 +1304,21 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 # NOTE: Use crawl_context primitives, NOT detached ORM website object
-                if crawl_completed_authoritatively:
-                    # Success: Reset circuit breaker
+                if _crawl_resets_failure_backoff(
+                    crawl_outcome,
+                    crawl_termination_reason,
+                    useful_items=(
+                        num_published_pages
+                        + num_not_modified_pages
+                        + published_files
+                        + num_skipped_files
+                    ),
+                    failed_items=num_failed_pages + num_failed_files,
+                ):
+                    # Local page/time caps are healthy completion. A partial result
+                    # dominated by remote failures must still enter backoff.
                     logger.info(
-                        f"Crawl successful, resetting circuit breaker for website {params.website_id}"
+                        f"Crawl completed within local policy, resetting circuit breaker for website {params.website_id}"
                     )
                     reset_stmt = (
                         sa.update(WebsitesTable)

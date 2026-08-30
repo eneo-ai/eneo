@@ -2,7 +2,8 @@
 
 import re
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from pathlib import PurePosixPath
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 from html2text import HTML2Text
@@ -21,7 +22,70 @@ _NOISE_ELEMENTS = (
     "aside",
 )
 _DOCUMENT_SUFFIXES = frozenset(
-    {".csv", ".docx", ".json", ".md", ".pdf", ".pptx", ".txt", ".xls", ".xlsx", ".xml"}
+    {
+        ".csv",
+        ".docx",
+        ".json",
+        ".md",
+        ".pdf",
+        ".pptx",
+        ".txt",
+        ".xls",
+        ".xlsx",
+        ".xml",
+    }
+)
+_NON_PAGE_SUFFIXES = frozenset(
+    {
+        ".7z",
+        ".avif",
+        ".avi",
+        ".bmp",
+        ".csv",
+        ".css",
+        ".docx",
+        ".eot",
+        ".epub",
+        ".flac",
+        ".gif",
+        ".gz",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".js",
+        ".m4a",
+        ".m4v",
+        ".map",
+        ".md",
+        ".mov",
+        ".mp3",
+        ".mp4",
+        ".mpeg",
+        ".mpg",
+        ".ogg",
+        ".ogv",
+        ".otf",
+        ".pdf",
+        ".png",
+        ".pptx",
+        ".rar",
+        ".svg",
+        ".tar",
+        ".tif",
+        ".tiff",
+        ".ttf",
+        ".txt",
+        ".wav",
+        ".webm",
+        ".webmanifest",
+        ".webp",
+        ".woff",
+        ".woff2",
+        ".xls",
+        ".xlsx",
+        ".xml",
+        ".zip",
+    }
 )
 _EXCESS_BLANK_LINES = re.compile(r"\n{3,}")
 
@@ -96,9 +160,18 @@ def _content_root(soup: BeautifulSoup) -> Tag:
     return soup
 
 
+def _url_suffix(url: str) -> str:
+    path = unquote(urlsplit(url).path)
+    return PurePosixPath(path).suffix.casefold()
+
+
+def is_page_link(url: str) -> bool:
+    """Return whether a URL suffix can represent fetchable page content."""
+    return _url_suffix(url) not in _NON_PAGE_SUFFIXES
+
+
 def _is_document_link(url: str) -> bool:
-    path = urlsplit(url).path.lower()
-    return any(path.endswith(suffix) for suffix in _DOCUMENT_SUFFIXES)
+    return _url_suffix(url) in _DOCUMENT_SUFFIXES
 
 
 def extract_html(html: str, url: str) -> ExtractedPage:
@@ -124,7 +197,7 @@ def extract_html(html: str, url: str) -> ExtractedPage:
         seen.add(absolute)
         if _is_document_link(absolute):
             file_links.append(absolute)
-        else:
+        elif is_page_link(absolute):
             links.append(absolute)
 
     root = _content_root(soup)

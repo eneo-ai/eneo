@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 import pytest
 from aiohttp import web
@@ -13,6 +15,7 @@ from eneo.crawler.engine import (
     CrawlLimits,
     CrawlRequest,
     FileDownloaded,
+    FileFailed,
     PageCrawled,
     PageFailed,
     PageUnchanged,
@@ -32,6 +35,7 @@ def _request(
     crawl_type: CrawlType = CrawlType.CRAWL,
     obey_robots: bool = False,
     max_response_bytes: int = 100_000,
+    max_file_bytes: int = 10 * 1024 * 1024,
     max_pages: int = 10,
     max_seconds: float = 10,
     download_files: bool = True,
@@ -48,6 +52,7 @@ def _request(
             max_seconds=max_seconds,
             request_timeout_seconds=2,
             max_response_bytes=max_response_bytes,
+            max_file_bytes=max_file_bytes,
             concurrency=concurrency,
             retries=1,
         ),
@@ -194,6 +199,56 @@ async def test_sitemap_crawl_follows_nested_indexes_but_not_page_links() -> None
     )
 
 
+async def test_sitemap_page_limit_ignores_known_non_page_urls() -> None:
+    requested: list[str] = []
+
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<url><loc>{origin}/encoded%2Ejpg</loc></url>"
+                f"<url><loc>{origin}/app.webmanifest</loc></url>"
+                f"<url><loc>{origin}/guide.pdf</loc></url>"
+                f"<url><loc>{origin}/asset.jpg</loc></url>"
+                f"<url><loc>{origin}/page</loc></url>"
+                "</urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def asset(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        return web.Response(body=b"image", content_type="image/jpeg")
+
+    async def page(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        return web.Response(text="<main>ok</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/asset.jpg", asset)
+    app.router.add_get("/page", page)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/sitemap.xml",
+                    crawl_type=CrawlType.SITEMAP,
+                    max_pages=1,
+                )
+            )
+        ]
+
+    assert requested == ["/page"]
+    assert [event.url for event in events if isinstance(event, PageCrawled)] == [
+        f"{base_url}/page"
+    ]
+    assert not any(isinstance(event, PageFailed) for event in events)
+
+
 async def test_conditional_frontier_keeps_known_children_when_seed_is_304() -> None:
     requested: list[str] = []
 
@@ -278,6 +333,91 @@ async def test_crawl_rejects_oversized_response() -> None:
     assert events[0] == PageFailed(url=f"{base_url}/start", reason="response_too_large")
 
 
+async def test_crawl_with_no_file_links_skips_temporary_directory(
+    monkeypatch,
+) -> None:
+    def unexpected_temporary_directory(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("crawl allocated a file directory")
+
+    monkeypatch.setattr(
+        "eneo.crawler.python_engine.TemporaryDirectory",
+        unexpected_temporary_directory,
+    )
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(text="<main>ok</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", download_files=True)
+            )
+        ]
+
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=1,
+        pages_failed=0,
+    )
+
+
+def test_download_filenames_preserve_unicode_and_fit_filesystem_limits() -> None:
+    arabic = PythonCrawlEngine._filename_for_url(
+        f"https://example.se/files/{quote('دليل البلدية.pdf')}", set()
+    )
+    long_arabic = PythonCrawlEngine._filename_for_url(
+        f"https://example.se/files/{quote('م' * 300 + '.pdf')}", set()
+    )
+    extreme_suffix = PythonCrawlEngine._filename_for_url(
+        f"https://example.se/files/{quote('report.' + 'x' * 300)}", set()
+    )
+    nfd_source = "Cafe\u0301.pdf"
+    nfd = PythonCrawlEngine._filename_for_url(
+        f"https://example.se/files/{quote(nfd_source)}", set()
+    )
+
+    colliding_url = "https://example.se/other/report.pdf?version=2"
+    collision_digest = hashlib.sha256(colliding_url.encode()).hexdigest()[:8]
+    taken_names = {"report.pdf", f"report_{collision_digest}.pdf"}
+    collision = PythonCrawlEngine._filename_for_url(colliding_url, taken_names)
+    partial_collision = PythonCrawlEngine._filename_for_url(
+        "https://example.se/files/report.pdf",
+        {"report.pdf.part"},
+    )
+
+    long_names: set[str] = set()
+    long_url = f"https://example.se/files/{quote('م' * 300 + '.pdf')}"
+    first_long = PythonCrawlEngine._filename_for_url(long_url, long_names)
+    second_long = PythonCrawlEngine._filename_for_url(
+        f"{long_url}?version=2", long_names
+    )
+
+    assert arabic == "دليل_البلدية.pdf"
+    assert long_arabic.endswith(".pdf")
+    assert extreme_suffix.startswith("report")
+    assert nfd == "Café.pdf"
+    assert collision not in {"report.pdf", f"report_{collision_digest}.pdf"}
+    assert partial_collision != "report.pdf"
+    assert len({first_long, second_long}) == 2
+    assert all(
+        len(name.encode("utf-8")) <= 200
+        for name in (
+            arabic,
+            long_arabic,
+            extreme_suffix,
+            nfd,
+            collision,
+            first_long,
+            second_long,
+        )
+    )
+
+
 async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
     async def start(_: web.Request) -> web.Response:
         return web.Response(
@@ -303,6 +443,65 @@ async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
 
     assert downloaded_path is not None
     assert not downloaded_path.exists()
+
+
+async def test_file_size_limit_applies_to_streams_without_content_length(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    download_directory = tmp_path / "downloads"
+    download_directory.mkdir()
+
+    class PersistentTemporaryDirectory:
+        name = str(download_directory)
+
+        @staticmethod
+        def cleanup() -> None:
+            pass
+
+    monkeypatch.setattr(
+        "eneo.crawler.python_engine.TemporaryDirectory",
+        lambda *args, **kwargs: PersistentTemporaryDirectory(),
+    )
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text='<main><a href="/large.pdf">Large file</a></main>',
+            content_type="text/html",
+        )
+
+    async def large(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(headers={"Content-Type": "application/pdf"})
+        await response.prepare(request)
+        await response.write(b"1234")
+        await response.write(b"5678")
+        await response.write_eof()
+        return response
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/large.pdf", large)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", max_file_bytes=5)
+            )
+        ]
+
+    assert any(
+        isinstance(event, FileFailed) and event.reason == "file_too_large"
+        for event in events
+    )
+    assert not any(isinstance(event, FileDownloaded) for event in events)
+    assert list(download_directory.iterdir()) == []
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=1,
+        pages_failed=0,
+        files_failed=1,
+    )
 
 
 async def test_file_downloads_use_bounded_concurrency() -> None:

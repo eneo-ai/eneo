@@ -10,6 +10,7 @@ import ipaddress
 import logging
 import re
 import socket
+import unicodedata
 from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ from eneo.crawler.engine import (
 from eneo.crawler.extraction import (
     extract_html,
     is_in_scope,
+    is_page_link,
     is_same_origin,
     normalize_url,
 )
@@ -56,9 +58,11 @@ logger = logging.getLogger(__name__)
 
 _USER_AGENT = "EneoCrawler/1.0"
 _RETRYABLE_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
-_FILENAME_SANITIZE = re.compile(r"[^A-Za-z0-9._-]+")
+_FILENAME_SANITIZE = re.compile(r"[^\w.-]+")
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _MAX_REDIRECTS = 10
+_MAX_FILENAME_BYTES = 200
+_MAX_SUFFIX_BYTES = 16
 
 _process_capacity: asyncio.Semaphore | None = None
 _process_capacity_loop: asyncio.AbstractEventLoop | None = None
@@ -81,6 +85,29 @@ class _UnsafeTarget(aiohttp.ClientError):
 
 class _RedirectRejected(aiohttp.ClientError):
     pass
+
+
+def _filename_with_token(basename: str, token: str) -> str:
+    suffix = Path(basename).suffix
+    if len(suffix.encode("utf-8")) > _MAX_SUFFIX_BYTES:
+        suffix = ""
+    stem = basename.removesuffix(suffix) if suffix else basename
+    reserved = len(f"_{token}{suffix}".encode("utf-8"))
+    stem = (
+        stem.encode("utf-8")[: _MAX_FILENAME_BYTES - reserved]
+        .decode("utf-8", errors="ignore")
+        .rstrip("._")
+        or "download"
+    )
+    return f"{stem}_{token}{suffix}"
+
+
+def _log_skipped_sitemap_entries(count: int) -> None:
+    if count:
+        logger.info(
+            "Skipped known non-page sitemap entries",
+            extra={"count": count},
+        )
 
 
 def _address_is_allowed(address: str, *, allow_private_network: bool) -> bool:
@@ -208,7 +235,7 @@ class PythonCrawlEngine:
             if (normalized := normalize_url(hint.url)) is not None
         }
 
-        files_dir = TemporaryDirectory(prefix="eneo-crawl-")
+        files_dir: TemporaryDirectory[str] | None = None
         try:
             connector = aiohttp.TCPConnector(
                 resolver=_SafeResolver(
@@ -374,6 +401,7 @@ class PythonCrawlEngine:
                 )
 
                 if request.download_files and file_links:
+                    files_dir = TemporaryDirectory(prefix="eneo-crawl-")
                     try:
                         async for result in self._download_files(
                             session=session,
@@ -408,7 +436,8 @@ class PythonCrawlEngine:
                 reason=termination_reason,
             )
         finally:
-            files_dir.cleanup()
+            if files_dir is not None:
+                files_dir.cleanup()
 
     async def _load_robots(
         self,
@@ -648,7 +677,7 @@ class PythonCrawlEngine:
 
         filename = self._filename_for_url(normalized, taken_names)
         target = directory / filename
-        partial = target.with_suffix(f"{target.suffix}.part")
+        partial = target.with_name(f"{target.name}.part")
         try:
             async with self._capacity:
                 response, final_url = await self._request_with_redirects(
@@ -698,22 +727,34 @@ class PythonCrawlEngine:
 
     @staticmethod
     def _filename_for_url(url: str, taken_names: set[str]) -> str:
-        basename = unquote(Path(urlsplit(url).path).name) or "download"
+        basename = (
+            unicodedata.normalize("NFC", unquote(Path(urlsplit(url).path).name))
+            or "download"
+        )
         basename = _FILENAME_SANITIZE.sub("_", basename).strip("._") or "download"
         encoded = basename.encode("utf-8")
-        if len(encoded) > 200:
-            suffix = Path(basename).suffix
+        if len(encoded) > _MAX_FILENAME_BYTES:
             digest = hashlib.sha256(encoded).hexdigest()[:8]
-            available = 200 - len(suffix.encode("utf-8")) - len(digest) - 1
-            stem = (
-                Path(basename)
-                .stem.encode("utf-8")[:available]
-                .decode("utf-8", errors="ignore")
+            basename = _filename_with_token(basename, digest)
+
+        def is_available(candidate: str) -> bool:
+            return (
+                candidate not in taken_names and f"{candidate}.part" not in taken_names
             )
-            basename = f"{stem}_{digest}{suffix}"
-        if basename in taken_names:
-            basename = f"{hashlib.sha256(url.encode()).hexdigest()[:8]}_{basename}"
-        taken_names.add(basename)
+
+        if not is_available(basename):
+            collision_source = basename
+            digest = hashlib.sha256(url.encode()).hexdigest()[:8]
+            for collision in range(len(taken_names) + 1):
+                token = digest if collision == 0 else f"{digest}_{collision}"
+                candidate = _filename_with_token(collision_source, token)
+                if is_available(candidate):
+                    basename = candidate
+                    break
+            else:
+                raise AssertionError("bounded download filename search exhausted")
+
+        taken_names.update((basename, f"{basename}.part"))
         return basename
 
     async def _sitemap_urls(
@@ -729,6 +770,7 @@ class PythonCrawlEngine:
         seen_pages: set[str] = set()
         failures: list[PageFailed] = []
         sitemap_entries: list[SitemapEntry] = []
+        skipped_non_page_entries = 0
         max_sitemap_documents = 100
 
         while sitemap_frontier and len(seen_sitemaps) <= max_sitemap_documents:
@@ -788,21 +830,30 @@ class PythonCrawlEngine:
                 location = original_entry.location
                 normalized = normalize_url(location, base_url=final_url)
                 if (
-                    normalized is not None
-                    and is_same_origin(normalized, sitemap_url)
-                    and normalized not in seen_pages
+                    normalized is None
+                    or not is_same_origin(normalized, sitemap_url)
+                    or normalized in seen_pages
                 ):
-                    seen_pages.add(normalized)
-                    page_urls.append(normalized)
-                    sitemap_entries.append(
-                        SitemapEntry(
-                            location=normalized,
-                            last_modified=original_entry.last_modified,
-                        )
-                    )
-                    if len(page_urls) >= request.limits.max_pages:
-                        return page_urls, failures, None, True
+                    continue
+                if not is_page_link(normalized):
+                    skipped_non_page_entries += 1
+                    continue
 
+                seen_pages.add(normalized)
+                page_urls.append(normalized)
+                sitemap_entries.append(
+                    SitemapEntry(
+                        location=normalized,
+                        last_modified=original_entry.last_modified,
+                    )
+                )
+                if len(page_urls) >= request.limits.max_pages:
+                    _log_skipped_sitemap_entries(skipped_non_page_entries)
+                    return page_urls, failures, None, True
+
+        _log_skipped_sitemap_entries(skipped_non_page_entries)
+        # Only page candidates belong in the fingerprint. Asset-only sitemap
+        # changes should not force a content recrawl.
         snapshot = snapshot_sitemap(sitemap_entries) if not failures else None
         return page_urls, failures, snapshot, False
 

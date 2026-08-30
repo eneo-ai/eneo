@@ -16,6 +16,7 @@ from eneo.crawler.engine import (
     CrawlFinished,
     CrawlRequest,
     PageFailed,
+    PageUnchanged,
 )
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.database.tables.ai_models_table import EmbeddingModels
@@ -70,6 +71,54 @@ class _BlockedCrawlEngine:
             status="completed",
             pages_crawled=0,
             pages_failed=1,
+        )
+
+
+class _PageLimitedCrawlEngine:
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        yield PageUnchanged(url=request.url)
+        yield CrawlFinished(
+            status="partial",
+            pages_crawled=0,
+            pages_failed=0,
+            pages_unchanged=1,
+            reason="page_limit",
+        )
+
+
+class _FailureDominatedPartialCrawlEngine:
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        yield PageUnchanged(url=request.url)
+        yield PageFailed(
+            url=f"{request.url}/unavailable",
+            reason="http_503",
+            status_code=503,
+            retryable=True,
+        )
+        yield CrawlFinished(
+            status="completed",
+            pages_crawled=0,
+            pages_failed=1,
+            pages_unchanged=1,
+        )
+
+
+class _FailureDominatedPageLimitedCrawlEngine:
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        yield PageUnchanged(url=request.url)
+        for index in range(3):
+            yield PageFailed(
+                url=f"{request.url}/unavailable-{index}",
+                reason="http_503",
+                status_code=503,
+                retryable=True,
+            )
+        yield CrawlFinished(
+            status="partial",
+            pages_crawled=0,
+            pages_failed=3,
+            pages_unchanged=1,
+            reason="page_limit",
         )
 
 
@@ -732,6 +781,60 @@ async def test_worker_terminalizes_a_zero_page_crawl_as_empty(
         assert finished.outcome == CrawlOutcome.EMPTY
         assert finished.pages_crawled == 0
         assert job.status == Status.COMPLETE.value
+
+
+@pytest.mark.parametrize(
+    ("engine", "expected_failures", "expects_retry"),
+    [
+        (_PageLimitedCrawlEngine(), 0, False),
+        (_FailureDominatedPartialCrawlEngine(), 4, True),
+        (_FailureDominatedPageLimitedCrawlEngine(), 4, True),
+    ],
+    ids=("local-page-limit", "remote-failures", "page-limited-remote-failures"),
+)
+async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
+    db_session,
+    admin_user,
+    engine,
+    expected_failures: int,
+    expects_retry: bool,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label=f"Partial backoff {expected_failures}",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        await session.execute(
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website.id)
+            .values(
+                consecutive_failures=3,
+                next_retry_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+        )
+
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(engine))
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.PARTIAL.value
+    async with db_session() as session:
+        persisted = await session.scalar(
+            sa.select(WebsitesTable).where(WebsitesTable.id == website.id)
+        )
+        assert persisted is not None
+        assert persisted.consecutive_failures == expected_failures
+        assert (persisted.next_retry_at is not None) is expects_retry
 
 
 async def test_worker_audits_failure_as_the_initiating_user(
