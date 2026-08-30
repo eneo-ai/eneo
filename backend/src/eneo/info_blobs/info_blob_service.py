@@ -73,6 +73,70 @@ class InfoBlobDownload:
         await self._close()
 
 
+async def open_info_blob_original_download(
+    *,
+    repo: InfoBlobRepository,
+    object_content: ObjectContentService,
+    info_blob_id: UUID,
+    expected_tenant_id: UUID,
+) -> InfoBlobDownload:
+    session = repo.session
+    if session.in_transaction():
+        raise RuntimeError("InfoBlob downloads require a non-ambient transaction")
+    async with session.begin():
+        reference = await repo.get_original(info_blob_id)
+        if reference is None or not reference.usable:
+            raise InfoBlobOriginalUnavailableError()
+        if reference.tenant_id != expected_tenant_id:
+            raise UnauthorizedException("Token not valid for this InfoBlob")
+    read_context = object_content.open_content(
+        ContentReadGrant(
+            content_id=reference.content_id,
+            tenant_id=reference.tenant_id,
+            access_class=reference.access_class,
+        )
+    )
+    opened = await read_context.__aenter__()
+    closed = False
+
+    async def exit_read_context(
+        error: BaseException | None = None,
+    ) -> bool | None:
+        nonlocal closed
+        if closed:
+            return None
+        closed = True
+        if error is None:
+            return await read_context.__aexit__(None, None, None)
+        return await read_context.__aexit__(
+            type(error),
+            error,
+            error.__traceback__,
+        )
+
+    async def stream() -> AsyncGenerator[bytes, None]:
+        try:
+            async for chunk in opened.chunks:
+                yield chunk
+        except BaseException as error:
+            if not await exit_read_context(error):
+                raise
+        else:
+            await exit_read_context()
+
+    async def close() -> None:
+        await exit_read_context()
+
+    return InfoBlobDownload(
+        chunks=stream(),
+        content_length=opened.content_length,
+        media_type=opened.media_type,
+        filename=reference.original_filename,
+        sha256=reference.sha256,
+        _close=close,
+    )
+
+
 class InfoBlobService:
     def __init__(
         self,
@@ -471,65 +535,6 @@ class InfoBlobService:
         if not blob.original_available:
             raise InfoBlobOriginalUnavailableError()
         return blob
-
-    async def get_original_download_no_auth(
-        self, info_blob_id: UUID, *, expected_tenant_id: UUID
-    ) -> InfoBlobDownload:
-        session = self.repo.session
-        if session.in_transaction():
-            raise RuntimeError("InfoBlob downloads require a non-ambient transaction")
-        async with session.begin():
-            reference = await self.repo.get_original(info_blob_id)
-            if reference is None or not reference.usable:
-                raise InfoBlobOriginalUnavailableError()
-            if reference.tenant_id != expected_tenant_id:
-                raise UnauthorizedException("Token not valid for this InfoBlob")
-        read_context = self.object_content.open_content(
-            ContentReadGrant(
-                content_id=reference.content_id,
-                tenant_id=reference.tenant_id,
-                access_class=reference.access_class,
-            )
-        )
-        opened = await read_context.__aenter__()
-        closed = False
-
-        async def exit_read_context(
-            error: BaseException | None = None,
-        ) -> bool | None:
-            nonlocal closed
-            if closed:
-                return None
-            closed = True
-            if error is None:
-                return await read_context.__aexit__(None, None, None)
-            return await read_context.__aexit__(
-                type(error),
-                error,
-                error.__traceback__,
-            )
-
-        async def stream() -> AsyncGenerator[bytes, None]:
-            try:
-                async for chunk in opened.chunks:
-                    yield chunk
-            except BaseException as error:
-                if not await exit_read_context(error):
-                    raise
-            else:
-                await exit_read_context()
-
-        async def close() -> None:
-            await exit_read_context()
-
-        return InfoBlobDownload(
-            chunks=stream(),
-            content_length=opened.content_length,
-            media_type=opened.media_type,
-            filename=reference.original_filename,
-            sha256=reference.sha256,
-            _close=close,
-        )
 
     async def get_by_user(
         self,

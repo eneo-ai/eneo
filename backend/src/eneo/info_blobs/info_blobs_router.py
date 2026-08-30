@@ -33,6 +33,7 @@ from eneo.info_blobs.info_blob_protocol import (
     to_info_blob_public,
     to_info_blob_public_no_text,
 )
+from eneo.info_blobs.info_blob_service import open_info_blob_original_download
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException, UnauthorizedException
 from eneo.main.logging import get_logger
@@ -118,7 +119,7 @@ async def generate_original_signed_url(
         info_blob_id=id,
         expires_at=expires_at,
         content_disposition=signed_url_req.content_disposition,
-        tenant_id=user.tenant_id,
+        tenant_id=blob.tenant_id,
     )
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -195,9 +196,12 @@ async def download_original(
     container: Annotated[Container, Depends(get_container(with_transaction=False))],
 ) -> ClosingStreamingResponse:
     disposition, tenant_id = _validate_original_claims(id, token)
-    download = await container.info_blob_service(
-        user=None
-    ).get_original_download_no_auth(id, expected_tenant_id=tenant_id)
+    download = await open_info_blob_original_download(
+        repo=container.info_blob_repo(),
+        object_content=container.object_content_service(),
+        info_blob_id=id,
+        expected_tenant_id=tenant_id,
+    )
     headers = {
         "Content-Disposition": content_disposition_header(
             disposition.value, download.filename

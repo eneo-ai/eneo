@@ -18,7 +18,7 @@ from eneo.info_blobs.info_blob import (
 )
 from eneo.info_blobs.info_blob_protocol import to_info_blob_public
 from eneo.info_blobs.info_blob_repo import InfoBlobOriginal
-from eneo.info_blobs.info_blob_service import InfoBlobService
+from eneo.info_blobs.info_blob_service import open_info_blob_original_download
 from eneo.main.exceptions import UnauthorizedException
 from eneo.object_content.content import ContentAccessClass, ContentState
 from eneo.questions.question import Question
@@ -82,20 +82,11 @@ async def _open_download(chunks: AsyncGenerator[bytes, None]):
     read_context.__aexit__ = AsyncMock(return_value=None)
     object_content = MagicMock()
     object_content.open_content.return_value = read_context
-    service = InfoBlobService(
+    download = await open_info_blob_original_download(
         repo=repo,
-        space_repo=AsyncMock(),
-        user=MagicMock(),
-        quota_service=AsyncMock(),
-        group_service=AsyncMock(),
-        update_website_size_service=AsyncMock(),
-        space_service=AsyncMock(),
-        actor_manager=MagicMock(),
-        datastore=AsyncMock(),
         object_content=object_content,
-    )
-    download = await service.get_original_download_no_auth(
-        uuid4(), expected_tenant_id=tenant_id
+        info_blob_id=uuid4(),
+        expected_tenant_id=tenant_id,
     )
     return download, read_context
 
@@ -130,16 +121,22 @@ def test_content_disposition_is_ascii_safe(filename):
 
 @pytest.mark.asyncio
 async def test_mint_audit_metadata_excludes_token(monkeypatch):
-    blob_id, tenant_id = uuid4(), uuid4()
-    actor = MagicMock(id=uuid4(), tenant_id=tenant_id, username="admin", email="a@x.se")
-    blob = MagicMock(id=blob_id, tenant_id=tenant_id)
+    blob_id, actor_tenant_id, source_tenant_id = uuid4(), uuid4(), uuid4()
+    actor = MagicMock(
+        id=uuid4(),
+        tenant_id=actor_tenant_id,
+        username="admin",
+        email="a@x.se",
+    )
+    blob = MagicMock(id=blob_id, tenant_id=source_tenant_id)
     service, audit = AsyncMock(), AsyncMock()
     service.ensure_original_available.return_value = blob
+    token_claims = {}
     monkeypatch.setattr(info_blobs_router.time, "time", lambda: 1_000)
     monkeypatch.setattr(
         info_blobs_router,
         "generate_info_blob_original_download_token",
-        lambda **_: "secret-token",
+        lambda **claims: token_claims.update(claims) or "secret-token",
     )
 
     class Container:
@@ -165,6 +162,8 @@ async def test_mint_audit_metadata_excludes_token(monkeypatch):
     assert metadata["extra"]["expires_at"] == 1_120
     assert metadata["extra"]["content_disposition"] == "inline"
     assert "secret-token" not in str(metadata)
+    assert token_claims["tenant_id"] == source_tenant_id
+    assert audit.log_async.await_args.kwargs["tenant_id"] == actor_tenant_id
 
 
 @pytest.mark.asyncio
@@ -191,16 +190,25 @@ async def test_download_sets_digest_and_unicode_filename_headers(monkeypatch):
         sha256=b"hash",
         aclose=AsyncMock(),
     )
-    service = AsyncMock()
-    service.get_original_download_no_auth.return_value = download
+    open_download = AsyncMock(return_value=download)
+    monkeypatch.setattr(
+        info_blobs_router,
+        "open_info_blob_original_download",
+        open_download,
+    )
+    repo, object_content = MagicMock(), MagicMock()
 
     class Container:
-        @staticmethod
-        def info_blob_service(user):
-            assert user is None
-            return service
+        info_blob_repo = staticmethod(lambda: repo)
+        object_content_service = staticmethod(lambda: object_content)
 
     response = await info_blobs_router.download_original(blob_id, "token", Container())
+    assert open_download.await_args.kwargs == {
+        "repo": repo,
+        "object_content": object_content,
+        "info_blob_id": blob_id,
+        "expected_tenant_id": tenant_id,
+    }
     assert response.headers["repr-digest"] == "sha-256=:aGFzaA==:"
     assert "filename*=UTF-8''" in response.headers["content-disposition"]
     await response.aclose()

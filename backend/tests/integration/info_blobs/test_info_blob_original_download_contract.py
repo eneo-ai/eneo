@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from hashlib import sha256
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
@@ -23,6 +24,7 @@ from eneo.info_blobs.info_blob import (
     PreparedKnowledgeOriginal,
 )
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.info_blobs.info_blob_service import open_info_blob_original_download
 from eneo.main.container.container import Container
 from eneo.main.exceptions import UnauthorizedException
 from eneo.object_content.content import ContentState, StorageKind
@@ -32,24 +34,35 @@ async def _bytes(payload: bytes) -> AsyncGenerator[bytes]:
     yield payload
 
 
-async def _seed_blob(container, *, title: str, state: str = "active") -> InfoBlobs:
+async def _seed_blob(
+    container,
+    *,
+    title: str,
+    state: str = "active",
+    space: Spaces | None = None,
+    embedding_model: EmbeddingModels | None = None,
+) -> InfoBlobs:
     session = container.session()
     user = container.user()
-    model = (await session.scalars(sa.select(EmbeddingModels).limit(1))).one()
-    space = await session.scalar(
-        sa.select(Spaces).where(
-            Spaces.tenant_id == user.tenant_id,
-            Spaces.user_id == user.id,
-        )
+    model = (
+        embedding_model
+        or (await session.scalars(sa.select(EmbeddingModels).limit(1))).one()
     )
     if space is None:
-        space = Spaces(
-            name=f"original contract {uuid4().hex}",
-            tenant_id=user.tenant_id,
-            user_id=user.id,
+        space = await session.scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == user.tenant_id,
+                Spaces.user_id == user.id,
+            )
         )
-        session.add(space)
-        await session.flush()
+        if space is None:
+            space = Spaces(
+                name=f"original contract {uuid4().hex}",
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+            )
+            session.add(space)
+            await session.flush()
     group = CollectionsTable(
         name=f"original contract {uuid4().hex}",
         size=0,
@@ -222,8 +235,6 @@ async def test_original_download_reresolves_reference_and_closes_lazy_stream(
 ):
     async with db_container() as container:
         blob = await _seed_blob(container, title="download")
-        user = container.user()
-        tenant = container.tenant()
         blob_id = blob.id
         tenant_id = blob.tenant_id
         payload = b"original bytes, not extracted text"
@@ -251,16 +262,12 @@ async def test_original_download_reresolves_reference_and_closes_lazy_stream(
 
     async with db_container():
         async with sessionmanager.session() as session:
-            service = Container(
-                session=providers.Object(session),
-                user=providers.Object(user),
-                tenant=providers.Object(tenant),
-            ).info_blob_service(
-                user=None,
-            )
+            container = Container(session=providers.Object(session))
             with pytest.raises(UnauthorizedException):
-                await service.get_original_download_no_auth(
-                    blob_id,
+                await open_info_blob_original_download(
+                    repo=container.info_blob_repo(),
+                    object_content=container.object_content_service(),
+                    info_blob_id=blob_id,
                     expected_tenant_id=uuid4(),
                 )
             reference_queries: list[str] = []
@@ -275,8 +282,10 @@ async def test_original_download_reresolves_reference_and_closes_lazy_stream(
             sync_engine = session.bind.sync_engine
             event.listen(sync_engine, "before_cursor_execute", capture)
             try:
-                download = await service.get_original_download_no_auth(
-                    blob_id,
+                download = await open_info_blob_original_download(
+                    repo=container.info_blob_repo(),
+                    object_content=container.object_content_service(),
+                    info_blob_id=blob_id,
                     expected_tenant_id=tenant_id,
                 )
                 assert download.content_length == len(payload)
@@ -294,13 +303,115 @@ async def test_original_download_reresolves_reference_and_closes_lazy_stream(
 
     async with db_container():
         async with sessionmanager.session() as session:
-            service = Container(
-                session=providers.Object(session),
-                user=providers.Object(user),
-                tenant=providers.Object(tenant),
-            ).info_blob_service(user=None)
+            container = Container(session=providers.Object(session))
             with pytest.raises(InfoBlobOriginalUnavailableError):
-                await service.get_original_download_no_auth(
-                    blob_id,
+                await open_info_blob_original_download(
+                    repo=container.info_blob_repo(),
+                    object_content=container.object_content_service(),
+                    info_blob_id=blob_id,
                     expected_tenant_id=tenant_id,
                 )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federated_reader_downloads_original_owned_by_source_tenant(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    embedding_model_factory,
+    tenant_factory,
+    user_factory,
+):
+    payload = b"federated source bytes"
+    async with db_container() as container:
+        source_tenant_id = container.user().tenant_id
+        organization_space = await container.session().scalar(
+            sa.select(Spaces).where(
+                Spaces.tenant_id == source_tenant_id,
+                Spaces.user_id.is_(None),
+                Spaces.tenant_space_id.is_(None),
+            )
+        )
+        assert organization_space is not None
+        source_space = Spaces(
+            name="Federated source space",
+            tenant_id=source_tenant_id,
+            user_id=None,
+            tenant_space_id=organization_space.id,
+        )
+        container.session().add(source_space)
+        await container.session().flush()
+        shared_model = await embedding_model_factory(
+            container.session(), name="Federated download model"
+        )
+        blob = await _seed_blob(
+            container,
+            title="federated download",
+            space=source_space,
+            embedding_model=shared_model,
+        )
+        assert blob.group_id is not None
+        source_space_id = await container.session().scalar(
+            sa.select(CollectionsTable.space_id).where(
+                CollectionsTable.id == blob.group_id
+            )
+        )
+        assert source_space_id is not None
+
+        async with _original(container, payload) as original:
+            prepared = await container.info_blob_service()._prepare_original(
+                InfoBlobAdd(
+                    text=blob.text,
+                    title=blob.title,
+                    group_id=blob.group_id,
+                    tenant_id=blob.tenant_id,
+                    user_id=blob.user_id,
+                ),
+                original,
+            )
+            await InfoBlobRepository(container.session()).add_original_reference(
+                info_blob_id=blob.id,
+                content_id=prepared.id,
+                original_filename="federated.txt",
+            )
+
+        reader_tenant = await tenant_factory(
+            container.session(), name="Federated reader tenant"
+        )
+        reader = await user_factory(container.session(), tenant_id=reader_tenant.id)
+        unrelated_reader = await user_factory(
+            container.session(), tenant_id=reader_tenant.id
+        )
+        await container.session().execute(
+            sa.text(
+                """
+                INSERT INTO spaces_users (space_id, user_id, role)
+                VALUES (:space_id, :user_id, 'viewer')
+                """
+            ),
+            {"space_id": source_space_id, "user_id": reader.id},
+        )
+        reader_token = container.auth_service().create_access_token_for_user(reader)
+        unrelated_token = container.auth_service().create_access_token_for_user(
+            unrelated_reader
+        )
+        blob_id = blob.id
+
+    signed = await client.post(
+        f"/api/v1/info-blobs/{blob_id}/original/signed-url/",
+        json={"content_disposition": "attachment"},
+        headers={"Authorization": f"Bearer {reader_token}"},
+    )
+    assert signed.status_code == 200, signed.text
+    parsed = urlsplit(signed.json()["url"])
+    download = await client.get(f"{parsed.path}?{parsed.query}")
+    assert download.status_code == 200, download.text
+    assert download.content == payload
+
+    unrelated = await client.post(
+        f"/api/v1/info-blobs/{blob_id}/original/signed-url/",
+        json={"content_disposition": "attachment"},
+        headers={"Authorization": f"Bearer {unrelated_token}"},
+    )
+    assert unrelated.status_code == 403
