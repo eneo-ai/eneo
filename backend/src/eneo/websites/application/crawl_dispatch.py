@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 DISPATCH_RETRY_AFTER = timedelta(minutes=1)
 QUEUE_REDELIVERY_AFTER = timedelta(minutes=5)
 EnqueueCrawl = Callable[[Task, UUID, CrawlTask], Awaitable[ArqJob | None]]
+DiscardCrawlDeliveries = Callable[[tuple[UUID, ...]], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,11 +50,37 @@ def _validate_candidate(candidate: CrawlDispatchCandidate) -> CrawlTask:
 async def reconcile_crawl_work(
     *,
     enqueue: EnqueueCrawl = job_manager.enqueue,
+    discard: DiscardCrawlDeliveries = job_manager.discard_crawl_deliveries,
     concurrency_limit: int | None = None,
 ) -> CrawlReconciliationResult:
     """Repair leases and deliver one fair, bounded batch to the crawl queue."""
     async with sessionmanager.session() as session, session.begin():
-        interrupted = await CrawlRunRepository(session).interrupt_expired_attempts()
+        repository = CrawlRunRepository(session)
+        interrupted = await repository.interrupt_expired_attempts()
+        cleanup_dispatch_ids = await repository.pending_transport_cleanup_candidates()
+
+    delivery_errors = 0
+    if cleanup_dispatch_ids:
+        try:
+            await discard(cleanup_dispatch_ids)
+        except Exception:
+            delivery_errors += 1
+            logger.exception(
+                "Expired crawl transport cleanup failed and will be retried",
+                extra={"dispatch_count": len(cleanup_dispatch_ids)},
+            )
+        else:
+            try:
+                async with sessionmanager.session() as session, session.begin():
+                    await CrawlRunRepository(session).acknowledge_transport_cleanup(
+                        cleanup_dispatch_ids
+                    )
+            except Exception:
+                delivery_errors += 1
+                logger.exception(
+                    "Expired crawl transport cleanup could not be acknowledged",
+                    extra={"dispatch_count": len(cleanup_dispatch_ids)},
+                )
 
     limit = (
         concurrency_limit
@@ -69,7 +96,6 @@ async def reconcile_crawl_work(
 
     dispatched = 0
     invalid = 0
-    delivery_errors = 0
     for candidate in candidates:
         try:
             task = _validate_candidate(candidate)

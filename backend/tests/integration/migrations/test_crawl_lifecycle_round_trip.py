@@ -359,6 +359,7 @@ def test_crawl_lifecycle_migration_preserves_and_terminalizes_legacy_history(
         "ix_crawl_attempts_dispatch_candidates",
         "ix_crawl_attempts_redelivery_candidates",
         "ix_crawl_attempts_expired_lease",
+        "ix_crawl_attempts_pending_transport_cleanup",
     } <= _inspected_names(database_url, CrawlAttempts.__tablename__, "indexes")
     assert "uq_crawl_runs_job_id" in _inspected_names(
         database_url, CrawlRuns.__tablename__, "unique"
@@ -373,6 +374,7 @@ def test_crawl_lifecycle_migration_preserves_and_terminalizes_legacy_history(
         "ck_crawl_attempts_lease_pair",
         "ck_crawl_attempts_finished_without_lease",
         "ck_crawl_attempts_dispatch_order",
+        "ck_crawl_attempts_transport_cleanup",
     } <= _inspected_names(database_url, CrawlAttempts.__tablename__, "checks")
 
 

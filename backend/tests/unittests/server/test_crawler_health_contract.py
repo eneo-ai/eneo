@@ -15,6 +15,7 @@ def test_missing_crawler_worker_is_unhealthy() -> None:
         executor_heartbeat_ttl=-2,
         reconciliation_heartbeat_ttl=30,
         expired_leases=0,
+        pending_transport_cleanup=0,
     )
 
     assert status == "UNHEALTHY"
@@ -33,6 +34,7 @@ def test_expired_execution_lease_degrades_health() -> None:
         executor_heartbeat_ttl=30,
         reconciliation_heartbeat_ttl=30,
         expired_leases=2,
+        pending_transport_cleanup=0,
     )
 
     assert status == "DEGRADED"
@@ -45,6 +47,21 @@ def test_expired_execution_lease_degrades_health() -> None:
     assert "2" in reason
 
 
+def test_pending_transport_cleanup_degrades_health() -> None:
+    status, flags, reason = determine_crawler_health(
+        redis_error=None,
+        database_ok=True,
+        executor_heartbeat_ttl=30,
+        reconciliation_heartbeat_ttl=30,
+        expired_leases=0,
+        pending_transport_cleanup=2,
+    )
+
+    assert status == "DEGRADED"
+    assert "TRANSPORT_CLEANUP_PENDING" in flags
+    assert "2" in reason
+
+
 def test_unavailable_authoritative_store_makes_health_unknown() -> None:
     status, flags, _ = determine_crawler_health(
         redis_error=None,
@@ -52,6 +69,7 @@ def test_unavailable_authoritative_store_makes_health_unknown() -> None:
         executor_heartbeat_ttl=30,
         reconciliation_heartbeat_ttl=30,
         expired_leases=None,
+        pending_transport_cleanup=None,
     )
 
     assert status == "UNKNOWN"
@@ -69,6 +87,7 @@ def test_missing_reconciliation_success_is_unhealthy() -> None:
         executor_heartbeat_ttl=30,
         reconciliation_heartbeat_ttl=-2,
         expired_leases=0,
+        pending_transport_cleanup=0,
     )
 
     assert status == "UNHEALTHY"
@@ -83,6 +102,7 @@ def test_redis_failure_does_not_expose_internal_connection_details() -> None:
         executor_heartbeat_ttl=-2,
         reconciliation_heartbeat_ttl=-2,
         expired_leases=0,
+        pending_transport_cleanup=0,
     )
 
     assert status == "UNKNOWN"
@@ -97,6 +117,7 @@ def test_non_expiring_worker_heartbeat_degrades_health() -> None:
         executor_heartbeat_ttl=-1,
         reconciliation_heartbeat_ttl=30,
         expired_leases=0,
+        pending_transport_cleanup=0,
     )
 
     assert status == "DEGRADED"

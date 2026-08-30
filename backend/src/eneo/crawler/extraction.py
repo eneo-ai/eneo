@@ -87,7 +87,7 @@ def _content_root(soup: BeautifulSoup) -> Tag:
         element = soup.find(element_name)
         if isinstance(element, Tag):
             return element
-    role_main = soup.find(attrs={"role": "main"})
+    role_main = soup.find(role="main")
     if isinstance(role_main, Tag):
         return role_main
     body = soup.find("body")

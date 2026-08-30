@@ -82,6 +82,7 @@ class CrawlLifecycleHealth(BaseModel):
     stopping: int | None = None
     active_total: int | None = None
     expired_leases: int | None = None
+    pending_transport_cleanup: int | None = None
     oldest_active_age_seconds: int | None = None
 
 
@@ -122,6 +123,7 @@ def determine_crawler_health(
     executor_heartbeat_ttl: int,
     reconciliation_heartbeat_ttl: int,
     expired_leases: int | None,
+    pending_transport_cleanup: int | None,
 ) -> tuple[CrawlerHealthStatus, list[str], str]:
     """Classify health from the two real crawler stores."""
     flags: list[str] = []
@@ -160,12 +162,21 @@ def determine_crawler_health(
         flags.append("EXPIRED_LEASES")
         reasons.append(f"{expired_leases} crawl execution lease(s) expired")
 
+    if pending_transport_cleanup:
+        flags.append("TRANSPORT_CLEANUP_PENDING")
+        reasons.append(
+            f"{pending_transport_cleanup} expired crawl delivery cleanup(s) pending"
+        )
+
     if redis_error is not None or not database_ok:
         status = "UNKNOWN"
     elif executor_heartbeat_ttl in {-2, 0} or reconciliation_heartbeat_ttl in {-2, 0}:
         status = "UNHEALTHY"
     elif (
-        executor_heartbeat_ttl < 0 or reconciliation_heartbeat_ttl < 0 or expired_leases
+        executor_heartbeat_ttl < 0
+        or reconciliation_heartbeat_ttl < 0
+        or expired_leases
+        or pending_transport_cleanup
     ):
         status = "DEGRADED"
     else:
@@ -661,6 +672,9 @@ def get_application():
             executor_heartbeat_ttl=executor_heartbeat_ttl,
             reconciliation_heartbeat_ttl=reconciliation_heartbeat_ttl,
             expired_leases=snapshot.expired_leases if snapshot else None,
+            pending_transport_cleanup=(
+                snapshot.pending_transport_cleanup if snapshot else None
+            ),
         )
 
         redis_db = cast(int | None, getattr(settings, "redis_db", None))
@@ -679,6 +693,9 @@ def get_application():
                 stopping=snapshot.stopping if snapshot else None,
                 active_total=snapshot.active_total if snapshot else None,
                 expired_leases=snapshot.expired_leases if snapshot else None,
+                pending_transport_cleanup=(
+                    snapshot.pending_transport_cleanup if snapshot else None
+                ),
                 oldest_active_age_seconds=(
                     snapshot.oldest_active_age_seconds if snapshot else None
                 ),

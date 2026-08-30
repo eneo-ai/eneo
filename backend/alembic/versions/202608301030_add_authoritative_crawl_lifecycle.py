@@ -317,6 +317,7 @@ def upgrade() -> None:
         sa.Column("finished_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("failure_code", sa.String(64), nullable=True),
         sa.Column("failure_detail", sa.Text(), nullable=True),
+        sa.Column("transport_cleaned_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column(
             "id",
             UUID(as_uuid=True),
@@ -379,6 +380,10 @@ def upgrade() -> None:
             "failure_detail IS NULL OR char_length(failure_detail) <= 512",
             name="ck_crawl_attempts_failure_detail_length",
         ),
+        sa.CheckConstraint(
+            "transport_cleaned_at IS NULL OR failure_code = 'lease_expired'",
+            name="ck_crawl_attempts_transport_cleanup",
+        ),
         sa.ForeignKeyConstraint(
             ["crawl_run_id"],
             ["crawl_runs.id"],
@@ -422,6 +427,14 @@ def upgrade() -> None:
         ["lease_expires_at"],
         postgresql_where=sa.text(
             "lease_expires_at IS NOT NULL AND finished_at IS NULL"
+        ),
+    )
+    op.create_index(
+        "ix_crawl_attempts_pending_transport_cleanup",
+        "crawl_attempts",
+        ["finished_at", "id"],
+        postgresql_where=sa.text(
+            "failure_code = 'lease_expired' AND transport_cleaned_at IS NULL"
         ),
     )
 
@@ -484,6 +497,10 @@ def downgrade() -> None:
         """
     )
 
+    op.drop_index(
+        "ix_crawl_attempts_pending_transport_cleanup",
+        table_name="crawl_attempts",
+    )
     op.drop_index("ix_crawl_attempts_expired_lease", table_name="crawl_attempts")
     op.drop_index(
         "ix_crawl_attempts_redelivery_candidates",

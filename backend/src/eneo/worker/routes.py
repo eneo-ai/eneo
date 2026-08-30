@@ -155,7 +155,7 @@ async def _reconcile_crawl_dispatch_and_record_health() -> CrawlReconciliationRe
     return result
 
 
-@crawler_worker.long_running_function(with_user=False)
+@crawler_worker.long_running_function(with_user=False, keep_result=0)
 async def crawl(job_id: UUID, params: CrawlTask, container: Container):
     """Crawl task uses long_running_function to avoid DB pool exhaustion.
 

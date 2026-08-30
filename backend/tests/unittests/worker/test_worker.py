@@ -46,6 +46,7 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.after_job_end is not None
     assert crawler.job_serializer is general.job_serializer
     assert crawler.job_deserializer is general.job_deserializer
+    assert crawler.functions["crawl"].keep_result_s == 0
 
 
 async def test_successful_reconciliation_renews_its_health_signal(monkeypatch) -> None:

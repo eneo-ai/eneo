@@ -2,6 +2,13 @@ from uuid import UUID
 
 from arq import create_pool
 from arq.connections import ArqRedis
+from arq.constants import (
+    abort_jobs_ss,
+    in_progress_key_prefix,
+    job_key_prefix,
+    result_key_prefix,
+    retry_key_prefix,
+)
 from arq.jobs import Job
 
 from eneo.jobs.job_models import Task
@@ -62,6 +69,32 @@ class JobManager:
     async def enqueue_jobless(self, task: Task):
         assert self._redis is not None
         await self._redis.enqueue_job(task, _queue_name=queue_name_for_task(task))
+
+    async def discard_crawl_deliveries(self, job_ids: tuple[UUID, ...]) -> None:
+        """Atomically remove expired crawl deliveries and their ARQ bookkeeping."""
+        if not job_ids:
+            return
+        if self._redis is None:
+            raise NotReadyException("Job manager is not initialized!")
+
+        members = tuple(str(job_id) for job_id in job_ids)
+        keys = tuple(
+            key
+            for member in members
+            for key in (
+                job_key_prefix + member,
+                in_progress_key_prefix + member,
+                retry_key_prefix + member,
+                result_key_prefix + member,
+            )
+        )
+        # Deletion is idempotent; PostgreSQL retains the cleanup obligation
+        # until this transaction succeeds and the caller acknowledges it.
+        async with self._redis.pipeline(transaction=True) as transaction:
+            transaction.zrem(CRAWLER_QUEUE_NAME, *members)
+            transaction.zrem(abort_jobs_ss, *members)
+            transaction.delete(*keys)
+            await transaction.execute()
 
     async def get_job_status(self, job_id: UUID, task: Task):
         if self._redis is None:

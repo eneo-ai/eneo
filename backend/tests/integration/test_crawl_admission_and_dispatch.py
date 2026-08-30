@@ -1,9 +1,9 @@
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 from uuid import UUID, uuid4
 
 import pytest
@@ -375,6 +375,251 @@ async def test_delivery_failure_remains_repairable_and_retry_is_idempotent(
         concurrency_limit=1,
     )
     assert (redelivered.claimed, redelivered.dispatched) == (1, 1)
+
+
+async def test_expired_worker_delivery_is_discarded_after_database_repair(
+    db_session,
+    admin_user,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Expired transport delivery",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        run_id = cast(UUID, run.id)
+        dispatch_id = attempt.dispatch_id
+        repo = CrawlRunRepository(session)
+        assert await repo.mark_dispatched(attempt.id) is True
+        assert (
+            await repo.claim_attempt(
+                attempt.id,
+                dispatch_id=dispatch_id,
+                lease_owner="dead-worker",
+                lease_duration=timedelta(minutes=5),
+            )
+            is not None
+        )
+        attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+    async def assert_repaired_before_discard(job_ids: tuple[UUID, ...]) -> None:
+        assert job_ids == (dispatch_id,)
+        async with db_session() as verification_session:
+            repaired = await CrawlRunRepository(verification_session).one(run_id)
+            assert repaired.phase == CrawlPhase.TERMINAL
+            assert repaired.outcome == CrawlOutcome.INTERRUPTED
+
+    discard = AsyncMock(side_effect=assert_repaired_before_discard)
+    result = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=AsyncMock(return_value=None),
+        discard=discard,
+        concurrency_limit=1,
+    )
+
+    assert (result.interrupted, result.delivery_errors) == (1, 0)
+    discard.assert_awaited_once_with((dispatch_id,))
+
+    async with db_session() as session:
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.dispatch_id == dispatch_id)
+        )
+        assert attempt is not None
+        assert attempt.transport_cleaned_at is not None
+
+
+async def test_concurrent_reconcilers_cleanup_the_same_expired_delivery_safely(
+    db_session,
+    admin_user,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Concurrent transport cleanup",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        dispatch_id = attempt.dispatch_id
+        repository = CrawlRunRepository(session)
+        assert await repository.mark_dispatched(attempt.id) is True
+        assert (
+            await repository.claim_attempt(
+                attempt.id,
+                dispatch_id=dispatch_id,
+                lease_owner="dead-worker",
+                lease_duration=timedelta(minutes=5),
+            )
+            is not None
+        )
+        attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        assert await repository.interrupt_expired_attempts() == 1
+
+    both_discards_started = asyncio.Event()
+    discard_count = 0
+
+    async def synchronize_discard(job_ids: tuple[UUID, ...]) -> None:
+        nonlocal discard_count
+        assert job_ids == (dispatch_id,)
+        discard_count += 1
+        if discard_count == 2:
+            both_discards_started.set()
+        await asyncio.wait_for(both_discards_started.wait(), timeout=5)
+
+    first, second = await asyncio.wait_for(
+        asyncio.gather(
+            crawl_dispatch.reconcile_crawl_work(
+                enqueue=AsyncMock(return_value=None),
+                discard=synchronize_discard,
+                concurrency_limit=1,
+            ),
+            crawl_dispatch.reconcile_crawl_work(
+                enqueue=AsyncMock(return_value=None),
+                discard=synchronize_discard,
+                concurrency_limit=1,
+            ),
+        ),
+        timeout=10,
+    )
+
+    assert first.interrupted == second.interrupted == 0
+    assert first.delivery_errors == second.delivery_errors == 0
+    assert discard_count == 2
+    async with db_session() as session:
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.dispatch_id == dispatch_id)
+        )
+        assert attempt is not None
+        assert attempt.transport_cleaned_at is not None
+
+
+async def test_expired_worker_transport_cleanup_retries_until_acknowledged(
+    db_session,
+    admin_user,
+    monkeypatch,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Failed transport cleanup",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        dispatch_id = attempt.dispatch_id
+        repo = CrawlRunRepository(session)
+        assert await repo.mark_dispatched(attempt.id) is True
+        assert (
+            await repo.claim_attempt(
+                attempt.id,
+                dispatch_id=attempt.dispatch_id,
+                lease_owner="dead-worker",
+                lease_duration=timedelta(minutes=5),
+            )
+            is not None
+        )
+        attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+    original_acknowledge = CrawlRunRepository.acknowledge_transport_cleanup
+    acknowledge_calls = 0
+
+    async def acknowledge_after_one_failure(
+        repository: CrawlRunRepository,
+        dispatch_ids: tuple[UUID, ...],
+    ) -> None:
+        nonlocal acknowledge_calls
+        acknowledge_calls += 1
+        if acknowledge_calls == 1:
+            raise ConnectionError("PostgreSQL acknowledgement interrupted")
+        await original_acknowledge(repository, dispatch_ids)
+
+    monkeypatch.setattr(
+        CrawlRunRepository,
+        "acknowledge_transport_cleanup",
+        acknowledge_after_one_failure,
+    )
+    discard = AsyncMock(side_effect=[ConnectionError("Redis unavailable"), None, None])
+    enqueue = AsyncMock(return_value=None)
+
+    failed = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=enqueue,
+        discard=discard,
+        concurrency_limit=1,
+    )
+
+    async with db_session() as session:
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.dispatch_id == dispatch_id)
+        )
+        assert attempt is not None
+        assert attempt.transport_cleaned_at is None
+        assert (
+            await CrawlRunRepository(session).health_snapshot()
+        ).pending_transport_cleanup == 1
+
+    acknowledgement_failed = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=enqueue,
+        discard=discard,
+        concurrency_limit=1,
+    )
+
+    async with db_session() as session:
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.dispatch_id == dispatch_id)
+        )
+        assert attempt is not None
+        assert attempt.transport_cleaned_at is None
+
+    retried = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=enqueue,
+        discard=discard,
+        concurrency_limit=1,
+    )
+
+    async with db_session() as session:
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.dispatch_id == dispatch_id)
+        )
+        assert attempt is not None
+        assert attempt.transport_cleaned_at is not None
+        assert (
+            await CrawlRunRepository(session).health_snapshot()
+        ).pending_transport_cleanup == 0
+
+    converged = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=enqueue,
+        discard=discard,
+        concurrency_limit=1,
+    )
+
+    assert (failed.interrupted, failed.delivery_errors) == (1, 1)
+    assert (
+        acknowledgement_failed.interrupted,
+        acknowledgement_failed.delivery_errors,
+    ) == (
+        0,
+        1,
+    )
+    assert (retried.interrupted, retried.delivery_errors) == (0, 0)
+    assert (converged.interrupted, converged.delivery_errors) == (0, 0)
+    assert discard.await_args_list == [
+        call((dispatch_id,)),
+        call((dispatch_id,)),
+        call((dispatch_id,)),
+    ]
 
 
 async def test_invalid_persisted_dispatch_becomes_terminal_failure(

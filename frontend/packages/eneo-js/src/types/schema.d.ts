@@ -10963,6 +10963,8 @@ export interface components {
       active_total?: number | null;
       /** Expired Leases */
       expired_leases?: number | null;
+      /** Pending Transport Cleanup */
+      pending_transport_cleanup?: number | null;
       /** Oldest Active Age Seconds */
       oldest_active_age_seconds?: number | null;
     };

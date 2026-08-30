@@ -211,6 +211,10 @@ class CrawlAttempts(BasePublic):
             "failure_detail IS NULL OR char_length(failure_detail) <= 512",
             name="ck_crawl_attempts_failure_detail_length",
         ),
+        CheckConstraint(
+            "transport_cleaned_at IS NULL OR failure_code = 'lease_expired'",
+            name="ck_crawl_attempts_transport_cleanup",
+        ),
         Index(
             "uq_crawl_attempts_active_run",
             "crawl_run_id",
@@ -242,6 +246,14 @@ class CrawlAttempts(BasePublic):
                 "lease_expires_at IS NOT NULL AND finished_at IS NULL"
             ),
         ),
+        Index(
+            "ix_crawl_attempts_pending_transport_cleanup",
+            "finished_at",
+            "id",
+            postgresql_where=text(
+                "failure_code = 'lease_expired' AND transport_cleaned_at IS NULL"
+            ),
+        ),
     )
 
     crawl_run_id: Mapped[UUID] = mapped_column(
@@ -268,6 +280,9 @@ class CrawlAttempts(BasePublic):
     )
     failure_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     failure_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    transport_cleaned_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
 
 
 class Websites(BasePublic):

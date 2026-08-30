@@ -39,6 +39,10 @@ _CLEAN_OUTCOMES = {
     CrawlOutcome.UNCHANGED,
     CrawlOutcome.EMPTY,
 }
+_PENDING_TRANSPORT_CLEANUP = sa.and_(
+    CrawlAttempts.failure_code == CrawlFailureCode.LEASE_EXPIRED.value,
+    CrawlAttempts.transport_cleaned_at.is_(None),
+)
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
@@ -64,6 +68,7 @@ class CrawlLifecycleSnapshot:
     finalizing: int
     stopping: int
     expired_leases: int
+    pending_transport_cleanup: int
     oldest_active_age_seconds: int | None
 
     @property
@@ -131,6 +136,11 @@ class CrawlRunRepository:
             .where(CrawlRunsTable.phase != CrawlPhase.TERMINAL.value)
             .where(CrawlRunsTable.attempt_count == CrawlAttempts.attempt_number)
         )
+        pending_transport_cleanup = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(CrawlAttempts)
+            .where(_PENDING_TRANSPORT_CLEANUP)
+        )
         return CrawlLifecycleSnapshot(
             pending_dispatch=counts.get(CrawlPhase.PENDING_DISPATCH.value, 0),
             queued=counts.get(CrawlPhase.QUEUED.value, 0),
@@ -138,6 +148,7 @@ class CrawlRunRepository:
             finalizing=counts.get(CrawlPhase.FINALIZING.value, 0),
             stopping=counts.get(CrawlPhase.STOPPING.value, 0),
             expired_leases=int(expired or 0),
+            pending_transport_cleanup=int(pending_transport_cleanup or 0),
             oldest_active_age_seconds=oldest_active_age_seconds,
         )
 
@@ -754,6 +765,28 @@ class CrawlRunRepository:
             )
         await self.session.flush()
         return len(rows)
+
+    async def pending_transport_cleanup_candidates(self) -> tuple[UUID, ...]:
+        dispatch_ids = await self.session.scalars(
+            sa.select(CrawlAttempts.dispatch_id)
+            .where(_PENDING_TRANSPORT_CLEANUP)
+            .order_by(CrawlAttempts.finished_at.asc(), CrawlAttempts.id.asc())
+            .limit(LEASE_SWEEP_BATCH_SIZE)
+        )
+        return tuple(dispatch_ids.all())
+
+    async def acknowledge_transport_cleanup(
+        self,
+        dispatch_ids: tuple[UUID, ...],
+    ) -> None:
+        if not dispatch_ids:
+            return
+        await self.session.execute(
+            sa.update(CrawlAttempts)
+            .where(CrawlAttempts.dispatch_id.in_(dispatch_ids))
+            .where(_PENDING_TRANSPORT_CLEANUP)
+            .values(transport_cleaned_at=sa.func.now())
+        )
 
     async def _lock_current_attempt(
         self,

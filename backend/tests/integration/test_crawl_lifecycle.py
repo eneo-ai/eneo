@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -414,6 +414,10 @@ async def test_expired_lease_becomes_a_terminal_interruption(
         interrupted = await repo.interrupt_expired_attempts()
 
         assert interrupted == 1
+        assert await repo.pending_transport_cleanup_candidates() == (job.id,)
+        assert (await repo.health_snapshot()).pending_transport_cleanup == 1
+        await repo.acknowledge_transport_cleanup((job.id,))
+        assert await repo.pending_transport_cleanup_candidates() == ()
         recovered = await repo.one(run.id)
         assert recovered.phase == CrawlPhase.TERMINAL
         assert recovered.outcome == CrawlOutcome.INTERRUPTED
@@ -435,6 +439,7 @@ async def test_health_snapshot_reports_authoritative_phase_and_expired_lease(
         assert pending.pending_dispatch == 1
         assert pending.active_total == 1
         assert pending.expired_leases == 0
+        assert pending.pending_transport_cleanup == 0
         assert pending.oldest_active_age_seconds is not None
         assert pending.oldest_active_age_seconds >= 0
 
@@ -475,6 +480,73 @@ async def test_health_snapshot_reports_authoritative_phase_and_expired_lease(
         assert running.running == 1
         assert running.active_total == 1
         assert running.expired_leases == 1
+        assert running.pending_transport_cleanup == 0
+
+        assert await repo.interrupt_expired_attempts() == 1
+        repaired = await repo.health_snapshot()
+        assert repaired.active_total == 0
+        assert repaired.expired_leases == 0
+        assert repaired.pending_transport_cleanup == 1
+
+
+async def test_transport_cleanup_candidates_are_bounded_and_converge(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        finished_at = datetime.now(timezone.utc)
+        dispatch_ids: set[UUID] = set()
+        attempts: list[CrawlAttempts] = []
+        for _ in range(101):
+            run_id = uuid4()
+            dispatch_id = uuid4()
+            dispatch_ids.add(dispatch_id)
+            session.add(
+                CrawlRunsTable(
+                    id=run_id,
+                    website_id=website.id,
+                    tenant_id=admin_user.tenant_id,
+                    phase=CrawlPhase.TERMINAL.value,
+                    outcome=CrawlOutcome.INTERRUPTED.value,
+                    origin=CrawlOrigin.MANUAL.value,
+                    finished_at=finished_at,
+                    failure_code=CrawlFailureCode.LEASE_EXPIRED.value,
+                    failure_detail="Expired worker lease",
+                    attempt_count=1,
+                )
+            )
+            attempts.append(
+                CrawlAttempts(
+                    crawl_run_id=run_id,
+                    attempt_number=1,
+                    dispatch_id=dispatch_id,
+                    dispatch_payload={},
+                    dispatch_attempted_at=finished_at,
+                    dispatched_at=finished_at,
+                    started_at=finished_at,
+                    finished_at=finished_at,
+                    failure_code=CrawlFailureCode.LEASE_EXPIRED.value,
+                    failure_detail="Expired worker lease",
+                )
+            )
+        await session.flush()
+        session.add_all(attempts)
+        await session.flush()
+
+        repository = CrawlRunRepository(session)
+        first_batch = await repository.pending_transport_cleanup_candidates()
+        assert len(first_batch) == 100
+        assert set(first_batch) < dispatch_ids
+
+        await repository.acknowledge_transport_cleanup(first_batch)
+        second_batch = await repository.pending_transport_cleanup_candidates()
+        assert len(second_batch) == 1
+        assert second_batch[0] in dispatch_ids - set(first_batch)
+
+        await repository.acknowledge_transport_cleanup(second_batch)
+        assert await repository.pending_transport_cleanup_candidates() == ()
 
 
 async def test_lease_lock_prevents_sweeper_overlap_and_stale_overwrite(
@@ -487,6 +559,7 @@ async def test_lease_lock_prevents_sweeper_overlap_and_stale_overwrite(
         repo = CrawlRunRepository(session)
         first_run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
         first_job = await _job(session, admin_user)
+        first_job_id = first_job.id
         first_attempt_id = uuid4()
         first_task = _task(
             website=website,
@@ -544,6 +617,9 @@ async def test_lease_lock_prevents_sweeper_overlap_and_stale_overwrite(
 
     async with db_session() as session:
         assert await CrawlRunRepository(session).interrupt_expired_attempts() == 1
+        assert await CrawlRunRepository(
+            session
+        ).pending_transport_cleanup_candidates() == (first_job_id,)
 
     async with db_session() as session:
         repo = CrawlRunRepository(session)
