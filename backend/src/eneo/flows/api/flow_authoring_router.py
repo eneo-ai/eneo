@@ -412,8 +412,8 @@ async def get_published_flow_runtime(
     summary="Update Flow",
     description=(
         "Update a draft flow definition, including steps, metadata, and its "
-        "configured retention contribution. The Flow value can tighten but cannot "
-        "activate or loosen automatic run-history deletion. "
+        "configured purge eligibility. The Flow value overrides the Space and "
+        "tenant windows but does not delete Flow data. "
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={

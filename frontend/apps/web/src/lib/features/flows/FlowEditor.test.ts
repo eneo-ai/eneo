@@ -337,7 +337,7 @@ describe("FlowEditor basic settings commands", () => {
     }
   });
 
-  it("keeps a latent Flow contribution read-only while automatic deletion is off", () => {
+  it("keeps a latent Flow contribution read-only without an eligibility window", () => {
     const editor = createFlowEditor({
       flow: makeFlow(null, {
         data_retention_days: 30,

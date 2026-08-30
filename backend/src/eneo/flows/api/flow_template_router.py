@@ -231,8 +231,8 @@ async def upload_flow_template_file(
     summary="Delete a flow template asset",
     description=(
         "Remove a draft DOCX template asset from a flow. The underlying file "
-        "blob is reclaimed by retention after no live or published-version "
-        "reference can still use it."
+        "remains stored until an administrator-requested purge explicitly includes "
+        "it after no live or published-version reference can still use it."
     ),
     responses={
         403: error_response(

@@ -4339,7 +4339,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow
-     * @description Update a draft flow definition, including steps, metadata, and its configured retention contribution. The Flow value can tighten but cannot activate or loosen automatic run-history deletion. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Update a draft flow definition, including steps, metadata, and its configured purge eligibility. The Flow value overrides the Space and tenant windows but does not delete Flow data. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow"];
     trace?: never;
@@ -5174,7 +5174,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a flow template asset
-     * @description Remove a draft DOCX template asset from a flow. The underlying file blob is reclaimed by retention after no live or published-version reference can still use it.
+     * @description Remove a draft DOCX template asset from a flow. The underlying file remains stored until an administrator-requested purge explicitly includes it after no live or published-version reference can still use it.
      */
     delete: operations["delete_flow_template_file"];
     options?: never;
@@ -6938,7 +6938,7 @@ export interface paths {
     };
     /**
      * Get flow retention policy
-     * @description Return the tenant fallback for layered Flow run-history retention, the runtime-upload cleanup window, and the independent debug-evidence value. A Flow-specific value overrides its Space value, and a Space value overrides the tenant fallback. Null means automatic deletion is disabled at that layer; this endpoint never previews or reconstructs deleted data.
+     * @description Return the tenant fallback for layered Flow run-history purge eligibility, the runtime-upload eligibility window, and the independent debug-evidence eligibility window. A Flow-specific value overrides its Space value, and a Space value overrides the tenant fallback. Null means no eligibility window at that layer. Reading this endpoint never previews, deletes, or redacts Flow data.
      */
     get: operations["get_flow_retention_policy"];
     put?: never;
@@ -6948,7 +6948,7 @@ export interface paths {
     head?: never;
     /**
      * Update flow retention policy
-     * @description Update tenant Flow retention inputs. Omitted fields are unchanged and null means Off. Flow values override Space values, which override this tenant fallback. run_debug_evidence_days remains independent JSONB cleanup. The shared retention worker applies changes on its next scheduled pass; there is no classification barrier, tombstone, or preview/confirmation workflow.
+     * @description Update tenant Flow purge-eligibility inputs. Omitted fields are unchanged and null removes the tenant input. Flow values override Space values, which override this tenant fallback; run_debug_evidence_days remains independent. Saving these values never deletes or redacts Flow data. Deletion requires a separate explicit administrator purge with preview and confirmation.
      */
     patch: operations["update_flow_retention_policy"];
     trace?: never;
@@ -15851,7 +15851,7 @@ export interface components {
     FlowCreateRequest: {
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
+       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
       /** Description */
@@ -16948,7 +16948,7 @@ export interface components {
       created_by_user_id?: string | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
+       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
       /** Description */
@@ -16974,7 +16974,7 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window. Organization and matching-classification minimum/no-purge barriers never activate deletion and cannot be weakened here.
+       * @description Effective administrator-requested purge eligibility for Flow run history. A Flow value overrides its Space value, and a Space value overrides the tenant fallback. A days state reports eligibility only and never authorizes deletion; off means that no eligibility window is configured.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -17270,12 +17270,18 @@ export interface components {
     FlowRetentionPolicyPublic: {
       /**
        * Flow Run History Retention Days
-       * @description Tenant fallback for Flow run history. A Flow value overrides its Space value, and a Space value overrides this tenant value.
+       * @description Tenant purge eligibility fallback for Flow run history. A Flow value overrides its Space value, and a Space value overrides this tenant value.
        */
       flow_run_history_retention_days: number | null;
-      /** Flow Runtime Upload Abandonment Days */
+      /**
+       * Flow Runtime Upload Abandonment Days
+       * @description Tenant purge eligibility window for Flow runtime uploads that were never bound to a run input. Null means no tenant window; saving a value never removes uploads.
+       */
       flow_runtime_upload_abandonment_days: number | null;
-      /** Run Debug Evidence Days */
+      /**
+       * Run Debug Evidence Days
+       * @description Tenant purge eligibility window for stored Flow debug evidence. Null means no tenant window; saving a value never redacts evidence.
+       */
       run_debug_evidence_days: number | null;
     };
     /**
@@ -17287,11 +17293,20 @@ export interface components {
      *     }
      */
     FlowRetentionPolicyUpdate: {
-      /** Flow Run History Retention Days */
+      /**
+       * Flow Run History Retention Days
+       * @description Tenant purge eligibility fallback for Flow run history. A Flow value overrides its Space value, and a Space value overrides this tenant value.
+       */
       flow_run_history_retention_days?: number | null;
-      /** Flow Runtime Upload Abandonment Days */
+      /**
+       * Flow Runtime Upload Abandonment Days
+       * @description Tenant purge eligibility window for Flow runtime uploads that were never bound to a run input. Null means no tenant window; saving a value never removes uploads.
+       */
       flow_runtime_upload_abandonment_days?: number | null;
-      /** Run Debug Evidence Days */
+      /**
+       * Run Debug Evidence Days
+       * @description Tenant purge eligibility window for stored Flow debug evidence. Null means no tenant window; saving a value never redacts evidence.
+       */
       run_debug_evidence_days?: number | null;
     };
     /** FlowReviewCheckpointRuntimePathsPublic */
@@ -21223,7 +21238,7 @@ export interface components {
       created_by_user_id?: string | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
+       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
       /** Description */
@@ -21249,7 +21264,7 @@ export interface components {
       published_version?: number | null;
       /**
        * Run History Retention
-       * @description Effective automatic Flow run-history deletion state. The organization or matching classification value activates deletion; space and Flow values can only tighten the active window. Organization and matching-classification minimum/no-purge barriers never activate deletion and cannot be weakened here.
+       * @description Effective administrator-requested purge eligibility for Flow run history. A Flow value overrides its Space value, and a Space value overrides the tenant fallback. A days state reports eligibility only and never authorizes deletion; off means that no eligibility window is configured.
        */
       run_history_retention:
         | components["schemas"]["FlowRunRetentionOff"]
@@ -25682,7 +25697,7 @@ export interface components {
     PartialFlowUpdateRequest: {
       /**
        * Data Retention Days
-       * @description Number of days to retain full Flow run and step history. This value can only tighten an active organization or matching classification policy; null removes the Flow contribution. Valid range: 1-2555 days.
+       * @description Number of days before this Flow's run and step history becomes eligible for an administrator-requested purge. Time starts when the run finishes, or when it was created if no finish time exists. This Flow value overrides the Space value and tenant fallback; null removes the Flow override. Saving this value never deletes Flow data. Valid range: 1-2555 days.
        */
       data_retention_days?: number | null;
       /** Description */
@@ -25724,7 +25739,7 @@ export interface components {
       completion_models?: components["schemas"]["ModelId"][] | null;
       /**
        * Data Retention Days
-       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. For Flow run history, this value can only tighten an active organization or matching classification policy. Set to null to disable the space-level conversation policy and remove the Space contribution from the Flow envelope. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
+       * @description Number of days to retain conversation history for this space. Applies to all assistants and apps in the space that don't have their own retention policy. For Flow run history, this value overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only. It never authorizes Flow deletion. Set to null to disable the space-level conversation policy and remove the Space eligibility value for Flows. Omit to keep the current retention policy unchanged. Valid range: 1-2555 days (1 day to 7 years).
        */
       data_retention_days?: number | null;
       /** Description */
@@ -29273,7 +29288,7 @@ export interface components {
       created_at?: string | null;
       /**
        * Data Retention Days
-       * @description Configured Space retention days. This governs conversation history for assistants and apps, and is only a tightening contribution for an already-active Flow run-history deletion envelope.
+       * @description Configured Space retention days. This governs conversation history for assistants and apps. For Flow run history, it overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only; it never authorizes Flow deletion.
        */
       data_retention_days?: number | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
@@ -29354,7 +29369,7 @@ export interface components {
       created_at?: string | null;
       /**
        * Data Retention Days
-       * @description Configured Space retention days. This governs conversation history for assistants and apps, and is only a tightening contribution for an already-active Flow run-history deletion envelope.
+       * @description Configured Space retention days. This governs conversation history for assistants and apps. For Flow run history, it overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only; it never authorizes Flow deletion.
        */
       data_retention_days?: number | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
@@ -29414,7 +29429,7 @@ export interface components {
       created_at?: string | null;
       /**
        * Data Retention Days
-       * @description Configured Space retention days. This governs conversation history for assistants and apps, and is only a tightening contribution for an already-active Flow run-history deletion envelope.
+       * @description Configured Space retention days. This governs conversation history for assistants and apps. For Flow run history, it overrides the tenant fallback when a Flow has no override and defines eligibility for an administrator-requested purge only; it never authorizes Flow deletion.
        */
       data_retention_days?: number | null;
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;

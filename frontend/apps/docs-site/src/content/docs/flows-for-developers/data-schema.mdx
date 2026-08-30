@@ -76,11 +76,11 @@ order:
 2. Space `data_retention_days`
 3. Tenant Flow-run-history default
 
-The first configured value wins. No value means automatic Flow run-history
-deletion is off. The shared retention worker selects complete run aggregates in
-bounded tenant-scoped batches and respects audit/webhook delivery blockers. It
-does not implement preview/confirm governance, classification barriers,
-minimum-retention rules, or tombstones.
+The first configured value wins. No value means there is no run-history purge
+eligibility window. These values never authorize scheduled deletion: the shared
+retention worker does not mutate Flow-owned data. A separate administrator purge
+must own preview, confirmation, execution, and the immutable audit receipt while
+continuing to respect audit and webhook delivery blockers.
 
 ## JSONB ownership
 

@@ -697,6 +697,22 @@ class FlowEvidencePolicyUpdate(BaseModel):
         return value
 
 
+FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION = (
+    "Tenant purge eligibility window for stored Flow debug evidence. Null means "
+    "no tenant window; saving a value never redacts evidence."
+)
+FLOW_RUN_HISTORY_ELIGIBILITY_DESCRIPTION = (
+    "Tenant purge eligibility fallback for Flow run history. A Flow value "
+    "overrides its Space "
+    "value, and a Space value overrides this tenant value."
+)
+FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION = (
+    "Tenant purge eligibility window for Flow runtime uploads that were never "
+    "bound to a run input. Null means no tenant window; saving a value never "
+    "removes uploads."
+)
+
+
 class FlowRetentionPolicyPublic(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -710,20 +726,25 @@ class FlowRetentionPolicyPublic(BaseModel):
     )
 
     run_debug_evidence_days: int | None = Field(
-        ..., strict=True, ge=MIN_RETENTION_DAYS, le=MAX_RETENTION_DAYS
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description=FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION,
     )
     flow_run_history_retention_days: int | None = Field(
         ...,
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
-        description=(
-            "Tenant fallback for Flow run history. A Flow value overrides its Space "
-            "value, and a Space value overrides this tenant value."
-        ),
+        description=FLOW_RUN_HISTORY_ELIGIBILITY_DESCRIPTION,
     )
     flow_runtime_upload_abandonment_days: int | None = Field(
-        ..., strict=True, ge=MIN_RETENTION_DAYS, le=MAX_RETENTION_DAYS
+        ...,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+        description=FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION,
     )
 
 
@@ -744,6 +765,7 @@ class FlowRetentionPolicyUpdate(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
+        description=FLOW_DEBUG_EVIDENCE_ELIGIBILITY_DESCRIPTION,
         json_schema_extra=_strip_json_schema_default,
     )
     flow_run_history_retention_days: int | None = Field(
@@ -751,6 +773,7 @@ class FlowRetentionPolicyUpdate(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
+        description=FLOW_RUN_HISTORY_ELIGIBILITY_DESCRIPTION,
         json_schema_extra=_strip_json_schema_default,
     )
     flow_runtime_upload_abandonment_days: int | None = Field(
@@ -758,6 +781,7 @@ class FlowRetentionPolicyUpdate(BaseModel):
         strict=True,
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
+        description=FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION,
         json_schema_extra=_strip_json_schema_default,
     )
 

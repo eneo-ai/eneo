@@ -1625,11 +1625,11 @@ A single limit governs both: **1 MiB of UTF-8 bytes**, deployment-configurable t
 
 ### Retention
 
-Run history retention is a tenant setting and is off by default, so runs and their files persist until an administrator configures a window. Once a window is configured, expiry deletes the run and step history outright; artifact bytes purged earlier leave metadata behind with `availability: "content_purged"`. Because create-run idempotency replay is tied to the retained run row, the practical replay window is the run's retention window.
+Run-history settings define when data becomes eligible for an administrator-requested purge. Configuring a window does not delete anything, and no scheduled worker purges Flow-owned data. Runs and their files persist until an administrator explicitly previews, confirms, and starts a purge. Because create-run idempotency replay is tied to the retained run row, a completed purge also ends replay against that historical row.
 
 Abandoned uploads that were never attached to a run are not swept automatically. Delete them yourself with `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; a file already bound to a run returns `409 flow_runtime_file_attached`.
 
-Once retention has removed a run row, its create-run `Idempotency-Key` no longer matches anything, so replaying that key creates a new run instead of returning the old one. Keep the run id, not the key, as your durable handle.
+Once an administrator-requested purge has removed a run row, its create-run `Idempotency-Key` no longer matches anything, so replaying that key creates a new run instead of returning the old one. Keep the run id, not the key, as your durable handle.
 
 ## What this API does not offer
 

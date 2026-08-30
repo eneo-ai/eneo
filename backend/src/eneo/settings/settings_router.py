@@ -642,11 +642,12 @@ async def update_flow_evidence_policy(
     operation_id="get_flow_retention_policy",
     summary="Get flow retention policy",
     description=(
-        "Return the tenant fallback for layered Flow run-history retention, the "
-        "runtime-upload cleanup window, and the independent debug-evidence value. "
-        "A Flow-specific value overrides its Space value, and a Space value "
-        "overrides the tenant fallback. Null means automatic deletion is disabled "
-        "at that layer; this endpoint never previews or reconstructs deleted data."
+        "Return the tenant fallback for layered Flow run-history purge eligibility, "
+        "the runtime-upload eligibility window, and the independent debug-evidence "
+        "eligibility window. A Flow-specific value overrides its Space value, and "
+        "a Space value overrides the tenant fallback. Null means no eligibility "
+        "window at that layer. Reading this endpoint never previews, deletes, or "
+        "redacts Flow data."
     ),
     responses={403: _flow_settings_admin_forbidden_response()},
 )
@@ -664,11 +665,11 @@ async def get_flow_retention_policy(
     operation_id="update_flow_retention_policy",
     summary="Update flow retention policy",
     description=(
-        "Update tenant Flow retention inputs. Omitted fields are unchanged and null "
-        "means Off. Flow values override Space values, which override this tenant "
-        "fallback. run_debug_evidence_days remains independent JSONB cleanup. The "
-        "shared retention worker applies changes on its next scheduled pass; there "
-        "is no classification barrier, tombstone, or preview/confirmation workflow."
+        "Update tenant Flow purge-eligibility inputs. Omitted fields are unchanged "
+        "and null removes the tenant input. Flow values override Space values, which "
+        "override this tenant fallback; run_debug_evidence_days remains independent. "
+        "Saving these values never deletes or redacts Flow data. Deletion requires "
+        "a separate explicit administrator purge with preview and confirmation."
     ),
     responses={
         400: _flow_settings_invalid_payload_response(

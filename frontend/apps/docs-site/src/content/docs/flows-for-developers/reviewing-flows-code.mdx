@@ -16,7 +16,7 @@ abstraction.
 | Review | checkpoint service and repository | actor scope, revision CAS, one active checkpoint, audit outbox |
 | Files or artifacts | runtime file service and file-row repositories | tenant/principal ownership, binding lock, signed access, retention behavior |
 | Evidence/export | evidence service, redaction owner, API adapter | tenant scope, same redaction policy, honest missing evidence, audit-before-response |
-| Retention | shared retention resolver/worker and purge repository | Flow → Space → Tenant resolution, blockers, bounded whole-run purge |
+| Retention eligibility or purge | Flow retention projection/resolver and purge repository; the explicit administrator purge service once implemented | Flow → Space → tenant override resolution, preview non-mutation, confirmation/audit, blockers, bounded whole-run purge |
 | Package portability | `eneo.flow_packages` plus the Flow adapter | archive safety, checksums, explicit mapping, unpublished target draft |
 | Builder behavior | stacked branch `eneo.flows.ai_builder` | permission/budget/lease/commit boundaries and normal core draft validation |
 

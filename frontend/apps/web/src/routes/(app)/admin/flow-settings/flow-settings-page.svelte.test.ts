@@ -194,13 +194,15 @@ describe("flow settings page — mapped restore lifecycle", () => {
     );
 
     expect(sectionHeadings[0]).toBe("Vad gäller just nu");
-    expect(sectionHeadings).toContain("Automatisk gallring");
+    expect(sectionHeadings).toContain("Villkor för gallring");
 
-    await page.getByRole("switch", { name: "Gallra körningshistorik automatiskt" }).click();
+    await page.getByRole("switch", { name: "Ange gallringsvillkor för körningshistorik" }).click();
     await expect
       .element(page.getByText("Visar sparat läge – du har osparade ändringar."))
       .toBeVisible();
-    await expect.element(page.getByText("Gallras inte automatiskt")).toBeVisible();
+    await expect
+      .element(page.getByText("Inget gallringsvillkor på organisationsnivå"))
+      .toBeVisible();
   });
 
   test("uses task-oriented names for every settings tab", async () => {

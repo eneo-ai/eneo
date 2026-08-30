@@ -131,16 +131,18 @@ from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
 
 FLOW_DATA_RETENTION_DAYS_DESCRIPTION = (
-    "Number of days to retain full Flow run and step history. "
-    "This value can only tighten an active organization or matching "
-    "classification policy; null removes the Flow contribution. "
+    "Number of days before this Flow's run and step history becomes eligible "
+    "for an administrator-requested purge. Time starts when the run finishes, "
+    "or when it was created if no finish time exists. This Flow value overrides "
+    "the Space value and tenant fallback; null removes the Flow override. "
+    "Saving this value never deletes Flow data. "
     f"Valid range: {MIN_RETENTION_DAYS}-{MAX_RETENTION_DAYS} days."
 )
 FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION = (
-    "Effective automatic Flow run-history deletion state. The organization or "
-    "matching classification value activates deletion; space and Flow values "
-    "can only tighten the active window. Organization and matching-classification "
-    "minimum/no-purge barriers never activate deletion and cannot be weakened here."
+    "Effective administrator-requested purge eligibility for Flow run history. "
+    "A Flow value overrides its Space value, and a Space value overrides the "
+    "tenant fallback. A days state reports eligibility only and never authorizes "
+    "deletion; off means that no eligibility window is configured."
 )
 FLOW_SPARSE_STEP_COUNT_DESCRIPTION = (
     "Number of steps in the flow's current step definitions. This reflects "

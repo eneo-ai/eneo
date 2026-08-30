@@ -223,11 +223,11 @@ PATCH requests distinguish omission from null: omit a field to preserve it, or s
 - `flow_run_history_retention_days`
 - `flow_runtime_upload_abandonment_days`
 
-The inputs are nullable integers in the range `1..2555`; there is no default or backfill. `flow_run_history_retention_days` is the tenant fallback for completed run and step history. A Flow value overrides its Space value, and a Space value overrides the tenant value. `flow_runtime_upload_abandonment_days` separately controls runtime uploads that were never attached to a run input. Debug-evidence redaction remains a separate cleanup policy.
+The inputs are nullable integers in the range `1..2555`; there is no default or backfill. `flow_run_history_retention_days` is the tenant fallback for completed run and step history. A Flow value overrides its Space value, and a Space value overrides the tenant value. `flow_runtime_upload_abandonment_days` separately sets eligibility for runtime uploads that were never attached to a run input. Debug-evidence eligibility remains independently configured.
 
-The shared retention worker resolves the first configured value in Flow → Space → tenant order and deletes terminal run history once that window has elapsed. Undelivered audit events and unresolved webhooks continue to block deletion. Every Flow response includes a `run_history_retention` projection with `state`, `effective_days`, `source`, and the three contributors; it makes no per-run purge-eligibility claim.
+The values define purge eligibility; saving them never deletes or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data. Deletion requires a separate administrator-initiated purge with an explicit scope, preview, confirmation, reason, and audit receipt. Until an administrator starts that operation, eligible data remains stored. Undelivered audit events and unresolved webhooks continue to block a purge. Every Flow response includes a `run_history_retention` projection with `state`, `effective_days`, `source`, and the three contributors; it makes no per-run purge-eligibility claim.
 
-Retention deletes the full run and step history. Evidence export therefore reports deletion provenance as not tracked: a missing row may have been purged or may never have been recorded, and the export does not claim which occurred. Use the tenant evidence policy for export controls.
+An administrator-requested purge deletes the full run and step history. Evidence export therefore reports deletion provenance as not tracked: a missing row may have been purged or may never have been recorded, and the export does not claim which occurred. Use the tenant evidence policy for export controls.
 
 ### Flow evidence policy shape
 

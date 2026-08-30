@@ -171,24 +171,24 @@
 
   const runHistoryStatus = $derived.by(() => {
     if (policy.flow_run_history_retention_days == null) {
-      return { active: false, label: m.flow_retention_status_not_deleting() };
+      return { active: false, label: m.flow_retention_status_no_run_history_window() };
     }
     const days = policy.flow_run_history_retention_days;
     return {
       active: true,
       label:
         days != null
-          ? m.flow_retention_status_deleting_days({ days })
-          : m.flow_retention_status_not_deleting()
+          ? m.flow_retention_status_run_history_eligible_days({ days })
+          : m.flow_retention_status_no_run_history_window()
     };
   });
 
   const uploadStatus = $derived.by(() => {
     const days = policy.flow_runtime_upload_abandonment_days;
     if (days == null) {
-      return { active: false, label: m.flow_retention_status_not_cleaning() };
+      return { active: false, label: m.flow_retention_status_no_upload_window() };
     }
-    return { active: true, label: m.flow_retention_status_cleanup_days({ days }) };
+    return { active: true, label: m.flow_retention_status_upload_eligible_days({ days }) };
   });
 
   function formatSeconds(value: number): string {
@@ -456,27 +456,27 @@
         </Settings.Group>
 
         <Settings.Group
-          title={m.flow_retention_group_automatic()}
-          description={m.flow_retention_group_automatic_description()}
+          title={m.flow_retention_group_eligibility()}
+          description={m.flow_retention_group_eligibility_description()}
           density="compact"
         >
           <Settings.ToggleNumberRow
             title={m.flow_retention_run_history_title()}
             description={m.flow_retention_run_history_description()}
-            toggleLabel={m.flow_retention_run_history_enable()}
-            valueLabel={m.flow_retention_delete_after_label()}
+            toggleLabel={m.flow_retention_run_history_window_enable()}
+            valueLabel={m.flow_retention_eligibility_after_label()}
             unit={m.flow_retention_days_suffix()}
-            offStatus={m.flow_retention_run_history_off_status()}
+            offStatus={m.flow_retention_run_history_window_off_status()}
             info={m.flow_retention_run_history_info()}
             field={runHistory}
           />
           <Settings.ToggleNumberRow
             title={m.flow_retention_upload_title()}
             description={m.flow_retention_upload_description()}
-            toggleLabel={m.flow_retention_upload_enable()}
-            valueLabel={m.flow_retention_cleanup_after_label()}
+            toggleLabel={m.flow_retention_upload_window_enable()}
+            valueLabel={m.flow_retention_eligibility_after_label()}
             unit={m.flow_retention_days_suffix()}
-            offStatus={m.flow_retention_upload_off_status()}
+            offStatus={m.flow_retention_upload_window_off_status()}
             info={m.flow_retention_upload_anchor_description()}
             field={uploadCleanup}
           />

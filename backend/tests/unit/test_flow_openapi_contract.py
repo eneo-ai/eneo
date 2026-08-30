@@ -1031,7 +1031,7 @@ def test_openapi_flow_retention_policy_is_default_off_and_strictly_bounded(
         assert "default" not in property_schema
 
 
-def test_openapi_flow_retention_descriptions_are_public_and_match_confirmation_semantics(
+def test_openapi_flow_retention_descriptions_require_explicit_admin_purge(
     openapi_spec: dict,
 ) -> None:
     operations = (
@@ -1043,11 +1043,61 @@ def test_openapi_flow_retention_descriptions_are_public_and_match_confirmation_s
     )
     normalized = descriptions.lower()
 
-    assert "wi-19" not in normalized
     assert "flow-specific value overrides its space value" in normalized
     assert "space value" in normalized
     assert "tenant fallback" in normalized
-    assert "preview/confirmation" in normalized
+    assert "explicit administrator purge" in normalized
+    assert "saving" in normalized
+    assert "never deletes or redacts flow data" in normalized
+    assert "automatic deletion" not in normalized
+    assert "scheduled pass" not in normalized
+
+    schemas = openapi_spec["components"]["schemas"]
+    for schema_name in ("FlowRetentionPolicyPublic", "FlowRetentionPolicyUpdate"):
+        properties = schemas[schema_name]["properties"]
+        for field_name in (
+            "run_debug_evidence_days",
+            "flow_run_history_retention_days",
+            "flow_runtime_upload_abandonment_days",
+        ):
+            assert "purge eligibility" in properties[field_name]["description"].lower()
+
+    public_retention_descriptions = [
+        schemas[schema_name]["properties"]["data_retention_days"]["description"]
+        for schema_name in (
+            "FlowCreateRequest",
+            "PartialFlowUpdateRequest",
+            "FlowSparsePublic",
+            "FlowPublic",
+            "PartialUpdateSpaceRequest",
+            "SpaceSparse",
+        )
+    ]
+    projection_descriptions = [
+        schemas[schema_name]["properties"]["run_history_retention"]["description"]
+        for schema_name in ("FlowSparsePublic", "FlowPublic")
+    ]
+    for description in public_retention_descriptions + projection_descriptions:
+        normalized_description = description.lower()
+        assert "administrator-requested purge" in normalized_description
+        assert "automatic flow run-history deletion" not in normalized_description
+        assert "matching classification" not in normalized_description
+        assert "minimum/no-purge" not in normalized_description
+
+    flow_update_description = _get_operation(
+        openapi_spec, "/api/v1/flows/{id}/", "patch"
+    )["description"].lower()
+    assert "purge eligibility" in flow_update_description
+    assert "does not delete flow data" in flow_update_description
+    assert "automatic run-history deletion" not in flow_update_description
+
+    template_delete_description = _get_operation(
+        openapi_spec,
+        "/api/v1/flows/{id}/template-files/{file_id}/",
+        "delete",
+    )["description"].lower()
+    assert "administrator-requested purge" in template_delete_description
+    assert "reclaimed by retention" not in template_delete_description
 
 
 def test_openapi_flow_retention_preview_and_confirmation_are_exact_contracts(
@@ -2514,9 +2564,9 @@ def test_openapi_flow_retention_days_documents_public_range(
         assert integer_schema.get("minimum") == 1
         assert integer_schema.get("maximum") == 2555
         assert _schema_allows_null(retention_schema)
-        assert "full Flow run and step history" in str(
-            retention_schema.get("description", "")
-        )
+        description = str(retention_schema.get("description", ""))
+        assert "administrator-requested purge" in description
+        assert "never deletes Flow data" in description
 
 
 def test_openapi_flow_read_models_expose_discriminated_retention_projection(

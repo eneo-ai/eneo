@@ -829,8 +829,8 @@
                             <div class="border-default bg-secondary rounded-md border px-3 py-2.5">
                               <p class="text-primary text-sm font-medium">
                                 {runHistoryRetention.state === "off"
-                                  ? m.flow_retention_automatic_off()
-                                  : m.flow_retention_effective_days({
+                                  ? m.flow_retention_no_eligibility_window()
+                                  : m.flow_retention_eligible_after_days({
                                       days: runHistoryRetention.effective_days
                                     })}
                               </p>
@@ -894,8 +894,8 @@
                               {$isPublished
                                 ? m.flow_retention_published_read_only()
                                 : runHistoryRetention.state === "off"
-                                  ? m.flow_retention_off_override_hint()
-                                  : m.flow_retention_active_override_hint()}
+                                  ? m.flow_retention_no_eligibility_hint()
+                                  : m.flow_retention_eligibility_override_hint()}
                             </Field.Description>
                           </Field.Field>
                         </div>

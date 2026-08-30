@@ -135,10 +135,12 @@ class UpdateSpaceRequest(BaseModel):
         description=(
             "Number of days to retain conversation history for this space. "
             "Applies to all assistants and apps in the space that don't have "
-            "their own retention policy. For Flow run history, this value can only "
-            "tighten an active organization or matching classification policy. "
+            "their own retention policy. For Flow run history, this value overrides "
+            "the tenant fallback when a Flow has no override and defines eligibility "
+            "for an administrator-requested purge only. It never authorizes Flow "
+            "deletion. "
             "Set to null to disable the space-level conversation policy and remove "
-            "the Space contribution from the Flow envelope. "
+            "the Space eligibility value for Flows. "
             "Omit to keep the current retention policy unchanged. "
             "Valid range: 1-2555 days (1 day to 7 years)."
         ),
@@ -188,8 +190,9 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
         default=None,
         description=(
             "Configured Space retention days. This governs conversation history "
-            "for assistants and apps, and is only a tightening contribution for "
-            "an already-active Flow run-history deletion envelope."
+            "for assistants and apps. For Flow run history, it overrides the tenant "
+            "fallback when a Flow has no override and defines eligibility for an "
+            "administrator-requested purge only; it never authorizes Flow deletion."
         ),
     )
 

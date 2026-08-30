@@ -51,10 +51,12 @@ perform partial terminal writes.
 
 ## 7. Retention is layered and simple
 
-Run-history retention resolves Flow → Space → Tenant from
-`data_retention_days`. No configured value means automatic deletion is off.
-The final product has no classification retention plane, preview/confirm
-workflow, minimum-retention barriers, or tombstones.
+Run-history purge eligibility resolves Flow → Space → Tenant from
+`data_retention_days`. A configured value only makes data eligible; it never
+authorizes scheduled deletion. An administrator-initiated purge owns the
+preview, confirmation, reason, execution, and immutable audit receipt. The
+final product has no classification retention plane, minimum-retention
+barriers, or tombstones.
 
 ## 8. Tenant ownership is relational
 
