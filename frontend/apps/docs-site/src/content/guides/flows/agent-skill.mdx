@@ -1,0 +1,101 @@
+import { Callout } from "nextra/components";
+
+# Eneo Flows API skill for AI agents
+
+Give a coding agent a portable, Flow-specific operating guide even when it cannot reach your private Eneo deployment or its `/openapi.json`. The downloadable Agent Skill teaches the runtime sequence, typed states, security boundaries, and recovery rules needed to build reliable applications on published Eneo Flows.
+
+This is an **Agent Skill for development tools such as Codex and Claude Code**. It is not an Eneo in-product Skill, a Flow definition, or Flow AI Builder.
+
+## What the installed skill improves
+
+An agent using the skill is instructed to:
+
+- discover the published Flow and current run contract before generating forms or requests;
+- upload files to the correct step and bind them through `step_inputs`;
+- create runs with published-version checks and retry-safe idempotency keys;
+- poll the content-free status endpoint and handle human review as a real lifecycle state;
+- branch on typed final results, signed artifact downloads, and stable error codes;
+- respect audit, evidence, sensitive-content, and retention boundaries;
+- state deployment assumptions instead of inventing an API prefix, limits, or unsupported behavior.
+
+The package contains a concise `SKILL.md`, focused references, and small evaluation definitions. It does not contain credentials, deployment URLs, internal source code, or Flow AI Builder guidance.
+
+## Download
+
+[Download `eneo-flows-api.skill`](/skills/eneo-flows-api.skill)
+
+The `.skill` file is a ZIP-compatible archive. Install it once for a developer, or commit the unpacked directory to a project when every agent working in that repository should share it.
+
+## Install for Codex
+
+Personal installation:
+
+```bash
+mkdir -p ~/.codex/skills
+unzip ~/Downloads/eneo-flows-api.skill -d ~/.codex/skills
+test -f ~/.codex/skills/eneo-flows-api/SKILL.md
+```
+
+For one repository, unpack it into that repository's `.codex/skills` directory instead. Start a new Codex task after installation so the skill is discovered with the task's instructions.
+
+## Install for Claude Code
+
+Personal installation:
+
+```bash
+mkdir -p ~/.claude/skills
+unzip ~/Downloads/eneo-flows-api.skill -d ~/.claude/skills
+test -f ~/.claude/skills/eneo-flows-api/SKILL.md
+```
+
+For one repository, unpack it into `.claude/skills`. Claude Code can discover skills added there; if an existing session does not pick up a newly created top-level skill directory, start a new session.
+
+<Callout type="warning">
+  Review a downloaded skill before installing it. An Agent Skill supplies
+  instructions to your coding agent. Keep deployment credentials in your normal
+  secret store, never inside the skill directory or a generated client.
+</Callout>
+
+## Ask the agent for an integration
+
+Examples that should activate the skill:
+
+```text
+Build a server-side TypeScript client that uploads an audio file to an Eneo Flow,
+starts one run safely, handles human review, and downloads the final report.
+```
+
+```text
+Review our Eneo Flow consumer for duplicate submissions, stale published versions,
+unsafe polling, unhandled result kinds, and incorrect artifact downloads.
+```
+
+```text
+Our agent cannot reach the private openapi.json. Use the Eneo Flows API skill and
+state which paths, limits, and schemas the application must still discover at runtime.
+```
+
+The skill deliberately does not activate for creating draft Flows, prompting Flow AI Builder, or using unrelated Eneo APIs.
+
+## How contract freshness works
+
+The bundled references provide the stable consumer workflow and the exact contract details that are easy to misuse. They are useful when an internal OpenAPI document cannot be shared with an external coding agent.
+
+They do not replace deployment discovery. A generated application must still treat these two public runtime responses as authoritative:
+
+1. `GET /flows/{flow_id}/published/` for server-relative runtime paths and published metadata.
+2. `GET /flows/{flow_id}/run-contract/` for the active version, form fields, step input IDs, MIME types, file limits, review needs, and final-output delivery.
+
+If the target deployment exposes `/openapi.json` to the development environment, generate client types from it and use the skill for workflow and review guidance. If not, the skill tells the agent to define and validate only the boundary fields the application needs, and to record every unverified deployment assumption.
+
+## Consumer responsibility
+
+Installing the skill improves the agent's context; it does not grant API access or verify a deployment. The application owner must still provide:
+
+- the Eneo deployment origin and configured API prefix;
+- a user-token flow or a server-side service key with suitable scope;
+- one or more published Flow IDs or a scoped Space for discovery;
+- product decisions for timeouts, user-visible retries, review roles, and handling sensitive content;
+- integration tests against a non-production deployment before release.
+
+Continue with [Integrating Flows](/guides/flows/integrating-flows) for the human-readable end-to-end guide, [Flow Runtime API Reference](/guides/flows-api-guide) for full endpoint detail, and [Flow error reference](/guides/flows/reference/errors) for the complete error catalog.

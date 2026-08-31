@@ -1,0 +1,44 @@
+{
+  "skill_name": "eneo-flows-api",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Build a server-side TypeScript client that uploads an audio file to a published Eneo Flow, starts one run safely, waits through human review, and downloads the final report. The private OpenAPI document is unavailable in CI.",
+      "expected_output": "An implementation or concrete plan that uses the published projection and run contract as runtime truth, binds the upload to its step, creates idempotently, polls content-free status, handles review, and downloads the typed result safely.",
+      "assertions": [
+        "Fetches the published projection and run contract before collecting inputs",
+        "Uploads with multipart field upload_file and binds the returned ID under step_inputs[step_id].file_ids",
+        "Uses expected_flow_version and one stable Idempotency-Key for identical create retries",
+        "Polls the status endpoint and treats awaiting_review as non-terminal",
+        "Branches on every documented result.kind and downloads a signed URL without an Eneo credential",
+        "States deployment-prefix or schema assumptions that could not be verified"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Implement the human review UI for an Eneo Flow run, including concurrent reviewers and retry-safe resume.",
+      "expected_output": "A review flow that uses the active checkpoint and its revision, sends only the corrected value for edits, separates approval from resume, and recovers from stale state without overwriting another reviewer.",
+      "assertions": [
+        "Handles HTTP 200 with a literal null active checkpoint",
+        "Uses edited_value rather than resending current_payload_json",
+        "Allows editing only when the checkpoint mode and output permit it",
+        "Requires a reason for rejection",
+        "Refreshes after flow_review_stale_revision",
+        "Approves first and resumes separately with one stable resume Idempotency-Key"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Review a public-sector Eneo Flow consumer for sensitive-content exposure, unsafe retry behavior, artifact retention, and unknown API failures.",
+      "expected_output": "A prioritized review that keeps routine polling content-free, treats detail and evidence as audited reads, avoids ambiguous provider retries, handles purged bytes, and degrades safely on unknown error codes.",
+      "assertions": [
+        "Uses run status rather than content-bearing detail for routine polling",
+        "Explains that audited content reads can fail closed instead of bypassing audit",
+        "Does not automatically rerun ambiguous provider work",
+        "Treats signed URLs as short-lived secrets",
+        "Handles content_purged metadata and HTTP 410 without presenting a preview as complete",
+        "Branches on string code and preserves unknown codes plus request IDs for support"
+      ]
+    }
+  ]
+}

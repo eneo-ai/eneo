@@ -28,6 +28,7 @@ export const FLOWS_BUNDLE_ROUTES = [
   "guides/flows",
   "guides/flows/designing-flows",
   "guides/flows/integrating-flows",
+  "guides/flows/agent-skill",
   "guides/flows-api-guide",
   "guides/flows/reference/errors",
   "guides/flows/flows-faq",

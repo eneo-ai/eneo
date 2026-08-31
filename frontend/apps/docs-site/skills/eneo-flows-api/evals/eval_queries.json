@@ -1,0 +1,50 @@
+[
+  {
+    "query": "Build a server-side TypeScript integration that uploads an audio file to the right Eneo Flow step, starts the Flow, and waits for the result. CI cannot access the deployment OpenAPI.",
+    "should_trigger": true
+  },
+  {
+    "query": "we got a published flow id from another team. can you wire it into our case app with the fields and file uploads it asks for?",
+    "should_trigger": true
+  },
+  {
+    "query": "Implement the human review screen for an Eneo Flow run, including edit, approve, reject, resume, and stale revision handling.",
+    "should_trigger": true
+  },
+  {
+    "query": "Our coding agent cannot reach the private Eneo openapi.json. Help it build a correct Flow API consumer and identify what must still be discovered at runtime.",
+    "should_trigger": true
+  },
+  {
+    "query": "Design how our classified case application polls Eneo Flow runs, downloads reports, shows evidence, and explains retention without leaking content.",
+    "should_trigger": true
+  },
+  {
+    "query": "Review our Eneo Flow client. Users double-submit and we sometimes see flow_run_stale_version or flow_run_idempotency_conflict.",
+    "should_trigger": true
+  },
+  {
+    "query": "Use Flow AI Builder to generate and refine a new flow from a natural-language conversation.",
+    "should_trigger": false
+  },
+  {
+    "query": "Add and reorder steps in an unpublished Eneo Flow draft and configure its prompts.",
+    "should_trigger": false
+  },
+  {
+    "query": "Configure a 90-day organization retention policy with a 30-day Space override for Flow history.",
+    "should_trigger": false
+  },
+  {
+    "query": "Integrate the Eneo assistants and conversations API into our chat application.",
+    "should_trigger": false
+  },
+  {
+    "query": "Where in the Eneo admin UI can I see the effective Flow retention policy?",
+    "should_trigger": false
+  },
+  {
+    "query": "Write release notes explaining that our team has published a new Eneo Flow.",
+    "should_trigger": false
+  }
+]
