@@ -54,6 +54,13 @@ class JobFailureCode(StrEnum):
     STORAGE_UNAVAILABLE = "storage_unavailable"
     STORAGE_VERIFICATION_FAILED = "storage_verification_failed"
     KNOWLEDGE_SOURCE_CONFLICT = "knowledge_source_conflict"
+    DISPATCH_FAILED = "dispatch_failed"
+    INVALID_DISPATCH = "invalid_dispatch"
+    WORKER_INTERRUPTED = "worker_interrupted"
+    LEASE_EXPIRED = "lease_expired"
+    REMOTE_UNREACHABLE = "remote_unreachable"
+    REMOTE_BLOCKED = "remote_blocked"
+    TIMED_OUT = "timed_out"
 
 
 _EXTRACTION_FAILURE_CODES = {
@@ -126,7 +133,9 @@ class JobPublic(JobBase, InDB):
             return None
 
     @model_validator(mode="after")
-    def hide_failed_knowledge_result_location(self) -> Self:
-        if self.status == Status.FAILED and self.task in KNOWLEDGE_TASKS:
+    def hide_failed_internal_result_location(self) -> Self:
+        if self.status == Status.FAILED and (
+            self.task in KNOWLEDGE_TASKS or self.task == Task.CRAWL
+        ):
             self.result_location = None
         return self

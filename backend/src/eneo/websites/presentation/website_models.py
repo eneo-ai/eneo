@@ -19,6 +19,7 @@ from eneo.main.models import (
     Status,
     is_provided,
 )
+from eneo.websites.application.website_crud_service import WebsiteBulkErrorCode
 from eneo.websites.domain.crawl_run import (
     CrawlFailureCode,
     CrawlOrigin,
@@ -255,8 +256,17 @@ class WebsiteUpdate(BaseModel):
 class BulkCrawlRequest(BaseModel):
     """Request model for triggering crawls on multiple websites."""
 
-    website_ids: list[UUID]
+    website_ids: list[UUID] = Field(min_length=1, max_length=50)
     """List of website IDs to crawl (max 50 per request for safety)"""
+
+
+class WebsiteBulkActionError(BaseModel):
+    """One website-level failure in a bounded bulk action."""
+
+    website_id: UUID
+    error: WebsiteBulkErrorCode = Field(
+        description="Stable machine-readable website action error code"
+    )
 
 
 class BulkCrawlResponse(BaseModel):
@@ -274,8 +284,29 @@ class BulkCrawlResponse(BaseModel):
     crawl_runs: list[CrawlRunPublic]
     """Details of successfully queued crawl runs"""
 
-    errors: list[dict[str, str]]
+    errors: list[WebsiteBulkActionError]
     """List of errors for failed websites (website_id and error message)"""
+
+
+class BulkCrawlStopResponse(BaseModel):
+    """Result of stopping active crawls for a bounded website selection."""
+
+    total: int
+    stopped: int
+    not_running: int
+    failed: int
+    crawl_runs: list[CrawlRunPublic]
+    errors: list[WebsiteBulkActionError]
+
+
+class BulkWebsiteDeleteResponse(BaseModel):
+    """Result of permanently deleting a bounded website selection."""
+
+    total: int
+    deleted: int
+    not_found: int
+    failed: int
+    errors: list[WebsiteBulkActionError]
 
 
 class WebsiteExistsResponse(BaseModel):

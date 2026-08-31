@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
@@ -9,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.websites_table import CrawlAttempts
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
+from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import Status
@@ -40,7 +42,12 @@ _CLEAN_OUTCOMES = {
     CrawlOutcome.EMPTY,
 }
 _PENDING_TRANSPORT_CLEANUP = sa.and_(
-    CrawlAttempts.failure_code == CrawlFailureCode.LEASE_EXPIRED.value,
+    CrawlAttempts.failure_code.in_(
+        (
+            CrawlFailureCode.LEASE_EXPIRED.value,
+            CrawlFailureCode.CANCELLED.value,
+        )
+    ),
     CrawlAttempts.transport_cleaned_at.is_(None),
 )
 
@@ -58,6 +65,25 @@ class CrawlDispatchCandidate:
     website_id: UUID
     tenant_id: UUID
     origin: str
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlCancellation:
+    run: CrawlRun
+    dispatch_id: UUID | None
+
+
+class CrawlDeletionBlocker(StrEnum):
+    ACTIVE_CRAWL = "active_crawl"
+    TRANSPORT_CLEANUP = "transport_cleanup_pending"
+
+
+class WebsiteCrawlActiveError(Exception):
+    """A website cannot be deleted while its crawl is active."""
+
+
+class WebsiteCrawlCleanupPendingError(Exception):
+    """A website cannot be deleted until durable transport cleanup completes."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +236,128 @@ class CrawlRunRepository:
             .order_by(CrawlRunsTable.created_at.desc(), CrawlRunsTable.id.desc())
         )
         return [CrawlRun.to_domain(record=record) for record in records]
+
+    async def get_active_for_website(self, website_id: UUID) -> CrawlRun | None:
+        record = await self.session.scalar(
+            sa.select(CrawlRunsTable)
+            .where(CrawlRunsTable.website_id == website_id)
+            .where(CrawlRunsTable.phase != CrawlPhase.TERMINAL.value)
+            .order_by(CrawlRunsTable.created_at.asc(), CrawlRunsTable.id.asc())
+            .limit(1)
+        )
+        return CrawlRun.to_domain(record=record) if record is not None else None
+
+    async def lock_website_deletion(
+        self,
+        website_id: UUID,
+    ) -> CrawlDeletionBlocker | None:
+        """Fence new crawl admission and report lifecycle work that blocks deletion."""
+        locked_website_id = await self.session.scalar(
+            sa.select(WebsitesTable.id)
+            .where(WebsitesTable.id == website_id)
+            .with_for_update()
+        )
+        if locked_website_id is None:
+            raise NotFoundException()
+
+        has_active_crawl = await self.session.scalar(
+            sa.select(
+                sa.exists().where(
+                    CrawlRunsTable.website_id == website_id,
+                    CrawlRunsTable.phase != CrawlPhase.TERMINAL.value,
+                )
+            )
+        )
+        if has_active_crawl:
+            return CrawlDeletionBlocker.ACTIVE_CRAWL
+
+        has_pending_cleanup = await self.session.scalar(
+            sa.select(
+                sa.exists()
+                .where(CrawlRunsTable.website_id == website_id)
+                .where(CrawlAttempts.crawl_run_id == CrawlRunsTable.id)
+                .where(_PENDING_TRANSPORT_CLEANUP)
+            )
+        )
+        if has_pending_cleanup:
+            return CrawlDeletionBlocker.TRANSPORT_CLEANUP
+        return None
+
+    async def request_cancel(self, run_id: UUID) -> CrawlCancellation:
+        """Persist a cancellation before Redis is asked to stop its delivery."""
+        attempt_id = await self.session.scalar(
+            sa.select(CrawlAttempts.id)
+            .join(CrawlRunsTable, CrawlRunsTable.id == CrawlAttempts.crawl_run_id)
+            .where(CrawlRunsTable.id == run_id)
+            .where(CrawlRunsTable.attempt_count == CrawlAttempts.attempt_number)
+        )
+        pair = (
+            await self._lock_current_attempt(attempt_id)
+            if attempt_id is not None
+            else None
+        )
+        if pair is None:
+            run = await self.session.scalar(
+                sa.select(CrawlRunsTable).where(CrawlRunsTable.id == run_id)
+            )
+            if run is None:
+                raise NotFoundException()
+            if run.phase == CrawlPhase.TERMINAL.value:
+                return CrawlCancellation(
+                    run=CrawlRun.to_domain(record=run),
+                    dispatch_id=None,
+                )
+            raise RuntimeError("Active crawl run has no current attempt")
+        attempt, run = pair
+        if run.id != run_id:
+            raise RuntimeError("Crawl attempt does not belong to the requested run")
+        if run.phase == CrawlPhase.TERMINAL.value:
+            return CrawlCancellation(
+                run=CrawlRun.to_domain(record=run),
+                dispatch_id=None,
+            )
+        if attempt.finished_at is not None:
+            raise RuntimeError("Active crawl run has no current attempt")
+
+        now = await self._database_now()
+        run.cancel_requested_at = run.cancel_requested_at or now
+        if run.phase in {
+            CrawlPhase.PENDING_DISPATCH.value,
+            CrawlPhase.QUEUED.value,
+        }:
+            detail = "The crawl was stopped by a user"
+            self._finish_records(
+                attempt,
+                run,
+                outcome=CrawlOutcome.CANCELLED,
+                finished_at=now,
+                failure_code=CrawlFailureCode.CANCELLED.value,
+                failure_detail=detail,
+                result_location=None,
+            )
+            await self._project_job_terminal(
+                attempt.dispatch_id,
+                outcome=CrawlOutcome.CANCELLED,
+                finished_at=now,
+                failure_code=CrawlFailureCode.CANCELLED.value,
+                failure_detail=detail,
+                result_location=None,
+            )
+        elif run.phase in {
+            CrawlPhase.RUNNING.value,
+            CrawlPhase.FINALIZING.value,
+            CrawlPhase.STOPPING.value,
+        }:
+            run.phase = CrawlPhase.STOPPING.value
+        else:
+            raise RuntimeError(f"Unsupported active crawl phase: {run.phase}")
+
+        await self.session.flush()
+        await self.session.refresh(run)
+        return CrawlCancellation(
+            run=CrawlRun.to_domain(record=run),
+            dispatch_id=attempt.dispatch_id,
+        )
 
     async def add_attempt(
         self,
@@ -596,9 +744,21 @@ class CrawlRunRepository:
         *,
         lease_owner: str,
         lease_duration: timedelta,
+        pages_crawled: int | None = None,
+        files_downloaded: int | None = None,
+        pages_failed: int | None = None,
+        files_failed: int | None = None,
     ) -> bool:
         if lease_duration <= timedelta(0):
             raise ValueError("A crawl lease duration must be positive")
+        progress = {
+            "pages_crawled": pages_crawled,
+            "files_downloaded": files_downloaded,
+            "pages_failed": pages_failed,
+            "files_failed": files_failed,
+        }
+        if any(value is not None and value < 0 for value in progress.values()):
+            raise ValueError("Crawl counters cannot be negative")
         renewed = (
             await self.session.execute(
                 sa.update(CrawlAttempts)
@@ -606,14 +766,52 @@ class CrawlRunRepository:
                 .where(CrawlAttempts.finished_at.is_(None))
                 .where(CrawlAttempts.lease_owner == lease_owner)
                 .where(CrawlAttempts.lease_expires_at > sa.func.now())
+                .where(
+                    sa.exists(
+                        sa.select(1)
+                        .select_from(CrawlRunsTable)
+                        .where(CrawlRunsTable.id == CrawlAttempts.crawl_run_id)
+                        .where(
+                            CrawlRunsTable.phase.in_(
+                                (
+                                    CrawlPhase.RUNNING.value,
+                                    CrawlPhase.FINALIZING.value,
+                                )
+                            )
+                        )
+                    )
+                )
                 .values(lease_expires_at=sa.func.now() + lease_duration)
-                .returning(CrawlAttempts.dispatch_id)
+                .returning(
+                    CrawlAttempts.dispatch_id,
+                    CrawlAttempts.crawl_run_id,
+                )
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         if renewed is None:
             return False
+        dispatch_id, crawl_run_id = renewed
+        progress_values = {
+            name: value for name, value in progress.items() if value is not None
+        }
+        if progress_values:
+            await self.session.execute(
+                sa.update(CrawlRunsTable)
+                .where(CrawlRunsTable.id == crawl_run_id)
+                .where(
+                    CrawlRunsTable.phase.in_(
+                        (
+                            CrawlPhase.RUNNING.value,
+                            CrawlPhase.FINALIZING.value,
+                        )
+                    )
+                )
+                .values(**progress_values)
+            )
         await self.session.execute(
-            sa.update(Jobs).where(Jobs.id == renewed).values(updated_at=sa.func.now())
+            sa.update(Jobs)
+            .where(Jobs.id == dispatch_id)
+            .values(updated_at=sa.func.now())
         )
         return True
 
@@ -692,10 +890,21 @@ class CrawlRunRepository:
             return False
         attempt, run = pair
         now = await self._database_now()
-        if run.phase not in {
-            CrawlPhase.RUNNING.value,
-            CrawlPhase.FINALIZING.value,
-        } or not self._lease_is_current(attempt, lease_owner=lease_owner, now=now):
+        if outcome == CrawlOutcome.CANCELLED:
+            phase_allows_finish = (
+                run.phase == CrawlPhase.STOPPING.value
+                and run.cancel_requested_at is not None
+            )
+        else:
+            phase_allows_finish = run.phase in {
+                CrawlPhase.RUNNING.value,
+                CrawlPhase.FINALIZING.value,
+            }
+        if not phase_allows_finish or not self._lease_is_current(
+            attempt,
+            lease_owner=lease_owner,
+            now=now,
+        ):
             return False
 
         detail = failure_detail[:512] if failure_detail else None
@@ -744,22 +953,40 @@ class CrawlRunRepository:
                 .with_for_update(skip_locked=True)
             )
         ).all()
-        detail = "Crawler worker lease expired before completion"
         for attempt, run in rows:
+            cancellation_was_requested = bool(
+                run.phase == CrawlPhase.STOPPING.value
+                and run.cancel_requested_at is not None
+            )
+            outcome = (
+                CrawlOutcome.CANCELLED
+                if cancellation_was_requested
+                else CrawlOutcome.INTERRUPTED
+            )
+            failure_code = (
+                CrawlFailureCode.CANCELLED.value
+                if cancellation_was_requested
+                else CrawlFailureCode.LEASE_EXPIRED.value
+            )
+            detail = (
+                "The crawl was stopped by a user"
+                if cancellation_was_requested
+                else "Crawler worker lease expired before completion"
+            )
             self._finish_records(
                 attempt,
                 run,
-                outcome=CrawlOutcome.INTERRUPTED,
+                outcome=outcome,
                 finished_at=now,
-                failure_code=CrawlFailureCode.LEASE_EXPIRED.value,
+                failure_code=failure_code,
                 failure_detail=detail,
                 result_location=None,
             )
             await self._project_job_terminal(
                 attempt.dispatch_id,
-                outcome=CrawlOutcome.INTERRUPTED,
+                outcome=outcome,
                 finished_at=now,
-                failure_code=CrawlFailureCode.LEASE_EXPIRED.value,
+                failure_code=failure_code,
                 failure_detail=detail,
                 result_location=None,
             )

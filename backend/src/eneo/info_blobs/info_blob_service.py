@@ -16,7 +16,11 @@ from eneo.info_blobs.info_blob import (
     InfoBlobUpdate,
     PreparedKnowledgeOriginal,
 )
-from eneo.info_blobs.info_blob_repo import InfoBlobPublication, InfoBlobRepository
+from eneo.info_blobs.info_blob_repo import (
+    InfoBlobPublication,
+    InfoBlobRepository,
+    WebsiteInfoBlobPage,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -474,14 +478,24 @@ class InfoBlobService:
         group = await self.group_service.get_group(id)
         return await self.repo.get_by_group(group.id)
 
-    async def get_by_website(self, id: UUID) -> list[InfoBlobInDB]:
+    async def get_by_website(
+        self,
+        id: UUID,
+        *,
+        limit: int,
+        cursor: UUID | None = None,
+    ) -> WebsiteInfoBlobPage:
         space = await self.space_service.get_space_by_website(website_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_info_blobs():
             raise UnauthorizedException()
 
-        return await self.repo.get_by_website(website_id=id)
+        return await self.repo.get_by_website(
+            website_id=id,
+            limit=limit,
+            cursor=cursor,
+        )
 
     async def delete(self, id: UUID):
         # Fetch the blob first to validate authorization BEFORE deleting

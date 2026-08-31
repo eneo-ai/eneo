@@ -10,6 +10,7 @@ from arq.constants import (
     retry_key_prefix,
 )
 from arq.jobs import Job
+from arq.utils import timestamp_ms
 
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
@@ -71,7 +72,7 @@ class JobManager:
         await self._redis.enqueue_job(task, _queue_name=queue_name_for_task(task))
 
     async def discard_crawl_deliveries(self, job_ids: tuple[UUID, ...]) -> None:
-        """Atomically remove expired crawl deliveries and their ARQ bookkeeping."""
+        """Atomically remove terminal crawl deliveries and their ARQ bookkeeping."""
         if not job_ids:
             return
         if self._redis is None:
@@ -95,6 +96,12 @@ class JobManager:
             transaction.zrem(abort_jobs_ss, *members)
             transaction.delete(*keys)
             await transaction.execute()
+
+    async def signal_crawl_abort(self, job_id: UUID) -> None:
+        """Record ARQ's abort marker for a running crawler delivery."""
+        if self._redis is None:
+            raise NotReadyException("Job manager is not initialized!")
+        await self._redis.zadd(abort_jobs_ss, {str(job_id): timestamp_ms()})
 
     async def get_job_status(self, job_id: UUID, task: Task):
         if self._redis is None:

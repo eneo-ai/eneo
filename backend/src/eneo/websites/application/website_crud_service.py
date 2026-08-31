@@ -1,11 +1,19 @@
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
 from eneo.main.exceptions import (
     BadRequestException,
+    NotFoundException,
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.websites.domain.crawl_run_repo import (
+    CrawlDeletionBlocker,
+    WebsiteCrawlActiveError,
+    WebsiteCrawlCleanupPendingError,
+)
 from eneo.websites.domain.website import UpdateInterval, Website
 
 if TYPE_CHECKING:
@@ -16,6 +24,25 @@ if TYPE_CHECKING:
     from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
     from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
     from eneo.websites.domain.crawl_service import CrawlService
+
+
+class WebsiteBulkErrorCode(StrEnum):
+    NOT_AUTHORIZED = "not_authorized"
+    NOT_FOUND = "not_found"
+    CRAWL_STOP_REQUESTED = "crawl_stop_requested"
+    CRAWL_ACTIVE = "crawl_active"
+    CRAWL_CLEANUP_PENDING = "crawl_cleanup_pending"
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteBulkError:
+    website_id: UUID
+    error: WebsiteBulkErrorCode
+
+
+def _ordered_website_ids(website_ids: list[UUID]) -> list[UUID]:
+    """Use one lock order across bulk mutations to avoid reversed-order deadlocks."""
+    return sorted(set(website_ids), key=lambda website_id: website_id.int)
 
 
 class WebsiteCRUDService:
@@ -125,7 +152,15 @@ class WebsiteCRUDService:
 
         return website
 
-    async def delete_website(self, id: UUID) -> None:
+    async def delete_website(self, id: UUID) -> Website:
+        website, owner_space_id = await self._authorize_website_deletion(id)
+        await self._delete_authorized_website(
+            website=website,
+            owner_space_id=owner_space_id,
+        )
+        return website
+
+    async def _authorize_website_deletion(self, id: UUID) -> tuple[Website, UUID]:
         owner_space = await self.space_service.get_space_by_website(id)
         assert owner_space.id is not None
         owner_actor = self.actor_manager.get_space_actor_from_space(space=owner_space)
@@ -133,9 +168,85 @@ class WebsiteCRUDService:
         if not owner_actor.can_delete_websites():
             raise UnauthorizedException()
 
+        website = owner_space.get_website(website_id=id)
+        return website, owner_space.id
+
+    async def _delete_authorized_website(
+        self,
+        *,
+        website: Website,
+        owner_space_id: UUID,
+    ) -> None:
+        assert website.id is not None
+        blocker = await self.crawl_run_repo.lock_website_deletion(website.id)
+        if blocker == CrawlDeletionBlocker.ACTIVE_CRAWL:
+            raise WebsiteCrawlActiveError()
+        if blocker == CrawlDeletionBlocker.TRANSPORT_CLEANUP:
+            raise WebsiteCrawlCleanupPendingError()
         await self.space_repo.hard_delete_website(
-            website_id=id, owner_space_id=owner_space.id
+            website_id=website.id,
+            owner_space_id=owner_space_id,
         )
+
+    async def bulk_delete_websites(
+        self, website_ids: list[UUID]
+    ) -> tuple[list[Website], list[UUID], list[WebsiteBulkError]]:
+        """Delete a bounded selection while reporting expected per-item misses."""
+        if len(website_ids) > 50:
+            raise BadRequestException("Cannot delete more than 50 websites at once")
+
+        deleted: list[Website] = []
+        not_found: list[UUID] = []
+        errors: list[WebsiteBulkError] = []
+
+        for website_id in _ordered_website_ids(website_ids):
+            try:
+                website, owner_space_id = await self._authorize_website_deletion(
+                    website_id
+                )
+                active_run = await self.crawl_run_repo.get_active_for_website(
+                    website_id
+                )
+                if active_run is not None:
+                    assert active_run.id is not None
+                    await self.crawl_service.cancel(active_run.id)
+                    errors.append(
+                        WebsiteBulkError(
+                            website_id=website_id,
+                            error=WebsiteBulkErrorCode.CRAWL_STOP_REQUESTED,
+                        )
+                    )
+                    continue
+                await self._delete_authorized_website(
+                    website=website,
+                    owner_space_id=owner_space_id,
+                )
+                deleted.append(website)
+            except NotFoundException:
+                not_found.append(website_id)
+            except UnauthorizedException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_AUTHORIZED,
+                    )
+                )
+            except WebsiteCrawlActiveError:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.CRAWL_ACTIVE,
+                    )
+                )
+            except WebsiteCrawlCleanupPendingError:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.CRAWL_CLEANUP_PENDING,
+                    )
+                )
+
+        return deleted, not_found, errors
 
     async def crawl_website(self, id: UUID) -> "CrawlRun":
         space = await self.space_service.get_space_by_website(id)
@@ -158,6 +269,16 @@ class WebsiteCRUDService:
 
         return crawl_run
 
+    async def cancel_crawl_run(self, id: UUID) -> "CrawlRun":
+        crawl_run = await self.crawl_run_repo.one(id)
+        space = await self.space_service.get_space_by_website(crawl_run.website_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        if not actor.can_create_websites():
+            raise UnauthorizedException()
+
+        return await self.crawl_service.cancel(id)
+
     async def get_crawl_runs(self, website_id: UUID) -> list["CrawlRun"]:
         space = await self.space_service.get_space_by_website(website_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -169,7 +290,7 @@ class WebsiteCRUDService:
 
     async def bulk_crawl_websites(
         self, website_ids: list[UUID]
-    ) -> tuple[list["CrawlRun"], list[dict[str, str]]]:
+    ) -> tuple[list["CrawlRun"], list[WebsiteBulkError]]:
         """Trigger crawls for multiple websites in bulk.
 
         Why: Enables efficient batch operations for users managing many websites.
@@ -181,7 +302,7 @@ class WebsiteCRUDService:
         Returns:
             Tuple of (successful_crawl_runs, errors)
             - successful_crawl_runs: List of CrawlRun objects that were queued
-            - errors: List of dicts with website_id and error message for failures
+            - errors: Website-scoped expected failures
 
         Raises:
             BadRequestException: If more than 50 websites requested (safety limit)
@@ -190,24 +311,73 @@ class WebsiteCRUDService:
             raise BadRequestException("Cannot crawl more than 50 websites at once")
 
         successful_runs: list["CrawlRun"] = []
-        errors: list[dict[str, str]] = []
+        errors: list[WebsiteBulkError] = []
 
-        for website_id in website_ids:
+        for website_id in _ordered_website_ids(website_ids):
             try:
                 # Reuse existing crawl_website method for consistent behavior
                 crawl_run = await self.crawl_website(website_id)
                 successful_runs.append(crawl_run)
             except UnauthorizedException:
                 errors.append(
-                    {
-                        "website_id": str(website_id),
-                        "error": "Not authorized to crawl this website",
-                    }
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_AUTHORIZED,
+                    )
                 )
-            except Exception as e:
-                errors.append({"website_id": str(website_id), "error": str(e)})
+            except NotFoundException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_FOUND,
+                    )
+                )
 
         return successful_runs, errors
+
+    async def bulk_stop_websites(
+        self, website_ids: list[UUID]
+    ) -> tuple[list["CrawlRun"], list[UUID], list[WebsiteBulkError]]:
+        """Stop the active crawl for each website without failing the whole batch."""
+        if len(website_ids) > 50:
+            raise BadRequestException("Cannot stop more than 50 websites at once")
+
+        stopped_runs: list["CrawlRun"] = []
+        not_running: list[UUID] = []
+        errors: list[WebsiteBulkError] = []
+
+        for website_id in _ordered_website_ids(website_ids):
+            try:
+                space = await self.space_service.get_space_by_website(website_id)
+                actor = self.actor_manager.get_space_actor_from_space(space=space)
+                if not actor.can_create_websites():
+                    raise UnauthorizedException()
+
+                active_run = await self.crawl_run_repo.get_active_for_website(
+                    website_id
+                )
+                if active_run is None:
+                    not_running.append(website_id)
+                    continue
+
+                assert active_run.id is not None
+                stopped_runs.append(await self.crawl_service.cancel(active_run.id))
+            except UnauthorizedException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_AUTHORIZED,
+                    )
+                )
+            except NotFoundException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_FOUND,
+                    )
+                )
+
+        return stopped_runs, not_running, errors
 
     async def find_on_organization_space(self, url: str) -> dict[str, object] | None:
         """Find website with matching URL on the user's organization space.

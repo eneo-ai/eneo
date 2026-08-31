@@ -20,6 +20,7 @@ from eneo.crawler.engine import (
     CrawlRequest,
     FileDownloaded,
     FileFailed,
+    PageCrawled,
     PageFailed,
     PageUnchanged,
 )
@@ -80,6 +81,22 @@ class _BlockedCrawlEngine:
         )
 
 
+class _SinglePageCrawlEngine:
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        yield PageCrawled(
+            url=request.url,
+            title="Page",
+            content="<main>Page content</main>",
+            etag=None,
+            last_modified=None,
+        )
+        yield CrawlFinished(
+            status="completed",
+            pages_crawled=1,
+            pages_failed=0,
+        )
+
+
 class _PageLimitedCrawlEngine:
     async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
         yield PageUnchanged(url=request.url)
@@ -115,7 +132,7 @@ class _UsefulPartialCrawlEngine:
         yield PageUnchanged(url=f"{request.url}/useful")
         yield PageFailed(
             url=f"{request.url}/redirected",
-            reason="_RedirectRejected",
+            reason="redirect_rejected",
         )
         yield CrawlFinished(
             status="completed",
@@ -302,6 +319,150 @@ async def test_outer_commit_requests_immediate_reconciliation(
     reconcile.assert_awaited_once_with()
 
 
+async def test_reconciliation_is_coalesced_per_transaction(
+    admin_user,
+    monkeypatch,
+) -> None:
+    reconcile = AsyncMock()
+    monkeypatch.setattr(crawl_service_module, "reconcile_crawl_work", reconcile)
+
+    async with sessionmanager.session() as session, session.begin():
+        service = CrawlService(
+            CrawlRunRepository(session),
+            JobService(admin_user, JobRepository(session)),
+        )
+        service.schedule_reconciliation_after_commit()
+        service.schedule_reconciliation_after_commit()
+
+    for _ in range(5):
+        if reconcile.await_count:
+            break
+        await asyncio.sleep(0)
+
+    reconcile.assert_awaited_once_with()
+
+
+async def test_reconciliation_is_not_coalesced_across_transactions(
+    admin_user,
+    monkeypatch,
+) -> None:
+    reconcile = AsyncMock()
+    monkeypatch.setattr(crawl_service_module, "reconcile_crawl_work", reconcile)
+
+    async with sessionmanager.session() as session:
+        service = CrawlService(
+            CrawlRunRepository(session),
+            JobService(admin_user, JobRepository(session)),
+        )
+        async with session.begin():
+            service.schedule_reconciliation_after_commit()
+        async with session.begin():
+            service.schedule_reconciliation_after_commit()
+
+    for _ in range(5):
+        if reconcile.await_count == 2:
+            break
+        await asyncio.sleep(0)
+
+    assert reconcile.await_count == 2
+
+
+async def test_queued_cancellation_reconciles_delivery_after_commit(
+    db_session,
+    admin_user,
+    monkeypatch,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Cancelled queued crawl",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        assert await CrawlRunRepository(session).mark_dispatched(attempt.id)
+
+    discard = AsyncMock()
+    reconcile = AsyncMock()
+    monkeypatch.setattr(
+        crawl_service_module.job_manager,
+        "discard_crawl_deliveries",
+        discard,
+    )
+    monkeypatch.setattr(crawl_service_module, "reconcile_crawl_work", reconcile)
+
+    async with sessionmanager.session() as session, session.begin():
+        cancellation = await CrawlService(
+            CrawlRunRepository(session),
+            JobService(admin_user, JobRepository(session)),
+        ).cancel(cast(UUID, run.id))
+        assert cancellation.phase == CrawlPhase.TERMINAL
+        assert cancellation.outcome == CrawlOutcome.CANCELLED
+        discard.assert_not_awaited()
+
+    for _ in range(5):
+        if reconcile.await_count:
+            break
+        await asyncio.sleep(0)
+
+    discard.assert_not_awaited()
+    reconcile.assert_awaited_once_with()
+
+
+async def test_running_cancellation_signals_worker_only_after_commit(
+    db_session,
+    admin_user,
+    monkeypatch,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Cancelled running crawl",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        dispatch_id = attempt.dispatch_id
+        repository = CrawlRunRepository(session)
+        assert await repository.mark_dispatched(attempt.id)
+        assert await repository.claim_attempt(
+            attempt.id,
+            dispatch_id=dispatch_id,
+            lease_owner="cancellable-worker",
+            lease_duration=timedelta(minutes=5),
+        )
+
+    signal = AsyncMock()
+    monkeypatch.setattr(
+        crawl_service_module.job_manager,
+        "signal_crawl_abort",
+        signal,
+    )
+
+    async with sessionmanager.session() as session, session.begin():
+        cancellation = await CrawlService(
+            CrawlRunRepository(session),
+            JobService(admin_user, JobRepository(session)),
+        ).cancel(cast(UUID, run.id))
+        assert cancellation.phase == CrawlPhase.STOPPING
+        signal.assert_not_awaited()
+
+    for _ in range(5):
+        if signal.await_count:
+            break
+        await asyncio.sleep(0)
+
+    signal.assert_awaited_once_with(dispatch_id)
+
+
 async def test_concurrent_admission_coalesces_one_run_job_and_attempt(
     db_session,
     admin_user,
@@ -345,6 +506,39 @@ async def test_concurrent_admission_coalesces_one_run_job_and_attempt(
             .where(Jobs.task == Task.CRAWL.value)
         )
     assert (run_count, attempt_count, crawl_job_count) == (1, 1, 1)
+
+
+async def test_website_deletion_fence_prevents_late_crawl_admission(
+    db_session,
+    admin_user,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Deletion admission fence",
+        )
+
+    async def admit_while_deletion_is_locked():
+        async with sessionmanager.session() as session, session.begin():
+            return await _admit(session, website=website, user=admin_user)
+
+    admission_task = None
+    async with sessionmanager.session() as session, session.begin():
+        assert (
+            await CrawlRunRepository(session).lock_website_deletion(website.id) is None
+        )
+        admission_task = asyncio.create_task(admit_while_deletion_is_locked())
+        await asyncio.sleep(0.1)
+        assert not admission_task.done()
+        await session.execute(
+            sa.delete(WebsitesTable).where(WebsitesTable.id == website.id)
+        )
+
+    assert admission_task is not None
+    with pytest.raises(sa.exc.IntegrityError):
+        await asyncio.wait_for(admission_task, timeout=5)
 
 
 async def test_manual_admission_uses_the_authorized_initiating_user(
@@ -651,10 +845,13 @@ async def test_dispatch_reconciliation_waits_for_contended_owner_lock(
     enqueue.assert_awaited_once()
 
 
-async def test_expired_worker_transport_cleanup_retries_until_acknowledged(
+@pytest.mark.parametrize("cancel_requested", [False, True])
+async def test_finished_worker_transport_cleanup_retries_until_acknowledged(
     db_session,
     admin_user,
     monkeypatch,
+    *,
+    cancel_requested: bool,
 ) -> None:
     async with db_session() as session:
         website = await _persist_website(
@@ -680,6 +877,8 @@ async def test_expired_worker_transport_cleanup_retries_until_acknowledged(
             )
             is not None
         )
+        if cancel_requested:
+            assert (await repo.request_cancel(run.id)).run.phase == CrawlPhase.STOPPING
         attempt.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
 
     original_acknowledge = CrawlRunRepository.acknowledge_transport_cleanup
@@ -881,6 +1080,45 @@ async def test_worker_terminalizes_a_zero_page_crawl_as_empty(
         assert finished.outcome == CrawlOutcome.EMPTY
         assert finished.pages_crawled == 0
         assert job.status == Status.COMPLETE.value
+
+
+async def test_persistence_failure_is_not_counted_as_a_successful_page(
+    db_session,
+    admin_user,
+    monkeypatch,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Failed page persistence",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+
+    monkeypatch.setattr(
+        crawl_tasks_module,
+        "persist_batch",
+        AsyncMock(return_value=(0, 1, [], {"db_error": [website.url]})),
+    )
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(_SinglePageCrawlEngine()))
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.FAILED.value
+    assert result["pages_crawled"] == 0
+    async with db_session() as session:
+        finished = await CrawlRunRepository(session).one(run_id)
+        assert finished.pages_crawled == 0
+        assert finished.pages_failed == 1
 
 
 @pytest.mark.parametrize(

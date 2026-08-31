@@ -8,6 +8,7 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.websites_table import CrawlAttempts
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
@@ -23,7 +24,10 @@ from eneo.websites.domain.crawl_run import (
     CrawlRun,
     CrawlType,
 )
-from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
+from eneo.websites.domain.crawl_run_repo import (
+    CrawlDeletionBlocker,
+    CrawlRunRepository,
+)
 from eneo.websites.domain.website import UpdateInterval, WebsiteSparse
 from eneo.websites.presentation.website_models import CrawlRunPublic
 
@@ -123,6 +127,147 @@ async def test_active_run_is_coalesced_and_does_not_depend_on_job_projection(
         assert reloaded.job_id is None
 
 
+async def test_active_run_lookup_ignores_terminal_history(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+
+        active = await repo.get_active_for_website(website.id)
+        assert active is not None
+        assert active.id == run.id
+
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(
+                website=website,
+                run_id=run.id,
+                attempt_id=attempt_id,
+                job=job,
+            ),
+        )
+        await repo.request_cancel(run.id)
+
+        assert await repo.get_active_for_website(website.id) is None
+
+
+async def test_deleting_website_cascades_content_and_crawl_history(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        blob = InfoBlobs(
+            text="Indexed website content",
+            title="Lifecycle page",
+            url="https://example.com/page",
+            size=23,
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            embedding_model_id=website_record.embedding_model_id,
+        )
+        session.add(blob)
+
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(
+                website=website,
+                run_id=run.id,
+                attempt_id=attempt_id,
+                job=job,
+            ),
+        )
+        await session.flush()
+
+        await session.execute(
+            sa.delete(WebsitesTable).where(WebsitesTable.id == website.id)
+        )
+        await session.flush()
+
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(InfoBlobs)
+                .where(InfoBlobs.id == blob.id)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(CrawlRunsTable)
+                .where(CrawlRunsTable.id == run.id)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(CrawlAttempts)
+                .where(CrawlAttempts.id == attempt_id)
+            )
+            == 0
+        )
+        assert await session.get(Jobs, job.id) is not None
+
+
+async def test_website_deletion_waits_for_cancelled_transport_cleanup(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(
+                website=website,
+                run_id=run.id,
+                attempt_id=attempt_id,
+                job=job,
+            ),
+        )
+
+        assert (
+            await repo.lock_website_deletion(website.id)
+            == CrawlDeletionBlocker.ACTIVE_CRAWL
+        )
+        await repo.request_cancel(run.id)
+        assert (
+            await repo.lock_website_deletion(website.id)
+            == CrawlDeletionBlocker.TRANSPORT_CLEANUP
+        )
+
+        await repo.acknowledge_transport_cleanup((job.id,))
+        assert await repo.lock_website_deletion(website.id) is None
+
+
 async def test_attempt_token_fences_claim_renewal_and_terminalization(
     db_session,
     admin_user,
@@ -179,6 +324,20 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
         )
         assert record is not None
         assert CrawlRunPublic.model_validate(record).status == Status.IN_PROGRESS
+        assert await repo.renew_attempt_lease(
+            attempt_id,
+            lease_owner="crawler-1",
+            lease_duration=timedelta(minutes=10),
+            pages_crawled=12,
+            files_downloaded=2,
+            pages_failed=1,
+            files_failed=0,
+        )
+        progress = await repo.one(run.id)
+        assert progress.pages_crawled == 12
+        assert progress.files_downloaded == 2
+        assert progress.pages_failed == 1
+        assert progress.files_failed == 0
         assert (
             await repo.renew_attempt_lease(
                 attempt_id,
@@ -254,6 +413,15 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
         assert (
             await repo.finish_attempt(
                 attempt_id,
+                outcome=CrawlOutcome.CANCELLED,
+                failure_code=CrawlFailureCode.CANCELLED,
+                lease_owner="crawler-1",
+            )
+            is False
+        )
+        assert (
+            await repo.finish_attempt(
+                attempt_id,
                 outcome=CrawlOutcome.SUCCEEDED,
                 lease_owner="crawler-1",
             )
@@ -271,6 +439,167 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
             )
             is None
         )
+
+
+async def test_cancel_queued_attempt_is_immediate_and_idempotent(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(
+                website=website,
+                run_id=run.id,
+                attempt_id=attempt_id,
+                job=job,
+            ),
+        )
+        assert await repo.mark_dispatched(attempt_id) is True
+
+        cancellation = await repo.request_cancel(run.id)
+        cancelled = cancellation.run
+        cancelled_again = (await repo.request_cancel(run.id)).run
+
+        assert cancellation.dispatch_id == job.id
+        assert cancelled.phase == CrawlPhase.TERMINAL
+        assert cancelled.outcome == CrawlOutcome.CANCELLED
+        assert cancelled.failure_code == CrawlFailureCode.CANCELLED.value
+        assert cancelled.cancel_requested_at is not None
+        assert cancelled_again.cancel_requested_at == cancelled.cancel_requested_at
+
+        attempt = await session.get(CrawlAttempts, attempt_id)
+        assert attempt is not None
+        assert attempt.finished_at == cancelled.finished_at
+        assert attempt.failure_code == CrawlFailureCode.CANCELLED.value
+        await session.refresh(job)
+        assert job.status == Status.FAILED.value
+        assert job.failure_code == CrawlFailureCode.CANCELLED.value
+
+
+@pytest.mark.parametrize("finalizing", [False, True])
+async def test_cancel_leased_attempt_stops_renewal_and_terminalizes_cancelled(
+    db_session,
+    admin_user,
+    space_factory,
+    *,
+    finalizing: bool,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        task = _task(
+            website=website,
+            run_id=run.id,
+            attempt_id=attempt_id,
+            job=job,
+        )
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=task,
+        )
+        assert await repo.mark_dispatched(attempt_id) is True
+        assert (
+            await repo.claim_attempt(
+                attempt_id,
+                dispatch_id=job.id,
+                lease_owner="stopping-worker",
+                lease_duration=timedelta(minutes=5),
+            )
+            == task
+        )
+        if finalizing:
+            assert await repo.mark_finalizing(
+                attempt_id,
+                lease_owner="stopping-worker",
+            )
+
+        stopping = (await repo.request_cancel(run.id)).run
+
+        assert stopping.phase == CrawlPhase.STOPPING
+        assert stopping.outcome is None
+        assert stopping.cancel_requested_at is not None
+        assert (
+            await repo.renew_attempt_lease(
+                attempt_id,
+                lease_owner="stopping-worker",
+                lease_duration=timedelta(minutes=5),
+            )
+            is False
+        )
+        assert await repo.finish_attempt(
+            attempt_id,
+            lease_owner="stopping-worker",
+            outcome=CrawlOutcome.CANCELLED,
+            failure_code=CrawlFailureCode.CANCELLED,
+            failure_detail="The crawl was stopped by a user",
+            pages_crawled=12,
+            pages_failed=1,
+        )
+
+        finished = await repo.one(run.id)
+        assert finished.phase == CrawlPhase.TERMINAL
+        assert finished.outcome == CrawlOutcome.CANCELLED
+        assert finished.pages_crawled == 12
+        assert finished.pages_failed == 1
+
+
+async def test_stopping_attempt_with_dead_worker_is_reaped(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(
+                website=website,
+                run_id=run.id,
+                attempt_id=attempt_id,
+                job=job,
+            ),
+        )
+        assert await repo.mark_dispatched(attempt_id) is True
+        assert await repo.claim_attempt(
+            attempt_id,
+            dispatch_id=job.id,
+            lease_owner="dead-stopping-worker",
+            lease_duration=timedelta(minutes=5),
+        )
+        assert (await repo.request_cancel(run.id)).run.phase == CrawlPhase.STOPPING
+        await session.execute(
+            sa.update(CrawlAttempts)
+            .where(CrawlAttempts.id == attempt_id)
+            .values(lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+        )
+
+        assert await repo.interrupt_expired_attempts() == 1
+        recovered = await repo.one(run.id)
+        assert recovered.phase == CrawlPhase.TERMINAL
+        assert recovered.outcome == CrawlOutcome.CANCELLED
+        assert recovered.failure_code == CrawlFailureCode.CANCELLED.value
+        assert await repo.pending_transport_cleanup_candidates() == (job.id,)
+        assert (await repo.health_snapshot()).pending_transport_cleanup == 1
 
 
 async def test_non_clean_finish_preserves_recorded_progress_when_omitted(

@@ -33,6 +33,12 @@ class InfoBlobs(BasePublic):
             postgresql_where=text("version_state = 'active'"),
         ),
         Index("ix_info_blobs_source_id", "source_id"),
+        Index(
+            "ix_info_blobs_active_website_cursor",
+            "website_id",
+            "id",
+            postgresql_where=text("version_state = 'active'"),
+        ),
     )
 
     text: Mapped[str] = mapped_column()

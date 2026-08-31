@@ -66,7 +66,7 @@ async def reconcile_crawl_work(
         except Exception:
             delivery_errors += 1
             logger.exception(
-                "Expired crawl transport cleanup failed and will be retried",
+                "Crawler transport cleanup failed and will be retried",
                 extra={"dispatch_count": len(cleanup_dispatch_ids)},
             )
         else:
@@ -78,7 +78,7 @@ async def reconcile_crawl_work(
             except Exception:
                 delivery_errors += 1
                 logger.exception(
-                    "Expired crawl transport cleanup could not be acknowledged",
+                    "Crawler transport cleanup could not be acknowledged",
                     extra={"dispatch_count": len(cleanup_dispatch_ids)},
                 )
 

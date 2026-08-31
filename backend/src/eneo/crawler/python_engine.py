@@ -87,6 +87,20 @@ class _RedirectRejected(aiohttp.ClientError):
     pass
 
 
+def _request_failure_reason(exc: BaseException) -> str:
+    if isinstance(exc, _UnsafeTarget):
+        return "unsafe_target"
+    if isinstance(exc, _RedirectRejected):
+        return "redirect_rejected"
+    if isinstance(exc, asyncio.TimeoutError):
+        return "request_timeout"
+    if isinstance(exc, LookupError):
+        return "response_decode_error"
+    if isinstance(exc, aiohttp.ClientError):
+        return "connection_error"
+    return "request_failed"
+
+
 def _filename_with_token(basename: str, token: str) -> str:
     suffix = Path(basename).suffix
     if len(suffix.encode("utf-8")) > _MAX_SUFFIX_BYTES:
@@ -588,13 +602,15 @@ class PythonCrawlEngine:
             except _ResponseTooLarge:
                 return _FetchResult(PageFailed(url=url, reason="response_too_large"))
             except (_UnsafeTarget, _RedirectRejected, LookupError) as exc:
-                return _FetchResult(PageFailed(url=url, reason=type(exc).__name__))
+                return _FetchResult(
+                    PageFailed(url=url, reason=_request_failure_reason(exc))
+                )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 if attempt + 1 == attempts:
                     return _FetchResult(
                         PageFailed(
                             url=url,
-                            reason=type(exc).__name__,
+                            reason=_request_failure_reason(exc),
                             retryable=True,
                         )
                     )
@@ -719,7 +735,7 @@ class PythonCrawlEngine:
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             return FileFailed(
                 url=normalized,
-                reason=type(exc).__name__,
+                reason=_request_failure_reason(exc),
                 retryable=True,
             )
         finally:
@@ -804,12 +820,16 @@ class PythonCrawlEngine:
             except _ResponseTooLarge:
                 failures.append(PageFailed(url=current, reason="sitemap_too_large"))
                 continue
-            except InvalidSitemap as exc:
-                failures.append(PageFailed(url=current, reason=str(exc)))
+            except InvalidSitemap:
+                failures.append(PageFailed(url=current, reason="invalid_sitemap"))
                 continue
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 failures.append(
-                    PageFailed(url=current, reason=type(exc).__name__, retryable=True)
+                    PageFailed(
+                        url=current,
+                        reason=_request_failure_reason(exc),
+                        retryable=True,
+                    )
                 )
                 continue
 

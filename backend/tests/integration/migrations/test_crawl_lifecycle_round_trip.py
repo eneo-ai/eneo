@@ -18,6 +18,9 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _PREVIOUS_REVISION = "202608131000"
 _LIFECYCLE_REVISION = "202608301030"
+_CANCELLED_CLEANUP_REVISION = "202608311400"
+_WEBSITE_BLOB_CURSOR_REVISION = "202608311430"
+_WEBSITE_BLOB_CURSOR_INDEX = "ix_info_blobs_active_website_cursor"
 
 
 @dataclass(frozen=True)
@@ -462,3 +465,129 @@ def test_crawl_lifecycle_downgrade_refuses_lossy_state_then_round_trips(
         assert not inspect(engine).has_table("crawl_attempts")
     finally:
         engine.dispose()
+
+
+def test_cancelled_cleanup_migration_refuses_to_lose_pending_or_acknowledged_work(
+    migration_database: tuple[str, Config],
+) -> None:
+    database_url, config = migration_database
+    command.upgrade(config, _CANCELLED_CLEANUP_REVISION)
+
+    with (
+        psycopg2.connect(_sync_url(database_url)) as connection,
+        connection.cursor() as cursor,
+    ):
+        run_id = uuid4()
+        attempt_id = uuid4()
+        cursor.execute("ALTER TABLE crawl_runs DISABLE TRIGGER ALL")
+        try:
+            cursor.execute(
+                """
+                INSERT INTO crawl_runs (
+                    id, tenant_id, website_id, phase, outcome, origin,
+                    finished_at, failure_code, cancel_requested_at, attempt_count
+                )
+                VALUES (
+                    %s, %s, %s, 'terminal', 'cancelled', 'manual',
+                    now(), 'cancelled', now(), 1
+                )
+                """,
+                (str(run_id), str(uuid4()), str(uuid4())),
+            )
+        finally:
+            cursor.execute("ALTER TABLE crawl_runs ENABLE TRIGGER ALL")
+        cursor.execute(
+            """
+            INSERT INTO crawl_attempts (
+                id, crawl_run_id, attempt_number, dispatch_id,
+                dispatch_payload, finished_at, failure_code
+            )
+            VALUES (%s, %s, %s, %s, '{}'::jsonb, now(), 'cancelled')
+            """,
+            (
+                str(attempt_id),
+                str(run_id),
+                1,
+                str(uuid4()),
+            ),
+        )
+
+    with pytest.raises(
+        InternalError,
+        match="cannot downgrade cancelled crawl cleanup",
+    ):
+        command.downgrade(config, _LIFECYCLE_REVISION)
+    assert _current_revision(database_url) == _CANCELLED_CLEANUP_REVISION
+
+    with (
+        psycopg2.connect(_sync_url(database_url)) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            """
+            UPDATE crawl_attempts
+            SET transport_cleaned_at = now()
+            WHERE id = %s
+            """,
+            (str(attempt_id),),
+        )
+
+    with pytest.raises(
+        InternalError,
+        match="cannot downgrade cancelled crawl cleanup",
+    ):
+        command.downgrade(config, _LIFECYCLE_REVISION)
+    assert _current_revision(database_url) == _CANCELLED_CLEANUP_REVISION
+
+    with (
+        psycopg2.connect(_sync_url(database_url)) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            """
+            UPDATE crawl_attempts
+            SET failure_code = 'lease_expired'
+            WHERE id = %s
+            """,
+            (str(attempt_id),),
+        )
+
+    command.downgrade(config, _LIFECYCLE_REVISION)
+    assert _current_revision(database_url) == _LIFECYCLE_REVISION
+    command.upgrade(config, _CANCELLED_CLEANUP_REVISION)
+
+
+def test_active_website_blob_cursor_index_round_trips(
+    migration_database: tuple[str, Config],
+) -> None:
+    database_url, config = migration_database
+    command.upgrade(config, _WEBSITE_BLOB_CURSOR_REVISION)
+
+    assert _current_revision(database_url) == _WEBSITE_BLOB_CURSOR_REVISION
+    assert _WEBSITE_BLOB_CURSOR_INDEX in _inspected_names(
+        database_url,
+        "info_blobs",
+        "indexes",
+    )
+
+    command.downgrade(config, _CANCELLED_CLEANUP_REVISION)
+    assert _WEBSITE_BLOB_CURSOR_INDEX not in _inspected_names(
+        database_url,
+        "info_blobs",
+        "indexes",
+    )
+
+    command.upgrade(config, _WEBSITE_BLOB_CURSOR_REVISION)
+    connection = psycopg2.connect(_sync_url(database_url))
+    try:
+        connection.autocommit = True
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"DROP INDEX CONCURRENTLY IF EXISTS {_WEBSITE_BLOB_CURSOR_INDEX}"
+            )
+    finally:
+        connection.close()
+
+    command.downgrade(config, _CANCELLED_CLEANUP_REVISION)
+    assert _current_revision(database_url) == _CANCELLED_CLEANUP_REVISION
+    command.upgrade(config, _WEBSITE_BLOB_CURSOR_REVISION)

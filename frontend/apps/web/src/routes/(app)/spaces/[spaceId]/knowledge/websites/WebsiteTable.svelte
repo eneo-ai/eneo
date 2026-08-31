@@ -12,6 +12,10 @@
   import { IconWeb } from "@eneo/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import { m } from "$lib/paraglide/messages";
+  import {
+    toggleVisibleWebsiteSelection,
+    visibleWebsiteIdsFromTableRows
+  } from "../bulkWebsiteActions";
 
   const {
     state: { currentSpace }
@@ -22,6 +26,7 @@
   );
 
   const websites = ownedWebsites;
+  const visibleWebsiteIds = writable<string[]>([]);
 
   // Selection state for bulk operations
   export let selectedWebsiteIds = writable<Set<string>>(new Set());
@@ -57,11 +62,7 @@
 
   // Toggle all websites selection
   function toggleSelectAll() {
-    if ($selectedWebsiteIds.size === $websites.length && $websites.length > 0) {
-      $selectedWebsiteIds = new Set();
-    } else {
-      $selectedWebsiteIds = new Set($websites.map((w) => w.id));
-    }
+    $selectedWebsiteIds = toggleVisibleWebsiteSelection($selectedWebsiteIds, $visibleWebsiteIds);
   }
 
   const table = Table.createWithStore(websites);
@@ -74,7 +75,7 @@
       header: () => {
         return createRender(SelectionHeaderCheckbox, {
           selectedWebsiteIds,
-          websites: $websites,
+          visibleWebsiteIds,
           onToggleAll: toggleSelectAll
         });
       },
@@ -176,6 +177,8 @@
       }
     })
   ]);
+  const { pageRows } = viewModel;
+  $: $visibleWebsiteIds = visibleWebsiteIdsFromTableRows($pageRows);
 
   function createModelFilter(embeddingModel: { id: string }) {
     return function (website: WebsiteSparse) {

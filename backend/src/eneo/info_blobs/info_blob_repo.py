@@ -71,6 +71,13 @@ class InfoBlobListing:
         return self.title or self.url or "Untitled source"
 
 
+@dataclass(frozen=True, slots=True)
+class WebsiteInfoBlobPage:
+    items: list[InfoBlobInDBNoText]
+    total_count: int
+    next_cursor: UUID | None
+
+
 class InfoBlobRepository:
     def __init__(self, session: AsyncSession) -> None:
         super().__init__()
@@ -720,14 +727,43 @@ class InfoBlobRepository:
         records = await self.delegate.get_models_from_query(query)
         return [InfoBlobInDB.model_validate(record) for record in records]
 
-    async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDB]:
-        records = await self.session.scalars(
-            sa.select(InfoBlobs).where(
-                InfoBlobs.website_id == website_id,
-                active_info_blob_version(),
-            )
+    async def get_by_website(
+        self,
+        website_id: UUID,
+        *,
+        limit: int,
+        cursor: UUID | None = None,
+    ) -> WebsiteInfoBlobPage:
+        conditions = (
+            InfoBlobs.website_id == website_id,
+            active_info_blob_version(),
         )
-        return [InfoBlobInDB.model_validate(record) for record in records]
+        total_count = await self.session.scalar(
+            sa.select(sa.func.count()).select_from(InfoBlobs).where(*conditions)
+        )
+        query = (
+            sa.select(InfoBlobs)
+            .where(*conditions)
+            .order_by(InfoBlobs.id.asc())
+            .options(
+                defer(InfoBlobs.text),
+                selectinload(InfoBlobs.website),
+            )
+            .limit(limit + 1)
+        )
+        if cursor is not None:
+            query = query.where(InfoBlobs.id > cursor)
+
+        records = list(await self.session.scalars(query))
+        has_more = len(records) > limit
+        items = [
+            InfoBlobInDBNoText.model_validate(record) for record in records[:limit]
+        ]
+        return WebsiteInfoBlobPage(
+            items=items,
+            total_count=total_count or 0,
+            next_cursor=items[-1].id if has_more else None,
+        )
 
     @staticmethod
     def _source_filter(

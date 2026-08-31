@@ -8,45 +8,43 @@
   import utc from "dayjs/plugin/utc";
   import "dayjs/locale/sv";
   import "dayjs/locale/en";
+  import {
+    crawlRunFailureMessage,
+    crawlRunState,
+    crawlRunStateLabel
+  } from "$lib/features/knowledge/crawlRunState";
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
 
   export let website: WebsiteSparse;
-  const SKIPPED_PREFIX = "skipped duplicate crawl";
 
   // Set dayjs locale based on paraglide locale
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
   /* TODO colours */
   function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
-    const skipReason = website.latest_crawl?.result_location;
-    const skipTooltip = skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
-      ? m.crawl_skipped_duplicate()
-      : skipReason;
-
-    // Check if there are failures in the latest crawl
-    const pagesFailed = website.latest_crawl?.pages_failed ?? 0;
-    const filesFailed = website.latest_crawl?.files_failed ?? 0;
-    const hasFailures = pagesFailed > 0 || filesFailed > 0;
-
-    if (
-      website.latest_crawl?.status === "failed" &&
-      skipReason?.toLowerCase().startsWith(SKIPPED_PREFIX)
-    ) {
+    const crawl = website.latest_crawl;
+    if (!crawl) {
       return {
         color: "gray",
-        label: m.sync_skipped(),
-        tooltip: skipTooltip
+        label: m.not_synced()
       };
     }
 
-    switch (website.latest_crawl?.status) {
-      case "complete": {
-        const completed = dayjs(website.latest_crawl?.finished_at);
+    const state = crawlRunState(crawl);
+    const stateLabel = crawlRunStateLabel(state);
+
+    const pagesFailed = crawl.pages_failed ?? 0;
+    const filesFailed = crawl.files_failed ?? 0;
+    const hasFailures = pagesFailed > 0 || filesFailed > 0;
+
+    switch (state) {
+      case "succeeded":
+      case "partial": {
+        const completed = dayjs(crawl.finished_at);
         const label = m.synced_ago({ timeAgo: dayjs().to(completed) });
 
-        // If there are failures, show warning color and include failure info in tooltip
-        if (hasFailures) {
+        if (state === "partial" || hasFailures) {
           let failureText: string;
           if (pagesFailed > 0 && filesFailed > 0) {
             failureText = m.pages_and_files_failed({
@@ -61,7 +59,7 @@
 
           return {
             color: "yellow",
-            label: m.synced_with_warnings(),
+            label: stateLabel,
             tooltip: `${m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })} - ${failureText}`
           };
         }
@@ -72,36 +70,53 @@
           tooltip: m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })
         };
       }
-      case "in progress":
+      case "unchanged":
         return {
-          color: "yellow",
-          label: m.sync_in_progress(),
-          tooltip: m.started_on({
-            date: dayjs(website.latest_crawl?.created_at).format("YYYY-MM-DD HH:mm")
+          color: "green",
+          label: stateLabel,
+          tooltip: m.synced_on({
+            date: dayjs(crawl.finished_at).format("YYYY-MM-DD HH:mm")
           })
         };
-      case "failed":
+      case "empty":
         return {
-          color: "orange",
-          label: m.sync_failed(),
-          tooltip: skipTooltip
-        };
-      case "not found":
-        return {
-          color: "orange",
-          label: m.sync_failed(),
-          tooltip: skipTooltip
+          color: "yellow",
+          label: stateLabel
         };
       case "queued":
         return {
           color: "blue",
-          label: m.queued()
+          label: stateLabel,
+          tooltip: m.started_on({ date: dayjs(crawl.created_at).format("YYYY-MM-DD HH:mm") })
+        };
+      case "running":
+      case "finalizing":
+      case "stopping":
+        return {
+          color: "yellow",
+          label: stateLabel,
+          tooltip: m.started_on({ date: dayjs(crawl.created_at).format("YYYY-MM-DD HH:mm") })
+        };
+      case "cancelled":
+        return {
+          color: "gray",
+          label: stateLabel,
+          tooltip: crawlRunFailureMessage(crawl)
+        };
+      case "failed":
+      case "interrupted":
+        return {
+          color: "orange",
+          label: stateLabel,
+          tooltip: crawlRunFailureMessage(crawl)
+        };
+      case "unknown":
+        return {
+          color: "orange",
+          label: stateLabel,
+          tooltip: m.crawl_failure_unknown()
         };
     }
-    return {
-      color: "orange",
-      label: "error"
-    };
   }
 </script>
 

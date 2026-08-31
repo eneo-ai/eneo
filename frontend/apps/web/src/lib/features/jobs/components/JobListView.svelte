@@ -9,7 +9,13 @@
   export let title: string;
   export let prefix: string | undefined = undefined;
 
+  function isCancelledCrawl(job: Job): boolean {
+    return job.task === "crawl" && job.failure_code === "cancelled";
+  }
+
   function failureMessage(job: Job): string | null {
+    if (isCancelledCrawl(job)) return null;
+    if (job.task === "crawl") return getJobFailureMessage(job.failure_code, job.task);
     if (job.task === "upload_info_blob" || job.task === "transcription") {
       return getJobFailureMessage(job.failure_code, job.task);
     }
@@ -41,6 +47,8 @@
             </div>
             {#if job.status === "in progress" || job.status === "queued"}
               <IconLoadingSpinner class="animate-spin" />
+            {:else if isCancelledCrawl(job)}
+              <div class="text-secondary min-w-fit font-medium">{m.crawl_status_cancelled()}</div>
             {:else if job.status === "failed"}
               <div class="text-negative-default min-w-fit font-medium">{m.failed()}</div>
             {:else if job.status === "complete"}

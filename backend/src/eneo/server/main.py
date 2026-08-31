@@ -164,9 +164,7 @@ def determine_crawler_health(
 
     if pending_transport_cleanup:
         flags.append("TRANSPORT_CLEANUP_PENDING")
-        reasons.append(
-            f"{pending_transport_cleanup} expired crawl delivery cleanup(s) pending"
-        )
+        reasons.append(f"{pending_transport_cleanup} crawl delivery cleanup(s) pending")
 
     if redis_error is not None or not database_ok:
         status = "UNKNOWN"

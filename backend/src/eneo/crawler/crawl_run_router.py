@@ -26,3 +26,21 @@ async def get_crawl_run(
 ) -> CrawlRunPublic:
     service = container.website_crud_service()
     return CrawlRunPublic.from_domain(await service.get_crawl_run(id=id))
+
+
+@router.post(
+    "/{id}/cancel/",
+    response_model=CrawlRunPublic,
+    responses=responses.get_responses([403, 404]),
+    summary="Stop a crawl run",
+    description=(
+        "Persist an idempotent cancellation request. Queued work stops immediately; "
+        "running work transitions through the stopping phase."
+    ),
+)
+async def cancel_crawl_run(
+    id: Annotated[UUID, Path(description="Unique identifier of the crawl run to stop")],
+    container: ContainerDep,
+) -> CrawlRunPublic:
+    service = container.website_crud_service()
+    return CrawlRunPublic.from_domain(await service.cancel_crawl_run(id=id))

@@ -29,6 +29,7 @@ from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.main.observability import redact_url_query
 from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
     load_active_litellm_provider,
@@ -708,8 +709,18 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 },
             )
 
-            # Do task
-            logger.info(f"Running crawl with params: {params}")
+            logger.info(
+                "Starting crawl execution",
+                extra={
+                    "run_id": str(params.run_id),
+                    "attempt_id": str(params.attempt_id),
+                    "website_id": str(params.website_id),
+                    "url": redact_url_query(params.url),
+                    "crawl_type": params.crawl_type.value,
+                    "download_files": params.download_files,
+                    "origin": params.origin.value,
+                },
+            )
 
             # Use set for O(1) membership tests
             crawled_titles: set[str] = set()
@@ -728,6 +739,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         attempt_id,
                         lease_owner=lease_owner,
                         lease_duration=lease_duration,
+                        pages_crawled=num_published_pages,
+                        files_downloaded=num_published_files,
+                        pages_failed=num_failed_pages,
+                        files_failed=num_failed_files,
                     )
 
             heartbeat_monitor = HeartbeatMonitor(
@@ -1006,17 +1021,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 await producer_task
                 await _flush_pages()
-            except (HeartbeatFailedError, CrawlLeaseLostError):
-                logger.warning(
-                    "Crawl lease heartbeat stopped execution",
-                    extra={
-                        "job_id": str(job_id),
-                        "attempt_id": str(attempt_id),
-                        "website_id": str(params.website_id),
-                        "pages_processed": num_pages,
-                    },
-                )
-                raise
             finally:
                 if not producer_task.done():
                     producer_task.cancel()
@@ -1253,10 +1257,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 f"total_measured={total_time:.2f}s",
                 extra={
                     "timings": timings,
-                    "pages_crawled": num_pages,
+                    "pages_crawled": num_published_pages,
                     "pages_not_modified": num_not_modified_pages,
                     "pages_failed": num_failed_pages,
-                    "files_crawled": num_files,
+                    "files_crawled": num_published_files,
                     "files_failed": num_failed_files,
                     "files_skipped": num_skipped_files,
                     "file_skip_rate_percent": file_skip_rate,
@@ -1405,8 +1409,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 failure_code=crawl_failure_code,
                 failure_detail=crawl_failure_detail,
                 result_location=result_location if crawl_has_usable_result else None,
-                pages_crawled=num_pages,
-                files_downloaded=num_files,
+                pages_crawled=num_published_pages,
+                files_downloaded=num_published_files,
                 pages_failed=num_failed_pages,
                 files_failed=num_failed_files,
                 failure_summary=failure_summary,
@@ -1442,9 +1446,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 "name": website.name or website.url,
                             },
                             "crawl_stats": {
-                                "pages_crawled": num_pages,
+                                "pages_crawled": num_published_pages,
                                 "pages_failed": num_failed_pages,
-                                "files_downloaded": num_files,
+                                "files_downloaded": num_published_files,
                                 "files_failed": num_failed_files,
                                 "files_skipped": num_skipped_files,
                                 "blobs_deleted": num_deleted_blobs,
@@ -1465,10 +1469,30 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
         return {
             "status": crawl_outcome.value,
-            "pages_crawled": num_pages,
-            "files_downloaded": num_files,
+            "pages_crawled": num_published_pages,
+            "files_downloaded": num_published_files,
         }
     except CrawlLeaseLostError:
+        await _stop_heartbeat()
+        if await _finish_attempt(
+            CrawlOutcome.CANCELLED,
+            failure_code=CrawlFailureCode.CANCELLED,
+            failure_detail="The crawl was stopped by a user",
+            pages_crawled=num_published_pages,
+            files_downloaded=num_published_files,
+            pages_failed=num_failed_pages,
+            files_failed=num_failed_files,
+            failure_summary=dict(failure_counts) if failure_counts else None,
+        ):
+            logger.info(
+                "Crawl stopped after a persisted cancellation request",
+                extra={"job_id": str(job_id), "attempt_id": str(attempt_id)},
+            )
+            return {
+                "status": CrawlOutcome.CANCELLED.value,
+                "pages_crawled": num_published_pages,
+                "files_downloaded": num_published_files,
+            }
         logger.warning(
             "Crawl worker stopped after losing its attempt lease",
             extra={"job_id": str(job_id), "attempt_id": str(attempt_id)},
@@ -1480,8 +1504,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             CrawlOutcome.INTERRUPTED,
             failure_code=CrawlFailureCode.WORKER_INTERRUPTED,
             failure_detail="The crawler could not renew its database lease",
-            pages_crawled=num_pages,
-            files_downloaded=num_files,
+            pages_crawled=num_published_pages,
+            files_downloaded=num_published_files,
             pages_failed=num_failed_pages,
             files_failed=num_failed_files,
             failure_summary=dict(failure_counts) if failure_counts else None,
@@ -1489,16 +1513,37 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         raise
     except asyncio.CancelledError:
         await _stop_heartbeat()
-        await _finish_attempt(
-            CrawlOutcome.INTERRUPTED,
-            failure_code=CrawlFailureCode.WORKER_INTERRUPTED,
-            failure_detail="The crawler worker stopped before completion",
-            pages_crawled=num_pages,
-            files_downloaded=num_files,
+        cancelled = await _finish_attempt(
+            CrawlOutcome.CANCELLED,
+            failure_code=CrawlFailureCode.CANCELLED,
+            failure_detail="The crawl was stopped by a user",
+            pages_crawled=num_published_pages,
+            files_downloaded=num_published_files,
             pages_failed=num_failed_pages,
             files_failed=num_failed_files,
             failure_summary=dict(failure_counts) if failure_counts else None,
         )
+        if cancelled:
+            logger.info(
+                "Crawl stopped after a persisted cancellation request",
+                extra={"job_id": str(job_id), "attempt_id": str(attempt_id)},
+            )
+        else:
+            interrupted = await _finish_attempt(
+                CrawlOutcome.INTERRUPTED,
+                failure_code=CrawlFailureCode.WORKER_INTERRUPTED,
+                failure_detail="The crawler worker stopped before completion",
+                pages_crawled=num_published_pages,
+                files_downloaded=num_published_files,
+                pages_failed=num_failed_pages,
+                files_failed=num_failed_files,
+                failure_summary=dict(failure_counts) if failure_counts else None,
+            )
+            if interrupted:
+                logger.warning(
+                    "Crawl worker stopped before completion",
+                    extra={"job_id": str(job_id), "attempt_id": str(attempt_id)},
+                )
         raise
     except Exception:
         await _stop_heartbeat()
@@ -1506,8 +1551,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             CrawlOutcome.FAILED,
             failure_code=CrawlFailureCode.PROCESSING_FAILED,
             failure_detail="The crawler stopped because of an internal processing error",
-            pages_crawled=num_pages,
-            files_downloaded=num_files,
+            pages_crawled=num_published_pages,
+            files_downloaded=num_published_files,
             pages_failed=num_failed_pages,
             files_failed=num_failed_files,
             failure_summary=dict(failure_counts) if failure_counts else None,

@@ -61,6 +61,10 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
+from eneo.websites.domain.crawl_run_repo import (
+    WebsiteCrawlActiveError,
+    WebsiteCrawlCleanupPendingError,
+)
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -145,6 +149,17 @@ logger = logging.getLogger(__name__)
 # server adapter may depend on a domain package without reversing that
 # dependency. One map, so "where do I register this?" has one answer.
 DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
+    # --- Website crawl lifecycle ---
+    WebsiteCrawlActiveError: (
+        409,
+        "Stop the active crawl before deleting this website.",
+        ErrorCodes.WEBSITE_CRAWL_ACTIVE,
+    ),
+    WebsiteCrawlCleanupPendingError: (
+        409,
+        "Crawler cleanup is still in progress; retry deletion shortly.",
+        ErrorCodes.WEBSITE_CRAWL_CLEANUP_PENDING,
+    ),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),

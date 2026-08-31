@@ -21,6 +21,13 @@ from eneo.object_content.content import (
     ObjectContentIntegrityError,
     ObjectContentUnavailableError,
 )
+from eneo.websites.domain.crawl_run import CrawlFailureCode
+
+
+def test_every_crawl_failure_code_is_safe_for_the_public_job_contract() -> None:
+    assert {code.value for code in CrawlFailureCode} <= {
+        code.value for code in JobFailureCode
+    }
 
 
 @pytest.mark.parametrize(
@@ -150,7 +157,7 @@ def test_public_job_preserves_successful_knowledge_location() -> None:
     )
 
 
-def test_public_job_preserves_non_knowledge_failure_details() -> None:
+def test_public_job_masks_failed_crawl_details() -> None:
     persisted = JobInDb(
         id=uuid4(),
         user_id=uuid4(),
@@ -160,6 +167,21 @@ def test_public_job_preserves_non_knowledge_failure_details() -> None:
         result_location="The crawl exceeded its configured time limit",
     )
 
-    assert JobPublic.model_validate(persisted).result_location == (
-        "The crawl exceeded its configured time limit"
+    assert JobPublic.model_validate(persisted).result_location is None
+
+
+def test_public_job_preserves_typed_crawl_failure_code() -> None:
+    persisted = JobInDb(
+        id=uuid4(),
+        user_id=uuid4(),
+        name="intranet.example",
+        status=Status.FAILED,
+        task=Task.CRAWL,
+        result_location="connection refused by upstream",
+        failure_code="remote_unreachable",
     )
+
+    public = JobPublic.model_validate(persisted)
+
+    assert public.failure_code == "remote_unreachable"
+    assert public.result_location is None

@@ -212,7 +212,8 @@ class CrawlAttempts(BasePublic):
             name="ck_crawl_attempts_failure_detail_length",
         ),
         CheckConstraint(
-            "transport_cleaned_at IS NULL OR failure_code = 'lease_expired'",
+            "transport_cleaned_at IS NULL OR "
+            "failure_code IN ('lease_expired', 'cancelled')",
             name="ck_crawl_attempts_transport_cleanup",
         ),
         Index(
@@ -251,7 +252,8 @@ class CrawlAttempts(BasePublic):
             "finished_at",
             "id",
             postgresql_where=text(
-                "failure_code = 'lease_expired' AND transport_cleaned_at IS NULL"
+                "failure_code IN ('lease_expired', 'cancelled') "
+                "AND transport_cleaned_at IS NULL"
             ),
         ),
     )

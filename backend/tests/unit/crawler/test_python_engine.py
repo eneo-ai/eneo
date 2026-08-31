@@ -689,7 +689,7 @@ async def test_private_seed_becomes_a_safe_page_failure() -> None:
     ]
 
     assert isinstance(events[0], PageFailed)
-    assert events[0].reason == "_UnsafeTarget"
+    assert events[0].reason == "unsafe_target"
 
 
 async def test_redirect_is_validated_before_out_of_scope_target_is_requested() -> None:
@@ -717,7 +717,7 @@ async def test_redirect_is_validated_before_out_of_scope_target_is_requested() -
 
     assert not target_requested
     assert isinstance(events[0], PageFailed)
-    assert events[0].reason == "_RedirectRejected"
+    assert events[0].reason == "redirect_rejected"
 
 
 async def test_basic_auth_is_not_sent_after_origin_change() -> None:
@@ -754,7 +754,7 @@ async def test_basic_auth_is_not_sent_after_origin_change() -> None:
 
     assert seen_authorization == []
     assert isinstance(events[0], PageFailed)
-    assert events[0].reason == "_RedirectRejected"
+    assert events[0].reason == "redirect_rejected"
 
 
 async def test_page_limit_marks_crawl_partial() -> None:
@@ -881,7 +881,7 @@ async def test_bogus_response_charset_becomes_page_failure() -> None:
         ]
 
     assert isinstance(events[0], PageFailed)
-    assert events[0].reason == "LookupError"
+    assert events[0].reason == "response_decode_error"
 
 
 async def test_cancellation_propagates_and_stops_in_flight_fetches() -> None:

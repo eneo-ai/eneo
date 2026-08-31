@@ -124,3 +124,28 @@ async def test_discard_crawl_deliveries_removes_orphan_transport_state(
         await redis_client.zrem(abort_jobs_ss, *(str(value) for value in job_ids))
         await redis_client.delete(f"arq:job:{upload_job_id}")
         await manager.close()
+
+
+async def test_signal_crawl_abort_keeps_delivery_until_worker_acknowledges_it(
+    redis_client,
+) -> None:
+    manager = JobManager()
+    crawl_job_id = uuid4()
+    params = TaskParams(user_id=uuid4())
+
+    await manager.init()
+    try:
+        await manager.enqueue(Task.CRAWL, crawl_job_id, params)
+
+        await manager.signal_crawl_abort(crawl_job_id)
+
+        assert await redis_client.zscore(abort_jobs_ss, str(crawl_job_id)) is not None
+        assert (
+            await redis_client.zscore(CRAWLER_QUEUE_NAME, str(crawl_job_id)) is not None
+        )
+        assert await redis_client.exists(f"arq:job:{crawl_job_id}") == 1
+    finally:
+        await redis_client.zrem(CRAWLER_QUEUE_NAME, str(crawl_job_id))
+        await redis_client.zrem(abort_jobs_ss, str(crawl_job_id))
+        await redis_client.delete(f"arq:job:{crawl_job_id}")
+        await manager.close()
