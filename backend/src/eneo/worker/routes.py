@@ -165,8 +165,18 @@ async def crawl(job_id: UUID, params: CrawlTask, container: Container):
     3. crawl_task manages its own sessions via Container.session_scope()
 
     This prevents holding a DB connection for the entire crawl (5-30 minutes).
+    Every exit triggers a best-effort durable capacity refill; the minute
+    reconciler remains the fallback when that trigger fails.
     """
-    return await crawl_task(job_id=job_id, params=params, container=container)
+    try:
+        return await crawl_task(job_id=job_id, params=params, container=container)
+    finally:
+        try:
+            await _reconcile_crawl_dispatch_and_record_health()
+        except Exception:
+            logger.exception(
+                "Post-crawl reconciliation failed; scheduled reconciliation will retry"
+            )
 
 
 @worker.cron_job(

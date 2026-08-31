@@ -599,6 +599,58 @@ async def test_concurrent_reconcilers_cleanup_the_same_expired_delivery_safely(
         assert attempt.transport_cleaned_at is not None
 
 
+async def test_dispatch_reconciliation_waits_for_contended_owner_lock(
+    db_session,
+    admin_user,
+) -> None:
+    async with db_session() as session:
+        first_website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Contended dispatch first",
+        )
+        second_website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Contended dispatch second",
+        )
+        await _admit(session, website=first_website, user=admin_user)
+        await _admit(session, website=second_website, user=admin_user)
+
+    enqueue = AsyncMock(return_value=None)
+    reconcile_task: asyncio.Task[crawl_dispatch.CrawlReconciliationResult] | None = None
+    try:
+        async with sessionmanager.session() as lock_session, lock_session.begin():
+            claimed_while_locked = await CrawlRunRepository(
+                lock_session
+            ).claim_dispatch_candidates(
+                concurrency_limit=1,
+                retry_after=crawl_dispatch.DISPATCH_RETRY_AFTER,
+                redeliver_after=crawl_dispatch.QUEUE_REDELIVERY_AFTER,
+            )
+            assert len(claimed_while_locked) == 1
+
+            reconcile_task = asyncio.create_task(
+                crawl_dispatch.reconcile_crawl_work(
+                    enqueue=enqueue,
+                    discard=AsyncMock(),
+                    concurrency_limit=2,
+                )
+            )
+            await asyncio.sleep(0.1)
+            assert not reconcile_task.done()
+
+        result = await asyncio.wait_for(reconcile_task, timeout=5)
+    finally:
+        if reconcile_task is not None and not reconcile_task.done():
+            reconcile_task.cancel()
+
+    assert (result.claimed, result.dispatched, result.delivery_errors) == (1, 1, 0)
+    enqueue.assert_awaited_once()
+
+
 async def test_expired_worker_transport_cleanup_retries_until_acknowledged(
     db_session,
     admin_user,

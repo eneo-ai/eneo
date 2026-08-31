@@ -1,8 +1,10 @@
+import asyncio
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from arq.worker import Function, create_worker
 
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
@@ -92,6 +94,106 @@ async def test_delivery_error_does_not_renew_reconciliation_health(monkeypatch) 
 
     assert await worker_routes._reconcile_crawl_dispatch_and_record_health() == result
     mark_healthy.assert_not_awaited()
+
+
+async def test_finished_crawl_triggers_durable_admission_reconciliation(
+    monkeypatch,
+) -> None:
+    crawl_result = {
+        "status": "failed",
+        "pages_crawled": 0,
+        "files_downloaded": 0,
+    }
+    crawl_task = AsyncMock(return_value=crawl_result)
+    reconcile = AsyncMock(
+        return_value=CrawlReconciliationResult(
+            interrupted=0,
+            claimed=1,
+            dispatched=1,
+            invalid=0,
+            delivery_errors=0,
+        )
+    )
+    monkeypatch.setattr(worker_routes, "crawl_task", crawl_task)
+    monkeypatch.setattr(
+        worker_routes,
+        "_reconcile_crawl_dispatch_and_record_health",
+        reconcile,
+    )
+
+    result = await worker_routes.crawl({"job_id": uuid4()}, object())
+
+    assert result == crawl_result
+    reconcile.assert_awaited_once_with()
+
+
+async def test_post_crawl_dispatch_failure_does_not_replace_crawl_result(
+    monkeypatch,
+) -> None:
+    crawl_result = {
+        "status": "succeeded",
+        "pages_crawled": 1,
+        "files_downloaded": 0,
+    }
+    monkeypatch.setattr(
+        worker_routes,
+        "crawl_task",
+        AsyncMock(return_value=crawl_result),
+    )
+    reconcile = AsyncMock(side_effect=RuntimeError("redis unavailable"))
+    monkeypatch.setattr(
+        worker_routes,
+        "_reconcile_crawl_dispatch_and_record_health",
+        reconcile,
+    )
+
+    result = await worker_routes.crawl({"job_id": uuid4()}, object())
+
+    assert result == crawl_result
+    reconcile.assert_awaited_once_with()
+
+
+async def test_failed_crawl_still_triggers_durable_admission_reconciliation(
+    monkeypatch,
+) -> None:
+    crawl_failure = RuntimeError("crawl failed unexpectedly")
+    reconcile = AsyncMock()
+    monkeypatch.setattr(
+        worker_routes,
+        "crawl_task",
+        AsyncMock(side_effect=crawl_failure),
+    )
+    monkeypatch.setattr(
+        worker_routes,
+        "_reconcile_crawl_dispatch_and_record_health",
+        reconcile,
+    )
+
+    with pytest.raises(RuntimeError, match="crawl failed unexpectedly"):
+        await worker_routes.crawl({"job_id": uuid4()}, object())
+
+    reconcile.assert_awaited_once_with()
+
+
+async def test_cancelled_crawl_preserves_cancellation_when_reconciliation_fails(
+    monkeypatch,
+) -> None:
+    reconcile = AsyncMock(side_effect=RuntimeError("redis unavailable"))
+    monkeypatch.setattr(
+        worker_routes,
+        "crawl_task",
+        AsyncMock(side_effect=asyncio.CancelledError),
+    )
+    monkeypatch.setattr(
+        worker_routes,
+        "_reconcile_crawl_dispatch_and_record_health",
+        reconcile,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await worker_routes.crawl({"job_id": uuid4()}, object())
+
+    reconcile.assert_awaited_once_with()
 
 
 def test_job_id_from_ctx_returns_uuid_from_uuid_value():

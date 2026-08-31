@@ -272,11 +272,11 @@ class CrawlRunRepository:
                 "Queue redelivery interval must exceed the dispatch retry interval"
             )
 
-        locked = await self.session.scalar(
-            sa.select(sa.func.pg_try_advisory_xact_lock(_DISPATCH_ADVISORY_LOCK))
+        # Wait for the short claim transaction so a concurrent completion cannot
+        # lose the wake-up that should fill its newly released capacity slot.
+        await self.session.execute(
+            sa.select(sa.func.pg_advisory_xact_lock(_DISPATCH_ADVISORY_LOCK))
         )
-        if not locked:
-            return []
 
         now = await self._database_now()
         stale_before = now - retry_after
