@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -39,8 +40,15 @@ from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.runtime import tasks as flow_runtime_tasks
+from eneo.flows.runtime.step_execution_result import (
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
 
 LIFECYCLE_LOGGER = "eneo.flows.application.flow_run_lifecycle_events"
 
@@ -573,6 +581,107 @@ async def test_stale_running_query_excludes_awaiting_review_runs(
         )
 
     assert stale_runs == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_pending_webhook_committed_after_stale_discovery_blocks_terminalization(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    stale_before = datetime.now(timezone.utc)
+    async with sessionmanager.session() as setup_session, setup_session.begin():
+        run, flow, _run_repo = await _create_running_run(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        await setup_session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .where(FlowRuns.tenant_id == admin_user.tenant_id)
+            .values(updated_at=stale_before - timedelta(hours=1))
+        )
+        run_id = run.id
+        flow_id = flow.id
+        step_id = flow.steps[0].id
+
+    assert flow_id is not None
+    assert step_id is not None
+    stale_run_discovered = asyncio.Event()
+    webhook_committed = asyncio.Event()
+
+    async def discover_then_terminalize():
+        async with sessionmanager.session() as recovery_session:
+            run_repo = FlowRunRepository(session=recovery_session)
+            terminalizer = _flow_run_terminalizer(run_repo)
+            async with recovery_session.begin():
+                stale_runs = await run_repo.list_stale_running_runs(
+                    tenant_id=admin_user.tenant_id,
+                    stale_before=stale_before,
+                )
+            assert [candidate.id for candidate in stale_runs] == [run_id]
+            stale_run_discovered.set()
+            await webhook_committed.wait()
+            async with recovery_session.begin():
+                return await terminalizer.terminalize_stale_running_run(
+                    run_id=run_id,
+                    tenant_id=admin_user.tenant_id,
+                    stale_before=stale_before,
+                    error=FlowRunError.from_source(
+                        FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                        code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                        message="flow_worker_stalled: stale run reconciled.",
+                    ),
+                )
+
+    async def commit_pending_webhook():
+        await stale_run_discovered.wait()
+        async with sessionmanager.session() as webhook_session, webhook_session.begin():
+            await FlowRunWebhookDeliveryRepository(
+                session=webhook_session
+            ).insert_pending_delivery(
+                flow_id=flow_id,
+                tenant_id=admin_user.tenant_id,
+                intent=WebhookDeliveryIntent(
+                    flow_run_id=run_id,
+                    step_id=step_id,
+                    step_order=1,
+                    attempt_no=1,
+                    idempotency_key=f"{run_id}:{step_id}:1:webhook",
+                    payload=WebhookPayloadRef(
+                        value=f"flow_run:{run_id}:step:{step_id}:attempt:1"
+                    ),
+                ),
+            )
+        webhook_committed.set()
+
+    async with asyncio.TaskGroup() as task_group:
+        recovery_task = task_group.create_task(discover_then_terminalize())
+        task_group.create_task(commit_pending_webhook())
+    result = recovery_task.result()
+
+    assert result.did_transition is False
+    assert result.run.status is FlowRunStatus.RUNNING
+    async with sessionmanager.session() as verify_session, verify_session.begin():
+        persisted_status = await verify_session.scalar(
+            sa.select(FlowRuns.status)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == admin_user.tenant_id)
+        )
+        outbox_count = await verify_session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.flow_run_id == run_id)
+        )
+
+    assert persisted_status == FlowRunStatus.RUNNING.value
+    assert outbox_count == 0
 
 
 @pytest.mark.asyncio

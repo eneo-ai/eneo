@@ -874,7 +874,9 @@ class FlowRunRepository:
             .where(FlowRuns.status.in_(source_statuses))
         )
         if stale_before is not None:
-            stmt = stmt.where(FlowRuns.updated_at <= stale_before)
+            stmt = stmt.where(
+                stale_running_flow_run_predicate(stale_before=stale_before)
+            )
         run_row = await self.session.scalar(stmt.values(**values).returning(FlowRuns))
         if run_row is None:
             return None
