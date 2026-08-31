@@ -20,7 +20,6 @@ class DeletedCounts(TypedDict):
     questions: int
     app_runs: int
     sessions: int
-    builder_sessions: int
     builder_client_errors: int
     total: int
 
@@ -76,7 +75,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "questions": 0,
             "app_runs": 0,
             "sessions": 0,
-            "builder_sessions": 0,
             "builder_client_errors": 0,
             "total": 0,
         },
@@ -131,22 +129,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 if sessions_count > 0:
                     logger.info(f"Deleted {sessions_count} orphaned sessions")
 
-            builder_sessions_count = await _run_cleanup_step(
-                session=session,
-                results=results,
-                error_prefix="Failed to delete expired Builder sessions",
-                action=lambda: retention_service.delete_expired_builder_sessions(
-                    now=start_time,
-                ),
-            )
-            if builder_sessions_count is not None:
-                results["deleted"]["builder_sessions"] = builder_sessions_count
-                if builder_sessions_count > 0:
-                    logger.info(
-                        "Deleted %s expired Builder sessions based on retention policies",
-                        builder_sessions_count,
-                    )
-
             while True:
                 client_errors_batch = await _run_cleanup_step(
                     session=session,
@@ -174,7 +156,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         results["deleted"]["questions"]
         + results["deleted"]["app_runs"]
         + results["deleted"]["sessions"]
-        + results["deleted"]["builder_sessions"]
         + results["deleted"]["builder_client_errors"]
     )
 
@@ -185,7 +166,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"(questions: {results['deleted']['questions']}, "
             f"app_runs: {results['deleted']['app_runs']}, "
             f"sessions: {results['deleted']['sessions']}, "
-            f"builder_sessions: {results['deleted']['builder_sessions']}, "
             f"builder_client_errors: {results['deleted']['builder_client_errors']})"
         )
     else:

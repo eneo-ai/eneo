@@ -9,7 +9,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Last revised:** 2026-08-30
+- **Last revised:** 2026-08-31
 - **Decision owners:** Product, security, and architecture
 - **Scope:** Flow and Flow AI Builder launch behavior, destructive retention
   activation, and the portable-package platform boundary
@@ -565,8 +565,9 @@ WI-MKT-02.
   explicit mode, admin UX, operational safeguards, and a revision to this record.
 - **Separate data classes:** Conversation, App, Flow AI Builder session, audit-log,
   backup, external-export, and object-storage retention are not governed by this
-  hierarchy. In particular, current Builder sessions may still be removed by
-  their Space/conversation cleanup path and require their own production decision.
+  hierarchy. Builder sessions are excluded from the generic scheduled
+  Space/conversation cleanup path; until a Builder-specific retention policy is
+  defined, missing policy preserves the session.
 - **Removed or unavailable surface:** Classification-driven retention, minimum-
   retention barriers, hidden defaults, partial policies, automatic Flow deletion,
   a purge or approval button in the current settings surface, and claims that age

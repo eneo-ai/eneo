@@ -44,7 +44,6 @@ class _SessionProvider:
 class _DataRetentionService:
     def __init__(self, *, app_runs_error: Exception | None = None) -> None:
         self.app_runs_error = app_runs_error
-        self.builder_now_values: list[datetime] = []
         self.builder_client_error_now_values: list[datetime] = []
         self.flow_destructive_calls: list[str] = []
 
@@ -58,10 +57,6 @@ class _DataRetentionService:
 
     async def delete_old_sessions(self) -> int:
         return 5
-
-    async def delete_expired_builder_sessions(self, *, now: datetime) -> int:
-        self.builder_now_values.append(now)
-        return 13
 
     async def delete_expired_builder_client_errors_batch(self, *, now: datetime) -> int:
         self.builder_client_error_now_values.append(now)
@@ -106,7 +101,7 @@ class _Container:
 
 
 @pytest.mark.asyncio
-async def test_cleanup_old_data_never_runs_flow_destructive_retention(
+async def test_cleanup_old_data_preserves_builder_sessions_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _Session()
@@ -129,14 +124,12 @@ async def test_cleanup_old_data_never_runs_flow_destructive_retention(
         "questions": 2,
         "app_runs": 3,
         "sessions": 5,
-        "builder_sessions": 13,
         "builder_client_errors": 4,
-        "total": 27,
+        "total": 14,
     }
     assert service.flow_destructive_calls == []
     assert len(service.builder_client_error_now_values) == 3
-    assert service.builder_now_values == service.builder_client_error_now_values[:1]
-    assert session.transaction_count == 7
+    assert session.transaction_count == 6
     assert container.session.reset_count == 1
 
 
@@ -165,11 +158,10 @@ async def test_cleanup_old_data_keeps_non_flow_partial_success(
         "questions": 2,
         "app_runs": 0,
         "sessions": 5,
-        "builder_sessions": 13,
         "builder_client_errors": 4,
-        "total": 24,
+        "total": 11,
     }
     assert "sensitive value" not in "\n".join(result["errors"])
     assert service.flow_destructive_calls == []
-    assert session.transaction_count == 7
+    assert session.transaction_count == 6
     assert container.session.reset_count == 1

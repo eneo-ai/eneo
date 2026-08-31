@@ -19,8 +19,10 @@ from eneo.data_retention.infrastructure.data_retention_service import (
 )
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
+    BuilderSessions,
     FlowOutboxDeliveryStatus,
     FlowRunAuditOutbox,
     FlowRunReviewCheckpoints,
@@ -45,6 +47,7 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_repo import FileRepository
+from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus, TargetKind
 from eneo.flows.application.flow_run_audit_outbox_delivery import (
     FlowRunAuditOutboxDeliveryService,
 )
@@ -1119,6 +1122,56 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         assert await session.get(FlowTemplateAssets, template_asset_id) is not None
         assert await session.get(Files, template_file_id) is not None
         assert await session.get(FlowRunAuditOutbox, outbox_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_scheduled_cleanup_preserves_builder_sessions_without_builder_policy(
+    db_container,
+    db_session,
+) -> None:
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        tenant = container.tenant()
+        user = container.user()
+        session.add(
+            AuditRetentionPolicy(
+                tenant_id=tenant.id,
+                retention_days=365,
+                conversation_retention_enabled=True,
+                conversation_retention_days=1,
+            )
+        )
+        space = Spaces(
+            name=f"Builder retention preservation {uuid4()}",
+            description="Builder sessions must survive generic retention",
+            tenant_id=tenant.id,
+            user_id=user.id,
+            tenant_space_id=None,
+            data_retention_days=1,
+        )
+        session.add(space)
+        await session.flush()
+        builder_session = BuilderSessions(
+            tenant_id=tenant.id,
+            space_id=space.id,
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE.value,
+            status=SessionStatus.APPLIED.value,
+            conversation=[{"role": "user", "content": "retained"}],
+            created_at=now - timedelta(days=2),
+            updated_at=now - timedelta(days=2),
+        )
+        session.add(builder_session)
+        await session.flush()
+        builder_session_id = builder_session.id
+
+    cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
+    result = await cleanup_old_data(container=Container())
+
+    assert result["success"] is True
+    async with db_session() as session:
+        assert await session.get(BuilderSessions, builder_session_id) is not None
 
 
 @pytest.mark.asyncio
