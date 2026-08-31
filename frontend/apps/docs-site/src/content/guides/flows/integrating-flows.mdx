@@ -94,7 +94,7 @@ The full state map, including review-checkpoint and rerun-operation states, is o
 
 Polling is the only mechanism a caller controls for observing run status, because there is no client-registered subscription, server-sent events stream, or WebSocket. A flow author can design a terminal step that delivers its result over outbound HTTP, and that does signal successful completion to whatever receiver they configured, but it is not something the caller registers and it does not report failure or review states. A workable cadence:
 
-- poll `GET /api/v1/flows/{id}/runs/{run_id}/` every **2 seconds** for the first 30 seconds, then every **5 seconds**, then every **15 seconds** after two minutes
+- poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` every **2 seconds** for the first 30 seconds, then every **5 seconds**, then every **15 seconds** after two minutes
 - stop as soon as `should_poll` is false for the current status, meaning the run is `completed`, `failed`, or `cancelled`
 - keep polling while the status is `awaiting_review`; a reviewer may act at any time, and the checkpoint can also expire
 - cap the total wait with your own deadline. Long audio transcription is minutes, not seconds
@@ -133,7 +133,7 @@ Endpoint order:
 | Discover contract           | `/api/v1/flows/{id}/run-contract/`                                             | `GET`   | `200 OK`       | `get_flow_run_contract`                 |
 | Upload runtime file         | `/api/v1/flows/{id}/steps/{step_id}/runtime-files/`                            | `POST`  | `201 Created`  | `upload_flow_runtime_file`              |
 | Create run                  | `/api/v1/flows/{id}/runs/`                                                     | `POST`  | `201 Created`  | `create_flow_run`                       |
-| Poll run                    | `/api/v1/flows/{id}/runs/{run_id}/`                                            | `GET`   | `200 OK`       | `get_flow_run`                          |
+| Poll run                    | `/api/v1/flows/{id}/runs/{run_id}/status/`                                     | `GET`   | `200 OK`       | `get_flow_run_status`                   |
 | Find active review          | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/`                  | `GET`   | `200 OK`       | `get_active_flow_run_review_checkpoint` |
 | Edit review payload         | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/`         | `PATCH` | `200 OK`       | `edit_flow_run_review_checkpoint`       |
 | Approve review              | `/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/` | `POST`  | `200 OK`       | `approve_flow_run_review_checkpoint`    |
@@ -337,10 +337,11 @@ Poll the run until it is terminal or reaches `awaiting_review`.
 Request:
 
 ```text
-GET /api/v1/flows/{id}/runs/{run_id}/
+GET /api/v1/flows/{id}/runs/{run_id}/status/
 ```
 
-The run reports review state and secret-free outbound delivery progress.
+The content-free summary reports lifecycle and bounded public diagnostics. It
+does not return accepted input, results, files, usage, or webhook deliveries.
 
 Response:
 
@@ -364,24 +365,19 @@ Response:
   "cancelled_at": null,
   "started_at": "2026-03-17T10:05:02Z",
   "finished_at": null,
-  "input_payload_json": {
-    "employee_name": "Alex Example"
-  },
-  "result": null,
-  "result_files": [],
-  "token_usage": null,
-  "transcription_usage": null,
   "error": null,
   "job_id": "00000000-0000-0000-0000-000000000401",
   "created_at": "2026-03-17T10:05:00Z",
-  "updated_at": "2026-03-17T10:05:30Z",
-  "webhook_deliveries": []
+  "updated_at": "2026-03-17T10:05:30Z"
 }
 ```
 
 ### 5. Find active review
 
-Fetch the active checkpoint before showing the review screen. This endpoint always answers `200 OK`, and the body is the literal JSON `null` when no checkpoint is open, so check for that before reading any field.
+Fetch the active checkpoint before showing the review screen. It returns `200 OK`
+with the literal JSON `null` when no checkpoint is open, so check for that before
+reading any field. The payload is a required audited read; Eneo returns `503`
+without checkpoint content if the audit record cannot be committed.
 
 Request:
 
@@ -910,17 +906,19 @@ Discover the contract, create a run with idempotency, poll status, then read the
 
 1. Call `runtime_paths.run_contract` to get required inputs, review steps, final output, and `published_flow_version`.
 2. Call `runtime_paths.create_run` with `expected_flow_version` and an `Idempotency-Key`; the response returns a run id.
-3. Call `runtime_paths.get_run_template` until the run is terminal or `awaiting_review`.
-4. Call `runtime_paths.list_steps_template` to get per-step status, output, result files, and error codes.
+3. Call `runtime_paths.get_run_status_template` until the run is terminal or `awaiting_review`.
+4. Call `runtime_paths.get_run_template` once to read the audited final result.
+5. Call `runtime_paths.list_steps_template` only when you need per-step output, files, or diagnostics.
 
 Endpoint facts:
 
-| Endpoint                                  | Method | Success       | Operation               |
-| ----------------------------------------- | ------ | ------------- | ----------------------- |
-| `/api/v1/flows/{id}/run-contract/`        | `GET`  | `200 OK`      | `get_flow_run_contract` |
-| `/api/v1/flows/{id}/runs/`                | `POST` | `201 Created` | `create_flow_run`       |
-| `/api/v1/flows/{id}/runs/{run_id}/`       | `GET`  | `200 OK`      | `get_flow_run`          |
-| `/api/v1/flows/{id}/runs/{run_id}/steps/` | `GET`  | `200 OK`      | `list_flow_run_steps`   |
+| Endpoint                                   | Method | Success       | Operation               |
+| ------------------------------------------ | ------ | ------------- | ----------------------- |
+| `/api/v1/flows/{id}/run-contract/`         | `GET`  | `200 OK`      | `get_flow_run_contract` |
+| `/api/v1/flows/{id}/runs/`                 | `POST` | `201 Created` | `create_flow_run`       |
+| `/api/v1/flows/{id}/runs/{run_id}/status/` | `GET`  | `200 OK`      | `get_flow_run_status`   |
+| `/api/v1/flows/{id}/runs/{run_id}/`        | `GET`  | `200 OK`      | `get_flow_run`          |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/`  | `GET`  | `200 OK`      | `list_flow_run_steps`   |
 
 Contract coverage: These endpoints are contract-tested.
 
@@ -986,7 +984,7 @@ After inputs are bound, plan how the UI behaves when a review-marked step pauses
 Runs pause only at review-marked steps and resume through review checkpoint endpoints.
 
 1. Call `runtime_paths.run_contract` before run creation and inspect `steps_requiring_review`.
-2. Poll `runtime_paths.get_run_template`; when status is `awaiting_review`, show the review UI.
+2. Poll `runtime_paths.get_run_status_template`; when status is `awaiting_review`, show the review UI.
 3. Call `review_checkpoints.active_template` to get the open checkpoint and revision.
 4. Read checkpoint `schema_version`; treat an unsupported version as non-editable and refresh or upgrade the client.
 5. For edit review, send `edited_value`: the corrected step output itself, a string for a `text` output step or a JSON object or array for a `json` one, satisfying `output_contract` and staying within the inline UTF-8 limit.

@@ -35,13 +35,13 @@ Closest supported alternative: Convert the image into a supported document or te
 
 ## Capability and endpoint pitfalls
 
-| What you can do                     | Endpoint owner                                                                                                                             | Trap                                                                 | Consumer action                                                                                                                 |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Start a run safely                  | `POST create_flow_run` (`201 Created`)                                                                                                     | Reusing a retry key with different input returns a conflict.         | Retry with the original payload or choose a new idempotency key.                                                                |
-| Poll without hammering              | `GET get_flow_run_status_capabilities` (`200 OK`); `GET get_flow_run` (`200 OK`); `GET list_flow_run_steps` (`200 OK`)                     | Status capabilities tell you when polling should slow down or stop.  | Use status capabilities for cadence and poll run or step endpoints only while progress can change.                              |
-| Continue after review or rerun      | `POST resume_flow_run_review_checkpoint` (`202 Accepted`); `POST rerun_flow_run_step` (`202 Accepted`)                                     | `202 Accepted` means work was queued, not finished.                  | Poll the run and step list for completion before showing final output.                                                          |
-| Open retained artifacts or evidence | `POST generate_flow_run_artifact_signed_url` (`200 OK`); `GET get_flow_run_evidence` (`200 OK`); `GET export_flow_run_evidence` (`200 OK`) | Purged content can leave metadata but no downloadable file content.  | Show retention-aware messaging and avoid retry loops for purged content.                                                        |
-| Handle outbound delivery failure    | `GET get_flow_run` (`200 OK`); `GET list_flow_run_steps` (`200 OK`); `POST generate_flow_run_artifact_signed_url` (`200 OK`)               | The run can finish but final outbound delivery can be dead-lettered. | Read the result through run and step endpoints because delivery retries are exhausted and no public redelivery endpoint exists. |
+| What you can do                     | Endpoint owner                                                                                                                             | Trap                                                                 | Consumer action                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Start a run safely                  | `POST create_flow_run` (`201 Created`)                                                                                                     | Reusing a retry key with different input returns a conflict.         | Retry with the original payload or choose a new idempotency key.                                                                  |
+| Poll without hammering              | `GET get_flow_run_status_capabilities` (`200 OK`); `GET get_flow_run_status` (`200 OK`)                                                    | Status capabilities tell you when polling should slow down or stop.  | Poll the content-free run status while progress can change; fetch audited detail or steps only when the user needs their content. |
+| Continue after review or rerun      | `POST resume_flow_run_review_checkpoint` (`202 Accepted`); `POST rerun_flow_run_step` (`202 Accepted`)                                     | `202 Accepted` means work was queued, not finished.                  | Poll the run and step list for completion before showing final output.                                                            |
+| Open retained artifacts or evidence | `POST generate_flow_run_artifact_signed_url` (`200 OK`); `GET get_flow_run_evidence` (`200 OK`); `GET export_flow_run_evidence` (`200 OK`) | Purged content can leave metadata but no downloadable file content.  | Show retention-aware messaging and avoid retry loops for purged content.                                                          |
+| Handle outbound delivery failure    | `GET get_flow_run` (`200 OK`); `GET list_flow_run_steps` (`200 OK`); `POST generate_flow_run_artifact_signed_url` (`200 OK`)               | The run can finish but final outbound delivery can be dead-lettered. | Read the result through run and step endpoints because delivery retries are exhausted and no public redelivery endpoint exists.   |
 
 ## Operations
 
@@ -81,16 +81,17 @@ Use the published contract and OpenAPI error examples as the smoke-test source.
 
 1. Call `runtime_paths.run_contract` in test setup and assert your UI can render every required input.
 2. Create a run with a deterministic `Idempotency-Key` and assert replay returns the same run.
-3. Poll run and step endpoints and assert your UI branches on known `FlowApiErrorCode` values.
+3. Poll the status endpoint, read audited detail when needed, and assert your UI branches on known `FlowApiErrorCode` values.
 
 Endpoint facts:
 
-| Endpoint                                  | Method | Success       | Operation               |
-| ----------------------------------------- | ------ | ------------- | ----------------------- |
-| `/api/v1/flows/{id}/run-contract/`        | `GET`  | `200 OK`      | `get_flow_run_contract` |
-| `/api/v1/flows/{id}/runs/`                | `POST` | `201 Created` | `create_flow_run`       |
-| `/api/v1/flows/{id}/runs/{run_id}/`       | `GET`  | `200 OK`      | `get_flow_run`          |
-| `/api/v1/flows/{id}/runs/{run_id}/steps/` | `GET`  | `200 OK`      | `list_flow_run_steps`   |
+| Endpoint                                   | Method | Success       | Operation               |
+| ------------------------------------------ | ------ | ------------- | ----------------------- |
+| `/api/v1/flows/{id}/run-contract/`         | `GET`  | `200 OK`      | `get_flow_run_contract` |
+| `/api/v1/flows/{id}/runs/`                 | `POST` | `201 Created` | `create_flow_run`       |
+| `/api/v1/flows/{id}/runs/{run_id}/status/` | `GET`  | `200 OK`      | `get_flow_run_status`   |
+| `/api/v1/flows/{id}/runs/{run_id}/`        | `GET`  | `200 OK`      | `get_flow_run`          |
+| `/api/v1/flows/{id}/runs/{run_id}/steps/`  | `GET`  | `200 OK`      | `list_flow_run_steps`   |
 
 Contract coverage: These endpoints are contract-tested.
 

@@ -110,6 +110,24 @@ Clean architecture is a dependency rule, not a directory ceremony.
 - Untrusted boundary data may begin as `unknown`, but it must be validated or
   narrowed before application or UI state depends on it.
 
+### Drift-safe projections and explicit failure
+
+- Define a narrower or content-safe response positively from its typed contract;
+  do not derive it by deleting string-named fields from a broader, more sensitive
+  object.
+- Give partial database reads a dedicated typed read model, select ORM column
+  attributes explicitly, and test at the query boundary that excluded content is
+  not read.
+- When an example documents a complete public response, validate it through the
+  response model and assert exact field-key parity.
+- Use enums for closed domain vocabulary such as lifecycle states and error codes,
+  not as duplicate registries of model field names.
+- Reject unknown fields at owned schema boundaries where forward-compatible
+  extension data is not part of the contract.
+- Fail closed at authorization, required-audit, redaction, and schema boundaries.
+  A recoverable background failure may preserve the last known usable view, but
+  the failure must remain visible or observable and clear after recovery.
+
 Use a concrete class when one implementation and no volatile seam exist. Tests
 should exercise public behavior rather than force production abstractions for
 mocking.

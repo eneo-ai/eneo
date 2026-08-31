@@ -18,14 +18,44 @@ Audit logs capture actions such as:
 
 Logs are stored in PostgreSQL and are scoped to your tenant.
 
+## Flow audit guarantees
+
+Flow events use different guarantees based on what could be exposed or changed:
+
+| Guarantee                         | Used for                                                                                                                                                          | What happens if audit storage is unavailable                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Required in the state transaction | Run creation and terminal/review transitions, redispatch, runtime input upload or deletion, run-history policy changes, package import, and future purge receipts | The protected database change does not commit.                                                                                                                    |
+| Required before access            | Run input/result detail, active review payloads, evidence and provider-call views or exports, template/run-file download URLs, and Flow package export            | Eneo returns `503` and does not return protected content, package bytes, or a signed URL.                                                                         |
+| Configurable and asynchronous     | Routine Flow authoring and most tenant Flow-setting changes                                                                                                       | The action can succeed when its configured audit event is disabled or the audit queue is temporarily unavailable.                                                 |
+| Operational, best effort          | Executed Flow HTTP and transcription audit summaries                                                                                                              | Runtime step/attempt state, webhook delivery state, and provider-call evidence remain the durable records. The additional admin audit summary may be unavailable. |
+
+Required Flow events are safety records. They bypass the global, category, and
+action toggles, so an administrator cannot accidentally disable the record while
+performing the protected action. The toggles control configurable events only.
+
+Audit metadata contains identifiers, bounded counts, classifications, and status.
+It does not contain prompts, document or audio content, credentials, signed URLs,
+authorization headers, or raw provider request and response bodies. Routine run
+status polling and history use content-free summaries, so they are not audited.
+Opening run input/result detail or an active review payload is audited and fails
+with `503` if the required record cannot be committed.
+
+The Flow authoring screen's **Test HTTP request** action is not a runtime Flow
+step. It creates a configurable asynchronous audit event after the external
+request, but no step, attempt, or webhook-delivery record. A temporary audit-queue
+failure does not suppress the test result, so this action is not durable HTTP
+evidence. Execute the published Flow when durable runtime evidence is required.
+
 ## Enable audit logging
 
-Audit logging can be turned on or off globally in the admin UI.
+Configurable audit logging can be turned on or off globally in the admin UI.
 
 - Go to **Organization → Granskningsloggar (Audit Logs)**
 - Use the global toggle to enable or disable logging for your tenant
 
-When disabled, no new audit logs are created.
+When disabled, configurable events are not created. Required Flow safety events
+described above still record the protected action or deny it if the record cannot
+be persisted.
 
 ## Configure what gets logged
 

@@ -6,18 +6,52 @@ For admin-facing guidance, see the [Audit Logging Guide](/guides/audit-logging).
 
 ## High-level architecture
 
-Audit events are created through the `AuditService` application layer:
+Audit events are created through the existing `AuditService`; Flow does not have
+a parallel audit subsystem. There are three persistence paths:
 
-1. API routes/services call `log_async` (preferred) or `log` (synchronous).
-2. `log_async` enqueues a background job in ARQ (Redis-backed).
-3. The worker persists the audit log in PostgreSQL.
-4. Retention is enforced by a scheduled purge job.
-5. Exports are generated via the `AuditExportService` (sync or async job).
+1. Configurable events call `log_async`, which applies the audit configuration and
+   enqueues an ARQ job for PostgreSQL persistence.
+2. Required request-time events call `log(required=True)` in the same database
+   transaction as the protected change, or commit the audit before returning
+   sensitive data.
+3. Run terminal and review transitions insert the existing Flow audit-outbox row
+   in the same transaction. Delivery is idempotent and observable; a failed outbox
+   insert prevents the transition from committing.
 
-Audit logging is gated by:
+The global feature toggle (`audit_logging_enabled`) and per-tenant category/action
+overrides apply only to configurable events. Required Flow events deliberately
+bypass those controls.
 
-- A global feature toggle (`audit_logging_enabled`).
-- Per-tenant audit configuration (category-level and action-level overrides).
+Audit-log retention is enforced separately by its scheduled purge job. Exports are
+generated through `AuditExportService`.
+
+## Flow assurance contract
+
+| Level                    | Canonical examples                                                                                                                           | Failure behavior                                                                                                                                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Required transaction     | Run creation; runtime-file upload/delete; terminal and review transitions; redispatch; run-history policy replacement; package import        | Roll back the protected database transition. Idempotency keys, state compare-and-set, or unique outbox revisions prevent misleading duplicates.                                                                             |
+| Required before response | Run input/result detail; active review payloads; evidence/provider-call access and export; template and run-file signed URLs; package export | Return `503` without protected content, bytes, or a signed URL.                                                                                                                                                             |
+| Configurable async       | Routine authoring and most Flow setting changes                                                                                              | Apply tenant audit configuration. An ARQ outage does not roll back the completed low-risk change.                                                                                                                           |
+| Best-effort operational  | Executed Flow HTTP calls and transcription summary events                                                                                    | Preserve the authoritative runtime records even if the extra admin audit summary fails. Executed HTTP calls use persisted step/attempt or webhook-delivery state; transcription uses required `FlowProviderCalls` evidence. |
+
+Routine status polling and run-history summaries deliberately exclude accepted
+input, results, result-file metadata, and usage data, so they are not business
+audit events. Retrieving run detail or an active review payload is a required,
+fail-closed access event. Side-effect-free package validation/import planning is
+also not a business audit event.
+
+The authoring-time **Test HTTP request** action differs from an executed Flow HTTP
+step. It makes an external request before emitting a configurable asynchronous
+audit event and creates no runtime step, attempt, or webhook-delivery record. If
+the audit queue is unavailable, the test result can still be returned and no
+durable HTTP evidence is guaranteed. Use executed Flow runs when durable runtime
+evidence is required.
+
+The future explicit Flow purge consumes the same required transaction contract.
+Its immutable receipt records the requester, reason, eligibility snapshot, eligible
+and deleted run counts, deleted bytes, outcome, correlation/idempotency identity,
+and receipt id. Saving a retention policy still never performs or schedules a
+purge.
 
 ## Storage model
 
@@ -42,6 +76,8 @@ Configuration is layered to allow broad and precise control:
 - **Action overrides**: enable/disable specific actions within a category.
 
 Changes apply immediately for new audit events; historical logs are not modified.
+Required Flow safety events are not configurable and remain enforced when these
+controls are disabled.
 
 ## Access model and justification
 

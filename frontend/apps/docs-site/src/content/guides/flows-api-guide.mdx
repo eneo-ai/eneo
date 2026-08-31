@@ -186,11 +186,11 @@ For most consumer apps, the safest order is:
 3. fetch the published run contract
 4. upload files if the flow requires them
 5. create a run with an optional `Idempotency-Key`
-6. poll the run and step endpoints
+6. poll the content-free run status endpoint
 7. if the run reaches `awaiting_review`, load the active review checkpoint
 8. edit, approve, reject, or resume the checkpoint
 9. optionally rerun a completed step when a reviewer accepts a correction
-10. fetch artifacts or evidence if your principal is allowed to
+10. fetch audited run detail, artifacts, or evidence when your principal needs them
 
 ## Tenant flow settings for runtime operators
 
@@ -331,6 +331,7 @@ Example response:
     },
     "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
     "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
+    "get_run_status_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/status/",
     "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
     "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
     "provider_calls_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/provider-calls/",
@@ -350,7 +351,7 @@ The full `runtime_paths` object includes `run_contract`, `graph`,
 `upload_step_runtime_file_template`, `delete_runtime_file_template`,
 `create_run`, `list_runs`, `cancel_run_template`, `redispatch_run_template`,
 `review_checkpoints`,
-`get_graph_for_run_template`, `get_run_template`, `list_steps_template`,
+`get_graph_for_run_template`, `get_run_template`, `get_run_status_template`, `list_steps_template`,
 `evidence_template`, `provider_calls_template`, `export_evidence_template`, and
 `artifact_signed_url_template`. The nested `review_checkpoints` object contains
 `active_template`, `edit_template`, `approve_template`, `reject_template`, and
@@ -677,8 +678,9 @@ Key endpoints:
 | Purpose                 | Endpoint                                                            |
 | ----------------------- | ------------------------------------------------------------------- |
 | Get status capabilities | `GET /api/v1/flows/runs/status-capabilities/`                       |
-| List runs for a flow    | `GET /api/v1/flows/{flow_id}/runs/`                                 |
-| Get one run             | `GET /api/v1/flows/{flow_id}/runs/{run_id}/`                        |
+| List run summaries      | `GET /api/v1/flows/{flow_id}/runs/`                                 |
+| Poll one run status     | `GET /api/v1/flows/{flow_id}/runs/{run_id}/status/`                 |
+| Get audited run detail  | `GET /api/v1/flows/{flow_id}/runs/{run_id}/`                        |
 | Cancel a run            | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/`                |
 | Redispatch a run        | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/`            |
 | Rerun a completed step  | `POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/` |
@@ -707,7 +709,7 @@ typically stops after the first page and silently skips the rest.
 Typical polling loop:
 
 - create the run
-- poll `GET /runs/{run_id}/`
+- poll `GET /runs/{run_id}/status/`
 - if the run reaches `awaiting_review`, load the active checkpoint and resolve it
 - once the run becomes terminal, fetch step outputs, artifacts, and any evidence you need
 
@@ -733,11 +735,13 @@ Current run status values:
 `awaiting_review` is non-terminal. Keep polling and call the active checkpoint
 endpoint before deciding whether to edit, approve, reject, or resume the run.
 
-Two response models exist and they differ by one field. `POST /runs/` returns
-`FlowRunPublic`. `GET /runs/{run_id}/` returns `FlowRunDetailPublic`, which is
-`FlowRunPublic` plus a **always-present** `webhook_deliveries` array. The array
-is empty unless the flow's final step was authored with output mode
-`http_post`; its presence does not depend on the delivery mode.
+Three response models make the sensitivity boundary explicit. `POST /runs/`
+returns `FlowRunPublic`. History and `GET /runs/{run_id}/status/` return
+`FlowRunSummaryPublic`, which omits accepted input, result, result-file metadata,
+provider usage, and webhook deliveries. `GET /runs/{run_id}/` returns the
+content-bearing `FlowRunDetailPublic`, which is `FlowRunPublic` plus an
+always-present `webhook_deliveries` array. Detail access is audit-logged and
+returns `503` without content if the required record cannot be committed.
 
 Example run response:
 
@@ -1469,9 +1473,10 @@ GET  /api/v1/flows/{flow_id}/run-contract/
 POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/ (optional)
 DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/      (optional abandoned upload cleanup)
 POST /api/v1/flows/{flow_id}/runs/                           with Idempotency-Key
-GET  /api/v1/flows/{flow_id}/runs/{run_id}/
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/status/           (routine polling)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/active/ (when awaiting_review)
 PATCH/POST review checkpoint edit/approve/reject/resume endpoints     (when awaiting_review)
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/                  (audited final detail)
 GET  /api/v1/flows/{flow_id}/runs/{run_id}/steps/
 POST /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/      (optional correction)
 POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/ (optional)
