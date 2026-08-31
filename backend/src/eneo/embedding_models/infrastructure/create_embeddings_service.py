@@ -92,7 +92,7 @@ class CreateEmbeddingsService:
         )
 
         # All models must have provider_id
-        if not hasattr(model, "provider_id") or not model.provider_id:
+        if model.provider_id is None:
             raise ValueError(
                 f"Model '{model.name}' is missing required provider_id. "
                 "All models must be associated with a ModelProvider."
@@ -126,7 +126,7 @@ class CreateEmbeddingsService:
                 logger.error(
                     "Model requires database session but none available",
                     extra={
-                        "model_id": str(model.id) if hasattr(model, "id") else None,
+                        "model_id": str(model.id),
                         "model_name": model.name,
                         "provider_id": str(model.provider_id),
                         "tenant_id": str(self.tenant.id) if self.tenant else None,
@@ -159,10 +159,10 @@ class CreateEmbeddingsService:
             )
             provider_type = provider.provider_type
 
-        logger.info(
+        logger.debug(
             f"Using LiteLLMEmbeddingAdapter for model '{model.name}'",
             extra={
-                "model_id": str(model.id) if hasattr(model, "id") else None,
+                "model_id": str(model.id),
                 "model_name": model.name,
                 "provider_id": str(model.provider_id),
                 "provider_type": provider_type,

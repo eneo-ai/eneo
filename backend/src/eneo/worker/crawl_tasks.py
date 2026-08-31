@@ -196,9 +196,8 @@ def _crawl_has_usable_result(outcome: CrawlOutcome) -> bool:
     }
 
 
-def _crawl_resets_failure_backoff(
+def _crawl_counts_as_scheduled_run(
     outcome: CrawlOutcome,
-    termination_reason: str,
     *,
     useful_items: int,
     failed_items: int,
@@ -209,11 +208,7 @@ def _crawl_resets_failure_backoff(
         CrawlOutcome.EMPTY,
     }:
         return True
-    return (
-        outcome == CrawlOutcome.PARTIAL
-        and termination_reason in {"page_limit", "timeout"}
-        and failed_items <= useful_items
-    )
+    return outcome == CrawlOutcome.PARTIAL and useful_items > failed_items
 
 
 def _failure_code_for_crawl(
@@ -474,6 +469,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     num_published_pages = 0
     num_not_modified_pages = 0
     num_files = 0
+    num_published_files = 0
     num_failed_pages = 0
     num_failed_files = 0
     num_deleted_blobs = 0
@@ -838,7 +834,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
             async def _process_file(event: FileDownloaded) -> None:
-                nonlocal num_files, num_failed_files, num_skipped_files
+                nonlocal num_files, num_published_files
+                nonlocal num_failed_files, num_skipped_files
                 nonlocal processing_file_seconds
                 file_started = time.time()
                 num_files += 1
@@ -881,6 +878,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         container=container,
                         existing_publications=existing_publications,
                     )
+                    num_published_files += success_count
                     if success_count:
                         crawled_titles.update(successful_titles)
                     if failed_count:
@@ -1032,25 +1030,28 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 0.0,
             )
 
-            published_files = max(
-                num_files - num_failed_files - num_skipped_files,
-                0,
-            )
             crawl_outcome = _classify_crawl_outcome(
                 published_pages=num_published_pages,
                 unchanged_pages=num_not_modified_pages,
-                published_files=published_files,
+                published_files=num_published_files,
                 unchanged_files=num_skipped_files,
                 failed_pages=num_failed_pages,
                 failed_files=num_failed_files,
                 partial=crawl_is_partial,
             )
             crawl_has_usable_result = _crawl_has_usable_result(crawl_outcome)
-            crawl_completed_authoritatively = crawl_outcome in {
-                CrawlOutcome.SUCCEEDED,
-                CrawlOutcome.UNCHANGED,
-                CrawlOutcome.EMPTY,
-            }
+            useful_items = (
+                num_published_pages
+                + num_not_modified_pages
+                + num_published_files
+                + num_skipped_files
+            )
+            failed_items = num_failed_pages + num_failed_files
+            crawl_counts_as_scheduled_run = _crawl_counts_as_scheduled_run(
+                crawl_outcome,
+                useful_items=useful_items,
+                failed_items=failed_items,
+            )
             crawl_failure_code = (
                 _failure_code_for_crawl(failure_counts, crawl_termination_reason)
                 if crawl_outcome in {CrawlOutcome.FAILED, CrawlOutcome.PARTIAL}
@@ -1203,7 +1204,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 # No need for transaction check - execute_with_recovery handles it
                 await sess.execute(last_crawled_stmt)
 
-            if crawl_completed_authoritatively:
+            if crawl_counts_as_scheduled_run:
                 await execute_with_recovery(
                     container=container,
                     session_holder=session_holder,
@@ -1304,21 +1305,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 # Session provided by execute_with_recovery (session-per-operation pattern)
                 # NOTE: Use crawl_context primitives, NOT detached ORM website object
-                if _crawl_resets_failure_backoff(
-                    crawl_outcome,
-                    crawl_termination_reason,
-                    useful_items=(
-                        num_published_pages
-                        + num_not_modified_pages
-                        + published_files
-                        + num_skipped_files
-                    ),
-                    failed_items=num_failed_pages + num_failed_files,
-                ):
-                    # Local page/time caps are healthy completion. A partial result
-                    # dominated by remote failures must still enter backoff.
+                if crawl_counts_as_scheduled_run:
+                    # A useful partial result is healthy enough to remain scheduled.
+                    # Failure-dominated results still enter backoff.
                     logger.info(
-                        f"Crawl completed within local policy, resetting circuit breaker for website {params.website_id}"
+                        "Crawl counts as scheduled; resetting failure backoff",
+                        extra={"website_id": str(params.website_id)},
                     )
                     reset_stmt = (
                         sa.update(WebsitesTable)
@@ -1433,34 +1425,35 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
                 audit_failed = crawl_outcome == CrawlOutcome.FAILED
 
-                await container.audit_service().log_async(
-                    tenant_id=current_tenant.id,
-                    user=user,
-                    action=ActionType.WEBSITE_CRAWLED,
-                    entity_type=EntityType.WEBSITE,
-                    entity_id=params.website_id,
-                    description=(
-                        f"Website crawled: {website.url} - {crawl_outcome.value}"
-                    ),
-                    metadata={
-                        "target": {
-                            "website_id": str(params.website_id),
-                            "url": website.url,
-                            "name": website.name or website.url,
+                async with Container.session_scope():
+                    await container.audit_service().log_async(
+                        tenant_id=current_tenant.id,
+                        user=user,
+                        action=ActionType.WEBSITE_CRAWLED,
+                        entity_type=EntityType.WEBSITE,
+                        entity_id=params.website_id,
+                        description=(
+                            f"Website crawled: {website.url} - {crawl_outcome.value}"
+                        ),
+                        metadata={
+                            "target": {
+                                "website_id": str(params.website_id),
+                                "url": website.url,
+                                "name": website.name or website.url,
+                            },
+                            "crawl_stats": {
+                                "pages_crawled": num_pages,
+                                "pages_failed": num_failed_pages,
+                                "files_downloaded": num_files,
+                                "files_failed": num_failed_files,
+                                "files_skipped": num_skipped_files,
+                                "blobs_deleted": num_deleted_blobs,
+                                "outcome": crawl_outcome.value,
+                            },
                         },
-                        "crawl_stats": {
-                            "pages_crawled": num_pages,
-                            "pages_failed": num_failed_pages,
-                            "files_downloaded": num_files,
-                            "files_failed": num_failed_files,
-                            "files_skipped": num_skipped_files,
-                            "blobs_deleted": num_deleted_blobs,
-                            "outcome": crawl_outcome.value,
-                        },
-                    },
-                    outcome=Outcome.FAILURE if audit_failed else Outcome.SUCCESS,
-                    error_message=crawl_failure_detail if audit_failed else None,
-                )
+                        outcome=(Outcome.FAILURE if audit_failed else Outcome.SUCCESS),
+                        error_message=crawl_failure_detail if audit_failed else None,
+                    )
             except Exception:
                 logger.exception(
                     "Crawl completed but its audit event could not be recorded",

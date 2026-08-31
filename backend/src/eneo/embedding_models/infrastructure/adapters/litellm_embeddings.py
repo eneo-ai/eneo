@@ -31,15 +31,6 @@ logger = get_logger(__name__)
 
 
 class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
-    def _mask_sensitive_params(self, params: dict[str, object]) -> dict[str, object]:
-        """Return copy of params with masked API key for safe logging."""
-        safe_params = dict(params)
-        if "api_key" in safe_params:
-            key = safe_params["api_key"]
-            if isinstance(key, str):
-                safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
-        return safe_params
-
     def __init__(
         self,
         model: "EmbeddingModelLike",
@@ -61,7 +52,7 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
     @override
     async def get_embeddings(self, chunks: list["InfoBlobChunk"]) -> ChunkEmbeddingList:
         chunk_embedding_list = ChunkEmbeddingList()
-        batch_size = getattr(self.model, "max_batch_size", None) or 32
+        batch_size = self.model.max_batch_size or 32
         total_chunks = len(chunks)
         total_batches = (
             (total_chunks + batch_size - 1) // batch_size if total_chunks else 0
@@ -177,10 +168,14 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
                         f"[LiteLLM] {self.litellm_model}: Injecting endpoint for {provider}: {endpoint}"
                     )
 
-            safe_params = {k: v for k, v in params.items() if k != "input"}
+            safe_params = {
+                key: value
+                for key, value in params.items()
+                if key not in {"api_key", "input"}
+            }
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Making embedding request with {len(texts)} texts and params: "
-                f"{self._mask_sensitive_params(safe_params)}"
+                f"{safe_params}"
             )
 
             # Call LiteLLM API to get the embeddings

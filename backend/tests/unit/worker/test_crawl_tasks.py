@@ -17,7 +17,7 @@ from eneo.worker.crawl_tasks import (
     _build_embedding_model_spec,
     _ByteBoundedQueue,
     _classify_crawl_outcome,
-    _crawl_resets_failure_backoff,
+    _crawl_counts_as_scheduled_run,
     _failure_code_for_crawl,
     _should_store_sitemap_state,
 )
@@ -91,31 +91,28 @@ def test_crawl_outcomes_are_truthful(
 
 
 @pytest.mark.parametrize(
-    ("outcome", "termination_reason", "useful_items", "failed_items", "expected"),
+    ("outcome", "useful_items", "failed_items", "expected"),
     [
-        (CrawlOutcome.SUCCEEDED, "completed", 1, 0, True),
-        (CrawlOutcome.UNCHANGED, "completed", 1, 0, True),
-        (CrawlOutcome.EMPTY, "completed", 0, 0, True),
-        (CrawlOutcome.PARTIAL, "page_limit", 2, 1, True),
-        (CrawlOutcome.PARTIAL, "timeout", 2, 1, True),
-        (CrawlOutcome.PARTIAL, "page_limit", 1, 2, False),
-        (CrawlOutcome.PARTIAL, "completed", 2, 1, False),
-        (CrawlOutcome.FAILED, "completed", 0, 1, False),
-        (CrawlOutcome.CANCELLED, "completed", 0, 0, False),
-        (CrawlOutcome.INTERRUPTED, "completed", 0, 0, False),
+        (CrawlOutcome.SUCCEEDED, 1, 0, True),
+        (CrawlOutcome.UNCHANGED, 1, 0, True),
+        (CrawlOutcome.EMPTY, 0, 0, True),
+        (CrawlOutcome.PARTIAL, 2, 1, True),
+        (CrawlOutcome.PARTIAL, 1, 1, False),
+        (CrawlOutcome.PARTIAL, 1, 2, False),
+        (CrawlOutcome.FAILED, 0, 1, False),
+        (CrawlOutcome.CANCELLED, 0, 0, False),
+        (CrawlOutcome.INTERRUPTED, 0, 0, False),
     ],
 )
-def test_only_authoritative_or_locally_limited_results_reset_failure_backoff(
+def test_only_healthy_results_reset_failure_backoff(
     outcome: CrawlOutcome,
-    termination_reason: str,
     useful_items: int,
     failed_items: int,
     expected: bool,
 ) -> None:
     assert (
-        _crawl_resets_failure_backoff(
+        _crawl_counts_as_scheduled_run(
             outcome,
-            termination_reason,
             useful_items=useful_items,
             failed_items=failed_items,
         )

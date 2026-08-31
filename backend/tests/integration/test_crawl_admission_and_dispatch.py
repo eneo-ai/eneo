@@ -1,20 +1,25 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
+from eneo.audit.application import audit_service as audit_service_module
+from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.crawler.engine import (
     CrawlEvent,
     CrawlFinished,
     CrawlRequest,
+    FileDownloaded,
+    FileFailed,
     PageFailed,
     PageUnchanged,
 )
@@ -45,6 +50,7 @@ from eneo.websites.domain.crawl_run import (
 from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.crawl_service import CrawlService
 from eneo.websites.domain.website import UpdateInterval, Website
+from eneo.worker import crawl_tasks as crawl_tasks_module
 from eneo.worker.crawl_tasks import crawl_task
 
 pytestmark = pytest.mark.integration
@@ -100,6 +106,48 @@ class _FailureDominatedPartialCrawlEngine:
             pages_crawled=0,
             pages_failed=1,
             pages_unchanged=1,
+        )
+
+
+class _UsefulPartialCrawlEngine:
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        yield PageUnchanged(url=request.url)
+        yield PageUnchanged(url=f"{request.url}/useful")
+        yield PageFailed(
+            url=f"{request.url}/redirected",
+            reason="_RedirectRejected",
+        )
+        yield CrawlFinished(
+            status="completed",
+            pages_crawled=0,
+            pages_failed=1,
+            pages_unchanged=2,
+        )
+
+
+class _UsefulFilePartialCrawlEngine:
+    def __init__(self, paths: tuple[Path, Path]) -> None:
+        self.paths = paths
+
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        for path in self.paths:
+            yield FileDownloaded(
+                url=f"{request.url}/{path.name}",
+                filename=path.name,
+                path=path,
+            )
+        yield FileFailed(
+            url=f"{request.url}/unavailable.pdf",
+            reason="http_503",
+            status_code=503,
+            retryable=True,
+        )
+        yield CrawlFinished(
+            status="completed",
+            pages_crawled=0,
+            pages_failed=0,
+            files_downloaded=2,
+            files_failed=1,
         )
 
 
@@ -784,20 +832,26 @@ async def test_worker_terminalizes_a_zero_page_crawl_as_empty(
 
 
 @pytest.mark.parametrize(
-    ("engine", "expected_failures", "expects_retry"),
+    ("engine", "expected_failures", "expects_backoff"),
     [
         (_PageLimitedCrawlEngine(), 0, False),
+        (_UsefulPartialCrawlEngine(), 0, False),
         (_FailureDominatedPartialCrawlEngine(), 4, True),
         (_FailureDominatedPageLimitedCrawlEngine(), 4, True),
     ],
-    ids=("local-page-limit", "remote-failures", "page-limited-remote-failures"),
+    ids=(
+        "local-page-limit",
+        "useful-partial",
+        "remote-failures",
+        "page-limited-remote-failures",
+    ),
 )
 async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
     db_session,
     admin_user,
     engine,
     expected_failures: int,
-    expects_retry: bool,
+    expects_backoff: bool,
 ) -> None:
     async with db_session() as session:
         website = await _persist_website(
@@ -834,12 +888,78 @@ async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
         )
         assert persisted is not None
         assert persisted.consecutive_failures == expected_failures
-        assert (persisted.next_retry_at is not None) is expects_retry
+        assert (persisted.next_retry_at is not None) is expects_backoff
+        assert (persisted.last_crawled_at is not None) is (not expects_backoff)
+
+
+async def test_published_files_are_not_reduced_by_unrelated_download_failures(
+    db_session,
+    admin_user,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Partially successful file crawl",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+        await session.execute(
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website.id)
+            .values(
+                consecutive_failures=3,
+                next_retry_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+        )
+
+    first_path = tmp_path / "first.pdf"
+    second_path = tmp_path / "second.pdf"
+    persist_file = AsyncMock(
+        side_effect=[
+            (1, 0, [first_path.stem], {}),
+            (1, 0, [second_path.stem], {}),
+        ]
+    )
+    monkeypatch.setattr(crawl_tasks_module, "persist_batch", persist_file)
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(
+        providers.Object(_UsefulFilePartialCrawlEngine((first_path, second_path)))
+    )
+    container.text_extractor.override(
+        providers.Object(SimpleNamespace(extract=Mock(return_value="file text")))
+    )
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.PARTIAL.value
+    assert result["files_downloaded"] == 2
+    async with db_session() as session:
+        finished = await CrawlRunRepository(session).one(run_id)
+        persisted = await session.scalar(
+            sa.select(WebsitesTable).where(WebsitesTable.id == website.id)
+        )
+        assert finished.files_downloaded == 2
+        assert finished.files_failed == 1
+        assert persisted is not None
+        assert persisted.consecutive_failures == 0
+        assert persisted.next_retry_at is None
+        assert persisted.last_crawled_at is not None
 
 
 async def test_worker_audits_failure_as_the_initiating_user(
     db_session,
     admin_user,
+    monkeypatch,
 ) -> None:
     async with db_session() as session:
         website_creator = Users(
@@ -865,19 +985,35 @@ async def test_worker_audits_failure_as_the_initiating_user(
         task = CrawlTask.model_validate(attempt.dispatch_payload)
         dispatch_id = attempt.dispatch_id
 
-    audit_service = SimpleNamespace(log_async=AsyncMock())
+    enqueue_audit = AsyncMock()
+    should_log_action = audit_service_module.AuditService._should_log_action
+
+    async def verify_audit_session(
+        service: audit_service_module.AuditService,
+        tenant_id: UUID,
+        action: ActionType,
+    ) -> bool:
+        await SessionProxy().execute(sa.text("SELECT 1"))
+        return await should_log_action(service, tenant_id, action)
+
+    monkeypatch.setattr(
+        audit_service_module.AuditService,
+        "_should_log_action",
+        verify_audit_session,
+    )
+    monkeypatch.setattr(audit_service_module.job_manager, "enqueue", enqueue_audit)
     container = Container(session=providers.Object(SessionProxy()))
     container.crawler.override(providers.Object(_BlockedCrawlEngine()))
-    container.audit_service.override(providers.Object(audit_service))
 
     result = await crawl_task(job_id=dispatch_id, params=task, container=container)
 
     assert result["status"] == CrawlOutcome.FAILED.value
-    audit_service.log_async.assert_awaited_once()
-    audit_call = audit_service.log_async.await_args.kwargs
-    assert audit_call["user"].id == admin_user.id
-    assert audit_call["outcome"] == Outcome.FAILURE
-    assert audit_call["error_message"] == "The website blocked the crawler"
+    enqueue_audit.assert_awaited_once()
+    audit_task, _, audit_params = enqueue_audit.await_args.args
+    assert audit_task == Task.LOG_AUDIT_EVENT
+    assert audit_params["actor_id"] == str(admin_user.id)
+    assert audit_params["outcome"] == Outcome.FAILURE.value
+    assert audit_params["error_message"] == "The website blocked the crawler"
 
 
 async def test_dispatch_capacity_serves_another_tenant_before_one_tenant_backlog(
