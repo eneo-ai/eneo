@@ -167,6 +167,7 @@ class FlowApiErrorCode(str, Enum):
     TEMPLATE_UNSUPPORTED_EXTENSION = "flow_template_unsupported_extension"
     TEMPLATE_MISSING_CONTENT = "flow_template_missing_content"
     TEMPLATE_IN_USE = "flow_template_in_use"
+    TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE = "flow_template_download_audit_unavailable"
 
 
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)

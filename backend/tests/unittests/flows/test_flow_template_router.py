@@ -26,7 +26,12 @@ from eneo.flows.api.flow_template_router import (
 )
 from eneo.flows.domain.flow import FlowTemplateAsset
 from eneo.flows.flow_access_policy import FlowApiAction
-from eneo.main.exceptions import UnauthorizedException
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
+    ErrorCodes,
+    UnauthorizedException,
+)
 from eneo.roles.permissions import Permission
 from tests.unittests.flows.test_flow_router import (
     _enable_space_access,
@@ -50,6 +55,26 @@ def _template_asset(*, flow_id: UUID, tenant_id: UUID) -> FlowTemplateAsset:
             "last_updated_by_name": "User",
         }
     )
+
+
+class _TemplateDownloadTransaction:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        exit_error: Exception | None = None,
+    ) -> None:
+        self._events = events
+        self._exit_error = exit_error
+
+    async def __aenter__(self) -> None:
+        self._events.append("transaction_enter")
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        self._events.append("transaction_exit")
+        if self._exit_error is not None:
+            raise self._exit_error
+        return False
 
 
 @pytest.mark.asyncio
@@ -244,8 +269,13 @@ async def test_generate_flow_template_signed_url_uses_template_file_tenant(
 ):
     container = MagicMock()
     template_asset_service = AsyncMock()
+    audit_service = AsyncMock()
     container.flow_template_asset_service.return_value = template_asset_service
+    container.audit_service.return_value = audit_service
+    events: list[str] = []
+    container.session().begin.return_value = _TemplateDownloadTransaction(events)
     flow_id = uuid4()
+    asset_id = uuid4()
     asset_file_id = uuid4()
     file_tenant_id = uuid4()
     user = SimpleNamespace(
@@ -263,9 +293,32 @@ async def test_generate_flow_template_signed_url_uses_template_file_tenant(
         "require_flow_edit_access",
         allow_edit_access,
     )
+    original_build_signed_download_response = (
+        flow_template_router_module.build_signed_download_response
+    )
+
+    async def record_audit(**kwargs):
+        events.append("audit_log")
+
+    def record_url_build(**kwargs):
+        events.append("url_build")
+        return original_build_signed_download_response(**kwargs)
+
+    audit_service.log.side_effect = record_audit
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "build_signed_download_response",
+        record_url_build,
+    )
+    asset = SimpleNamespace(
+        id=asset_id,
+        file_id=asset_file_id,
+        name="template.docx",
+        space_id=uuid4(),
+    )
     template_asset_service.get_asset_with_file.return_value = (
-        SimpleNamespace(file_id=asset_file_id),
-        SimpleNamespace(tenant_id=file_tenant_id),
+        asset,
+        SimpleNamespace(id=asset_file_id, tenant_id=file_tenant_id),
     )
 
     response = await generate_flow_template_signed_url(
@@ -277,6 +330,18 @@ async def test_generate_flow_template_signed_url_uses_template_file_tenant(
     )
 
     template_asset_service.get_asset_with_file.assert_awaited_once()
+    audit_service.log.assert_awaited_once()
+    audit_kwargs = audit_service.log.await_args.kwargs
+    assert audit_kwargs["required"] is True
+    assert audit_kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
+    assert audit_kwargs["entity_type"] == EntityType.FILE
+    assert audit_kwargs["entity_id"] == asset_file_id
+    assert audit_kwargs["metadata"]["extra"] == {
+        "flow_id": str(flow_id),
+        "template_asset_id": str(asset_id),
+        "file_id": str(asset_file_id),
+        "download_purpose": "flow_template",
+    }
     assert response.url.startswith(
         f"https://app.example.com/api/v1/files/{asset_file_id}/download/?token="
     )
@@ -288,6 +353,96 @@ async def test_generate_flow_template_signed_url_uses_template_file_tenant(
     )
     assert payload is not None
     assert payload["expires_at"] == response.expires_at
+    assert events == [
+        "transaction_enter",
+        "audit_log",
+        "transaction_exit",
+        "url_build",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generate_flow_template_signed_url_translates_audit_commit_failure(
+    monkeypatch,
+):
+    container = MagicMock()
+    template_asset_service = AsyncMock()
+    audit_service = AsyncMock()
+    container.flow_template_asset_service.return_value = template_asset_service
+    container.audit_service.return_value = audit_service
+    events: list[str] = []
+    container.session().begin.return_value = _TemplateDownloadTransaction(
+        events,
+        exit_error=RuntimeError("commit unavailable"),
+    )
+    user = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        permissions=[Permission.FLOWS],
+    )
+    container.user.return_value = user
+    asset_file_id = uuid4()
+    template_asset_service.get_asset_with_file.return_value = (
+        SimpleNamespace(
+            id=uuid4(),
+            file_id=asset_file_id,
+            name="template.docx",
+            space_id=uuid4(),
+        ),
+        SimpleNamespace(id=asset_file_id, tenant_id=user.tenant_id),
+    )
+
+    async def allow_edit_access(request, _container, *, flow_id):
+        return SimpleNamespace(flow=_flow(flow_id), actor=MagicMock())
+
+    async def record_audit(**kwargs):
+        events.append("audit_log")
+
+    def unexpected_url_build(**kwargs):
+        raise AssertionError("URL generation must not happen when audit commit fails.")
+
+    audit_service.log.side_effect = record_audit
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "require_flow_edit_access",
+        allow_edit_access,
+    )
+    monkeypatch.setattr(
+        flow_template_router_module,
+        "build_signed_download_response",
+        unexpected_url_build,
+    )
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await generate_flow_template_signed_url(
+            id=uuid4(),
+            file_id=uuid4(),
+            request=SimpleNamespace(base_url="https://app.example.com/"),
+            signed_url_req=SignedURLRequest(expires_in=120),
+            container=container,
+        )
+
+    assert events == ["transaction_enter", "audit_log", "transaction_exit"]
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE.value
+    )
+
+
+def test_generate_flow_template_signed_url_publishes_audit_failure_contract():
+    from eneo.server.main import app
+
+    operation = app.openapi()["paths"][
+        "/api/v1/flows/{id}/template-files/{file_id}/signed-url/"
+    ]["post"]
+    response = operation["responses"]["503"]
+
+    assert response["content"]["application/json"]["example"] == {
+        "message": "Flow template download audit logging is unavailable.",
+        "eneo_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+        "code": FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE.value,
+        "context": {"audit_required": True},
+    }
 
 
 @pytest.mark.asyncio

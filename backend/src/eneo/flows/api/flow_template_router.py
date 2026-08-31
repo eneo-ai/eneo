@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated
+import logging
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import (
@@ -18,9 +19,10 @@ from fastapi import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.database.database import AsyncSession
 from eneo.files.file_models import SignedURLRequest, SignedURLResponse
 from eneo.files.signed_urls import build_signed_download_response
-from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_api_common import audit_actor_kwargs, error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
 from eneo.flows.api.flow_template_asset_models import (
     FlowTemplateAssetPublic,
@@ -28,10 +30,14 @@ from eneo.flows.api.flow_template_asset_models import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes
-from eneo.server.dependencies.container import get_container
+from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -324,6 +330,15 @@ async def delete_flow_template_file(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        503: error_response(
+            description=(
+                "Required audit logging is unavailable, so no download URL was minted."
+            ),
+            message="Flow template download audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE,
+            context={"audit_required": True},
+        ),
     },
 )
 async def generate_flow_template_signed_url(
@@ -338,14 +353,68 @@ async def generate_flow_template_signed_url(
     request: Request,
     signed_url_req: SignedURLRequest,
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_upload_admission=True,
+        )
     ),
 ):
-    await require_flow_edit_access(request, container, flow_id=id)
-    asset, file = await container.flow_template_asset_service().get_asset_with_file(
-        flow_id=id,
-        asset_id=file_id,
-    )
+    session = cast(AsyncSession, container.session())
+    audit_context: tuple[UUID, UUID, UUID] | None = None
+    try:
+        async with session.begin():
+            await require_flow_edit_access(request, container, flow_id=id)
+            (
+                asset,
+                file,
+            ) = await container.flow_template_asset_service().get_asset_with_file(
+                flow_id=id,
+                asset_id=file_id,
+            )
+            user = container.user()
+            audit_context = (asset.id, asset.file_id, user.tenant_id)
+            actor_kwargs = audit_actor_kwargs(user)
+            await container.audit_service().log(
+                tenant_id=user.tenant_id,
+                actor_id=actor_kwargs["actor_id"],
+                actor_type=actor_kwargs["actor_type"],
+                actor_api_key_id=actor_kwargs["actor_api_key_id"],
+                action=ActionType.FILE_SIGNED_URL_MINTED,
+                entity_type=EntityType.FILE,
+                entity_id=asset.file_id,
+                description=f"Minted a download URL for Flow template '{asset.name}'",
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=asset,
+                    extra={
+                        "flow_id": str(id),
+                        "template_asset_id": str(asset.id),
+                        "file_id": str(asset.file_id),
+                        "download_purpose": "flow_template",
+                    },
+                ),
+                required=True,
+            )
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if audit_context is None:
+            raise
+        template_asset_id, asset_file_id, tenant_id = audit_context
+        logger.exception(
+            "Required Flow template download audit logging failed",
+            extra={
+                "flow_id": str(id),
+                "template_asset_id": str(template_asset_id),
+                "file_id": str(asset_file_id),
+                "tenant_id": str(tenant_id),
+            },
+        )
+        raise AuditLoggingUnavailableException(
+            "Flow template download audit logging is unavailable.",
+            code=FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE.value,
+            context={"audit_required": True},
+        ) from exc
     return build_signed_download_response(
         base_url=str(request.base_url),
         file_id=asset.file_id,

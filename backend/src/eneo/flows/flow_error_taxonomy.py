@@ -1212,6 +1212,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Keep the template asset available while published versions can use it.",
         user_action="Unpublish or replace the published flow template before deleting it.",
     ),
+    FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The required audit record could not commit, so no download URL was minted.",
+        consumer_action="Retry later; do not treat the failed response as a usable download.",
+        user_action="Try the download again later.",
+    ),
 }
 
 FLOW_ERROR_CATEGORY_ORDER: tuple[FlowErrorCategory, ...] = (

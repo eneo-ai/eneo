@@ -8,8 +8,14 @@ import pytest
 import sqlalchemy as sa
 from docx import Document
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.orm.session import SessionTransaction
 
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.audit_log import AuditLog
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.database import sessionmanager
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     BuilderSessionFiles,
@@ -33,6 +39,7 @@ from eneo.flows.application.flow_template_attachment_materialization import (
     materialize_template_attachment,
 )
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -131,6 +138,22 @@ async def _create_flow_and_file(container, *, placeholder: str):
     return user, space, flow, file
 
 
+async def _create_template_download_fixture(db_container):
+    async with db_container() as setup_container:
+        user, _space, flow, file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+        )
+        token = setup_container.auth_service().create_access_token_for_user(user)
+
+    async with db_container(user=user) as asset_container:
+        asset = await asset_container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id,
+            file_id=file.id,
+        )
+    return token, flow.id, asset.id, file.id, user.id, user.tenant_id
+
+
 async def _delete_file(
     *,
     file_id,
@@ -140,6 +163,124 @@ async def _delete_file(
         if lock_timeout:
             await session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
         await session.execute(sa.delete(Files).where(Files.id == file_id))
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_download_url_commits_bounded_audit_before_response(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+) -> None:
+    _ = patch_auth_service_jwt
+    (
+        token,
+        flow_id,
+        asset_id,
+        file_id,
+        user_id,
+        tenant_id,
+    ) = await _create_template_download_fixture(db_container)
+
+    response = await client.post(
+        f"/api/v1/flows/{flow_id}/template-files/{asset_id}/signed-url/",
+        json={"expires_in": 120},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    async with db_container() as container:
+        audit_log = await container.session().scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
+                AuditLogTable.entity_type == EntityType.FILE.value,
+                AuditLogTable.entity_id == file_id,
+            )
+        )
+        assert audit_log is not None
+        assert audit_log.tenant_id == tenant_id
+        assert audit_log.actor_id == user_id
+        assert audit_log.actor_api_key_id is None
+        assert audit_log.actor_type == "user"
+        assert audit_log.outcome == "success"
+        assert audit_log.log_metadata["extra"] == {
+            "flow_id": str(flow_id),
+            "template_asset_id": str(asset_id),
+            "file_id": str(file_id),
+            "download_purpose": "flow_template",
+        }
+        assert response.json()["url"] not in repr(audit_log.log_metadata)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_download_audit_commit_failure_returns_typed_503(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    monkeypatch,
+) -> None:
+    _ = patch_auth_service_jwt
+    (
+        token,
+        flow_id,
+        asset_id,
+        file_id,
+        _user_id,
+        _tenant_id,
+    ) = await _create_template_download_fixture(db_container)
+    events: list[str] = []
+    original_create_audit = AuditLogRepositoryImpl.create
+    original_commit = SessionTransaction.commit
+
+    async def mark_template_download_audit_transaction(
+        repository: AuditLogRepositoryImpl,
+        audit_log: AuditLog,
+    ) -> AuditLog:
+        result = await original_create_audit(repository, audit_log)
+        if audit_log.action == ActionType.FILE_SIGNED_URL_MINTED:
+            repository.session.sync_session.info["fail_template_audit_commit"] = True
+        return result
+
+    def fail_template_download_audit_commit(
+        transaction: SessionTransaction,
+        *,
+        _to_root: bool = False,
+    ) -> None:
+        if transaction.session.info.pop("fail_template_audit_commit", False):
+            events.append("commit_failed")
+            raise RuntimeError("template download audit commit unavailable")
+        original_commit(transaction, _to_root=_to_root)
+
+    monkeypatch.setattr(
+        AuditLogRepositoryImpl,
+        "create",
+        mark_template_download_audit_transaction,
+    )
+    monkeypatch.setattr(
+        SessionTransaction, "commit", fail_template_download_audit_commit
+    )
+
+    response = await client.post(
+        f"/api/v1/flows/{flow_id}/template-files/{asset_id}/signed-url/",
+        json={"expires_in": 120},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 503
+    assert events == ["commit_failed"]
+    payload = response.json()
+    assert payload["code"] == FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE
+    assert payload["context"] == {"audit_required": True}
+    assert "url" not in payload
+    async with db_container() as container:
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
+                AuditLogTable.entity_id == file_id,
+            )
+        )
+    assert audit_count == 0
 
 
 @pytest.mark.integration
