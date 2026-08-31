@@ -19,12 +19,13 @@ from eneo.flows.domain.flow import (
     FlowRunReviewCheckpoint,
     FlowRunStatus,
 )
+from eneo.flows.domain.flow_audit_outbox_limits import (
+    FLOW_AUDIT_OUTBOX_OPERATOR_LIST_MAX,
+)
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunReviewCheckpointState,
 )
-
-FLOW_AUDIT_OUTBOX_OPERATOR_LIST_MAX = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +92,13 @@ class FlowRunAuditOutboxRedriveStateConflict:
 @dataclass(frozen=True, slots=True)
 class FlowRunAuditOutboxRedriveGenerationConflict:
     current_dead_lettered_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunAuditOutboxRedriveInspection:
+    outbox_id: UUID
+    delivery_status: str
+    dead_lettered_at: datetime | None
 
 
 def flow_run_audit_description(
@@ -258,6 +266,22 @@ class FlowRunAuditOutboxRepository:
         return FlowRunAuditOutboxDeadLetterPage(
             items=items,
             has_more=len(rows) > limit,
+        )
+
+    async def inspect_redrive(
+        self,
+        *,
+        outbox_id: UUID,
+    ) -> FlowRunAuditOutboxRedriveInspection | None:
+        row = await self.session.scalar(
+            sa.select(FlowRunAuditOutbox).where(FlowRunAuditOutbox.id == outbox_id)
+        )
+        if row is None:
+            return None
+        return FlowRunAuditOutboxRedriveInspection(
+            outbox_id=row.id,
+            delivery_status=row.delivery_status,
+            dead_lettered_at=row.dead_lettered_at,
         )
 
     async def mark_delivery_succeeded(

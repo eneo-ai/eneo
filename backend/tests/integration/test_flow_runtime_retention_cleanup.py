@@ -2409,6 +2409,7 @@ async def test_successful_audit_outbox_redrive_delivery_permits_existing_purge_p
         expected_dead_lettered_at=dead_lettered_at,
         reason="Audit storage recovered.",
         now=now,
+        operator_identity="test-operator",
     )
     delivery_result = await delivery_service.deliver_due(now=now)
     result = await flow_retention_service.purge_old_flow_run_history_batch(

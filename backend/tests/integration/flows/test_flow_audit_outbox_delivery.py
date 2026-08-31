@@ -384,11 +384,26 @@ async def test_flow_audit_outbox_redrive_resets_budget_and_writes_operator_audit
         redriven_at = datetime.now(timezone.utc)
 
         delivery_service = _delivery_service(session)
+        inspection = await delivery_service.inspect_redrive(
+            outbox_id=outbox_id,
+            expected_dead_lettered_at=dead_lettered_at,
+        )
+        inspection_state = await session.scalar(
+            sa.select(FlowRunAuditOutbox.delivery_status).where(
+                FlowRunAuditOutbox.id == outbox_id
+            )
+        )
+        inspection_audit_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(AuditLogTable)
+            .where(AuditLogTable.id == outbox_id)
+        )
         result = await delivery_service.redrive_dead_lettered(
             outbox_id=outbox_id,
             expected_dead_lettered_at=dead_lettered_at,
             reason="Audit storage recovered; password=operator-secret",
             now=redriven_at,
+            operator_identity="on-call@example.invalid",
         )
 
         outbox_state = (
@@ -432,6 +447,10 @@ async def test_flow_audit_outbox_redrive_resets_budget_and_writes_operator_audit
         flow_id = run.flow_id
 
     assert result.outbox_id == outbox_id
+    assert inspection.outbox_id == outbox_id
+    assert inspection.dead_lettered_at == dead_lettered_at
+    assert inspection_state == FlowOutboxDeliveryStatus.DEAD_LETTERED.value
+    assert inspection_audit_count == 0
     assert result.flow_run_id == run_id
     assert result.delivery_status == FlowOutboxDeliveryStatus.PENDING.value
     assert result.delivery_attempts == 0
@@ -455,6 +474,7 @@ async def test_flow_audit_outbox_redrive_resets_budget_and_writes_operator_audit
         "flow_run_id": str(run_id),
         "outbox_id": str(outbox_id),
         "reason": "Audit storage recovered; password=[REDACTED]",
+        "operator_identity": "on-call@example.invalid",
         "prior_delivery_attempts": 5,
         "prior_dead_lettered_at": dead_lettered_at.isoformat(),
         "prior_delivery_last_error": (
@@ -491,11 +511,22 @@ async def test_flow_audit_outbox_redrive_distinguishes_missing_and_wrong_state(
         now = datetime.now(timezone.utc)
 
         with pytest.raises(FlowRunAuditOutboxNotFoundError):
+            await service.inspect_redrive(
+                outbox_id=uuid4(),
+                expected_dead_lettered_at=now,
+            )
+        with pytest.raises(FlowRunAuditOutboxNotFoundError):
             await service.redrive_dead_lettered(
                 outbox_id=uuid4(),
                 expected_dead_lettered_at=now,
                 reason="Investigated missing row.",
                 now=now,
+                operator_identity="test-operator",
+            )
+        with pytest.raises(FlowRunAuditOutboxStateConflictError):
+            await service.inspect_redrive(
+                outbox_id=outbox_id,
+                expected_dead_lettered_at=now,
             )
         with pytest.raises(FlowRunAuditOutboxStateConflictError) as conflict:
             await service.redrive_dead_lettered(
@@ -503,6 +534,7 @@ async def test_flow_audit_outbox_redrive_distinguishes_missing_and_wrong_state(
                 expected_dead_lettered_at=now,
                 reason="Attempted a duplicate redrive.",
                 now=now,
+                operator_identity="test-operator",
             )
 
         operator_audit_count = await session.scalar(
@@ -561,12 +593,18 @@ async def test_flow_audit_outbox_redrive_rejects_stale_dead_letter_generation(
             )
         )
 
+        with pytest.raises(FlowRunAuditOutboxGenerationConflictError):
+            await _delivery_service(session).inspect_redrive(
+                outbox_id=outbox_id,
+                expected_dead_lettered_at=stale_generation,
+            )
         with pytest.raises(FlowRunAuditOutboxGenerationConflictError) as conflict:
             await _delivery_service(session).redrive_dead_lettered(
                 outbox_id=outbox_id,
                 expected_dead_lettered_at=stale_generation,
                 reason="Using an obsolete operator listing.",
                 now=datetime.now(timezone.utc),
+                operator_identity="test-operator",
             )
 
         state = (
@@ -649,6 +687,7 @@ async def test_flow_audit_outbox_redrive_rolls_back_when_operator_audit_fails(
                 expected_dead_lettered_at=dead_lettered_at,
                 reason="Audit storage recovered.",
                 now=datetime.now(timezone.utc),
+                operator_identity="test-operator",
             )
 
         state = (
@@ -717,6 +756,7 @@ async def test_concurrent_flow_audit_outbox_redrives_allow_one_transition(
                 expected_dead_lettered_at=dead_lettered_at,
                 reason=reason,
                 now=datetime.now(timezone.utc),
+                operator_identity="test-operator",
             )
 
     outcomes = await asyncio.gather(

@@ -20,6 +20,10 @@ from eneo.flows.application.flow_run_audit_outbox_policy import (
     FLOW_AUDIT_OUTBOX_DELIVERY_BATCH_SIZE,
     flow_audit_outbox_retry_delay_seconds,
 )
+from eneo.flows.domain.flow_audit_outbox_limits import (
+    FLOW_AUDIT_OUTBOX_OPERATOR_IDENTITY_MAX,
+    FLOW_AUDIT_OUTBOX_OPERATOR_REASON_MAX,
+)
 from eneo.flows.flow_run_redaction import redact_string
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxDeadLetterPage,
@@ -43,6 +47,13 @@ class FlowRunAuditOutboxRedriveResult:
     delivery_attempts: Literal[0]
     next_delivery_at: datetime
     operator_audit_id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunAuditOutboxRedriveInspection:
+    outbox_id: UUID
+    delivery_status: Literal["dead_lettered"]
+    dead_lettered_at: datetime
 
 
 class FlowRunAuditOutboxNotFoundError(Exception):
@@ -118,6 +129,35 @@ class FlowRunAuditOutboxDeliveryService(
             has_more=page.has_more,
         )
 
+    async def inspect_redrive(
+        self,
+        *,
+        outbox_id: UUID,
+        expected_dead_lettered_at: datetime,
+    ) -> FlowRunAuditOutboxRedriveInspection:
+        inspection = await self._flow_audit_outbox_repo.inspect_redrive(
+            outbox_id=outbox_id
+        )
+        if inspection is None:
+            raise FlowRunAuditOutboxNotFoundError(str(outbox_id))
+        if inspection.delivery_status != "dead_lettered":
+            raise FlowRunAuditOutboxStateConflictError(
+                delivery_status=inspection.delivery_status
+            )
+        if inspection.dead_lettered_at is None:
+            raise FlowRunAuditOutboxStateConflictError(
+                delivery_status=inspection.delivery_status
+            )
+        if inspection.dead_lettered_at != expected_dead_lettered_at:
+            raise FlowRunAuditOutboxGenerationConflictError(
+                current_dead_lettered_at=inspection.dead_lettered_at
+            )
+        return FlowRunAuditOutboxRedriveInspection(
+            outbox_id=inspection.outbox_id,
+            delivery_status="dead_lettered",
+            dead_lettered_at=inspection.dead_lettered_at,
+        )
+
     async def redrive_dead_lettered(
         self,
         *,
@@ -125,7 +165,18 @@ class FlowRunAuditOutboxDeliveryService(
         expected_dead_lettered_at: datetime,
         reason: str,
         now: datetime,
+        operator_identity: str,
     ) -> FlowRunAuditOutboxRedriveResult:
+        normalized_reason = " ".join(reason.split())
+        if (
+            not normalized_reason
+            or len(normalized_reason) > FLOW_AUDIT_OUTBOX_OPERATOR_REASON_MAX
+        ):
+            raise ValueError(
+                "Redrive reason must be between 1 and "
+                f"{FLOW_AUDIT_OUTBOX_OPERATOR_REASON_MAX} characters."
+            )
+        normalized_operator_identity = _sanitize_operator_identity(operator_identity)
         session = self._flow_audit_outbox_repo.session
         transaction = (
             session.begin_nested() if session.in_transaction() else session.begin()
@@ -134,8 +185,9 @@ class FlowRunAuditOutboxDeliveryService(
             return await self._redrive_dead_lettered_in_transaction(
                 outbox_id=outbox_id,
                 expected_dead_lettered_at=expected_dead_lettered_at,
-                reason=reason,
+                reason=normalized_reason,
                 now=now,
+                operator_identity=normalized_operator_identity,
             )
 
     async def _redrive_dead_lettered_in_transaction(
@@ -145,6 +197,7 @@ class FlowRunAuditOutboxDeliveryService(
         expected_dead_lettered_at: datetime,
         reason: str,
         now: datetime,
+        operator_identity: str,
     ) -> FlowRunAuditOutboxRedriveResult:
         transition = await self._flow_audit_outbox_repo.redrive_dead_lettered(
             outbox_id=outbox_id,
@@ -163,6 +216,20 @@ class FlowRunAuditOutboxDeliveryService(
             )
 
         operator_audit_id = uuid4()
+        metadata: dict[str, str | int | None] = {
+            "flow_id": str(transition.flow_id),
+            "flow_run_id": str(transition.flow_run_id),
+            "outbox_id": str(transition.outbox_id),
+            "reason": redact_string(reason, key=None),
+            "prior_delivery_attempts": transition.previous_delivery_attempts,
+            "prior_dead_lettered_at": (
+                transition.previous_dead_lettered_at.isoformat()
+            ),
+            "prior_delivery_last_error": sanitize_persisted_delivery_error(
+                transition.previous_delivery_last_error
+            ),
+        }
+        metadata["operator_identity"] = operator_identity
         await self.audit_log_repo.create(
             AuditLog(
                 id=operator_audit_id,
@@ -175,19 +242,7 @@ class FlowRunAuditOutboxDeliveryService(
                 entity_id=transition.flow_run_id,
                 timestamp=now,
                 description="Flow run audit delivery redriven by a system operator.",
-                metadata={
-                    "flow_id": str(transition.flow_id),
-                    "flow_run_id": str(transition.flow_run_id),
-                    "outbox_id": str(transition.outbox_id),
-                    "reason": redact_string(reason, key=None),
-                    "prior_delivery_attempts": transition.previous_delivery_attempts,
-                    "prior_dead_lettered_at": (
-                        transition.previous_dead_lettered_at.isoformat()
-                    ),
-                    "prior_delivery_last_error": sanitize_persisted_delivery_error(
-                        transition.previous_delivery_last_error
-                    ),
-                },
+                metadata=metadata,
                 outcome=Outcome.SUCCESS,
             )
         )
@@ -242,6 +297,20 @@ def sanitize_persisted_delivery_error(value: str | None) -> str | None:
     if not normalized:
         return None
     return redact_string(normalized, key=None)[:MAX_ERROR_MESSAGE_LENGTH]
+
+
+def _sanitize_operator_identity(value: str) -> str:
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise ValueError("Operator identity must not be empty.")
+    if len(normalized) > FLOW_AUDIT_OUTBOX_OPERATOR_IDENTITY_MAX:
+        raise ValueError(
+            "Operator identity must not exceed "
+            f"{FLOW_AUDIT_OUTBOX_OPERATOR_IDENTITY_MAX} characters."
+        )
+    if any(ord(character) < 32 for character in normalized):
+        raise ValueError("Operator identity must not contain control characters.")
+    return redact_string(normalized, key=None)
 
 
 def _audit_description(*, action: ActionType, source: str) -> str:

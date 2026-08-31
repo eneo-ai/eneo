@@ -74,18 +74,47 @@ Terminal and review transitions write durable lifecycle-audit outbox rows.
 Both `pending` and `dead_lettered` rows are required audit state and block
 run-history purge.
 
-The final core release exposes no public or sysadmin manual-redrive API. When a
-dead letter appears:
+The supported recovery path is the narrow deployment-shell command below. It
+requires deployment or Kubernetes access through the authenticated operations
+wrapper for that environment. Deployments must provide an access-controlled,
+deployment-owned launcher that invokes only this module and injects
+`ENEO_OPERATOR_IDENTITY` from its authenticated operator context. The CLI
+cannot authenticate a human inside the application container; it fails closed
+when the launcher does not provide an identity. Do not set or forward that
+variable from an untrusted shell or command argument; do not expose this path
+as a generic privileged shell. There is no public or tenant-facing redrive
+endpoint and no bulk redrive command.
 
-1. restore the audit store, database, and platform maintenance worker;
-2. preserve the row and its bounded failure diagnosis;
-3. confirm the health endpoint and normal delivery loop after recovery;
-4. do not delete, resolve, reset attempts, or alter lifecycle fields with SQL;
-5. escalate for an audited application change if the row cannot converge.
+```bash
+# The deployment-owned launcher must pass the subcommand and arguments exactly.
+/usr/local/sbin/eneo-flow-audit-outbox -- list --limit 50
+```
 
-This fail-closed policy avoids creating an unreviewed cross-tenant operator
-surface. A pending or dead-lettered row remains a retention blocker until the
-canonical delivery owner records success.
+Use the `dead_lettered_at` value from the bounded list as the generation token.
+Inspect one row without changing it, then redrive only that row after the audit
+store, database, and platform maintenance worker are healthy:
+
+```bash
+export FLOW_AUDIT_OUTBOX_ID="<outbox-id-from-list>"
+export FLOW_AUDIT_DEAD_LETTERED_AT="<dead-lettered-at-from-list>"
+/usr/local/sbin/eneo-flow-audit-outbox -- dry-run "${FLOW_AUDIT_OUTBOX_ID}" \
+  --expected-dead-lettered-at "${FLOW_AUDIT_DEAD_LETTERED_AT}"
+/usr/local/sbin/eneo-flow-audit-outbox -- redrive "${FLOW_AUDIT_OUTBOX_ID}" \
+  --expected-dead-lettered-at "${FLOW_AUDIT_DEAD_LETTERED_AT}" \
+  --reason "Audit storage recovered; normal delivery can resume."
+```
+
+The command uses the existing generation-fenced delivery service and records
+the operator identity, bounded reason, previous attempt count, and prior
+generation in the tenant-scoped audit row. A stale generation or concurrent
+delivery returns a nonzero conflict exit; list the row again before retrying.
+Do not delete, resolve, reset attempts, or alter lifecycle fields with SQL. A
+pending or dead-lettered row remains a retention blocker until the canonical
+delivery owner records success.
+
+Exit status `10` means the row was not found, `11` means it is no longer
+dead-lettered, `12` means the generation is stale, `20` means configuration or
+database bootstrap failed, and `21` means the audit operation or sink failed.
 
 ## Evidence export
 

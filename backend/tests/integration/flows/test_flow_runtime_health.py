@@ -633,6 +633,7 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
             expected_dead_lettered_at=dead_lettered_at,
             reason="Audit storage recovered.",
             now=now,
+            operator_identity="test-operator",
         )
         delivery_result = await delivery_service.deliver_due(now=now)
         recovered_snapshot = await load_flow_runtime_health_snapshot(
