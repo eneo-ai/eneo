@@ -965,6 +965,17 @@ def test_openapi_all_flow_operations_have_reviewable_dx_docs(
     assert short_descriptions == []
 
 
+def test_openapi_flow_status_and_history_document_content_boundary(
+    openapi_spec: dict,
+) -> None:
+    for path in (
+        "/api/v1/flows/{id}/runs/",
+        "/api/v1/flows/{id}/runs/{run_id}/status/",
+    ):
+        description = str(_get_operation(openapi_spec, path, "get").get("description"))
+        assert "terminal errors" in description
+
+
 def test_openapi_all_flow_request_bodies_have_examples(
     openapi_spec: dict,
 ) -> None:

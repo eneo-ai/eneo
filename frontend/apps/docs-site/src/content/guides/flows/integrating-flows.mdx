@@ -340,8 +340,9 @@ Request:
 GET /api/v1/flows/{id}/runs/{run_id}/status/
 ```
 
-The content-free summary reports lifecycle and bounded public diagnostics. It
-does not return accepted input, results, files, usage, or webhook deliveries.
+The content-free summary reports lifecycle and bounded dispatch diagnostics. It
+does not return accepted input, terminal errors, results, files, usage, or
+webhook deliveries.
 
 Response:
 
@@ -365,7 +366,6 @@ Response:
   "cancelled_at": null,
   "started_at": "2026-03-17T10:05:02Z",
   "finished_at": null,
-  "error": null,
   "job_id": "00000000-0000-0000-0000-000000000401",
   "created_at": "2026-03-17T10:05:00Z",
   "updated_at": "2026-03-17T10:05:30Z"

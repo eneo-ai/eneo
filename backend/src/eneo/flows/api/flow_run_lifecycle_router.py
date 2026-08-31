@@ -222,9 +222,10 @@ _FLOW_RUN_LIST_DESCRIPTION = """
     whether another page exists after this offset window.
 
     Items use the same content-free lifecycle projection as the dedicated run-status endpoint.
-    Accepted input, terminal output, result-file metadata, provider usage, and webhook deliveries
-    are deliberately omitted so background history refresh does not expose or repeatedly read
-    sensitive content. Retrieve one run's audited detail when that content is needed.
+    Accepted input, terminal errors, terminal output, result-file metadata, provider usage, and
+    webhook deliveries are deliberately omitted so background history refresh does not expose
+    or repeatedly read sensitive content. Retrieve one run's audited detail when that content
+    is needed.
 
     Current runtime visibility is policy-based: callers always list their own runs, tenant admins
     can list runs across the tenant, same-space admins and owners can list run metadata for flows

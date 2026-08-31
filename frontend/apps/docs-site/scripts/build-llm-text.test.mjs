@@ -97,6 +97,29 @@ test("the published TypeScript client parses without syntax errors", async () =>
   ).toEqual([]);
 });
 
+test("the polling example contains only the content-free run summary", async () => {
+  const source = await readFile(integratingGuide, "utf8");
+  const section = source.match(/### 4\. Poll run[\s\S]*?(?=\n### 5\.)/)?.[0];
+  expect(section).toBeDefined();
+
+  const responseBlock = section?.match(/^```json\n([\s\S]*?)^```/m)?.[1];
+  expect(responseBlock).toBeDefined();
+  const response = JSON.parse(responseBlock);
+
+  expect(response.status).toBe("awaiting_review");
+  for (const contentField of [
+    "error",
+    "input_payload_json",
+    "result",
+    "result_files",
+    "token_usage",
+    "transcription_usage",
+    "webhook_deliveries",
+  ]) {
+    expect(response).not.toHaveProperty(contentField);
+  }
+});
+
 test("every route in the Flows bundle exists as content", async () => {
   const { FLOWS_BUNDLE_ROUTES } = await import("./build-llm-text.mjs");
   const { access } = await import("node:fs/promises");

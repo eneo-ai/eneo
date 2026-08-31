@@ -738,9 +738,9 @@ endpoint before deciding whether to edit, approve, reject, or resume the run.
 Three response models make the sensitivity boundary explicit. `POST /runs/`
 returns `FlowRunPublic`. History and `GET /runs/{run_id}/status/` return
 `FlowRunSummaryPublic`, which omits accepted input, result, result-file metadata,
-provider usage, and webhook deliveries. `GET /runs/{run_id}/` returns the
-content-bearing `FlowRunDetailPublic`, which is `FlowRunPublic` plus an
-always-present `webhook_deliveries` array. Detail access is audit-logged and
+terminal errors, provider usage, and webhook deliveries. `GET /runs/{run_id}/`
+returns the content-bearing `FlowRunDetailPublic`, which is `FlowRunPublic` plus
+an always-present `webhook_deliveries` array. Detail access is audit-logged and
 returns `503` without content if the required record cannot be committed.
 
 Example run response:
