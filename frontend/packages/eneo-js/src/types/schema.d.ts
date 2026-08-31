@@ -15763,7 +15763,8 @@ export interface components {
       | "flow_template_read_only"
       | "flow_template_unsupported_extension"
       | "flow_template_missing_content"
-      | "flow_template_in_use";
+      | "flow_template_in_use"
+      | "flow_template_download_audit_unavailable";
     /**
      * FlowAssistantCreateRequest
      * @example {
@@ -52210,6 +52211,25 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required audit logging is unavailable, so no download URL was minted. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_template_download_audit_unavailable",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Flow template download audit logging is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
