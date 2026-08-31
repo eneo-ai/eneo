@@ -78,14 +78,17 @@ from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_access_policy import FlowApiAction, require_flow_action
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_resource_bindings import FlowResourceBindingResolutionError
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
     BadRequestException,
     ErrorCodes,
     FileTooLargeException,
     UnauthorizedException,
 )
+from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
 from eneo.server.dependencies.container import (
     get_container,
@@ -101,6 +104,7 @@ FLOW_IMPORT_NAME_COLLISION_CODE = FlowPackageErrorCode.IMPORT_NAME_COLLISION.val
 FLOW_IMPORT_NAME_COLLISION_MESSAGE = (
     "A Flow with this name already exists in the target space."
 )
+logger = get_logger(__name__)
 
 
 tenant_router = APIRouter()
@@ -382,7 +386,7 @@ async def import_flow_package_as_draft(
             selection=command.selection,
         )
         if existing is not None:
-            await _finish_flow_package_import_transaction(
+            await _finish_flow_package_transaction(
                 session, owns_transaction=owns_transaction
             )
             return _flow_package_import_public(
@@ -424,7 +428,7 @@ async def import_flow_package_as_draft(
             result=install_result,
             import_id=import_id,
         )
-        await _finish_flow_package_import_transaction(
+        await _finish_flow_package_transaction(
             session, owns_transaction=owns_transaction
         )
         return _flow_package_import_public(import_id=import_id, result=install_result)
@@ -438,9 +442,7 @@ async def import_flow_package_as_draft(
         selection=failure_selection,
         failure=failure,
     )
-    await _finish_flow_package_import_transaction(
-        session, owns_transaction=owns_transaction
-    )
+    await _finish_flow_package_transaction(session, owns_transaction=owns_transaction)
     return _flow_package_import_error_response(failure, request)
 
 
@@ -519,14 +521,31 @@ def _replayed_install_result(
             description="The exported package exceeds the package export byte cap.",
             examples=openapi_examples.FLOW_PACKAGE_EXPORT_TOO_LARGE_EXAMPLE,
         ),
+        503: error_response(
+            description=(
+                "Required export audit logging is unavailable, so no package bytes "
+                "are returned."
+            ),
+            message="Flow package export audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.PACKAGE_EXPORT_AUDIT_UNAVAILABLE,
+            context={"audit_required": True},
+        ),
     },
 )
 async def export_flow_package(
     id: Annotated[UUID, Path(description="Identifier of the draft Flow to export.")],
     export_request: FlowPackageExportRequest,
     request: Request,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: Annotated[
+        Container,
+        Depends(get_container_for_explicit_transaction(with_user=True)),
+    ],
 ) -> Response:
+    session = cast(AsyncSession, container.session())
+    owns_transaction = not session.in_transaction()
+    if owns_transaction:
+        await session.begin()
     access_context = await require_flow_edit_access(
         request,
         container,
@@ -546,12 +565,33 @@ async def export_flow_package(
     except FlowPackageExportError as exc:
         _raise_export_error(exc)
 
-    await _log_flow_package_export(
-        container=container,
-        flow_id=id,
-        flow=access_context.flow,
-        result=result,
-    )
+    try:
+        await _log_flow_package_export(
+            container=container,
+            flow_id=id,
+            flow=access_context.flow,
+            result=result,
+        )
+        await _finish_flow_package_transaction(
+            session,
+            owns_transaction=owns_transaction,
+        )
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "Required Flow package export audit logging failed",
+            extra={
+                "tenant_id": str(container.user().tenant_id),
+                "flow_id": str(id),
+                "package_id": result.envelope.manifest.package_id,
+            },
+        )
+        raise AuditLoggingUnavailableException(
+            "Flow package export audit logging is unavailable.",
+            code=FlowApiErrorCode.PACKAGE_EXPORT_AUDIT_UNAVAILABLE.value,
+            context={"audit_required": True},
+        ) from exc
     response_headers = {
         "Content-Disposition": f'attachment; filename="{result.filename}"'
     }
@@ -673,7 +713,7 @@ async def _record_failed_flow_package_import(
     )
     await container.audit_service().log(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.FLOW_PACKAGE_IMPORT_FAILED,
         entity_type=EntityType.SPACE,
         entity_id=space_id,
@@ -750,7 +790,7 @@ def _safe_failure_context(context: Mapping[str, object] | None) -> dict[str, str
     return safe_context
 
 
-async def _finish_flow_package_import_transaction(
+async def _finish_flow_package_transaction(
     session: AsyncSession,
     *,
     owns_transaction: bool,
@@ -855,17 +895,18 @@ async def _log_flow_package_export(
     result: FlowPackageExportResult,
 ) -> None:
     user = container.user()
-    await container.audit_service().log_async(
+    await container.audit_service().log(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.FLOW_PACKAGE_EXPORTED,
         entity_type=EntityType.FLOW,
         entity_id=flow_id,
-        description=(f"Exported Flow package '{result.envelope.manifest.package_id}'"),
+        description=f"Exported Flow package '{result.envelope.manifest.package_id}'",
         metadata=AuditMetadata.standard(
             actor=user,
             target=flow,
             extra={
+                "flow_id": str(flow_id),
                 "package_id": result.envelope.manifest.package_id,
                 "package_version": result.envelope.manifest.package_version,
                 "content_checksum": result.envelope.content_checksum,
@@ -877,6 +918,7 @@ async def _log_flow_package_export(
                 ],
             },
         ),
+        required=True,
     )
 
 
@@ -890,7 +932,7 @@ async def _log_flow_package_import(
     user = container.user()
     await container.audit_service().log(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=ActionType.FLOW_PACKAGE_DRAFT_INSTALLED,
         entity_type=EntityType.FLOW,
         entity_id=result.flow_id,
@@ -905,6 +947,7 @@ async def _log_flow_package_import(
             extra={
                 "import_id": str(import_id),
                 "space_id": str(space_id),
+                "flow_id": str(result.flow_id),
                 "package_id": result.package_id,
                 "package_version": result.package_version,
                 "content_checksum": result.content_checksum,
@@ -912,4 +955,5 @@ async def _log_flow_package_import(
                 "resource_bindings_count": result.resource_bindings_count,
             },
         ),
+        required=True,
     )

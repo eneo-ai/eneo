@@ -17,6 +17,7 @@ import eneo.flows.api.flow_http_test_router as flow_http_test_router_module
 from eneo.actors.actors.space_actor import SpaceRole
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flows.api import flow_access_context as flow_access_context_module
 from eneo.flows.api.flow_assistant_router import (
@@ -171,6 +172,18 @@ async def test_test_flow_http_returns_typed_success_payload(monkeypatch):
     }
     execute.assert_awaited_once()
     audit_service.log_async.assert_awaited_once()
+    audit_event = audit_service.log_async.await_args.kwargs
+    assert audit_event["action"] is ActionType.FLOW_HTTP_OUTBOUND_CALL
+    assert audit_event["user"] is user
+    assert audit_event["metadata"]["extra"] == {
+        "flow_id": str(flow_id),
+        "test_direction": "output",
+        "test_success": True,
+        "status_code": 200,
+        "failure_code": None,
+    }
+    assert audit_event["outcome"] is Outcome.SUCCESS
+    assert audit_event["error_message"] is None
 
 
 @pytest.mark.asyncio
@@ -536,7 +549,8 @@ async def test_test_flow_http_returns_typed_failure_for_private_url(monkeypatch)
     flow.owner_user_id = user.id
     flow_service.get_flow.return_value = flow
     container.flow_service.return_value = flow_service
-    container.audit_service.return_value = AsyncMock()
+    audit_service = AsyncMock()
+    container.audit_service.return_value = audit_service
     container.user.return_value = user
     container.encryption_service.return_value = None
     _enable_space_access(container)
@@ -561,6 +575,17 @@ async def test_test_flow_http_returns_typed_failure_for_private_url(monkeypatch)
     assert response.success is False
     assert response.error_code == HttpTransportError.BLOCKED_URL
     assert response.error_message == "HTTP URL blocked by SSRF policy."
+    audit_service.log_async.assert_awaited_once()
+    audit_event = audit_service.log_async.await_args.kwargs
+    assert audit_event["outcome"] is Outcome.FAILURE
+    assert audit_event["error_message"] == HttpTransportError.BLOCKED_URL.value
+    assert audit_event["metadata"]["extra"] == {
+        "flow_id": str(flow_id),
+        "test_direction": "output",
+        "test_success": False,
+        "status_code": None,
+        "failure_code": HttpTransportError.BLOCKED_URL.value,
+    }
 
 
 def test_find_stored_http_config_logs_parse_failures(caplog, monkeypatch):

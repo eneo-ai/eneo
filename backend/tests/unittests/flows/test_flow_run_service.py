@@ -22,7 +22,6 @@ from eneo.files.file_models import FileType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from eneo.flows.application.flow_run_service import (
-    FlowRunPageWithResultFilesAndUsage,
     FlowRunService,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndUsage,
@@ -1975,7 +1974,7 @@ async def test_list_runs_delegates_to_repo(user):
     flow_version_repo = AsyncMock()
     flow_id = uuid4()
     expected = [_run(user=user, flow_id=flow_id)]
-    flow_run_repo.list_runs.return_value = expected
+    flow_run_repo.list_statuses.return_value = expected
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -1986,10 +1985,10 @@ async def test_list_runs_delegates_to_repo(user):
         max_concurrent_runs=5,
     )
 
-    result = await service.list_runs(flow_id=flow_id)
+    result = await service.list_run_statuses(flow_id=flow_id)
 
     assert result == expected
-    flow_run_repo.list_runs.assert_awaited_once_with(
+    flow_run_repo.list_statuses.assert_awaited_once_with(
         tenant_id=user.tenant_id,
         flow_id=flow_id,
         statuses=None,
@@ -2012,7 +2011,7 @@ async def test_list_runs_delegates_status_filter_to_repo(user):
             update={"status": FlowRunStatus.COMPLETED}
         )
     ]
-    flow_run_repo.list_runs.return_value = expected
+    flow_run_repo.list_statuses.return_value = expected
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -2023,10 +2022,10 @@ async def test_list_runs_delegates_status_filter_to_repo(user):
         max_concurrent_runs=5,
     )
 
-    result = await service.list_runs(flow_id=flow_id, statuses=statuses)
+    result = await service.list_run_statuses(flow_id=flow_id, statuses=statuses)
 
     assert result == expected
-    flow_run_repo.list_runs.assert_awaited_once_with(
+    flow_run_repo.list_statuses.assert_awaited_once_with(
         tenant_id=user.tenant_id,
         flow_id=flow_id,
         statuses=statuses,
@@ -2044,7 +2043,7 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
     flow_version_repo = AsyncMock()
     flow_id = uuid4()
     expected = [_run(user=user, flow_id=flow_id)]
-    flow_run_repo.list_runs.return_value = expected
+    flow_run_repo.list_statuses.return_value = expected
     admin_user = user.model_copy(
         update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
     )
@@ -2058,10 +2057,10 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
         max_concurrent_runs=5,
     )
 
-    result = await service.list_runs(flow_id=flow_id)
+    result = await service.list_run_statuses(flow_id=flow_id)
 
     assert result == expected
-    flow_run_repo.list_runs.assert_awaited_once_with(
+    flow_run_repo.list_statuses.assert_awaited_once_with(
         tenant_id=admin_user.tenant_id,
         flow_id=flow_id,
         statuses=None,
@@ -2090,7 +2089,7 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
             }
         )
     ]
-    flow_run_repo.list_runs.return_value = expected
+    flow_run_repo.list_statuses.return_value = expected
     service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
@@ -2101,10 +2100,10 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
         max_concurrent_runs=5,
     )
 
-    result = await service.list_runs(flow_id=flow_id)
+    result = await service.list_run_statuses(flow_id=flow_id)
 
     assert result == expected
-    flow_run_repo.list_runs.assert_awaited_once_with(
+    flow_run_repo.list_statuses.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow_id,
         statuses=None,
@@ -2122,7 +2121,7 @@ async def test_list_runs_keeps_tenant_admin_service_key_scoped_to_service_princi
     service_user = _service_key_user(user, tenant_admin=True)
     flow_id = uuid4()
     flow_run_repo = flow_run_repo_mock()
-    flow_run_repo.list_runs.return_value = []
+    flow_run_repo.list_statuses.return_value = []
     service = _flow_run_service(
         user=service_user,
         flow_repo=_flow_repo(),
@@ -2135,9 +2134,9 @@ async def test_list_runs_keeps_tenant_admin_service_key_scoped_to_service_princi
 
     assert Permission.ADMIN in service_user.permissions
 
-    await service.list_runs(flow_id=flow_id)
+    await service.list_run_statuses(flow_id=flow_id)
 
-    flow_run_repo.list_runs.assert_awaited_once_with(
+    flow_run_repo.list_statuses.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow_id,
         statuses=None,
@@ -2160,7 +2159,7 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
     actor_manager.get_space_actor_from_space.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
-    flow_run_repo.list_runs.return_value = []
+    flow_run_repo.list_statuses.return_value = []
     _seed_flow_repo(flow_repo, flow)
     space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
@@ -2179,9 +2178,9 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
         ),
     )
 
-    await service.list_runs(flow_id=flow.id)
+    await service.list_run_statuses(flow_id=flow.id)
 
-    flow_run_repo.list_runs.assert_awaited_once_with(
+    flow_run_repo.list_statuses.assert_awaited_once_with(
         tenant_id=service_user.tenant_id,
         flow_id=flow.id,
         statuses=None,
@@ -2193,324 +2192,27 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
 
 
 @pytest.mark.asyncio
-async def test_list_runs_with_result_files_and_usage_enriches_page(user):
+async def test_get_run_status_uses_content_free_repository_projection(user):
     flow_run_repo = flow_run_repo_mock()
-    provider_call_repo = _provider_call_repo()
-    flow_id = uuid4()
-    run_with_file = _run(user=user, flow_id=flow_id)
-    run_with_usage = _run(user=user, flow_id=flow_id)
-    extra_run = _run(user=user, flow_id=flow_id)
-    result_file = _result_file(user=user, run=run_with_file, file_id=uuid4())
-    transcription_usage = FlowRunTranscriptionUsage(
-        audio_seconds=51.25, completeness="complete"
-    )
-    usage = FlowRunTokenUsage(
-        num_tokens_input=12,
-        num_tokens_output=5,
-        num_tokens_total=17,
-        input_completeness="complete",
-        output_completeness="complete",
-    )
-    flow_run_repo.list_runs.return_value = [run_with_file, run_with_usage, extra_run]
-    flow_run_repo.list_result_files_for_runs.return_value = [result_file]
-    # A diarize-mode run sends the recording twice; the step measured it once.
-    flow_run_repo.recording_seconds_by_run_ids.return_value = {
-        run_with_usage.id: 25.6254
-    }
-    provider_call_repo.list_usage_for_runs.return_value = {
-        run_with_usage.id: FlowRunUsage(
-            token_usage=usage, transcription_usage=transcription_usage
-        )
-    }
+    run = _run(user=user, flow_id=uuid4())
+    flow_run_repo.get_status.return_value = run
     service = _flow_run_service(
         user=user,
         flow_repo=_flow_repo(),
         flow_run_repo=flow_run_repo,
-        provider_call_repo=provider_call_repo,
         flow_version_repo=AsyncMock(),
         runtime_upload_repo=_runtime_upload_repo(),
     )
 
-    page = await service.list_runs_with_result_files_and_usage(
-        flow_id=flow_id,
-        limit=2,
-        offset=4,
-    )
+    result = await service.get_run_status(run_id=run.id, flow_id=run.flow_id)
 
-    assert isinstance(page, FlowRunPageWithResultFilesAndUsage)
-    assert page.has_more is True
-    assert [item.run for item in page.items] == [run_with_file, run_with_usage]
-    assert page.items[0].result_files == (result_file,)
-    assert page.items[0].token_usage is None
-    assert page.items[0].transcription_usage is None
-    assert page.items[1].result_files == ()
-    assert page.items[1].token_usage == usage
-    assert page.items[1].transcription_usage == transcription_usage.model_copy(
-        update={"recording_seconds": 25.625}
-    )
-    flow_run_repo.list_runs.assert_awaited_once_with(
-        tenant_id=user.tenant_id,
-        flow_id=flow_id,
-        statuses=None,
-        principal_user_id=user.id,
-        principal_service_id=None,
-        limit=3,
-        offset=4,
-    )
-    flow_run_repo.list_result_files_for_runs.assert_awaited_once_with(
-        run_ids=[run_with_file.id, run_with_usage.id],
-        tenant_id=user.tenant_id,
-    )
-    provider_call_repo.list_usage_for_runs.assert_awaited_once_with(
-        run_ids=[run_with_file.id, run_with_usage.id],
-        tenant_id=user.tenant_id,
-    )
-    flow_run_repo.recording_seconds_by_run_ids.assert_awaited_once_with(
-        run_ids=[run_with_file.id, run_with_usage.id],
-        tenant_id=user.tenant_id,
-    )
-
-
-async def test_measured_recording_is_reported_without_provider_usage(user):
-    """A run whose step measured its audio shows the length even when no
-    provider request contributed seconds."""
-    flow_run_repo = flow_run_repo_mock()
-    provider_call_repo = _provider_call_repo()
-    flow_id = uuid4()
-    run = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_runs.return_value = [run]
-    flow_run_repo.list_result_files_for_runs.return_value = []
-    flow_run_repo.recording_seconds_by_run_ids.return_value = {run.id: 94.829}
-    provider_call_repo.list_usage_for_runs.return_value = {}
-    service = _flow_run_service(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        provider_call_repo=provider_call_repo,
-        flow_version_repo=AsyncMock(),
-        runtime_upload_repo=_runtime_upload_repo(),
-    )
-
-    page = await service.list_runs_with_result_files_and_usage(
-        flow_id=flow_id, limit=10, offset=0
-    )
-
-    assert page.items[0].transcription_usage == FlowRunTranscriptionUsage(
-        audio_seconds=0.0, completeness="complete", recording_seconds=94.829
-    )
-
-
-@pytest.mark.asyncio
-async def test_get_run_detail_includes_tenant_scoped_webhook_deliveries(user):
-    flow_run_repo = flow_run_repo_mock()
-    provider_call_repo = _provider_call_repo()
-    webhook_delivery_repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
-    flow = _flow(user)
-    run = _run(user=user, flow_id=flow.id)
-    delivery = SimpleNamespace(id=uuid4(), delivery_status="pending")
-    flow_run_repo.get.return_value = run
-    flow_run_repo.list_result_files_for_runs.return_value = []
-    provider_call_repo.list_usage_for_runs.return_value = {}
-    webhook_delivery_repo.list_run_delivery_statuses.return_value = [delivery]
-    service = _flow_run_service(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        provider_call_repo=provider_call_repo,
-        flow_version_repo=AsyncMock(),
-        runtime_upload_repo=_runtime_upload_repo(),
-        webhook_delivery_repo=webhook_delivery_repo,
-    )
-
-    detail = await service.get_run_detail_with_result_files_and_usage(
-        flow_id=flow.id,
-        run_id=run.id,
-    )
-
-    assert detail.run == run
-    assert detail.webhook_deliveries == (delivery,)
-    webhook_delivery_repo.list_run_delivery_statuses.assert_awaited_once_with(
+    assert result == run
+    flow_run_repo.get_status.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=user.tenant_id,
+        flow_id=run.flow_id,
     )
-
-
-@pytest.mark.asyncio
-async def test_list_runs_bulk_loads_each_historical_completed_version_once(user):
-    flow_run_repo = flow_run_repo_mock()
-    provider_call_repo = _provider_call_repo()
-    flow_version_repo = AsyncMock()
-    flow = _flow(user, published_version=2)
-    version_one = _runtime_version(user, flow, version=1)
-    text_flow = flow.model_copy(
-        update={
-            "steps": [
-                flow.steps[0],
-                flow.steps[1].model_copy(
-                    update={"output_type": "text", "output_contract": None}
-                ),
-            ]
-        },
-        deep=True,
-    )
-    version_two = _runtime_version(user, text_flow, version=2)
-    structured_run = _run(user=user, flow_id=flow.id).model_copy(
-        update={
-            "status": FlowRunStatus.COMPLETED,
-            "flow_version": 1,
-            "output_payload_json": {"structured": {"answer": "first"}},
-        }
-    )
-    duplicate_version_run = _run(user=user, flow_id=flow.id).model_copy(
-        update={
-            "status": FlowRunStatus.COMPLETED,
-            "flow_version": 1,
-            "output_payload_json": {"structured": {"answer": "second"}},
-        }
-    )
-    text_run = _run(user=user, flow_id=flow.id).model_copy(
-        update={
-            "status": FlowRunStatus.COMPLETED,
-            "flow_version": 2,
-            "output_payload_json": {"text": "current text"},
-        }
-    )
-    flow_run_repo.list_runs.return_value = [
-        structured_run,
-        duplicate_version_run,
-        text_run,
-    ]
-    flow_run_repo.list_result_files_for_runs.return_value = []
-    provider_call_repo.list_usage_for_runs.return_value = {}
-    flow_version_repo.get_many.return_value = {
-        (flow.id, 1): version_one,
-        (flow.id, 2): version_two,
-    }
-    service = _flow_run_service(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        provider_call_repo=provider_call_repo,
-        flow_version_repo=flow_version_repo,
-        runtime_upload_repo=_runtime_upload_repo(),
-    )
-
-    page = await service.list_runs_with_result_files_and_usage(
-        flow_id=flow.id,
-        limit=3,
-        offset=0,
-    )
-
-    assert [item.final_output.output_type for item in page.items] == [
-        "json",
-        "json",
-        "text",
-    ]
-    flow_version_repo.get_many.assert_awaited_once_with(
-        version_refs=((flow.id, 1), (flow.id, 2)),
-        tenant_id=user.tenant_id,
-    )
-
-
-@pytest.mark.asyncio
-async def test_list_runs_with_result_files_and_usage_exact_limit_has_no_more(
-    user,
-):
-    flow_run_repo = flow_run_repo_mock()
-    provider_call_repo = _provider_call_repo()
-    flow_id = uuid4()
-    run_one = _run(user=user, flow_id=flow_id)
-    run_two = _run(user=user, flow_id=flow_id)
-    flow_run_repo.list_runs.return_value = [run_one, run_two]
-    flow_run_repo.list_result_files_for_runs.return_value = []
-    provider_call_repo.list_usage_for_runs.return_value = {}
-    service = _flow_run_service(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        provider_call_repo=provider_call_repo,
-        flow_version_repo=AsyncMock(),
-        runtime_upload_repo=_runtime_upload_repo(),
-    )
-
-    page = await service.list_runs_with_result_files_and_usage(
-        flow_id=flow_id,
-        limit=2,
-        offset=0,
-    )
-
-    assert page.has_more is False
-    assert [item.run for item in page.items] == [run_one, run_two]
-    flow_run_repo.list_result_files_for_runs.assert_awaited_once_with(
-        run_ids=[run_one.id, run_two.id],
-        tenant_id=user.tenant_id,
-    )
-    provider_call_repo.list_usage_for_runs.assert_awaited_once_with(
-        run_ids=[run_one.id, run_two.id],
-        tenant_id=user.tenant_id,
-    )
-
-
-@pytest.mark.asyncio
-async def test_list_runs_with_result_files_and_usage_empty_page_skips_enrichment(
-    user,
-):
-    flow_run_repo = flow_run_repo_mock()
-    provider_call_repo = _provider_call_repo()
-    flow_id = uuid4()
-    flow_run_repo.list_runs.return_value = []
-    service = _flow_run_service(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        provider_call_repo=provider_call_repo,
-        flow_version_repo=AsyncMock(),
-        runtime_upload_repo=_runtime_upload_repo(),
-    )
-
-    page = await service.list_runs_with_result_files_and_usage(
-        flow_id=flow_id,
-        limit=20,
-        offset=0,
-    )
-
-    assert page.items == ()
-    assert page.has_more is False
-    flow_run_repo.list_result_files_for_runs.assert_not_awaited()
-    provider_call_repo.list_usage_for_runs.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_list_runs_with_result_files_and_usage_rejects_foreign_tenant_row(
-    user,
-):
-    flow_run_repo = flow_run_repo_mock()
-    provider_call_repo = _provider_call_repo()
-    flow_id = uuid4()
-    foreign_run = _run(user=user, flow_id=flow_id).model_copy(
-        update={"tenant_id": uuid4()}
-    )
-    flow_run_repo.list_runs.return_value = [foreign_run]
-    service = _flow_run_service(
-        user=user,
-        flow_repo=_flow_repo(),
-        flow_run_repo=flow_run_repo,
-        provider_call_repo=provider_call_repo,
-        flow_version_repo=AsyncMock(),
-        runtime_upload_repo=_runtime_upload_repo(),
-    )
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        await service.list_runs_with_result_files_and_usage(
-            flow_id=flow_id,
-            limit=1,
-            offset=0,
-        )
-
-    assert exc_info.value.code == "flow_run_access_denied"
-    assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
-    flow_run_repo.list_result_files_for_runs.assert_not_awaited()
-    provider_call_repo.list_usage_for_runs.assert_not_awaited()
+    flow_run_repo.get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2527,10 +2229,18 @@ async def test_get_run_with_result_files_and_usage_enriches_single_run(user):
         input_completeness="complete",
         output_completeness="complete",
     )
+    transcription_usage = FlowRunTranscriptionUsage(
+        audio_seconds=51.25,
+        completeness="complete",
+    )
     flow_run_repo.get.return_value = run
     flow_run_repo.list_result_files_for_runs.return_value = [result_file]
+    flow_run_repo.recording_seconds_by_run_ids.return_value = {run.id: 25.6254}
     provider_call_repo.list_usage_for_runs.return_value = {
-        run.id: FlowRunUsage(token_usage=usage, transcription_usage=None)
+        run.id: FlowRunUsage(
+            token_usage=usage,
+            transcription_usage=transcription_usage,
+        )
     }
     service = _flow_run_service(
         user=user,
@@ -2550,11 +2260,18 @@ async def test_get_run_with_result_files_and_usage_enriches_single_run(user):
     assert view.run == run
     assert view.result_files == (result_file,)
     assert view.token_usage == usage
+    assert view.transcription_usage == transcription_usage.model_copy(
+        update={"recording_seconds": 25.625}
+    )
     flow_run_repo.list_result_files_for_runs.assert_awaited_once_with(
         run_ids=[run.id],
         tenant_id=user.tenant_id,
     )
     provider_call_repo.list_usage_for_runs.assert_awaited_once_with(
+        run_ids=[run.id],
+        tenant_id=user.tenant_id,
+    )
+    flow_run_repo.recording_seconds_by_run_ids.assert_awaited_once_with(
         run_ids=[run.id],
         tenant_id=user.tenant_id,
     )

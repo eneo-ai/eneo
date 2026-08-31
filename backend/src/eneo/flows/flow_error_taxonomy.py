@@ -208,6 +208,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Upload files through the target flow before binding them to a run.",
         user_action="Upload the file through this flow and try again.",
     ),
+    FlowApiErrorCode.RUN_FILE_ACCESS_AUDIT_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Required audit logging could not commit before a run-file download URL was minted.",
+        consumer_action="Retry later; the failed response contains no usable signed URL.",
+        user_action="Try the download again later.",
+    ),
     FlowApiErrorCode.RUN_STEP_INPUT_FILE_TOO_LARGE: _entry(
         category="Run input",
         surfaced_through="API error response",
@@ -1218,6 +1225,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         cause="The required audit record could not commit, so no download URL was minted.",
         consumer_action="Retry later; do not treat the failed response as a usable download.",
         user_action="Try the download again later.",
+    ),
+    FlowApiErrorCode.PACKAGE_EXPORT_AUDIT_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Required audit logging failed before the Flow package export committed.",
+        consumer_action="Retry later; the failed response contains no package bytes.",
+        user_action="Try the export again later.",
     ),
 }
 

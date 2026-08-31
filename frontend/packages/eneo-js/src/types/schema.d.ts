@@ -3066,7 +3066,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 170 actions with their enabled status for the modal UI.
+     * @description Retrieve all 169 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -4561,9 +4561,10 @@ export interface paths {
      *         current page, not the total number of matching runs across all pages. `has_more` reports
      *         whether another page exists after this offset window.
      *
-     *         Each item uses the same typed `result` projection as the single-run endpoint. Historical
-     *         completed runs are interpreted with their own pinned `flow_version`; incomplete runs return
-     *         `result: null`.
+     *         Items use the same content-free lifecycle projection as the dedicated run-status endpoint.
+     *         Accepted input, terminal output, result-file metadata, provider usage, and webhook deliveries
+     *         are deliberately omitted so background history refresh does not expose or repeatedly read
+     *         sensitive content. Retrieve one run's audited detail when that content is needed.
      *
      *         Current runtime visibility is policy-based: callers always list their own runs, tenant admins
      *         can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -4576,7 +4577,7 @@ export interface paths {
      * @description Create a new run for a published flow.
      *
      *         The returned run id is committed before this endpoint returns `201 Created`, so clients can
-     *         immediately poll `GET /api/v1/flows/{id}/runs/{run_id}/` with the id from the response.
+     *         immediately poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` with the id from the response.
      *
      *         Generic consumer sequence:
      *         1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
@@ -4587,8 +4588,8 @@ export interface paths {
      *            the same Flow.
      *         3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
      *            together with any structured `input_payload_json` fields in this run request.
-     *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` for the typed terminal `result`,
-     *            and use `.../steps/` for detailed step progress and evidence.
+     *         4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` until the run is terminal.
+     *            Then retrieve this run's audited detail or use `.../steps/` for evidence.
      *
      *         Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
      *         `400` with code `flow_run_top_level_file_ids_not_supported`; use
@@ -4622,9 +4623,9 @@ export interface paths {
     };
     /**
      * Get flow run
-     * @description Get one run for a specific flow.
+     * @description Get the sensitive input and output detail for one run.
      *
-     *         Use this endpoint for run status and the typed top-level `result` when building consumer apps.
+     *         Use this endpoint for the accepted input and typed top-level `result` when building consumer apps.
      *         `result` is null until the run completes successfully, then discriminates inline text,
      *         authored structured JSON, current artifact metadata, or successful outbound delivery.
      *         Structured values and contracts are interpreted with this run's pinned `flow_version`.
@@ -4633,12 +4634,14 @@ export interface paths {
      *         always-present `webhook_deliveries` array, which stays empty unless the flow's final step
      *         was authored with outbound HTTP delivery.
      *
-     *         Polling is the only mechanism a caller controls for observing run status: there is no
+     *         This content-bearing access is audit-logged and fails closed if the required audit record
+     *         cannot be committed. Do not use it for routine status polling. Poll the dedicated
+     *         `/status/` endpoint instead; there is no
      *         client-registered run-status subscription, server-sent event, or WebSocket surface. A
      *         flow author can separately configure a terminal step to deliver its result over outbound
      *         HTTP, which is what `webhook_deliveries` reports; that does signal successful completion
      *         to the receiver they configured, but it is designed into the flow rather than requested
-     *         by the caller and it reports neither failure nor review states. Poll this endpoint about
+     *         by the caller and it reports neither failure nor review states. Poll the status endpoint about
      *         every 2 seconds for the first 30 seconds, then every 5 seconds, then every 15 seconds,
      *         and stop when the status capability `should_poll` is false. Keep polling while the status
      *         is `awaiting_review`, because a reviewer can act at any time and the checkpoint can also
@@ -5050,6 +5053,35 @@ export interface paths {
      *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     post: operations["resume_flow_run_review_checkpoint"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/status/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow run status
+     * @description Get the lifecycle status summary for one run.
+     *
+     *         This is the routine polling contract. It contains lifecycle, timing, and bounded,
+     *         secret-free dispatch diagnosis fields, but excludes accepted input, terminal errors,
+     *         terminal output, result-file metadata, provider usage, and webhook-delivery content.
+     *         Poll about every 2 seconds for the first 30 seconds, then every 5 seconds, then every
+     *         15 seconds, and stop when the status capability `should_poll` is false.
+     *
+     *         Status polling is authorized but not audit-logged as a distinct business event. Retrieve the
+     *         content-bearing run detail only when a user or client needs the run input or result.
+     */
+    get: operations["get_flow_run_status"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -10560,6 +10592,7 @@ export interface components {
       | "flow_published"
       | "flow_unpublished"
       | "flow_run_retention_policy_changed"
+      | "flow_run_history_purged"
       | "flow_run_created"
       | "flow_run_completed"
       | "flow_run_failed"
@@ -10571,8 +10604,6 @@ export interface components {
       | "flow_run_contract_rejected"
       | "flow_run_audio_transcribed"
       | "flow_http_outbound_call"
-      | "flow_run_artifact_downloaded"
-      | "flow_run_input_file_downloaded"
       | "flow_evidence_viewed"
       | "flow_evidence_exported_json"
       | "flow_package_exported"
@@ -12490,7 +12521,7 @@ export interface components {
      * @example {
      *       "categories": [
      *         {
-     *           "action_count": 49,
+     *           "action_count": 50,
      *           "category": "admin_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -12811,7 +12842,7 @@ export interface components {
      *     Display text is intentionally omitted: the frontend translates ``category``
      *     by key (``audit_category_{category}`` / ``_description``).
      * @example {
-     *       "action_count": 49,
+     *       "action_count": 50,
      *       "category": "admin_actions",
      *       "enabled": true,
      *       "example_actions": [
@@ -15635,6 +15666,7 @@ export interface components {
       | "flow_run_step_input_max_files_exceeded"
       | "flow_run_file_not_accessible"
       | "flow_run_file_not_bound_to_flow"
+      | "flow_run_file_access_audit_unavailable"
       | "flow_run_step_input_file_too_large"
       | "flow_run_step_input_mimetype_rejected"
       | "flow_run_aggregate_max_files_exceeded"
@@ -15764,7 +15796,8 @@ export interface components {
       | "flow_template_unsupported_extension"
       | "flow_template_missing_content"
       | "flow_template_in_use"
-      | "flow_template_download_audit_unavailable";
+      | "flow_template_download_audit_unavailable"
+      | "flow_package_export_audit_unavailable";
     /**
      * FlowAssistantCreateRequest
      * @example {
@@ -18320,7 +18353,7 @@ export interface components {
        * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
        */
       dispatched_at?: string | null;
-      /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
+      /** @description Structured terminal run error available only through audited detail and evidence reads. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
       error?: components["schemas"]["FlowRunError"] | null;
       /**
        * Finished At
@@ -19730,7 +19763,7 @@ export interface components {
        * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
        */
       dispatched_at?: string | null;
-      /** @description Structured terminal run error. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
+      /** @description Structured terminal run error available only through audited detail and evidence reads. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
       error?: components["schemas"]["FlowRunError"] | null;
       /**
        * Finished At
@@ -21072,6 +21105,128 @@ export interface components {
       /** @description Opaque authored JSON value produced by the published final step. Interpret it with `output_contract` and the enclosing run's `flow_version`. */
       value: components["schemas"]["JsonValue"];
     };
+    /**
+     * FlowRunSummaryPublic
+     * @example {
+     *       "created_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_attempt_count": 0,
+     *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_version": 3,
+     *       "id": "00000000-0000-0000-0000-000000000301",
+     *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "revision": 1,
+     *       "status": "queued",
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "trace_id": "00000000-0000-0000-0000-000000000302",
+     *       "updated_at": "2026-03-17T10:05:00Z"
+     *     }
+     */
+    FlowRunSummaryPublic: {
+      /**
+       * Cancelled At
+       * @description When the run was cancelled. Null unless `status` is `cancelled`.
+       */
+      cancelled_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       * @description When the run row was created.
+       */
+      created_at: string;
+      /**
+       * Dispatch Attempt Count
+       * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
+       */
+      dispatch_attempt_count: number;
+      /**
+       * Dispatch Exhausted At
+       * @description Timestamp when bounded attempts were exhausted for this dispatch epoch.
+       */
+      dispatch_exhausted_at?: string | null;
+      /**
+       * Dispatch Last Attempt At
+       * @description Timestamp of the latest claimed broker dispatch attempt.
+       */
+      dispatch_last_attempt_at?: string | null;
+      /** @description Last bounded, secret-free diagnosis for the most recent dispatch epoch. A later successful dispatch preserves this diagnostic. */
+      dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
+      /**
+       * Dispatch Next Attempt At
+       * @description Sole dispatch eligibility clock. It remains set while a queued broker delivery awaits worker claim or bounded recovery, and becomes null after claim, exhaustion, or another lifecycle transition.
+       */
+      dispatch_next_attempt_at?: string | null;
+      /**
+       * Dispatch Pending Since
+       * @description Stable timestamp when the most recent queue-entry dispatch epoch began. It does not move when dispatch is retried.
+       */
+      dispatch_pending_since?: string | null;
+      /**
+       * Dispatched At
+       * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
+       */
+      dispatched_at?: string | null;
+      /**
+       * Finished At
+       * @description When the run reached a terminal status. Null while non-terminal.
+       */
+      finished_at?: string | null;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Identifier of the flow that owns this run.
+       */
+      flow_id: string;
+      /**
+       * Flow Version
+       * @description Published flow version this run is pinned to. It is the version the run executes against even after the flow is republished.
+       */
+      flow_version: number;
+      /**
+       * Id
+       * Format: uuid
+       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, and artifact requests.
+       */
+      id: string;
+      /**
+       * Job Id
+       * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
+       */
+      job_id?: string | null;
+      /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
+      principal_type?: components["schemas"]["PrincipalType"] | null;
+      /**
+       * Revision
+       * @description Monotonic run lifecycle compare token.
+       */
+      revision: number;
+      /**
+       * Started At
+       * @description When a worker began executing the first step. Null while queued.
+       */
+      started_at?: string | null;
+      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
+      status: components["schemas"]["FlowRunStatus"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant that owns the run and its data.
+       */
+      tenant_id: string;
+      /**
+       * Trace Id
+       * Format: uuid
+       * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
+       */
+      trace_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       * @description When the run row last changed. It moves on every status change.
+       */
+      updated_at: string;
+    };
     /** FlowRunTokenUsagePublic */
     FlowRunTokenUsagePublic: {
       /**
@@ -21320,7 +21475,7 @@ export interface components {
       cancel_run_template: string;
       /**
        * Create Run
-       * @description POST path for creating a run. The returned run id is committed before `201 Created` is returned, so clients can immediately poll `get_run_template`.
+       * @description POST path for creating a run. The returned run id is committed before `201 Created` is returned, so clients can immediately poll `get_run_status_template`.
        */
       create_run: string;
       /**
@@ -21344,8 +21499,13 @@ export interface components {
        */
       get_graph_for_run_template: string;
       /**
+       * Get Run Status Template
+       * @description GET template for polling lifecycle status without run input, output, result-file metadata, or usage data. Replace `{run_id}` with the id returned by create_run.
+       */
+      get_run_status_template: string;
+      /**
        * Get Run Template
-       * @description GET template for polling run status and top-level output. Replace `{run_id}` with the id returned by create_run.
+       * @description GET template for retrieving sensitive run input and top-level output. Replace `{run_id}` with the id returned by create_run. This access is audit-logged and should not be used for routine polling.
        */
       get_run_template: string;
       /**
@@ -21478,6 +21638,7 @@ export interface components {
      *         "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
      *         "export_evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/export",
      *         "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
+     *         "get_run_status_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/status/",
      *         "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
      *         "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
      *         "input_file_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/input-files/{file_id}/signed-url/",
@@ -24996,8 +25157,8 @@ export interface components {
       /** Expected Previous Revision */
       expected_previous_revision: number;
     };
-    /** OffsetPaginatedResponse[FlowRunPublic] */
-    OffsetPaginatedResponse_FlowRunPublic_: {
+    /** OffsetPaginatedResponse[FlowRunSummaryPublic] */
+    OffsetPaginatedResponse_FlowRunSummaryPublic_: {
       /**
        * Count
        * @description Number of items returned in the response
@@ -25012,7 +25173,7 @@ export interface components {
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["FlowRunPublic"][];
+      items: components["schemas"]["FlowRunSummaryPublic"][];
     };
     /** OffsetPaginatedResponse[FlowSparsePublic] */
     OffsetPaginatedResponse_FlowSparsePublic_: {
@@ -49785,6 +49946,25 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Required export audit logging is unavailable, so no package bytes are returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_package_export_audit_unavailable",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Flow package export audit logging is unavailable."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   publish_flow: {
@@ -50058,11 +50238,7 @@ export interface operations {
            *           "flow_id": "00000000-0000-0000-0000-000000000001",
            *           "flow_version": 3,
            *           "id": "00000000-0000-0000-0000-000000000301",
-           *           "input_payload_json": {
-           *             "employee_name": "Alex Example"
-           *           },
            *           "job_id": "00000000-0000-0000-0000-000000000401",
-           *           "result_files": [],
            *           "revision": 1,
            *           "status": "queued",
            *           "tenant_id": "00000000-0000-0000-0000-000000000010",
@@ -50072,7 +50248,7 @@ export interface operations {
            *       ]
            *     }
            */
-          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunPublic_"];
+          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunSummaryPublic_"];
         };
       };
       /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
@@ -50300,6 +50476,25 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Required access audit logging is unavailable, so no run input or result was returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   generate_flow_run_artifact_signed_url: {
@@ -50388,6 +50583,25 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required access audit logging is unavailable, so no artifact download URL was minted. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_file_access_audit_unavailable",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Flow run file access audit logging is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -50779,6 +50993,25 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Required access audit logging is unavailable, so no input-file download URL was minted. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_file_access_audit_unavailable",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Flow run file access audit logging is unavailable."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   list_flow_run_provider_calls: {
@@ -51031,6 +51264,25 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required access audit logging is unavailable, so no review checkpoint payload was returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -51592,6 +51844,75 @@ export interface operations {
       };
     };
   };
+  get_flow_run_status: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the requested run. */
+        id: string;
+        /** @description Identifier of the run to poll. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunSummaryPublic"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow run not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   list_flow_run_steps: {
     parameters: {
       query?: never;
@@ -51656,6 +51977,25 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required access audit logging is unavailable, so no step outputs were returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

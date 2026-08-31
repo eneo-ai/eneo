@@ -83,6 +83,7 @@ class TestCategoryMappings:
             ActionType.MODULE_ADDED_TO_TENANT,
             ActionType.MODULE_REMOVED_FROM_TENANT,
             ActionType.MODULE_CLIENT_CONFIG_UPDATED,
+            ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
         ]
 
         for action_type in admin_action_types:
@@ -180,6 +181,7 @@ class TestCategoryMappings:
             ActionType.RETENTION_POLICY_APPLIED,
             ActionType.ENCRYPTION_KEY_ROTATED,
             ActionType.SYSTEM_MAINTENANCE,
+            ActionType.FLOW_RUN_HISTORY_PURGED,
             ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN,
         ]
 

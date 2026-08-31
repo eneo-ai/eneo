@@ -48,7 +48,6 @@ FLOW_ERROR_CODE_PATTERN = re.compile(r"^flow_[a-z0-9_]+$")
 FLOW_GUIDE_BACKTICKED_TOKEN_PATTERN = re.compile(r"`((?:flow|typed_io)_[a-z0-9_]+)`")
 FLOW_GUIDE_NON_ERROR_CODE_TOKENS = {
     "flow_evidence": "resource permission name, not an error code",
-    "flow_run_history_retention_days": "retention policy field, not an error code",
     "flow_runtime_upload_abandonment_days": (
         "runtime upload retention field, not an error code"
     ),

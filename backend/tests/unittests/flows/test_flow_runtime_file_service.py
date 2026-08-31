@@ -33,7 +33,7 @@ from eneo.main.exceptions import (
 )
 
 RUNTIME_ATTACHMENT_CONSTRAINTS = (
-    "fk_flow_run_step_input_files_file_id_files",
+    "flow_run_step_input_files_file_id_fkey",
     "fk_flow_run_step_input_files_runtime_upload",
     "fk_flow_run_step_result_files_file_tenant",
 )
@@ -322,12 +322,15 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
     async def save_file(*args, **kwargs):
         session.events.append("save_file")
         assert not session.in_transaction()
-        return SimpleNamespace(
+        file = SimpleNamespace(
             id=file_id,
             name="source.pdf",
             size=1024,
             mimetype="application/pdf",
         )
+        async with session.begin():
+            await kwargs["before_commit"](file)
+        return file
 
     async def create_runtime_upload(**kwargs):
         session.events.append("create_runtime_upload")
@@ -335,11 +338,11 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
 
     audit_service = AsyncMock()
 
-    async def log_async(**kwargs):
+    async def log(**kwargs):
         session.events.append("audit")
         assert session.in_transaction()
 
-    audit_service.log_async.side_effect = log_async
+    audit_service.log.side_effect = log
 
     file_service.save_file.side_effect = save_file
     runtime_upload_repo.create.side_effect = create_runtime_upload
@@ -390,13 +393,77 @@ async def test_upload_runtime_file_for_step_records_flow_upload_binding(
     assert create_kwargs["tenant_id"] == flow.tenant_id
     assert create_kwargs["uploaded_for_step_id"] == runtime_step.id
     assert create_kwargs["principal"].principal_user_id == user.id
-    audit_service.log_async.assert_awaited_once()
-    audit_kwargs = audit_service.log_async.await_args.kwargs
+    audit_service.log.assert_awaited_once()
+    audit_kwargs = audit_service.log.await_args.kwargs
     assert audit_kwargs["tenant_id"] == flow.tenant_id
     assert audit_kwargs["user"] is user
+    assert audit_kwargs["required"] is True
     assert audit_kwargs["entity_id"] == file_id
     assert audit_kwargs["metadata"]["extra"]["flow_id"] == str(flow.id)
     assert audit_kwargs["metadata"]["extra"]["step_id"] == str(runtime_step.id)
+
+
+@pytest.mark.asyncio
+async def test_upload_runtime_file_rolls_back_binding_when_required_audit_fails(
+    monkeypatch,
+) -> None:
+    flow_service = AsyncMock()
+    file_service = AsyncMock()
+    settings_service = AsyncMock()
+    session = _Session()
+    runtime_upload_repo = _runtime_upload_repo()
+    audit_service = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="document")
+    flow = _flow(step=runtime_step)
+    file_id = uuid4()
+    flow_service.get_flow.return_value = flow
+
+    async def save_file(*args, **kwargs):
+        file = SimpleNamespace(
+            id=file_id,
+            name="source.pdf",
+            size=1024,
+            mimetype="application/pdf",
+        )
+        async with session.begin():
+            await kwargs["before_commit"](file)
+        return file
+
+    file_service.save_file.side_effect = save_file
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=10_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+    audit_service.log.side_effect = RuntimeError("audit store unavailable")
+    service = _service(
+        session=session,
+        flow_service=flow_service,
+        file_service=file_service,
+        runtime_upload_repo=runtime_upload_repo,
+        settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
+        audit_service=audit_service,
+    )
+    upload = UploadFile(
+        filename="source.pdf",
+        file=BytesIO(b"%PDF-1.4 fake"),
+        headers={"content-type": "application/pdf"},
+    )
+    monkeypatch.setattr(
+        "eneo.flows.flow_runtime_file_service._sniff_mimetype",
+        lambda _upload_file: "application/pdf",
+    )
+
+    with pytest.raises(RuntimeError, match="audit store unavailable"):
+        await service.upload_runtime_file_for_step(
+            flow_id=flow.id,
+            step_id=runtime_step.id,
+            upload_file=upload,
+        )
+
+    runtime_upload_repo.create.assert_awaited_once()
+    assert session.exit_exc_type is RuntimeError
 
 
 @pytest.mark.asyncio
@@ -421,12 +488,15 @@ async def test_upload_runtime_file_rolls_back_when_binding_insert_fails(
     async def save_file(*args, **kwargs):
         session.events.append("save_file")
         assert not session.in_transaction()
-        return SimpleNamespace(
+        file = SimpleNamespace(
             id=file_id,
             name="source.pdf",
             size=1024,
             mimetype="application/pdf",
         )
+        async with session.begin():
+            await kwargs["before_commit"](file)
+        return file
 
     async def create_runtime_upload(**kwargs):
         session.events.append("create_runtime_upload")
@@ -1501,7 +1571,7 @@ async def test_delete_runtime_file_maps_asyncpg_attachment_message() -> None:
     file_id = uuid4()
     flow_service.get_flow.return_value = flow
     file_service.delete_file.side_effect = _integrity_error_with_origin_message(
-        'violates foreign key constraint "fk_flow_run_step_input_files_file_id_files"'
+        'violates foreign key constraint "flow_run_step_input_files_file_id_fkey"'
     )
     service = _service(
         flow_service=flow_service,

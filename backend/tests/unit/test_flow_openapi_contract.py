@@ -2548,7 +2548,7 @@ def test_openapi_flow_pagination_response_shape_is_current(
 ) -> None:
     targets = {
         "/api/v1/flows/": "OffsetPaginatedResponse_FlowSparsePublic_",
-        "/api/v1/flows/{id}/runs/": "OffsetPaginatedResponse_FlowRunPublic_",
+        "/api/v1/flows/{id}/runs/": ("OffsetPaginatedResponse_FlowRunSummaryPublic_"),
     }
     schemas = openapi_spec.get("components", {}).get("schemas", {})
 
@@ -2577,7 +2577,7 @@ def test_openapi_flow_pagination_response_shape_is_current(
         }
 
     assert "PaginatedResponse_FlowSparsePublic_" not in schemas
-    assert "PaginatedResponse_FlowRunPublic_" not in schemas
+    assert "PaginatedResponse_FlowRunSummaryPublic_" not in schemas
 
 
 def test_openapi_flow_run_create_schema_has_request_example(openapi_spec: dict) -> None:

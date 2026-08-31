@@ -58,6 +58,7 @@ from eneo.main.models import GeneralError
 from eneo.roles.permissions import Permission
 from eneo.server.exception_handlers import add_exception_handlers
 from tests.unittests.flows.test_flow_router import (
+    _enable_explicit_transaction,
     _enable_space_access,
     _evidence_export_payload,
     _flow,
@@ -166,6 +167,21 @@ def test_flow_evidence_audit_failure_error_response_includes_request_id():
     assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
     assert error.context == {"audit_required": True}
     assert error.request_id == "evidence-audit-failure-test"
+
+
+def test_flow_run_file_audit_failure_error_response_is_retryable():
+    response = _flow_error_response(
+        AuditLoggingUnavailableException(
+            "Flow run file access audit logging is unavailable.",
+            code=FlowApiErrorCode.RUN_FILE_ACCESS_AUDIT_UNAVAILABLE.value,
+            context={"audit_required": True},
+        )
+    )
+
+    assert response["status_code"] == 503
+    error = GeneralError.model_validate(response["payload"])
+    assert error.code == FlowApiErrorCode.RUN_FILE_ACCESS_AUDIT_UNAVAILABLE.value
+    assert error.context == {"audit_required": True}
 
 
 def test_flow_evidence_error_response_omits_request_id_when_absent():
@@ -285,6 +301,7 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
     assert (
         audit_service.log.await_args.kwargs["action"] == ActionType.FLOW_EVIDENCE_VIEWED
     )
+    assert audit_service.log.await_args.kwargs["required"] is True
     assert events == ["transaction_enter", "audit_log", "transaction_exit"]
     session.commit.assert_not_called()
 
@@ -365,6 +382,8 @@ async def test_list_flow_run_provider_calls_forwards_cursor_and_audits_page(
     assert audit_service.log.await_args.kwargs["metadata"]["extra"] == {
         "evidence_detail": "provider_calls",
         "page_count": 0,
+        "flow_id": str(flow_id),
+        "run_id": str(run.id),
     }
     assert events == ["transaction_enter", "audit_log", "transaction_exit"]
 
@@ -853,13 +872,15 @@ async def test_export_flow_run_evidence_returns_json_attachment(monkeypatch):
     assert audit_service.log.await_args.kwargs["metadata"]["extra"] == {
         "evidence_detail": "redacted",
         "export_reason": "support_debug",
+        "flow_id": str(flow_id),
+        "run_id": str(run.id),
     }
     assert events == ["transaction_enter", "audit_log", "transaction_exit"]
     session.commit.assert_not_called()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("audit_outcome", ["none", "exception", "commit"])
+@pytest.mark.parametrize("audit_outcome", ["exception", "commit"])
 async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavailable(
     monkeypatch, audit_outcome: str
 ):
@@ -914,9 +935,7 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
     )
     container.flow_run_evidence_service.return_value = run_service
     audit_service = AsyncMock()
-    if audit_outcome == "none":
-        audit_service.log.return_value = None
-    elif audit_outcome == "exception":
+    if audit_outcome == "exception":
         audit_service.log.side_effect = RuntimeError("audit unavailable")
     else:
         audit_service.log.return_value = object()
@@ -956,15 +975,11 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
     assert str(error) == "Evidence audit logging is unavailable."
     assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
     assert error.context == {"audit_required": True}
-    if audit_outcome == "none":
-        logger.error.assert_called_once()
-        logger.exception.assert_not_called()
-    else:
-        logger.exception.assert_called_once()
+    logger.exception.assert_called_once()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("audit_outcome", ["none", "exception", "commit"])
+@pytest.mark.parametrize("audit_outcome", ["exception", "commit"])
 async def test_export_flow_run_evidence_fails_closed_when_required_audit_is_unavailable(
     monkeypatch, audit_outcome: str
 ):
@@ -977,9 +992,7 @@ async def test_export_flow_run_evidence_fails_closed_when_required_audit_is_unav
     run_service.export_evidence_json.return_value = export_payload
     container.flow_run_evidence_service.return_value = run_service
     audit_service = AsyncMock()
-    if audit_outcome == "none":
-        audit_service.log.return_value = None
-    elif audit_outcome == "exception":
+    if audit_outcome == "exception":
         audit_service.log.side_effect = RuntimeError("audit unavailable")
     else:
         audit_service.log.return_value = object()
@@ -1022,11 +1035,7 @@ async def test_export_flow_run_evidence_fails_closed_when_required_audit_is_unav
     assert str(error) == "Evidence audit logging is unavailable."
     assert error.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
     assert error.context == {"audit_required": True}
-    if audit_outcome == "none":
-        logger.error.assert_called_once()
-        logger.exception.assert_not_called()
-    else:
-        logger.exception.assert_called_once()
+    logger.exception.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1080,6 +1089,8 @@ async def test_export_flow_run_evidence_passes_raw_detail_and_reason(monkeypatch
     ] == {
         "evidence_detail": "raw",
         "export_reason": "government_audit_request",
+        "flow_id": str(flow_id),
+        "run_id": str(run.id),
     }
 
 
@@ -1145,7 +1156,9 @@ async def test_list_flow_run_steps_projects_typed_diagnostics_and_logs_drops(
     flow_id = uuid4()
     run_id = uuid4()
     tenant_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=tenant_id).model_copy(update={"id": run_id})
     run_service = AsyncMock()
+    run_service.get_run.return_value = run
     step_result = cast(
         FlowStepResult,
         SimpleNamespace(
@@ -1189,6 +1202,12 @@ async def test_list_flow_run_steps_projects_typed_diagnostics_and_logs_drops(
         ),
     )
     container.flow_run_service.return_value = run_service
+    user = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, username="tester", email="t@e.com"
+    )
+    container.user.return_value = user
+    audit_service = AsyncMock()
+    container.audit_service.return_value = audit_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -1238,16 +1257,26 @@ async def test_list_flow_run_steps_projects_typed_diagnostics_and_logs_drops(
     assert dropped_records[0].run_id == str(run_id)
     assert dropped_records[0].dropped_count == 2
     assert dropped_records[0].error_types == ["not_mapping", "missing"]
+    audit_service.log.assert_awaited_once()
+    audit_event = audit_service.log.await_args.kwargs
+    assert audit_event["required"] is True
+    assert audit_event["action"] is ActionType.FLOW_EVIDENCE_VIEWED
+    assert audit_event["metadata"]["extra"] == {
+        "evidence_detail": "step_outputs",
+        "flow_id": str(flow_id),
+        "run_id": str(run.id),
+    }
 
 
 @pytest.mark.asyncio
 async def test_list_flow_run_steps_handles_non_list_diagnostics(monkeypatch):
     container = MagicMock()
     flow_id = uuid4()
-    run_id = uuid4()
     run_service = AsyncMock()
     step_result_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run_id = run.id
+    run_service.get_run.return_value = run
     result_file = _result_file(run=run, step_result_id=step_result_id)
     first_step_result = cast(
         FlowStepResult,
@@ -1300,6 +1329,13 @@ async def test_list_flow_run_steps_handles_non_list_diagnostics(monkeypatch):
         ),
     )
     container.flow_run_service.return_value = run_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        username="tester",
+        email="t@e.com",
+    )
+    container.audit_service.return_value = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -1323,6 +1359,61 @@ async def test_list_flow_run_steps_handles_non_list_diagnostics(monkeypatch):
     assert response[0].result_files == [result_file]
     assert response[1].diagnostics == []
     assert response[1].result_files == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_failure", ["write", "commit"])
+async def test_list_flow_run_steps_fails_closed_when_required_audit_is_unavailable(
+    monkeypatch,
+    audit_failure: str,
+) -> None:
+    container = MagicMock()
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    run_service = AsyncMock()
+    run_service.get_run.return_value = run
+    run_service.list_step_results_with_files.return_value = ()
+    container.flow_run_service.return_value = run_service
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        username="tester",
+        email="t@e.com",
+    )
+    audit_service = AsyncMock()
+    if audit_failure == "write":
+        audit_service.log.side_effect = RuntimeError("audit unavailable")
+    container.audit_service.return_value = audit_service
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(container)
+    if audit_failure == "commit":
+        session = MagicMock()
+        session.begin.return_value = _EvidenceTransaction(
+            [], exit_error=RuntimeError("commit unavailable")
+        )
+        session.connection = AsyncMock()
+        container.session.return_value = session
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await list_flow_run_steps(
+            id=flow_id,
+            run_id=run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    assert exc_info.value.code == (FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value)
+    assert exc_info.value.context == {"audit_required": True}
+    audit_service.log.assert_awaited_once()
+    assert audit_service.log.await_args.kwargs["required"] is True
 
 
 @pytest.mark.asyncio
@@ -1351,6 +1442,7 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     container.flow_service.return_value = AsyncMock()
     audit_service = AsyncMock()
     container.audit_service.return_value = audit_service
+    _enable_explicit_transaction(container)
 
     monkeypatch.setattr(
         flow_access_context_module,
@@ -1387,12 +1479,20 @@ async def test_artifact_signed_url_delegates_to_service_and_audits(monkeypatch):
     assert payload is not None
     assert payload["tenant_id"] == str(file_tenant_id)
 
-    audit_service.log_async.assert_awaited_once()
-    call_kwargs = audit_service.log_async.call_args[1]
-    assert call_kwargs["action"] == ActionType.FLOW_RUN_ARTIFACT_DOWNLOADED
+    audit_service.log.assert_awaited_once()
+    call_kwargs = audit_service.log.call_args[1]
+    assert call_kwargs["required"] is True
+    assert call_kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
+    assert call_kwargs["user"] is user
     assert call_kwargs["entity_id"] == file_id
     assert call_kwargs["metadata"]["extra"]["flow_id"] == str(flow_id)
     assert call_kwargs["metadata"]["extra"]["run_id"] == str(run_id)
+    assert call_kwargs["metadata"]["extra"]["file_id"] == str(file_id)
+    assert call_kwargs["metadata"]["extra"]["mimetype"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert call_kwargs["metadata"]["extra"]["size_bytes"] == 2048
+    assert call_kwargs["metadata"]["extra"]["download_purpose"] == ("flow_run_artifact")
 
 
 @pytest.mark.asyncio
@@ -1421,6 +1521,7 @@ async def test_input_file_signed_url_delegates_to_service_and_audits(monkeypatch
     container.flow_service.return_value = AsyncMock()
     audit_service = AsyncMock()
     container.audit_service.return_value = audit_service
+    _enable_explicit_transaction(container)
 
     monkeypatch.setattr(
         flow_access_context_module,
@@ -1459,10 +1560,93 @@ async def test_input_file_signed_url_delegates_to_service_and_audits(monkeypatch
     assert payload["tenant_id"] == str(file_tenant_id)
     assert payload["content_disposition"] == "inline"
 
-    audit_service.log_async.assert_awaited_once()
-    call_kwargs = audit_service.log_async.call_args[1]
-    assert call_kwargs["action"] == ActionType.FLOW_RUN_INPUT_FILE_DOWNLOADED
+    audit_service.log.assert_awaited_once()
+    call_kwargs = audit_service.log.call_args[1]
+    assert call_kwargs["required"] is True
+    assert call_kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
+    assert call_kwargs["user"] is user
     assert call_kwargs["entity_id"] == file_id
     assert call_kwargs["metadata"]["extra"]["flow_id"] == str(flow_id)
     assert call_kwargs["metadata"]["extra"]["run_id"] == str(run_id)
+    assert call_kwargs["metadata"]["extra"]["file_id"] == str(file_id)
+    assert call_kwargs["metadata"]["extra"]["mimetype"] == "audio/mpeg"
+    assert call_kwargs["metadata"]["extra"]["size_bytes"] == 4096
     assert call_kwargs["metadata"]["extra"]["content_disposition"] == "inline"
+    assert call_kwargs["metadata"]["extra"]["download_purpose"] == "flow_run_input"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("endpoint", "service_method"),
+    [
+        (generate_flow_run_artifact_signed_url, "get_run_artifact_file"),
+        (generate_flow_run_input_file_signed_url, "get_run_input_file"),
+    ],
+)
+@pytest.mark.parametrize("failure_kind", ["insert", "commit"])
+async def test_run_file_signed_url_is_not_minted_when_required_audit_fails(
+    monkeypatch,
+    endpoint,
+    service_method: str,
+    failure_kind: str,
+) -> None:
+    container = MagicMock()
+    flow_id = uuid4()
+    run_id = uuid4()
+    file_id = uuid4()
+    user = SimpleNamespace(
+        id=uuid4(), tenant_id=uuid4(), username="tester", email="t@e.com"
+    )
+    file_obj = SimpleNamespace(
+        id=file_id,
+        name="sensitive.bin",
+        tenant_id=user.tenant_id,
+        mimetype="application/octet-stream",
+        size=512,
+    )
+    evidence_service = AsyncMock()
+    getattr(evidence_service, service_method).return_value = file_obj
+    container.user.return_value = user
+    container.flow_run_evidence_service.return_value = evidence_service
+    container.flow_service.return_value = AsyncMock()
+    if failure_kind == "insert":
+        container.audit_service.return_value.log.side_effect = RuntimeError(
+            "audit store unavailable"
+        )
+    session = _enable_explicit_transaction(container)
+    if failure_kind == "commit":
+        session.begin.return_value = _EvidenceTransaction(
+            [],
+            exit_error=RuntimeError("audit commit failed"),
+        )
+    _enable_space_access(container)
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    signed_url_builder = MagicMock()
+    monkeypatch.setattr(
+        "eneo.flows.api.flow_run_steps_router.build_signed_download_response",
+        signed_url_builder,
+    )
+
+    from eneo.files.file_models import SignedURLRequest
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await endpoint(
+            id=flow_id,
+            run_id=run_id,
+            file_id=file_id,
+            request=SimpleNamespace(
+                state=SimpleNamespace(), base_url="https://app.example.com/"
+            ),
+            signed_url_req=SignedURLRequest(expires_in=300),
+            container=container,
+        )
+
+    assert exc_info.value.code == (
+        FlowApiErrorCode.RUN_FILE_ACCESS_AUDIT_UNAVAILABLE.value
+    )
+    assert exc_info.value.context == {"audit_required": True}
+    signed_url_builder.assert_not_called()

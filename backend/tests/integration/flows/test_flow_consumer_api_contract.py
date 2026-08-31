@@ -7,10 +7,14 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.audit_log import AuditLog
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowRunReviewCheckpoints,
     FlowRuns,
+    FlowRuntimeUploadedFiles,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -709,6 +713,130 @@ async def _open_first_step_review_checkpoint(
         return str(checkpoint.id)
 
 
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_runtime_upload_audit_is_attributed_and_atomic(
+    client,
+    admin_token,
+    admin_user,
+    db_container,
+    monkeypatch,
+) -> None:
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_required_runtime_input_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+    )
+    contract_response = await client.get(
+        f"/api/v1/flows/{flow['id']}/run-contract/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert contract_response.status_code == 200, contract_response.text
+    step_id = contract_response.json()["steps_requiring_input"][0]["step_id"]
+    successful_filename = f"audited-runtime-{uuid4().hex}.txt"
+    successful_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/steps/{step_id}/runtime-files/",
+        files={
+            "upload_file": (
+                successful_filename,
+                b"audited runtime input",
+                "text/plain",
+            )
+        },
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert successful_response.status_code == 201, successful_response.text
+    successful_file_id = UUID(successful_response.json()["id"])
+
+    async with db_container() as container:
+        session = container.session()
+        successful_audit = await session.scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FILE_UPLOADED.value,
+                AuditLogTable.entity_id == successful_file_id,
+            )
+        )
+        binding_count_before_failure = await session.scalar(
+            sa.select(sa.func.count(FlowRuntimeUploadedFiles.file_id)).where(
+                FlowRuntimeUploadedFiles.flow_id == UUID(flow["id"]),
+            )
+        )
+        upload_audit_count_before_failure = await session.scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.tenant_id == admin_user.tenant_id,
+                AuditLogTable.action == ActionType.FILE_UPLOADED.value,
+            )
+        )
+        assert successful_audit is not None
+        assert successful_audit.tenant_id == admin_user.tenant_id
+        assert successful_audit.actor_id == admin_user.id
+        assert successful_audit.actor_type == "user"
+        assert successful_audit.outcome == "success"
+        assert successful_audit.log_metadata["extra"] == {
+            "flow_id": flow["id"],
+            "step_id": step_id,
+            "file_id": str(successful_file_id),
+            "size_bytes": len(b"audited runtime input"),
+            "mimetype": "text/plain",
+            "upload_purpose": "flow_runtime_step_input",
+        }
+        assert "audited runtime input" not in repr(successful_audit.log_metadata)
+
+    filename = f"audit-failure-{uuid4().hex}.txt"
+    original_create = AuditLogRepositoryImpl.create
+
+    async def fail_runtime_upload_audit(
+        repository: AuditLogRepositoryImpl,
+        audit_log: AuditLog,
+    ) -> AuditLog:
+        if audit_log.action is ActionType.FILE_UPLOADED:
+            raise RuntimeError("runtime upload audit unavailable")
+        return await original_create(repository, audit_log)
+
+    monkeypatch.setattr(
+        AuditLogRepositoryImpl,
+        "create",
+        fail_runtime_upload_audit,
+    )
+
+    with pytest.raises(RuntimeError, match="runtime upload audit unavailable"):
+        await client.post(
+            f"/api/v1/flows/{flow['id']}/steps/{step_id}/runtime-files/",
+            files={
+                "upload_file": (
+                    filename,
+                    b"sensitive runtime input",
+                    "text/plain",
+                )
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    async with db_container() as container:
+        session = container.session()
+        file_count = await session.scalar(
+            sa.select(sa.func.count(Files.id)).where(
+                Files.tenant_id == admin_user.tenant_id,
+                Files.name == filename,
+            )
+        )
+        binding_count = await session.scalar(
+            sa.select(sa.func.count(FlowRuntimeUploadedFiles.file_id)).where(
+                FlowRuntimeUploadedFiles.flow_id == UUID(flow["id"]),
+            )
+        )
+        audit_count = await session.scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.tenant_id == admin_user.tenant_id,
+                AuditLogTable.action == ActionType.FILE_UPLOADED.value,
+            )
+        )
+
+    assert file_count == 0
+    assert binding_count == binding_count_before_failure
+    assert audit_count == upload_audit_count_before_failure
+
+
 def _runtime_path(
     template: str,
     *,
@@ -947,7 +1075,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert [request[0] for request in dispatch_requests] == [UUID(first_run["id"])]
 
     immediate_poll_response = await client.get(
-        published_payload["runtime_paths"]["get_run_template"].replace(
+        published_payload["runtime_paths"]["get_run_status_template"].replace(
             "{run_id}", first_run["id"]
         ),
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -955,8 +1083,21 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert immediate_poll_response.status_code == 200, immediate_poll_response.text
     immediate_poll = immediate_poll_response.json()
     assert immediate_poll["id"] == first_run["id"]
-    assert immediate_poll["input_payload_json"] == {"text": "hello"}
-    assert immediate_poll["result"] is None
+    assert "input_payload_json" not in immediate_poll
+    assert "result" not in immediate_poll
+    assert "result_files" not in immediate_poll
+    assert "error" not in immediate_poll
+
+    immediate_detail_response = await client.get(
+        published_payload["runtime_paths"]["get_run_template"].replace(
+            "{run_id}", first_run["id"]
+        ),
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert immediate_detail_response.status_code == 200, immediate_detail_response.text
+    immediate_detail = immediate_detail_response.json()
+    assert immediate_detail["input_payload_json"] == {"text": "hello"}
+    assert immediate_detail["result"] is None
 
     replay_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
@@ -1008,14 +1149,18 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert list_payload["count"] == 1
     assert len(list_payload["items"]) == 1
     assert list_payload["has_more"] is True
+    assert "input_payload_json" not in list_payload["items"][0]
+    assert "result" not in list_payload["items"][0]
+    assert "result_files" not in list_payload["items"][0]
+    assert "error" not in list_payload["items"][0]
 
-    poll_response = await client.get(
+    detail_response = await client.get(
         f"/api/v1/flows/{flow_id}/runs/{first_run['id']}/",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert poll_response.status_code == 200, poll_response.text
-    assert poll_response.json()["id"] == first_run["id"]
-    assert poll_response.json()["flow_id"] == flow_id
+    assert detail_response.status_code == 200, detail_response.text
+    assert detail_response.json()["id"] == first_run["id"]
+    assert detail_response.json()["flow_id"] == flow_id
 
     await _mark_first_step_completed(
         db_container=db_container,
@@ -1049,7 +1194,15 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert completed_runs_response.status_code == 200, completed_runs_response.text
     completed_runs = completed_runs_response.json()["items"]
     assert [run["id"] for run in completed_runs] == [first_run["id"]]
-    assert completed_runs[0]["result"] == {
+    assert "result" not in completed_runs[0]
+
+    completed_detail_response = await client.get(
+        f"/api/v1/flows/{flow_id}/runs/{first_run['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert completed_detail_response.status_code == 200, completed_detail_response.text
+    completed_result = completed_detail_response.json()["result"]
+    assert completed_result == {
         "kind": "structured",
         "value": {"answer": "consumer-visible"},
         "output_contract": None,
@@ -1063,7 +1216,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
         },
     )
     assert completed_replay_response.status_code == 201, completed_replay_response.text
-    assert completed_replay_response.json()["result"] == completed_runs[0]["result"]
+    assert completed_replay_response.json()["result"] == completed_result
 
     completed_cancel_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/{first_run['id']}/cancel/",
@@ -1071,7 +1224,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     )
     assert completed_cancel_response.status_code == 200, completed_cancel_response.text
     assert completed_cancel_response.json()["status"] == "completed"
-    assert completed_cancel_response.json()["result"] == completed_runs[0]["result"]
+    assert completed_cancel_response.json()["result"] == completed_result
 
     queued_runs_response = await client.get(
         f"/api/v1/flows/{flow_id}/runs/?status=queued",
@@ -1310,6 +1463,23 @@ async def test_flow_run_public_projects_text_artifact_and_outbound_results(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert signed_url_response.status_code == 200, signed_url_response.text
+    async with db_container() as container:
+        artifact_audit = await container.session().scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
+                AuditLogTable.entity_id == artifact_file_id,
+            )
+        )
+        assert artifact_audit is not None
+        assert artifact_audit.tenant_id == UUID(artifact_run["tenant_id"])
+        assert artifact_audit.log_metadata["extra"]["flow_id"] == artifact_flow["id"]
+        assert artifact_audit.log_metadata["extra"]["run_id"] == artifact_run["id"]
+        assert artifact_audit.log_metadata["extra"]["download_purpose"] == (
+            "flow_run_artifact"
+        )
+        assert signed_url_response.json()["url"] not in repr(
+            artifact_audit.log_metadata
+        )
     download_response = await client.get(signed_url_response.json()["url"])
     assert download_response.status_code == 200, download_response.text
     assert download_response.content == b"representative-pdf"
@@ -1421,7 +1591,7 @@ async def test_flow_run_public_projects_file_backed_text_overflow(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_list_uses_historical_contracts_with_bounded_bulk_queries(
+async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
     client,
     db_container,
     admin_token,
@@ -1515,6 +1685,7 @@ async def test_flow_run_list_uses_historical_contracts_with_bounded_bulk_queries
         "flow_run_step_result_files": 0,
         "flow_step_attempts": 0,
     }
+    flow_run_selects: list[str] = []
 
     def count_bulk_selects(
         _conn,
@@ -1527,6 +1698,9 @@ async def test_flow_run_list_uses_historical_contracts_with_bounded_bulk_queries
         normalized = statement.lower().lstrip()
         if not normalized.startswith("select"):
             return
+        compact = " ".join(normalized.split())
+        if " from flow_runs " in f" {compact} ":
+            flow_run_selects.append(compact)
         for table_name in selected_table_counts:
             if table_name in normalized:
                 selected_table_counts[table_name] += 1
@@ -1545,26 +1719,49 @@ async def test_flow_run_list_uses_historical_contracts_with_bounded_bulk_queries
     assert list_response.status_code == 200, list_response.text
     runs_by_id = {item["id"]: item for item in list_response.json()["items"]}
     assert runs_by_id[version_one_run["id"]]["flow_version"] == version_one
-    assert runs_by_id[version_one_run["id"]]["result"] == {
+    assert runs_by_id[version_two_run["id"]]["flow_version"] == version_two
+    for summary in runs_by_id.values():
+        assert "input_payload_json" not in summary
+        assert "result" not in summary
+        assert "result_files" not in summary
+        assert "token_usage" not in summary
+        assert "transcription_usage" not in summary
+        assert "error" not in summary
+    assert selected_table_counts == {
+        "flow_versions": 0,
+        "flow_run_step_result_files": 0,
+        "flow_step_attempts": 0,
+    }
+    assert len(flow_run_selects) == 1
+    assert "flow_runs.input_payload_json" not in flow_run_selects[0]
+    assert "flow_runs.output_payload_json" not in flow_run_selects[0]
+    assert "flow_runs.error_json" not in flow_run_selects[0]
+
+    version_one_detail_response = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{version_one_run['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert version_one_detail_response.status_code == 200
+    assert version_one_detail_response.json()["result"] == {
         "kind": "structured",
         "value": {"answer": "historical"},
         "output_contract": structured_contract,
     }
-    assert runs_by_id[version_two_run["id"]]["flow_version"] == version_two
-    assert runs_by_id[version_two_run["id"]]["result"] == {
+
+    version_two_detail_response = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{version_two_run['id']}/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert version_two_detail_response.status_code == 200
+    assert version_two_detail_response.json()["result"] == {
         "kind": "inline_text",
         "text": "current",
-    }
-    assert selected_table_counts == {
-        "flow_versions": 1,
-        "flow_run_step_result_files": 1,
-        "flow_step_attempts": 1,
     }
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_poll_sanitizes_corrupt_persisted_error_json(
+async def test_flow_run_detail_sanitizes_corrupt_persisted_error_json(
     client,
     db_container,
     admin_token,
@@ -1602,13 +1799,13 @@ async def test_flow_run_poll_sanitizes_corrupt_persisted_error_json(
         )
         await session.flush()
 
-    poll_response = await client.get(
+    detail_response = await client.get(
         f"/api/v1/flows/{flow['id']}/runs/{run['id']}/",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
 
-    assert poll_response.status_code == 200, poll_response.text
-    error = poll_response.json()["error"]
+    assert detail_response.status_code == 200, detail_response.text
+    error = detail_response.json()["error"]
     assert error == {
         "schema_version": 1,
         "code": "flow_run_error_payload_invalid",
@@ -2598,7 +2795,7 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
     assert "user_id" not in run
 
     immediate_poll_response = await client.get(
-        _runtime_path(runtime_paths["get_run_template"], run_id=run["id"]),
+        _runtime_path(runtime_paths["get_run_status_template"], run_id=run["id"]),
         headers=service_headers,
     )
     assert immediate_poll_response.status_code == 200, immediate_poll_response.text

@@ -20,7 +20,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.database.database import AsyncSession
 from eneo.files.file_models import FilePublic
 from eneo.flows.api import flow_access_context
-from eneo.flows.api.flow_api_common import audit_actor_kwargs, error_response
+from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_models import FlowRunContractPublic
 from eneo.flows.api.flow_runtime_paths import (
     DELETE_RUNTIME_FILE_PATH,
@@ -351,46 +351,49 @@ async def delete_flow_runtime_file(
     ],
     request: Request,
     container: Container = Depends(
-        get_container(with_user=True, with_upload_admission=True)
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_upload_admission=True,
+        )
     ),
 ) -> None:
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.RUN,
-        allow_service_key_principals=True,
-        require_published_for_service_key=True,
-    )
-    file = await container.flow_runtime_file_service().delete_runtime_file(
-        flow_id=id,
-        file_id=file_id,
-    )
-    user = container.user()
-    actor_kwargs = audit_actor_kwargs(user)
-    file_type = getattr(file, "file_type", None)
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=actor_kwargs["actor_id"],
-        actor_type=actor_kwargs["actor_type"],
-        actor_api_key_id=actor_kwargs["actor_api_key_id"],
-        action=ActionType.FILE_DELETED,
-        entity_type=EntityType.FILE,
-        entity_id=file.id,
-        description=f"Deleted runtime input file '{file.name}' for flow {id}",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=file,
-            extra={
-                "flow_id": str(id),
-                "file_id": str(file_id),
-                "size_bytes": file.size,
-                "mimetype": getattr(file, "mimetype", None),
-                "file_type": getattr(file_type, "value", file_type),
-                "runtime_role": "flow_runtime_step_input",
-            },
-        ),
-    )
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await flow_access_context.enforce_flow_scope(
+            request,
+            container,
+            flow_id=id,
+            required_access=FlowApiAction.RUN,
+            allow_service_key_principals=True,
+            require_published_for_service_key=True,
+        )
+        file = await container.flow_runtime_file_service().delete_runtime_file(
+            flow_id=id,
+            file_id=file_id,
+        )
+        user = container.user()
+        file_type = getattr(file, "file_type", None)
+        await container.audit_service().log(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.FILE_DELETED,
+            entity_type=EntityType.FILE,
+            entity_id=file.id,
+            description=f"Deleted runtime input file '{file.name}' for flow {id}",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=file,
+                extra={
+                    "flow_id": str(id),
+                    "file_id": str(file_id),
+                    "size_bytes": file.size,
+                    "mimetype": getattr(file, "mimetype", None),
+                    "file_type": getattr(file_type, "value", file_type),
+                    "runtime_role": "flow_runtime_step_input",
+                },
+            ),
+            required=True,
+        )
 
 
 __all__ = ["router"]

@@ -284,39 +284,44 @@ class FlowRuntimeFileService:
             policy=policy,
         )
 
+        async def bind_and_audit(file: FileInfo) -> None:
+            await self.runtime_upload_repo.create(
+                file_id=file.id,
+                flow_id=flow_id,
+                tenant_id=self.user.tenant_id,
+                uploaded_for_step_id=step_id,
+                principal=self._principal(),
+            )
+            await self.audit_service.log(
+                tenant_id=self.user.tenant_id,
+                user=self.user,
+                action=ActionType.FILE_UPLOADED,
+                entity_type=EntityType.FILE,
+                entity_id=file.id,
+                description=(
+                    f"Uploaded runtime input file '{file.name}' for flow step {step_id}"
+                ),
+                metadata=AuditMetadata.standard(
+                    actor=self.user,
+                    target=file,
+                    extra={
+                        "flow_id": str(flow_id),
+                        "step_id": str(step_id),
+                        "file_id": str(file.id),
+                        "size_bytes": file.size,
+                        "mimetype": getattr(file, "mimetype", None),
+                        "upload_purpose": "flow_runtime_step_input",
+                    },
+                ),
+                required=True,
+            )
+
         try:
-            file = await self.file_service.save_file(upload_file, max_size=max_size)
-            async with self.session.begin():
-                await self.runtime_upload_repo.create(
-                    file_id=file.id,
-                    flow_id=flow_id,
-                    tenant_id=self.user.tenant_id,
-                    uploaded_for_step_id=step_id,
-                    principal=self._principal(),
-                )
-                await self.audit_service.log_async(
-                    tenant_id=self.user.tenant_id,
-                    user=self.user,
-                    action=ActionType.FILE_UPLOADED,
-                    entity_type=EntityType.FILE,
-                    entity_id=file.id,
-                    description=(
-                        f"Uploaded runtime input file '{file.name}' "
-                        f"for flow step {step_id}"
-                    ),
-                    metadata=AuditMetadata.standard(
-                        actor=self.user,
-                        target=file,
-                        extra={
-                            "flow_id": str(flow_id),
-                            "step_id": str(step_id),
-                            "size_bytes": file.size,
-                            "mimetype": getattr(file, "mimetype", None),
-                            "upload_purpose": "flow_runtime_step_input",
-                        },
-                    ),
-                )
-            return file
+            return await self.file_service.save_file(
+                upload_file,
+                max_size=max_size,
+                before_commit=bind_and_audit,
+            )
         except FileTooLargeException as exc:
             raise FileTooLargeException(
                 f"Uploaded file exceeds effective flow limit of {max_size} bytes.",

@@ -737,7 +737,7 @@ async def test_list_runs_filters_by_flow_id(
             ],
         )
 
-        first_flow_runs = await run_repo.list_runs(
+        first_flow_runs = await run_repo.list_statuses(
             tenant_id=admin_user.tenant_id,
             flow_id=first_flow.id,
         )
@@ -2334,13 +2334,13 @@ async def test_list_runs_supports_limit_and_offset(
                 ],
             )
 
-        first_page = await run_repo.list_runs(
+        first_page = await run_repo.list_statuses(
             tenant_id=admin_user.tenant_id,
             flow_id=flow.id,
             limit=1,
             offset=0,
         )
-        second_page = await run_repo.list_runs(
+        second_page = await run_repo.list_statuses(
             tenant_id=admin_user.tenant_id,
             flow_id=flow.id,
             limit=1,
@@ -2354,7 +2354,7 @@ async def test_list_runs_supports_limit_and_offset(
         # Equal creation timestamps must not float across offset boundaries:
         # the (created_at DESC, id DESC) total order keeps page windows
         # stable for a static data set.
-        all_runs = await run_repo.list_runs(
+        all_runs = await run_repo.list_statuses(
             tenant_id=admin_user.tenant_id,
             flow_id=flow.id,
         )
@@ -2367,7 +2367,7 @@ async def test_list_runs_supports_limit_and_offset(
         expected_order = sorted((run.id for run in all_runs), reverse=True)
         paged: list[UUID] = []
         for offset in range(len(all_runs)):
-            page = await run_repo.list_runs(
+            page = await run_repo.list_statuses(
                 tenant_id=admin_user.tenant_id,
                 flow_id=flow.id,
                 limit=1,

@@ -20,6 +20,7 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     BuilderSessionFiles,
     BuilderSessions,
+    Flows,
     FlowTemplateAssets,
     FlowVersions,
 )
@@ -278,6 +279,90 @@ async def test_template_download_audit_commit_failure_returns_typed_503(
             sa.select(sa.func.count(AuditLogTable.id)).where(
                 AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
                 AuditLogTable.entity_id == file_id,
+            )
+        )
+    assert audit_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_download_hides_cross_tenant_asset_without_audit(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    tenant_factory,
+    user_factory,
+) -> None:
+    _ = patch_auth_service_jwt
+    async with db_container() as setup_container:
+        current_user = setup_container.user()
+        token = setup_container.auth_service().create_access_token_for_user(
+            current_user
+        )
+        other_tenant = await tenant_factory(
+            setup_container.session(),
+            name=f"Flow audit isolation {uuid4().hex}",
+        )
+        other_user = await user_factory(
+            setup_container.session(),
+            tenant_id=other_tenant.id,
+        )
+        other_space = Spaces(
+            tenant_id=other_tenant.id,
+            user_id=other_user.id,
+            name=f"Other tenant Flow space {uuid4().hex}",
+        )
+        setup_container.session().add(other_space)
+        await setup_container.session().flush()
+        other_flow = Flows(
+            tenant_id=other_tenant.id,
+            space_id=other_space.id,
+            name=f"Other tenant Flow {uuid4().hex}",
+            description="Tenant-isolation audit fixture.",
+            created_by_user_id=other_user.id,
+            owner_user_id=other_user.id,
+        )
+        other_file = Files(
+            tenant_id=other_tenant.id,
+            owner_type="user",
+            owner_user_id=other_user.id,
+            name="other-tenant-template.docx",
+            mimetype=DOCX_MIME,
+            file_type=FileType.DOCUMENT.value,
+        )
+        setup_container.session().add_all([other_flow, other_file])
+        await setup_container.session().flush()
+        other_asset = FlowTemplateAssets(
+            tenant_id=other_tenant.id,
+            space_id=other_space.id,
+            flow_id=other_flow.id,
+            file_id=other_file.id,
+            name=other_file.name,
+            checksum="cross-tenant-template-fixture",
+            mimetype=DOCX_MIME,
+            placeholders=[],
+            created_by_user_id=other_user.id,
+            updated_by_user_id=other_user.id,
+        )
+        setup_container.session().add(other_asset)
+        await setup_container.session().flush()
+        other_flow_id = other_flow.id
+        other_asset_id = other_asset.id
+        other_file_id = other_file.id
+
+    response = await client.post(
+        (f"/api/v1/flows/{other_flow_id}/template-files/{other_asset_id}/signed-url/"),
+        json={"expires_in": 120},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+    assert "url" not in response.json()
+    async with db_container() as container:
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
+                AuditLogTable.entity_id == other_file_id,
             )
         )
     assert audit_count == 0

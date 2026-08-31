@@ -83,6 +83,7 @@ from eneo.flows.api.flow_access_context import (
 )
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -101,6 +102,7 @@ from eneo.flows.flow_resource_bindings import (
 from eneo.json_types import JsonObject
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
     BadRequestException,
     FileTooLargeException,
     UnauthorizedException,
@@ -579,6 +581,7 @@ async def test_import_flow_package_as_draft_returns_typed_response_and_audit(
     assert audit_service.events[0]["metadata"]["extra"] == {
         "import_id": str(import_id),
         "space_id": str(target_space_id),
+        "flow_id": str(flow_id),
         "package_id": response.package_id,
         "package_version": response.package_version,
         "content_checksum": response.content_checksum,
@@ -1318,6 +1321,7 @@ async def test_export_flow_package_checks_access_before_exporting(
             return result
 
     audit_service = _FakeAuditService()
+    session = _FakeSession()
     monkeypatch.setattr(
         flow_package_router,
         "require_flow_edit_access",
@@ -1331,7 +1335,10 @@ async def test_export_flow_package_checks_access_before_exporting(
         id=flow_id,
         export_request=_export_request(),
         request=cast(Request, object()),
-        container=cast(Container, _FakeContainer(audit_service=audit_service)),
+        container=cast(
+            Container,
+            _FakeContainer(audit_service=audit_service, session=session),
+        ),
     )
 
     assert access_calls == [False]
@@ -1348,10 +1355,13 @@ async def test_export_flow_package_checks_access_before_exporting(
     assert len(audit_service.events) == 1
     event = audit_service.events[0]
     assert event["action"] is ActionType.FLOW_PACKAGE_EXPORTED
+    assert event["required"] is True
+    assert event["user"] is not None
     assert event["entity_type"] is EntityType.FLOW
     assert event["entity_id"] == flow_id
     assert event["description"] == "Exported Flow package 'se.demo.flow'"
     assert event["metadata"]["extra"] == {
+        "flow_id": str(flow_id),
         "package_id": "se.demo.flow",
         "package_version": "1.0.0",
         "content_checksum": result.envelope.content_checksum,
@@ -1368,6 +1378,109 @@ async def test_export_flow_package_checks_access_before_exporting(
             else []
         ),
     }
+    assert session.commit_count == 1
+
+
+@pytest.mark.anyio
+async def test_export_flow_package_returns_no_bytes_when_required_audit_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    result = _export_result()
+    session = _FakeSession()
+
+    class FakeExportService:
+        def __init__(self, *, flow_service: object, package_writer: object) -> None:
+            pass
+
+        async def export_to_bytes(
+            self,
+            *,
+            flow_id: UUID,
+            flow: Flow,
+            manifest_metadata: object,
+        ) -> FlowPackageExportResult:
+            return result
+
+    class FailingAuditService(_FakeAuditService):
+        async def log(self, **kwargs: object) -> None:
+            raise RuntimeError("audit store unavailable")
+
+    _patch_export_access(monkeypatch, flow_id=flow_id)
+    monkeypatch.setattr(
+        flow_package_router,
+        "FlowPackageExportService",
+        FakeExportService,
+    )
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await flow_package_router.export_flow_package(
+            id=flow_id,
+            export_request=_export_request(),
+            request=cast(Request, object()),
+            container=cast(
+                Container,
+                _FakeContainer(
+                    audit_service=FailingAuditService(),
+                    session=session,
+                ),
+            ),
+        )
+
+    assert exc_info.value.code == (
+        FlowApiErrorCode.PACKAGE_EXPORT_AUDIT_UNAVAILABLE.value
+    )
+    assert exc_info.value.context == {"audit_required": True}
+    assert session.commit_count == 0
+
+
+@pytest.mark.anyio
+async def test_export_flow_package_translates_audit_commit_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow_id = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+    result = _export_result()
+    session = _FakeSession(commit_error=RuntimeError("audit commit unavailable"))
+
+    class FakeExportService:
+        def __init__(self, *, flow_service: object, package_writer: object) -> None:
+            pass
+
+        async def export_to_bytes(
+            self,
+            *,
+            flow_id: UUID,
+            flow: Flow,
+            manifest_metadata: object,
+        ) -> FlowPackageExportResult:
+            return result
+
+    _patch_export_access(monkeypatch, flow_id=flow_id)
+    monkeypatch.setattr(
+        flow_package_router,
+        "FlowPackageExportService",
+        FakeExportService,
+    )
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await flow_package_router.export_flow_package(
+            id=flow_id,
+            export_request=_export_request(),
+            request=cast(Request, object()),
+            container=cast(
+                Container,
+                _FakeContainer(
+                    audit_service=_FakeAuditService(),
+                    session=session,
+                ),
+            ),
+        )
+
+    assert exc_info.value.code == (
+        FlowApiErrorCode.PACKAGE_EXPORT_AUDIT_UNAVAILABLE.value
+    )
+    assert exc_info.value.context == {"audit_required": True}
+    assert session.commit_count == 1
 
 
 @pytest.mark.anyio
@@ -1556,10 +1669,11 @@ class _FakeNestedTransaction:
 
 
 class _FakeSession:
-    def __init__(self) -> None:
+    def __init__(self, *, commit_error: Exception | None = None) -> None:
         self.nested_transactions: list[str] = []
         self.commit_count = 0
         self.transaction_active = False
+        self.commit_error = commit_error
 
     def in_transaction(self) -> bool:
         return self.transaction_active
@@ -1572,6 +1686,8 @@ class _FakeSession:
 
     async def commit(self) -> None:
         self.commit_count += 1
+        if self.commit_error is not None:
+            raise self.commit_error
         self.transaction_active = False
 
 

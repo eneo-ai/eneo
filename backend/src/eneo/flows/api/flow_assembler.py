@@ -14,6 +14,7 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStepPublic,
+    FlowRunSummaryPublic,
     FlowRunTokenUsagePublic,
     FlowRunTranscriptionUsagePublic,
     FlowRunWebhookDeliveryPublic,
@@ -40,6 +41,7 @@ from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
     FlowRunReviewCheckpoint,
+    FlowRunStatusSnapshot,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
     FlowSparse,
@@ -166,6 +168,10 @@ class FlowAssembler:
                 "transcription_usage": public_transcription_usage,
             }
         )
+
+    @staticmethod
+    def to_run_summary_public(run: FlowRunStatusSnapshot) -> FlowRunSummaryPublic:
+        return FlowRunSummaryPublic.model_validate(run)
 
     def to_run_detail_public(
         self,

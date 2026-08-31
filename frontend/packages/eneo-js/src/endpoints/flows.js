@@ -744,6 +744,19 @@ export function initFlows(client) {
       },
 
       /**
+       * Poll a flow run without retrieving its input, result, files, or usage.
+       * @param {{id: string, flowId: string, flow_id?: string}} run
+       * @throws {EneoError}
+       */
+      status: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "status");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/status/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: run.id } }
+        });
+      },
+
+      /**
        * List step outputs for a specific run under a flow.
        * @param {{flowId: string, runId: string}} params
        * @throws {EneoError}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Final, Literal, cast
+from typing import Annotated, Final, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
@@ -19,6 +19,7 @@ from eneo.flows.api.flow_models import (
     FlowEvidenceExportTooLargeError,
     FlowRunEvidenceExportResponse,
     FlowRunEvidenceResponse,
+    FlowRunPublic,
 )
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
@@ -29,7 +30,6 @@ from eneo.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
 from eneo.flows.api.flow_trace_audit import (
-    FlowTraceAuditActor,
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
 )
@@ -50,6 +50,7 @@ from eneo.main.exceptions import (
     ErrorCodes,
 )
 from eneo.server.dependencies.container import get_container_for_explicit_transaction
+from eneo.users.user import UserInDB
 
 router = APIRouter()
 
@@ -146,7 +147,7 @@ async def get_flow_run_evidence(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
-    committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
     try:
         async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(
@@ -190,12 +191,17 @@ async def get_flow_run_evidence(
                 if evidence.final_output is not None
                 else None
             )
-            run_payload = cast(dict[str, object], payload["run"])
+            run_payload = {
+                field_name: evidence.run[field_name]
+                for field_name in FlowRunPublic.model_fields
+                if field_name in evidence.run
+            }
             run_payload["result"] = (
                 redact_payload(projected_result.model_dump(mode="json"))
                 if projected_result is not None
                 else None
             )
+            payload["run"] = run_payload
             response = FlowRunEvidenceResponse.model_validate(payload)
             await log_flow_trace_audit_or_raise(
                 container=container,
@@ -285,7 +291,7 @@ async def list_flow_run_provider_calls(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ) -> ProviderCallEvidencePage:
-    committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
     try:
         async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(
@@ -450,7 +456,7 @@ async def export_flow_run_evidence(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
-    committed_audit_context: tuple[FlowTraceAuditActor, FlowRun] | None = None
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
     try:
         async with flow_run_evidence_snapshot_transaction(container):
             await flow_access_context.enforce_flow_scope(

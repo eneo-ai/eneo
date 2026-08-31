@@ -300,6 +300,7 @@ type WithTypedStepOutput<T extends { output_payload_json?: unknown }> = Omit<
 };
 
 export type FlowRun = components["schemas"]["FlowRunPublic"];
+export type FlowRunSummary = components["schemas"]["FlowRunSummaryPublic"];
 export type FlowRunStepInput = components["schemas"]["StepRunInput"] & { file_ids: string[] };
 export type FlowRunStepInputs = Record<string, FlowRunStepInput>;
 export type FlowRunStep = WithTypedStepOutput<components["schemas"]["FlowRunStepPublic"]>;

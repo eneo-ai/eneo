@@ -918,6 +918,7 @@ async def test_successful_flow_package_import_cascades_with_created_flow(
         assert audit_record.log_metadata["extra"] == {
             "import_id": str(response.import_id),
             "space_id": str(space.id),
+            "flow_id": str(response.flow_id),
             "package_id": response.package_id,
             "package_version": response.package_version,
             "content_checksum": response.content_checksum,

@@ -44,10 +44,7 @@ from eneo.flows.application.flow_run_evidence_service import (
     EMBEDDED_PROVIDER_CALL_LIMIT,
     FlowRunEvidenceService,
 )
-from eneo.flows.application.flow_run_service import (
-    FlowRunPageWithResultFilesAndUsage,
-    FlowRunService,
-)
+from eneo.flows.application.flow_run_service import FlowRunService
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     FLOW_WEBHOOK_DELIVERY_CONCURRENCY,
@@ -56,6 +53,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
 from eneo.flows.domain.flow import (
     Flow,
     FlowRunStatus,
+    FlowRunStatusSnapshot,
     FlowStep,
     FlowStepResult,
 )
@@ -98,8 +96,7 @@ DEEP_OFFSET = 250
 # final-output versions. Both token sources share one fixed-cost statement.
 # A page that contains result files adds one durable-content-reference query;
 # an empty result-file projection deliberately skips it.
-RUN_LISTING_BASE_STATEMENT_COUNT = 4
-RUN_LISTING_RESULT_FILE_REFERENCE_STATEMENT_COUNT = 1
+RUN_LISTING_STATEMENT_COUNT = 1
 # Access resolution, section measurements, bounded section loads, immutable
 # resolved-input lineage, durable file projections, and run token usage are
 # fixed-cost per bundle; none scales in statement count with the number of
@@ -621,13 +618,13 @@ async def _measure_run_listing_page(
     flow_id: UUID,
     offset: int,
     expected_statement_count: int,
-) -> tuple[FlowRunPageWithResultFilesAndUsage, list[dict[str, object]]]:
+) -> tuple[list[FlowRunStatusSnapshot], bool, list[dict[str, object]]]:
     bind = session.sync_session.bind
     assert bind is not None
     with _capture_queries(bind) as captured:
-        page = await run_service.list_runs_with_result_files_and_usage(
+        runs = await run_service.list_run_statuses(
             flow_id=flow_id,
-            limit=PAGE_LIMIT,
+            limit=PAGE_LIMIT + 1,
             offset=offset,
         )
     assert len(captured) == expected_statement_count
@@ -647,7 +644,7 @@ async def _measure_run_listing_page(
                 "explain": explain,
             }
         )
-    return page, statement_reports
+    return runs[:PAGE_LIMIT], len(runs) > PAGE_LIMIT, statement_reports
 
 
 async def _measure_evidence_assembly(
@@ -752,29 +749,23 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
         await session.execute(sa.text("ANALYZE flow_runs"))
         run_service = container.flow_run_service()
         page_reports: dict[str, object] = {}
-        for name, offset, expected_has_more, expected_statement_count in (
-            (
-                "shallow",
-                0,
-                True,
-                RUN_LISTING_BASE_STATEMENT_COUNT
-                + RUN_LISTING_RESULT_FILE_REFERENCE_STATEMENT_COUNT,
-            ),
-            ("deep", DEEP_OFFSET, False, RUN_LISTING_BASE_STATEMENT_COUNT),
+        for name, offset, expected_has_more in (
+            ("shallow", 0, True),
+            ("deep", DEEP_OFFSET, False),
         ):
-            page, statement_reports = await _measure_run_listing_page(
+            page, has_more, statement_reports = await _measure_run_listing_page(
                 session=session,
                 run_service=run_service,
                 flow_id=workload.measured_flow_ids[0],
                 offset=offset,
-                expected_statement_count=expected_statement_count,
+                expected_statement_count=RUN_LISTING_STATEMENT_COUNT,
             )
-            assert len(page.items) == PAGE_LIMIT
-            assert page.has_more is expected_has_more
+            assert len(page) == PAGE_LIMIT
+            assert has_more is expected_has_more
             assert all(
-                item.run.tenant_id == workload.measured_tenant_id
-                and item.run.flow_id == workload.measured_flow_ids[0]
-                for item in page.items
+                item.tenant_id == workload.measured_tenant_id
+                and item.flow_id == workload.measured_flow_ids[0]
+                for item in page
             )
             if name == "deep":
                 run_query_explain = cast(
@@ -786,8 +777,8 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
                 "scope": "public_flow_run_listing_service",
                 "offset": offset,
                 "limit": PAGE_LIMIT,
-                "authorized_rows": len(page.items),
-                "has_more": page.has_more,
+                "authorized_rows": len(page),
+                "has_more": has_more,
                 "statement_count": len(statement_reports),
                 "statements": statement_reports,
             }

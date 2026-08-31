@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Path, Request, status
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 from eneo.flows.api import flow_http_test_models
 from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
@@ -131,18 +132,27 @@ async def test_flow_http(
     )
 
     user = container.user()
+    failure_code = result.error_code.value if result.error_code is not None else None
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_UPDATED,
+        user=user,
+        action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
         entity_type=EntityType.FLOW,
         entity_id=id,
-        description=f"Tested HTTP {body.method} connection for flow",
+        description=f"Tested HTTP {body.method} connection for Flow authoring",
         metadata=AuditMetadata.standard(
             actor=user,
             target=flow,
-            extra={"test_direction": body.direction, "test_success": result.success},
+            extra={
+                "flow_id": str(id),
+                "test_direction": body.direction,
+                "test_success": result.success,
+                "status_code": result.status_code,
+                "failure_code": failure_code,
+            },
         ),
+        outcome=Outcome.SUCCESS if result.success else Outcome.FAILURE,
+        error_message=failure_code if not result.success else None,
     )
 
     return flow_http_test_models.HttpTestResponse(

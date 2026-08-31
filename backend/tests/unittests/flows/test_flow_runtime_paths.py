@@ -47,6 +47,7 @@ def _runtime_paths_payload() -> dict[str, object]:
         "review_checkpoints": _runtime_review_paths_payload(),
         "get_graph_for_run_template": "/api/v1/flows/{id}/graph/?run_id={run_id}",
         "get_run_template": "/api/v1/flows/{id}/runs/{run_id}/",
+        "get_run_status_template": "/api/v1/flows/{id}/runs/{run_id}/status/",
         "list_steps_template": "/api/v1/flows/{id}/runs/{run_id}/steps/",
         "evidence_template": "/api/v1/flows/{id}/runs/{run_id}/evidence/",
         "provider_calls_template": ("/api/v1/flows/{id}/runs/{run_id}/provider-calls/"),
@@ -96,6 +97,9 @@ def test_build_flow_runtime_paths_uses_explicit_api_prefix() -> None:
         runtime_paths.review_checkpoints.resume_template
         == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/"
         "review-checkpoints/{checkpoint_id}/resume/"
+    )
+    assert runtime_paths.get_run_status_template == (
+        f"/custom-api/flows/{flow_id}/runs/{{run_id}}/status/"
     )
     assert (
         runtime_paths.get_graph_for_run_template
@@ -160,3 +164,6 @@ def test_flow_runtime_discovery_models_construct_from_attributes() -> None:
     assert review_paths_public.resume_template.endswith("{checkpoint_id}/resume/")
     assert runtime_paths_public.review_checkpoints is not None
     assert runtime_public.runtime_paths.get_run_template.endswith("{run_id}/")
+    assert runtime_public.runtime_paths.get_run_status_template.endswith(
+        "{run_id}/status/"
+    )

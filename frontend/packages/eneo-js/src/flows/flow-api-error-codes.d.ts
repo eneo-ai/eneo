@@ -19,6 +19,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUN_STEP_INPUT_MAX_FILES_EXCEEDED: "flow_run_step_input_max_files_exceeded";
   RUN_FILE_NOT_ACCESSIBLE: "flow_run_file_not_accessible";
   RUN_FILE_NOT_BOUND_TO_FLOW: "flow_run_file_not_bound_to_flow";
+  RUN_FILE_ACCESS_AUDIT_UNAVAILABLE: "flow_run_file_access_audit_unavailable";
   RUN_STEP_INPUT_FILE_TOO_LARGE: "flow_run_step_input_file_too_large";
   RUN_STEP_INPUT_MIMETYPE_REJECTED: "flow_run_step_input_mimetype_rejected";
   RUN_AGGREGATE_MAX_FILES_EXCEEDED: "flow_run_aggregate_max_files_exceeded";
@@ -148,6 +149,8 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   TEMPLATE_UNSUPPORTED_EXTENSION: "flow_template_unsupported_extension";
   TEMPLATE_MISSING_CONTENT: "flow_template_missing_content";
   TEMPLATE_IN_USE: "flow_template_in_use";
+  TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE: "flow_template_download_audit_unavailable";
+  PACKAGE_EXPORT_AUDIT_UNAVAILABLE: "flow_package_export_audit_unavailable";
 }>;
 export type FlowApiErrorCode =
   | "flow_not_published"
@@ -169,6 +172,7 @@ export type FlowApiErrorCode =
   | "flow_run_step_input_max_files_exceeded"
   | "flow_run_file_not_accessible"
   | "flow_run_file_not_bound_to_flow"
+  | "flow_run_file_access_audit_unavailable"
   | "flow_run_step_input_file_too_large"
   | "flow_run_step_input_mimetype_rejected"
   | "flow_run_aggregate_max_files_exceeded"
@@ -297,5 +301,7 @@ export type FlowApiErrorCode =
   | "flow_template_read_only"
   | "flow_template_unsupported_extension"
   | "flow_template_missing_content"
-  | "flow_template_in_use";
+  | "flow_template_in_use"
+  | "flow_template_download_audit_unavailable"
+  | "flow_package_export_audit_unavailable";
 export declare const FLOW_API_ERROR_CODES: readonly FlowApiErrorCode[];

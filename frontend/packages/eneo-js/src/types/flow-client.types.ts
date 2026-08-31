@@ -55,7 +55,7 @@ async function compilePublishedFlowWebAppJourney(runtimeFile: File) {
     step_inputs: { [inputStep.step_id]: { file_ids: [upload.id] } }
   });
   const statusCapabilities = await flows.runs.statusCapabilities.get();
-  const current = await flows.runs.get({ id: run.id, flowId });
+  const current = await flows.runs.status({ id: run.id, flowId });
   await flows.graph({ id: flowId });
   await flows.graph({ id: flowId, run_id: run.id });
   const status = statusCapabilities.statuses.find((item) => item.status === current.status);

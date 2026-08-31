@@ -11,6 +11,8 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
 from eneo.flows.api.flow_assembler import FlowAssembler, FlowRunResultProjectionError
 from eneo.flows.api.flow_models import (
+    FLOW_RUN_PUBLIC_EXAMPLE,
+    FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
     FlowAssistantCreateRequest,
     FlowCreateRequest,
     FlowFinalOutputContractPublic,
@@ -22,6 +24,7 @@ from eneo.flows.api.flow_models import (
     FlowRunEvidenceResponse,
     FlowRunPublic,
     FlowRunStepPublic,
+    FlowRunSummaryPublic,
     FlowRuntimeInputContractPublic,
     FlowRuntimeUploadPolicyPublic,
     FlowStepAttemptPublic,
@@ -32,7 +35,13 @@ from eneo.flows.api.flow_models import (
     FormFieldPublic,
     StepRunInput,
 )
-from eneo.flows.domain.flow import Flow, FlowRun, FlowRunReviewCheckpoint, FlowSparse
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowRun,
+    FlowRunReviewCheckpoint,
+    FlowRunStatusSnapshot,
+    FlowSparse,
+)
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from eneo.flows.enums import (
     FlowOutputMode,
@@ -237,6 +246,35 @@ def test_flow_run_create_request_parses_typed_step_inputs() -> None:
     assert request.step_inputs is not None
     assert isinstance(request.step_inputs[step_id], StepRunInput)
     assert request.step_inputs[step_id].file_ids == [file_id]
+
+
+def test_flow_run_public_examples_exactly_match_their_typed_contracts() -> None:
+    summary = FlowRunSummaryPublic.model_validate(FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE)
+    detail = FlowRunPublic.model_validate(FLOW_RUN_PUBLIC_EXAMPLE)
+
+    assert set(FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE) == set(
+        FlowRunSummaryPublic.model_fields
+    )
+    assert set(FLOW_RUN_PUBLIC_EXAMPLE) == set(FlowRunPublic.model_fields)
+    assert "error" not in FlowRunSummaryPublic.model_fields
+    assert "error" in FlowRunPublic.model_fields
+    assert summary.id == detail.id
+
+
+def test_flow_run_status_snapshot_rejects_content_fields() -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        FlowRunStatusSnapshot.model_validate(
+            {
+                **FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
+                "principal_user_id": str(uuid4()),
+                "principal_service_id": None,
+                "input_payload_json": {"secret": "must not be loaded"},
+            }
+        )
+
+    assert any(
+        error.get("type") == "extra_forbidden" for error in exc_info.value.errors()
+    )
 
 
 def test_flow_run_create_request_rejects_removed_top_level_file_ids() -> None:
@@ -1197,7 +1235,6 @@ def test_flow_run_public_exposes_structured_error_for_failed_runs() -> None:
             "id": run_id,
             "flow_id": flow_id,
             "flow_version": 20,
-            "user_id": None,
             "tenant_id": tenant_id,
             "trace_id": trace_id,
             "revision": 1,
@@ -1215,7 +1252,6 @@ def test_flow_run_public_exposes_structured_error_for_failed_runs() -> None:
             "started_at": now,
             "finished_at": now,
             "input_payload_json": None,
-            "output_payload_json": None,
             "result_files": [],
             "token_usage": None,
             "error": {

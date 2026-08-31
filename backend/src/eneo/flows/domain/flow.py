@@ -232,8 +232,10 @@ class FlowVersion(BaseModel):
     updated_at: datetime
 
 
-class FlowRun(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class FlowRunStatusSnapshot(BaseModel):
+    """Content-free run lifecycle and ownership needed for polling and access."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
 
     id: UUID
     flow_id: UUID
@@ -241,8 +243,6 @@ class FlowRun(BaseModel):
     principal_type: PrincipalType | None = None
     principal_user_id: Optional[UUID] = None
     principal_service_id: Optional[UUID] = None
-    created_by_api_key_id: Optional[UUID] = None
-    runtime_service_permission: ApiKeyPermission | None = None
     tenant_id: UUID
     trace_id: UUID
     revision: int = 1
@@ -257,20 +257,9 @@ class FlowRun(BaseModel):
     cancelled_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    input_payload_json: FlowPersistedJsonObject | None = None
-    output_payload_json: FlowPersistedJsonObject | None = None
-    error: FlowRunError | None = Field(
-        default=None,
-        validation_alias=AliasChoices("error", "error_json"),
-    )
     job_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
-
-    @field_validator("error", mode="before")
-    @classmethod
-    def _parse_persisted_error(cls, value: object) -> FlowRunError | None:
-        return parse_flow_run_error(value)
 
     @field_validator("dispatch_last_error", mode="before")
     @classmethod
@@ -278,6 +267,24 @@ class FlowRun(BaseModel):
         cls, value: object
     ) -> FlowRunDispatchError | None:
         return parse_flow_run_dispatch_error(value)
+
+
+class FlowRun(FlowRunStatusSnapshot):
+    """Complete persisted run, including content required by execution and detail reads."""
+
+    error: FlowRunError | None = Field(
+        default=None,
+        validation_alias=AliasChoices("error", "error_json"),
+    )
+    created_by_api_key_id: Optional[UUID] = None
+    runtime_service_permission: ApiKeyPermission | None = None
+    input_payload_json: FlowPersistedJsonObject | None = None
+    output_payload_json: FlowPersistedJsonObject | None = None
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def _parse_persisted_error(cls, value: object) -> FlowRunError | None:
+        return parse_flow_run_error(value)
 
 
 class FlowRunTokenUsage(BaseModel):

@@ -306,7 +306,7 @@ FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
 }
 
 
-FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
+FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_version": 3,
@@ -325,15 +325,19 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "cancelled_at": None,
     "started_at": None,
     "finished_at": None,
+    "job_id": "00000000-0000-0000-0000-000000000401",
+    "created_at": "2026-03-17T10:05:00Z",
+    "updated_at": "2026-03-17T10:05:00Z",
+}
+
+FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
+    "error": None,
     "input_payload_json": {"employee_name": "Alex Example"},
     "result": None,
     "result_files": [],
     "token_usage": None,
     "transcription_usage": None,
-    "error": None,
-    "job_id": "00000000-0000-0000-0000-000000000401",
-    "created_at": "2026-03-17T10:05:00Z",
-    "updated_at": "2026-03-17T10:05:00Z",
 }
 
 FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE: dict[str, Any] = {
@@ -539,7 +543,7 @@ PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE: dict[str, Any] = {
 }
 
 PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE: dict[str, Any] = {
-    "items": [FLOW_RUN_PUBLIC_EXAMPLE],
+    "items": [FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE],
     "has_more": False,
     "count": 1,
 }
@@ -943,9 +947,11 @@ class FlowRunTranscriptionUsagePublic(BaseModel):
     )
 
 
-class FlowRunPublic(BaseModel):
+class FlowRunSummaryPublic(BaseModel):
     model_config = ConfigDict(
-        from_attributes=True, json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE}
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE},
     )
 
     id: UUID = Field(
@@ -1047,6 +1053,34 @@ class FlowRunPublic(BaseModel):
         default=None,
         description="When the run reached a terminal status. Null while non-terminal.",
     )
+    job_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Background job that owns the current execution attempt. Diagnostic "
+            "only; it is not addressable through the public API."
+        ),
+    )
+    created_at: datetime = Field(description="When the run row was created.")
+    updated_at: datetime = Field(
+        description="When the run row last changed. It moves on every status change."
+    )
+
+
+class FlowRunPublic(FlowRunSummaryPublic):
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE},
+    )
+
+    error: FlowRunError | None = Field(
+        default=None,
+        description=(
+            "Structured terminal run error available only through audited detail "
+            "and evidence reads. API consumers should branch on `error.code`; null "
+            "means the run has no terminal run-level error."
+        ),
+    )
     input_payload_json: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -1086,24 +1120,6 @@ class FlowRunPublic(BaseModel):
             "Null when no token-metered call exists or retention left no recoverable "
             "count."
         ),
-    )
-    error: FlowRunError | None = Field(
-        default=None,
-        description=(
-            "Structured terminal run error. API consumers should branch on "
-            "`error.code`; null means the run has no terminal run-level error."
-        ),
-    )
-    job_id: UUID | None = Field(
-        default=None,
-        description=(
-            "Background job that owns the current execution attempt. Diagnostic "
-            "only; it is not addressable through the public API."
-        ),
-    )
-    created_at: datetime = Field(description="When the run row was created.")
-    updated_at: datetime = Field(
-        description="When the run row last changed. It moves on every status change."
     )
 
 

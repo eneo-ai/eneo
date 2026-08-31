@@ -14,6 +14,7 @@ from fastapi import (
     status,
 )
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
@@ -21,6 +22,7 @@ from eneo.flows.api.flow_api_common import (
     FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE,
     commit_flow_runtime_write_before_response,
     error_response,
+    flow_run_evidence_snapshot_transaction,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
@@ -46,6 +48,10 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.api.flow_service_principal_actor_read_model import (
     FlowServicePrincipalActorPresenter,
 )
+from eneo.flows.api.flow_trace_audit import (
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
+)
 from eneo.flows.application.citation_summary_projection import (
     build_citation_summary,
     citation_grounded_step_orders,
@@ -53,16 +59,16 @@ from eneo.flows.application.citation_summary_projection import (
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
-from eneo.flows.domain.flow import FlowRunReviewCheckpoint, FlowRunStatus
+from eneo.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.published_runtime import load_published_definition
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes
+from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
 from eneo.server.dependencies.container import (
-    get_container,
     get_container_for_explicit_transaction,
 )
+from eneo.users.user import UserInDB
 
 router = APIRouter()
 
@@ -455,6 +461,16 @@ Service-key principals may resume approved checkpoints only for runs they own (k
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        503: error_response(
+            description=(
+                "Required access audit logging is unavailable, so no review "
+                "checkpoint payload was returned."
+            ),
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
     },
 )
 async def get_active_flow_run_review_checkpoint(
@@ -463,22 +479,63 @@ async def get_active_flow_run_review_checkpoint(
     ],
     run_id: Annotated[UUID, Path(description="Identifier of the run to inspect.")],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-    )
-    checkpoint = await container.flow_run_review_checkpoint_service().get_active_review_checkpoint(
-        flow_id=id,
-        run_id=run_id,
-    )
-    if checkpoint is None:
-        return None
-    return await _present_review_checkpoint(container=container, checkpoint=checkpoint)
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            run = await container.flow_run_service().get_run(
+                run_id=run_id,
+                flow_id=id,
+                access_kind="content",
+            )
+            checkpoint = await container.flow_run_review_checkpoint_service().get_active_review_checkpoint(
+                flow_id=id,
+                run_id=run_id,
+            )
+            response = (
+                None
+                if checkpoint is None
+                else await _present_review_checkpoint(
+                    container=container,
+                    checkpoint=checkpoint,
+                )
+            )
+            user = container.user()
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed active review checkpoint for flow run {run.id}",
+                extra={
+                    "evidence_detail": "active_review_checkpoint",
+                    "checkpoint_present": checkpoint is not None,
+                },
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
 
 
 @router.patch(

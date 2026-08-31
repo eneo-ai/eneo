@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flows.api import flow_access_context as flow_access_context_module
 from eneo.flows.api import flow_run_review_router as router_module
@@ -36,6 +37,8 @@ from eneo.flows.enums import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import AuditLoggingUnavailableException
 from tests.unittests.flows.test_flow_router import (
     _disable_flow_scope_filter,
     _enable_explicit_transaction,
@@ -64,6 +67,16 @@ def _record_review_checkpoint_public(monkeypatch, events: list[str]):
         "_present_review_checkpoint",
         _present_review_checkpoint,
     )
+
+
+class _CommitFailureTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if exc is None:
+            raise RuntimeError("commit failed")
+        return False
 
 
 def _enable_citation_presentation(monkeypatch, container, *, ctx, edited_at=None):
@@ -178,6 +191,50 @@ async def test_active_review_checkpoint_includes_current_citation_summary(monkey
     assert response.citation_summary is not None
     assert response.citation_summary.status == "observed"
     assert response.citation_summary.stale_after_edit is False
+    ctx.run_service.get_run.assert_awaited_once_with(
+        run_id=ctx.run.id,
+        flow_id=ctx.flow_id,
+        access_kind="content",
+    )
+    audit_event = container.audit_service.return_value.log.await_args.kwargs
+    assert audit_event["action"] is ActionType.FLOW_EVIDENCE_VIEWED
+    assert audit_event["required"] is True
+    assert audit_event["metadata"]["extra"] == {
+        "evidence_detail": "active_review_checkpoint",
+        "checkpoint_present": True,
+        "flow_id": str(ctx.flow_id),
+        "run_id": str(ctx.run.id),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["insert", "commit"])
+async def test_active_review_checkpoint_exposes_no_payload_when_audit_fails(
+    monkeypatch,
+    failure_kind: str,
+) -> None:
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    ctx.review_service.get_active_review_checkpoint.return_value = ctx.checkpoint
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
+    _disable_flow_scope_filter(monkeypatch)
+    if failure_kind == "insert":
+        container.audit_service.return_value.log.side_effect = RuntimeError(
+            "audit insert failed"
+        )
+    else:
+        container.session.return_value.begin.return_value = _CommitFailureTransaction()
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await get_active_flow_run_review_checkpoint(
+            id=ctx.flow_id,
+            run_id=ctx.run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+    assert exc_info.value.context == {"audit_required": True}
 
 
 @pytest.mark.asyncio

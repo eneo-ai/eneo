@@ -187,7 +187,13 @@ class FileService:
         upload_file: UploadFile,
         *,
         max_size: int | None = None,
+        before_commit: Callable[[FileInfo], Awaitable[None]] | None = None,
     ) -> FileInfo:
+        """Persist one file family and optionally join a dependent SQL write.
+
+        ``before_commit`` runs after the File rows are staged but inside the same
+        SQL transaction. Raising from it rolls back the File rows as well.
+        """
         snapshot = self._require_upload_admission()
         storage_target = snapshot.new_write_storage_target
         if (
@@ -246,10 +252,13 @@ class FileService:
                                 policy_revision=snapshot.policy_revision,
                                 parent_file_id=root.metadata.id,
                             )
-                    return project_file_info(
-                        root.metadata,
-                        list(root.references),
-                    )
+                        file = project_file_info(
+                            root.metadata,
+                            list(root.references),
+                        )
+                        if before_commit is not None:
+                            await before_commit(file)
+                    return file
 
                 contents = tuple(
                     entry.captured
@@ -261,11 +270,14 @@ class FileService:
                     object_store_revision=snapshot.object_store_revision,
                 ) as publication:
                     async with self._write_transaction():
-                        return await self._publish_verified_family(
+                        file = await self._publish_verified_family(
                             family,
                             publication=publication,
                             policy_revision=snapshot.policy_revision,
                         )
+                        if before_commit is not None:
+                            await before_commit(file)
+                    return file
 
     async def _capture_prepared_file(
         self,

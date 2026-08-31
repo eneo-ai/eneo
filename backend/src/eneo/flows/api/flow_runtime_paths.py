@@ -23,6 +23,7 @@ FLOW_RUN_STATUS_CAPABILITIES_PATH: Final[str] = "/runs/status-capabilities/"
 FLOW_RUN_CAPACITY_PATH: Final[str] = "/runs/capacity/"
 FLOW_RUNS_PATH: Final[str] = "/{id}/runs/"
 FLOW_RUN_PATH: Final[str] = "/{id}/runs/{run_id}/"
+FLOW_RUN_STATUS_PATH: Final[str] = "/{id}/runs/{run_id}/status/"
 FLOW_RUN_CANCEL_PATH: Final[str] = "/{id}/runs/{run_id}/cancel/"
 FLOW_RUN_REDISPATCH_PATH: Final[str] = "/{id}/runs/{run_id}/redispatch/"
 
@@ -140,7 +141,7 @@ class FlowRuntimePathsPublic(BaseModel):
         description=(
             "POST path for creating a run. The returned run id is committed before "
             "`201 Created` is returned, so clients can immediately poll "
-            "`get_run_template`."
+            "`get_run_status_template`."
         )
     )
     list_runs: str = Field(
@@ -177,8 +178,16 @@ class FlowRuntimePathsPublic(BaseModel):
     )
     get_run_template: str = Field(
         description=(
-            "GET template for polling run status and top-level output. Replace "
-            "`{run_id}` with the id returned by create_run."
+            "GET template for retrieving sensitive run input and top-level output. "
+            "Replace `{run_id}` with the id returned by create_run. This access is "
+            "audit-logged and should not be used for routine polling."
+        )
+    )
+    get_run_status_template: str = Field(
+        description=(
+            "GET template for polling lifecycle status without run input, output, "
+            "result-file metadata, or usage data. Replace `{run_id}` with the id "
+            "returned by create_run."
         )
     )
     list_steps_template: str = Field(
@@ -325,6 +334,11 @@ def build_flow_runtime_paths(
         get_graph_for_run_template=f"{graph_path}?run_id={{run_id}}",
         get_run_template=_flow_path(
             FLOW_RUN_PATH,
+            flow_id=flow_id_value,
+            api_prefix=api_prefix,
+        ),
+        get_run_status_template=_flow_path(
+            FLOW_RUN_STATUS_PATH,
             flow_id=flow_id_value,
             api_prefix=api_prefix,
         ),

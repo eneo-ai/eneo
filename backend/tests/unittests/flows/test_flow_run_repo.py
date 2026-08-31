@@ -81,6 +81,47 @@ async def test_get_raises_flow_run_not_found_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_status_selects_only_lifecycle_and_authorization_columns() -> None:
+    session = AsyncMock()
+    query_result = MagicMock()
+    query_result.mappings.return_value.one_or_none.return_value = None
+    session.execute.return_value = query_result
+    repo = FlowRunRepository(session=session)
+
+    with pytest.raises(FlowRunNotFoundError):
+        await repo.get_status(run_id=uuid4(), tenant_id=uuid4())
+
+    statement = session.execute.await_args.args[0]
+    sql = " ".join(str(statement.compile(dialect=postgresql.dialect())).split())
+    assert "flow_runs.principal_user_id" in sql
+    assert "flow_runs.principal_service_id" in sql
+    assert "flow_runs.input_payload_json" not in sql
+    assert "flow_runs.output_payload_json" not in sql
+    assert "flow_runs.error_json" not in sql
+
+
+@pytest.mark.asyncio
+async def test_list_statuses_never_selects_run_content_columns() -> None:
+    session = AsyncMock()
+    query_result = MagicMock()
+    query_result.mappings.return_value.all.return_value = []
+    session.execute.return_value = query_result
+    repo = FlowRunRepository(session=session)
+
+    result = await repo.list_statuses(tenant_id=uuid4(), limit=50, offset=0)
+
+    assert result == []
+    statement = session.execute.await_args.args[0]
+    sql = " ".join(str(statement.compile(dialect=postgresql.dialect())).split())
+    assert "flow_runs.principal_user_id" in sql
+    assert "flow_runs.principal_service_id" in sql
+    assert "flow_runs.input_payload_json" not in sql
+    assert "flow_runs.output_payload_json" not in sql
+    assert "flow_runs.error_json" not in sql
+    assert "ORDER BY flow_runs.created_at DESC, flow_runs.id DESC" in sql
+
+
+@pytest.mark.asyncio
 async def test_get_step_attempt_is_scoped_to_tenant_run_step_and_attempt() -> None:
     session = AsyncMock()
     session.scalar.return_value = None

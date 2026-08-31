@@ -525,6 +525,7 @@ describe("flows templates endpoint", () => {
         "step-1": { file_ids: ["file-1"] }
       }
     });
+    await flows.runs.status(createdRun);
     await flows.runs.get(createdRun);
     await flows.runs.steps({ flowId: createdRun.flow_id, runId: createdRun.id });
     await flows.runs.evidence(createdRun);
@@ -550,6 +551,10 @@ describe("flows templates endpoint", () => {
             }
           }
         }
+      ],
+      [
+        "/api/v1/flows/{id}/runs/{run_id}/status/",
+        { method: "get", params: { path: { id: "flow-1", run_id: "run-1" } } }
       ],
       [
         "/api/v1/flows/{id}/runs/{run_id}/",

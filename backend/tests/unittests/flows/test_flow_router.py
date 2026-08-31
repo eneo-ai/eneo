@@ -378,9 +378,11 @@ def _enable_review_checkpoint_route_context(container) -> _ReviewCheckpointRoute
     review_service = AsyncMock()
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
+    run_service.get_run.return_value = run
     container.flow_run_service.return_value = run_service
     container.flow_run_review_checkpoint_service.return_value = review_service
     container.flow_service.return_value = flow_service
+    container.audit_service.return_value = AsyncMock()
     container.user.return_value = user
     _enable_space_access(container)
     _enable_explicit_transaction(container, events)

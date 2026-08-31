@@ -3,10 +3,11 @@ from __future__ import annotations
 from sqlalchemy.exc import IntegrityError
 
 RUNTIME_UPLOAD_BINDING_CONSTRAINT = "fk_flow_run_step_input_files_runtime_upload"
+RUNTIME_STEP_INPUT_FILE_ATTACHMENT_CONSTRAINT = "flow_run_step_input_files_file_id_fkey"
 
 RUNTIME_FILE_ATTACHMENT_CONSTRAINT_NAMES = frozenset(
     {
-        "fk_flow_run_step_input_files_file_id_files",
+        RUNTIME_STEP_INPUT_FILE_ATTACHMENT_CONSTRAINT,
         # Delete-time attachment detection intentionally includes the binding FK:
         # deleting the file cascades to the runtime upload row before this FK rejects it.
         RUNTIME_UPLOAD_BINDING_CONSTRAINT,

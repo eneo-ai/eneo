@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeGuard, get_args
 from uuid import UUID
 
-from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.flow import FlowRun, FlowRunStatusSnapshot
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.rag_evidence import PassageDisclosure
 from eneo.flows.flow_access_policy import (
@@ -103,6 +103,23 @@ class FlowRunAccessPolicy:
         await self.ensure_can_access_run(run, access_kind=access_kind)
         return run
 
+    async def load_run_status(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> FlowRunStatusSnapshot:
+        try:
+            run = await self.flow_run_repo.get_status(
+                run_id=run_id,
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+            )
+        except FlowRunNotFoundError as exc:
+            raise NotFoundException("Flow run not found.") from exc
+        await self.ensure_can_access_run(run, access_kind="status")
+        return run
+
     async def _load_evidence_access_context(
         self, *, flow_id: UUID
     ) -> FlowEvidenceAccessContext:
@@ -157,7 +174,7 @@ class FlowRunAccessPolicy:
 
     async def ensure_can_access_run(
         self,
-        run: FlowRun,
+        run: FlowRunStatusSnapshot,
         *,
         access_kind: FlowRunAccessKind,
     ) -> None:
@@ -274,7 +291,7 @@ class FlowRunAccessPolicy:
 
     async def passage_disclosure_for_run(
         self,
-        run: FlowRun,
+        run: FlowRunStatusSnapshot,
         *,
         access_kind: FlowRunAccessKind,
     ) -> PassageDisclosure:

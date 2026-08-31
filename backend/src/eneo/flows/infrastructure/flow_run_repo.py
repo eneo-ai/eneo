@@ -33,6 +33,7 @@ from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
+    FlowRunStatusSnapshot,
     FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
@@ -346,6 +347,32 @@ _CANCELLABLE_RUN_STATUSES = tuple(
     status.value for status in CANCELLABLE_FLOW_RUN_STATUSES
 )
 
+_FLOW_RUN_STATUS_COLUMNS = (
+    FlowRuns.id,
+    FlowRuns.flow_id,
+    FlowRuns.flow_version,
+    FlowRuns.principal_type,
+    FlowRuns.principal_user_id,
+    FlowRuns.principal_service_id,
+    FlowRuns.tenant_id,
+    FlowRuns.trace_id,
+    FlowRuns.revision,
+    FlowRuns.status,
+    FlowRuns.dispatch_pending_since,
+    FlowRuns.dispatch_attempt_count,
+    FlowRuns.dispatch_last_attempt_at,
+    FlowRuns.dispatch_last_error,
+    FlowRuns.dispatch_next_attempt_at,
+    FlowRuns.dispatched_at,
+    FlowRuns.dispatch_exhausted_at,
+    FlowRuns.cancelled_at,
+    FlowRuns.started_at,
+    FlowRuns.finished_at,
+    FlowRuns.job_id,
+    FlowRuns.created_at,
+    FlowRuns.updated_at,
+)
+
 
 class FlowRunRepository:
     """Tenant-scoped repository for flow run lifecycle and run evidence."""
@@ -470,6 +497,30 @@ class FlowRunRepository:
             )
         return FlowRun.model_validate(run_row)
 
+    async def get_status(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> FlowRunStatusSnapshot:
+        stmt = (
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        row = (await self.session.execute(stmt)).mappings().one_or_none()
+        if row is None:
+            raise FlowRunNotFoundError(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        return FlowRunStatusSnapshot.model_validate(row)
+
     async def get_idempotent_run(
         self,
         *,
@@ -510,7 +561,7 @@ class FlowRunRepository:
             sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
         )
 
-    async def list_runs(
+    async def list_statuses(
         self,
         *,
         tenant_id: UUID,
@@ -520,9 +571,9 @@ class FlowRunRepository:
         principal_service_id: UUID | None = None,
         limit: int | None = None,
         offset: int | None = None,
-    ) -> list[FlowRun]:
+    ) -> list[FlowRunStatusSnapshot]:
         stmt = (
-            sa.select(FlowRuns)
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS)
             .where(FlowRuns.tenant_id == tenant_id)
             .order_by(FlowRuns.created_at.desc(), FlowRuns.id.desc())
         )
@@ -541,8 +592,8 @@ class FlowRunRepository:
         if limit is not None:
             stmt = stmt.limit(limit)
 
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return [FlowRun.model_validate(row) for row in rows]
+        rows = (await self.session.execute(stmt)).mappings().all()
+        return [FlowRunStatusSnapshot.model_validate(row) for row in rows]
 
     async def list_dispatchable_queued_runs(
         self,

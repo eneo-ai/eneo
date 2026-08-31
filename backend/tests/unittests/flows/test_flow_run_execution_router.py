@@ -33,6 +33,7 @@ from eneo.flows.api.flow_run_lifecycle_router import (
     cancel_flow_run,
     create_flow_run,
     get_flow_run,
+    get_flow_run_status,
     list_flow_runs,
     redispatch_flow_run,
 )
@@ -51,7 +52,6 @@ from eneo.flows.application.flow_dispatch import (
 from eneo.flows.application.flow_run_service import (
     CreateRunResult,
     FlowRunDetailView,
-    FlowRunPageWithResultFilesAndUsage,
     FlowRunVersionedView,
     FlowRunWithResultFilesAndUsage,
 )
@@ -77,6 +77,7 @@ from eneo.flows.published_definition import (
     published_definition_checksum,
 )
 from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
     BadRequestException,
     ConflictException,
     InternalServerException,
@@ -93,6 +94,16 @@ from tests.unittests.flows.test_flow_router import (
     _run,
     _service_key,
 )
+
+
+class _CommitFailureTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if exc is None:
+            raise RuntimeError("commit failed")
+        return False
 
 
 @pytest.mark.asyncio
@@ -383,7 +394,10 @@ async def test_create_flow_run_allows_service_key_principals():
 
     assert response.id == run.id
     flow_run_service.create_run.assert_awaited_once()
-    audit_service.log_async.assert_awaited_once()
+    audit_service.log.assert_awaited_once()
+    audit_kwargs = audit_service.log.await_args.kwargs
+    assert audit_kwargs["required"] is True
+    assert audit_kwargs["user"] is container.user.return_value
 
 
 @pytest.mark.asyncio
@@ -438,7 +452,14 @@ async def test_create_flow_run_schedules_background_dispatch():
         step_inputs=None,
         idempotency_key=None,
     )
-    audit_service.log_async.assert_awaited_once()
+    audit_service.log.assert_awaited_once()
+    audit_event = audit_service.log.await_args.kwargs
+    assert audit_event["required"] is True
+    assert audit_event["metadata"]["extra"] == {
+        "flow_id": str(flow_id),
+        "run_id": str(run.id),
+        "revision": run.revision,
+    }
 
 
 @pytest.mark.asyncio
@@ -474,7 +495,41 @@ async def test_create_flow_run_replay_skips_creation_audit_and_dispatch():
     assert response.id == run.id
     assert events == ["transaction_enter", "transaction_exit"]
     assert background_tasks.tasks == []
-    audit_service.log_async.assert_not_awaited()
+    audit_service.log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_run_audit_failure_aborts_before_dispatch():
+    container = MagicMock()
+    flow_run_service = AsyncMock()
+    audit_service = AsyncMock()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    flow_run_service.create_run.return_value = CreateRunResult(run=run, created=True)
+    audit_service.log.side_effect = RuntimeError("audit store unavailable")
+    container.flow_run_service.return_value = flow_run_service
+    container.flow_service.return_value = AsyncMock()
+    container.audit_service.return_value = audit_service
+    container.user.return_value = user
+    _enable_space_access(container)
+    events: list[str] = []
+    _enable_explicit_transaction(container, events)
+    background_tasks = _RecordingBackgroundTasks(events)
+
+    with pytest.raises(RuntimeError, match="audit store unavailable"):
+        await create_flow_run(
+            id=flow_id,
+            request=SimpleNamespace(state=SimpleNamespace(), headers={}),
+            run_in=FlowRunCreateRequest(input_payload_json={"case_id": "123"}),
+            background_tasks=background_tasks,
+            container=container,
+        )
+
+    assert events == ["transaction_enter", "transaction_exit"]
+    assert background_tasks.tasks == []
 
 
 @pytest.mark.asyncio
@@ -640,18 +695,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         updated_at=delivery_now,
     )
     run_service = AsyncMock()
-    run_service.list_runs_with_result_files_and_usage.return_value = (
-        FlowRunPageWithResultFilesAndUsage(
-            items=(
-                FlowRunWithResultFilesAndUsage(
-                    run=run,
-                    result_files=(result_file,),
-                    token_usage=None,
-                ),
-            ),
-            has_more=False,
-        )
-    )
+    run_service.list_run_statuses.return_value = [run]
     run_service.get_run_detail_with_result_files_and_usage.return_value = (
         FlowRunDetailView(
             run=run,
@@ -661,7 +705,18 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         )
     )
     run_service.list_step_results_with_files.return_value = ()
+    run_service.get_run_status.return_value = run
+    run_service.get_run.return_value = run
     container.flow_run_service.return_value = run_service
+    user = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        username="tester",
+        email="t@e.com",
+    )
+    container.user.return_value = user
+    audit_service = AsyncMock()
+    container.audit_service.return_value = audit_service
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -687,6 +742,12 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         request=request,
         container=container,
     )
+    status_response = await get_flow_run_status(
+        id=flow_id,
+        run_id=run.id,
+        request=request,
+        container=container,
+    )
     step_response = await list_flow_run_steps(
         id=flow_id,
         run_id=run.id,
@@ -696,10 +757,15 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
 
     assert list_response["count"] == 1
     assert list_response["has_more"] is False
-    assert list_response["items"][0].result_files == [result_file]
+    assert list_response["items"][0].id == run.id
+    assert "input_payload_json" not in list_response["items"][0].model_dump()
+    assert "result" not in list_response["items"][0].model_dump()
+    assert "result_files" not in list_response["items"][0].model_dump()
     assert get_response.id == run.id
     assert get_response.result_files == [result_file]
     assert len(get_response.webhook_deliveries) == 1
+    assert status_response.id == run.id
+    assert "input_payload_json" not in status_response.model_dump()
     public_delivery = get_response.webhook_deliveries[0]
     assert public_delivery.delivery_status == "dead_lettered"
     assert public_delivery.delivery_attempts == 5
@@ -717,19 +783,95 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         "updated_at",
     }
     assert step_response == []
-    # get_flow is called once per endpoint (3 total) via enforce_flow_scope space check
-    assert flow_service.get_flow.await_count == 3
-    run_service.list_runs_with_result_files_and_usage.assert_awaited_once_with(
-        flow_id=flow_id, statuses=None, limit=20, offset=2
+    # get_flow is called once per endpoint via enforce_flow_scope space check.
+    assert flow_service.get_flow.await_count == 4
+    run_service.list_run_statuses.assert_awaited_once_with(
+        flow_id=flow_id, statuses=None, limit=21, offset=2
     )
     run_service.get_run_detail_with_result_files_and_usage.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id
     )
-    run_service.list_runs.assert_not_awaited()
-    run_service.get_run.assert_not_awaited()
+    run_service.get_run_status.assert_awaited_once_with(
+        run_id=run.id,
+        flow_id=flow_id,
+    )
+    run_service.get_run.assert_awaited_once_with(
+        run_id=run.id,
+        flow_id=flow_id,
+        access_kind="content",
+    )
     run_service.list_step_results_with_files.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id
     )
+    assert audit_service.log.await_count == 2
+    assert [
+        call.kwargs["metadata"]["extra"] for call in audit_service.log.await_args_list
+    ] == [
+        {
+            "evidence_detail": "run_detail",
+            "flow_id": str(flow_id),
+            "run_id": str(run.id),
+        },
+        {
+            "evidence_detail": "step_outputs",
+            "flow_id": str(flow_id),
+            "run_id": str(run.id),
+        },
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["insert", "commit"])
+async def test_get_flow_run_exposes_no_content_when_required_audit_fails(
+    monkeypatch,
+    failure_kind: str,
+) -> None:
+    container = MagicMock()
+    flow_id = uuid4()
+    user = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        username="tester",
+        email="t@e.com",
+    )
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.RUNNING}
+    )
+    run_service = AsyncMock()
+    run_service.get_run_detail_with_result_files_and_usage.return_value = (
+        FlowRunDetailView(
+            run=run,
+            result_files=(),
+            token_usage=None,
+        )
+    )
+    container.flow_run_service.return_value = run_service
+    container.user.return_value = user
+    container.flow_service.return_value = AsyncMock()
+    container.audit_service.return_value = AsyncMock()
+    _enable_space_access(container)
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    if failure_kind == "insert":
+        container.audit_service.return_value.log.side_effect = RuntimeError(
+            "audit insert failed"
+        )
+    else:
+        container.session.return_value.begin.return_value = _CommitFailureTransaction()
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await get_flow_run(
+            id=flow_id,
+            run_id=run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+    assert exc_info.value.context == {"audit_required": True}
 
 
 @pytest.mark.asyncio
@@ -760,8 +902,7 @@ async def test_list_flow_runs_raises_not_found_when_flow_missing_without_scope_f
             container=container,
         )
 
-    run_service.list_runs.assert_not_awaited()
-    run_service.list_runs_with_result_files_and_usage.assert_not_awaited()
+    run_service.list_run_statuses.assert_not_awaited()
 
 
 @pytest.mark.asyncio

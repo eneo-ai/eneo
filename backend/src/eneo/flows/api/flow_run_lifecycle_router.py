@@ -27,6 +27,7 @@ from eneo.flows.api.flow_api_common import (
     audit_actor_kwargs,
     commit_flow_runtime_write_before_response,
     error_response,
+    flow_run_evidence_snapshot_transaction,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
@@ -36,6 +37,7 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
+    FlowRunSummaryPublic,
 )
 from eneo.flows.api.flow_run_contract_models import FlowRunCapacityPublic
 from eneo.flows.api.flow_run_status_capability_models import (
@@ -48,7 +50,12 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_PATH,
     FLOW_RUN_REDISPATCH_PATH,
     FLOW_RUN_STATUS_CAPABILITIES_PATH,
+    FLOW_RUN_STATUS_PATH,
     FLOW_RUNS_PATH,
+)
+from eneo.flows.api.flow_trace_audit import (
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
 )
 from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchAccepted,
@@ -63,13 +70,19 @@ from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ConflictException, ErrorCodes, InternalServerException
+from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
+    ConflictException,
+    ErrorCodes,
+    InternalServerException,
+)
 from eneo.main.models import GeneralError, OffsetPaginatedResponse
 from eneo.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
 )
 from eneo.server.exception_handlers import extract_request_id
+from eneo.users.user import UserInDB
 
 router = APIRouter()
 
@@ -124,7 +137,7 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
     Create a new run for a published flow.
 
     The returned run id is committed before this endpoint returns `201 Created`, so clients can
-    immediately poll `GET /api/v1/flows/{id}/runs/{run_id}/` with the id from the response.
+    immediately poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` with the id from the response.
 
     Generic consumer sequence:
     1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
@@ -135,8 +148,8 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
        the same Flow.
     3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
        together with any structured `input_payload_json` fields in this run request.
-    4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/` for the typed terminal `result`,
-       and use `.../steps/` for detailed step progress and evidence.
+    4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` until the run is terminal.
+       Then retrieve this run's audited detail or use `.../steps/` for evidence.
 
     Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
     `400` with code `flow_run_top_level_file_ids_not_supported`; use
@@ -158,10 +171,10 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
     """
 )
 
-_FLOW_RUN_STATUS_DESCRIPTION = """
-    Get one run for a specific flow.
+_FLOW_RUN_DETAIL_DESCRIPTION = """
+    Get the sensitive input and output detail for one run.
 
-    Use this endpoint for run status and the typed top-level `result` when building consumer apps.
+    Use this endpoint for the accepted input and typed top-level `result` when building consumer apps.
     `result` is null until the run completes successfully, then discriminates inline text,
     authored structured JSON, current artifact metadata, or successful outbound delivery.
     Structured values and contracts are interpreted with this run's pinned `flow_version`.
@@ -170,12 +183,14 @@ _FLOW_RUN_STATUS_DESCRIPTION = """
     always-present `webhook_deliveries` array, which stays empty unless the flow's final step
     was authored with outbound HTTP delivery.
 
-    Polling is the only mechanism a caller controls for observing run status: there is no
+    This content-bearing access is audit-logged and fails closed if the required audit record
+    cannot be committed. Do not use it for routine status polling. Poll the dedicated
+    `/status/` endpoint instead; there is no
     client-registered run-status subscription, server-sent event, or WebSocket surface. A
     flow author can separately configure a terminal step to deliver its result over outbound
     HTTP, which is what `webhook_deliveries` reports; that does signal successful completion
     to the receiver they configured, but it is designed into the flow rather than requested
-    by the caller and it reports neither failure nor review states. Poll this endpoint about
+    by the caller and it reports neither failure nor review states. Poll the status endpoint about
     every 2 seconds for the first 30 seconds, then every 5 seconds, then every 15 seconds,
     and stop when the status capability `should_poll` is false. Keep polling while the status
     is `awaiting_review`, because a reviewer can act at any time and the checkpoint can also
@@ -183,6 +198,19 @@ _FLOW_RUN_STATUS_DESCRIPTION = """
     Current runtime visibility is policy-based: callers always see their own runs, tenant admins
     can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
     flows in their space, and service-key principals can inspect only their own runs.
+    """
+
+_FLOW_RUN_STATUS_DESCRIPTION = """
+    Get the lifecycle status summary for one run.
+
+    This is the routine polling contract. It contains lifecycle, timing, and bounded,
+    secret-free dispatch diagnosis fields, but excludes accepted input, terminal errors,
+    terminal output, result-file metadata, provider usage, and webhook-delivery content.
+    Poll about every 2 seconds for the first 30 seconds, then every 5 seconds, then every
+    15 seconds, and stop when the status capability `should_poll` is false.
+
+    Status polling is authorized but not audit-logged as a distinct business event. Retrieve the
+    content-bearing run detail only when a user or client needs the run input or result.
     """
 
 _FLOW_RUN_LIST_DESCRIPTION = """
@@ -193,9 +221,10 @@ _FLOW_RUN_LIST_DESCRIPTION = """
     current page, not the total number of matching runs across all pages. `has_more` reports
     whether another page exists after this offset window.
 
-    Each item uses the same typed `result` projection as the single-run endpoint. Historical
-    completed runs are interpreted with their own pinned `flow_version`; incomplete runs return
-    `result: null`.
+    Items use the same content-free lifecycle projection as the dedicated run-status endpoint.
+    Accepted input, terminal output, result-file metadata, provider usage, and webhook deliveries
+    are deliberately omitted so background history refresh does not expose or repeatedly read
+    sensitive content. Retrieve one run's audited detail when that content is needed.
 
     Current runtime visibility is policy-based: callers always list their own runs, tenant admins
     can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -398,7 +427,6 @@ async def create_flow_run(
             )
             run_service = container.flow_run_service()
             user = container.user()
-            actor_kwargs = audit_actor_kwargs(user)
             create_result = await run_service.create_run(
                 flow_id=id,
                 input_payload_json=run_in.input_payload_json,
@@ -417,16 +445,23 @@ async def create_flow_run(
             )
             run = create_result.run
             if create_result.created:
-                await container.audit_service().log_async(
+                await container.audit_service().log(
                     tenant_id=user.tenant_id,
-                    actor_id=actor_kwargs["actor_id"],
-                    actor_type=actor_kwargs["actor_type"],
-                    actor_api_key_id=actor_kwargs["actor_api_key_id"],
+                    user=user,
                     action=ActionType.FLOW_RUN_CREATED,
                     entity_type=EntityType.FLOW_RUN,
                     entity_id=run.id,
                     description=f"Created flow run for flow {id}",
-                    metadata=AuditMetadata.standard(actor=user, target=run),
+                    metadata=AuditMetadata.standard(
+                        actor=user,
+                        target=run,
+                        extra={
+                            "flow_id": str(id),
+                            "run_id": str(run.id),
+                            "revision": run.revision,
+                        },
+                    ),
+                    required=True,
                 )
                 dispatch_run = run
             elif run.status is FlowRunStatus.COMPLETED:
@@ -471,7 +506,7 @@ async def create_flow_run(
 
 @router.get(
     FLOW_RUNS_PATH,
-    response_model=OffsetPaginatedResponse[FlowRunPublic],
+    response_model=OffsetPaginatedResponse[FlowRunSummaryPublic],
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_runs",
     summary="List flow runs",
@@ -537,35 +572,27 @@ async def list_flow_runs(
         allow_service_key_principals=True,
     )
     run_service = container.flow_run_service()
-    page = await run_service.list_runs_with_result_files_and_usage(
+    runs = await run_service.list_run_statuses(
         flow_id=id,
         statuses=statuses,
-        limit=limit,
+        limit=limit + 1,
         offset=offset,
     )
+    page_runs = runs[:limit]
     assembler = FlowAssembler()
     return {
-        "count": len(page.items),
-        "items": [
-            assembler.to_run_public(
-                item.run,
-                result_files=item.result_files,
-                token_usage=item.token_usage,
-                transcription_usage=item.transcription_usage,
-                final_output=item.final_output,
-            )
-            for item in page.items
-        ],
-        "has_more": page.has_more,
+        "count": len(page_runs),
+        "items": [assembler.to_run_summary_public(run) for run in page_runs],
+        "has_more": len(runs) > limit,
     }
 
 
 @router.get(
-    FLOW_RUN_PATH,
-    response_model=FlowRunDetailPublic,
+    FLOW_RUN_STATUS_PATH,
+    response_model=FlowRunSummaryPublic,
     status_code=status.HTTP_200_OK,
-    operation_id="get_flow_run",
-    summary="Get flow run",
+    operation_id="get_flow_run_status",
+    summary="Get flow run status",
     description=_FLOW_RUN_STATUS_DESCRIPTION,
     responses={
         403: error_response(
@@ -583,11 +610,11 @@ async def list_flow_runs(
         ),
     },
 )
-async def get_flow_run(
+async def get_flow_run_status(
     id: Annotated[
         UUID, Path(description="Identifier of the flow that owns the requested run.")
     ],
-    run_id: Annotated[UUID, Path(description="Identifier of the run to return.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to poll.")],
     request: Request,
     container: Container = Depends(
         get_container(with_user=True, with_upload_admission=True)
@@ -600,19 +627,105 @@ async def get_flow_run(
         required_access=FlowApiAction.VIEW,
         allow_service_key_principals=True,
     )
-    run_service = container.flow_run_service()
-    run_view = await run_service.get_run_detail_with_result_files_and_usage(
+    run = await container.flow_run_service().get_run_status(
         run_id=run_id,
         flow_id=id,
     )
-    return FlowAssembler().to_run_detail_public(
-        run_view.run,
-        result_files=run_view.result_files,
-        token_usage=run_view.token_usage,
-        transcription_usage=run_view.transcription_usage,
-        final_output=run_view.final_output,
-        webhook_deliveries=run_view.webhook_deliveries,
-    )
+    return FlowAssembler.to_run_summary_public(run)
+
+
+@router.get(
+    FLOW_RUN_PATH,
+    response_model=FlowRunDetailPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run",
+    summary="Get flow run",
+    description=_FLOW_RUN_DETAIL_DESCRIPTION,
+    responses={
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+        503: error_response(
+            description=(
+                "Required access audit logging is unavailable, so no run input "
+                "or result was returned."
+            ),
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
+    },
+)
+async def get_flow_run(
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the requested run.")
+    ],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to return.")],
+    request: Request,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_upload_admission=True,
+        )
+    ),
+):
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            run_service = container.flow_run_service()
+            run_view = await run_service.get_run_detail_with_result_files_and_usage(
+                run_id=run_id,
+                flow_id=id,
+            )
+            response = FlowAssembler().to_run_detail_public(
+                run_view.run,
+                result_files=run_view.result_files,
+                token_usage=run_view.token_usage,
+                transcription_usage=run_view.transcription_usage,
+                final_output=run_view.final_output,
+                webhook_deliveries=run_view.webhook_deliveries,
+            )
+            user = container.user()
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run_view.run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed input and result for flow run {run_view.run.id}",
+                extra={"evidence_detail": "run_detail"},
+            )
+            committed_audit_context = (user, run_view.run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
 
 
 @router.post(

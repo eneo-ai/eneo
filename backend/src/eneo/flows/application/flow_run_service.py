@@ -21,6 +21,7 @@ from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
+    FlowRunStatusSnapshot,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
     FlowStepResult,
@@ -154,12 +155,6 @@ class FlowRunWithResultFilesAndUsage:
 @dataclass(frozen=True, slots=True)
 class FlowRunDetailView(FlowRunWithResultFilesAndUsage):
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class FlowRunPageWithResultFilesAndUsage:
-    items: Sequence[FlowRunWithResultFilesAndUsage]
-    has_more: bool
 
 
 @dataclass(frozen=True)
@@ -591,14 +586,25 @@ class FlowRunService:
             access_kind=access_kind,
         )
 
-    async def list_runs(
+    async def get_run_status(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> FlowRunStatusSnapshot:
+        return await self.access_policy.load_run_status(
+            run_id=run_id,
+            flow_id=flow_id,
+        )
+
+    async def list_run_statuses(
         self,
         *,
         flow_id: UUID | None = None,
         statuses: Sequence[FlowRunStatus] | None = None,
         limit: int | None = None,
         offset: int | None = None,
-    ) -> list[FlowRun]:
+    ) -> list[FlowRunStatusSnapshot]:
         principal = self._principal()
         is_human_tenant_admin = self.access_policy.is_human_tenant_admin()
         if (
@@ -607,7 +613,7 @@ class FlowRunService:
             and flow_id is not None
         ):
             if await self.access_policy.can_list_all_runs_in_flow(flow_id=flow_id):
-                return await self.flow_run_repo.list_runs(
+                return await self.flow_run_repo.list_statuses(
                     tenant_id=self.user.tenant_id,
                     flow_id=flow_id,
                     principal_user_id=None,
@@ -616,7 +622,7 @@ class FlowRunService:
                     limit=limit,
                     offset=offset,
                 )
-        return await self.flow_run_repo.list_runs(
+        return await self.flow_run_repo.list_statuses(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
             statuses=statuses,
@@ -678,7 +684,11 @@ class FlowRunService:
         flow_id: UUID,
         run_id: UUID,
     ) -> FlowRunWithResultFilesAndUsage:
-        run = await self.get_run(run_id=run_id, flow_id=flow_id)
+        run = await self.get_run(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
+        )
         return await self.enrich_run_with_result_files_and_usage(run=run)
 
     async def get_run_detail_with_result_files_and_usage(
@@ -712,26 +722,6 @@ class FlowRunService:
     ) -> FlowRunWithResultFilesAndUsage:
         views = await self._runs_with_result_files_and_usage(runs=(run,))
         return views[0]
-
-    async def list_runs_with_result_files_and_usage(
-        self,
-        *,
-        flow_id: UUID,
-        statuses: Sequence[FlowRunStatus] | None = None,
-        limit: int,
-        offset: int,
-    ) -> FlowRunPageWithResultFilesAndUsage:
-        runs = await self.list_runs(
-            flow_id=flow_id,
-            statuses=statuses,
-            limit=limit + 1,
-            offset=offset,
-        )
-        page_runs = tuple(runs[:limit])
-        return FlowRunPageWithResultFilesAndUsage(
-            items=await self._runs_with_result_files_and_usage(runs=page_runs),
-            has_more=len(runs) > limit,
-        )
 
     async def _runs_with_result_files_and_usage(
         self, *, runs: Sequence[FlowRun]
