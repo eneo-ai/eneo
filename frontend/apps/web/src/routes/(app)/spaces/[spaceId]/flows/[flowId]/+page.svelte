@@ -1423,7 +1423,6 @@
         visible={activeTab === "history"}
         optimisticRuns={optimisticHistoryRuns}
         reloadTrigger={runsReloadTrigger}
-        bind:latestRunPayload={latestHistoryPayload}
         onOptimisticRunsConfirmed={(runIds) => {
           const confirmedIds = new Set(runIds);
           optimisticHistoryRuns = optimisticHistoryRuns.filter((run) => !confirmedIds.has(run.id));
@@ -1440,6 +1439,7 @@
   eneo={data.eneo}
   lastInputPayload={latestHistoryPayload}
   onRunCreated={(detail) => {
+    latestHistoryPayload = detail.run.input_payload_json ?? latestHistoryPayload;
     optimisticHistoryRuns = [
       detail.run,
       ...optimisticHistoryRuns.filter((run) => run.id !== detail.run.id)

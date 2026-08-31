@@ -1,4 +1,12 @@
-import { createEneo, type Eneo, type Flow, type FlowRun } from "@eneo/eneo-js";
+import {
+  createEneo,
+  type Eneo,
+  type Flow,
+  type FlowGraph,
+  type FlowRun,
+  type FlowRunStep,
+  type FlowRunSummary
+} from "@eneo/eneo-js";
 
 type FlowRunResultFileItem = NonNullable<FlowRun["result_files"]>[number];
 
@@ -101,9 +109,13 @@ export function makeTestFlow(): Flow {
  * response decoding stay the SDK's own, so fixtures cannot drift from the
  * generated contract (the body constant is typed against the list return).
  */
-export function makeRunsListEneo(handler: (url: URL) => { items: FlowRun[]; has_more: boolean }) {
+export function makeRunsListEneo(
+  handler: (url: URL) => { items: FlowRunSummary[]; has_more: boolean }
+) {
   const calls: Array<{ limit: number; offset: number }> = [];
   const evidenceCalls: string[] = [];
+  const graphCalls: string[] = [];
+  const stepCalls: string[] = [];
   const eneo: Eneo = createEneo({
     baseUrl: "http://backend.invalid",
     fetch: async (input: RequestInfo | URL) => {
@@ -139,6 +151,22 @@ export function makeRunsListEneo(handler: (url: URL) => { items: FlowRun[]; has_
           headers: { "Content-Type": "application/json" }
         });
       }
+      if (/\/graph\/$/.test(url.pathname)) {
+        graphCalls.push(url.pathname);
+        const body: FlowGraph = { nodes: [], edges: [] };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (/\/steps\/$/.test(url.pathname)) {
+        stepCalls.push(url.pathname);
+        const body: FlowRunStep[] = [];
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
       if (!/\/runs\/$/.test(url.pathname)) {
         return new Response(JSON.stringify({}), {
           status: 200,
@@ -156,5 +184,5 @@ export function makeRunsListEneo(handler: (url: URL) => { items: FlowRun[]; has_
       });
     }
   });
-  return { eneo, calls, evidenceCalls };
+  return { eneo, calls, evidenceCalls, graphCalls, stepCalls };
 }

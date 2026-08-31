@@ -457,6 +457,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_retention_policy_changed,
     description: m.audit_action_flow_run_retention_policy_changed_description
   },
+  flow_run_history_purged: {
+    name: m.audit_action_flow_run_history_purged,
+    description: m.audit_action_flow_run_history_purged_description
+  },
   flow_run_created: {
     name: m.audit_action_flow_run_created,
     description: m.audit_action_flow_run_created_description
@@ -500,14 +504,6 @@ const ACTION_MESSAGES = {
   flow_http_outbound_call: {
     name: m.audit_action_flow_http_outbound_call,
     description: m.audit_action_flow_http_outbound_call_description
-  },
-  flow_run_artifact_downloaded: {
-    name: m.audit_action_flow_run_artifact_downloaded,
-    description: m.audit_action_flow_run_artifact_downloaded_description
-  },
-  flow_run_input_file_downloaded: {
-    name: m.audit_action_flow_run_input_file_downloaded,
-    description: m.audit_action_flow_run_input_file_downloaded_description
   },
   flow_evidence_viewed: {
     name: m.audit_action_flow_evidence_viewed,

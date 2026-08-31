@@ -42,6 +42,7 @@ describe("loadFlowRunHistory", () => {
     expect(state.nextOffset).toBe(1);
     expect(state.loading).toBe(false);
     expect(state.loadError).toBeNull();
+    expect(state.refreshWarning).toBeNull();
     expect(state.isInitialLoad).toBe(false);
     expect(state.inFlightGeneration).toBeNull();
   });
@@ -93,7 +94,16 @@ describe("loadFlowRunHistory", () => {
     });
 
     expect(state.loadError).toBeNull();
+    expect(state.refreshWarning).toBe("transient");
     expect(state.runs.map((item) => item.id)).toEqual(["a"]);
+
+    await loadFlowRunHistory(state, {
+      flowId: "flow-1",
+      listRuns: async () => page([run("a")], false),
+      getErrorMessage: () => "failed"
+    });
+
+    expect(state.refreshWarning).toBeNull();
   });
 
   it("does not start a second load of the same generation while one is running", async () => {
@@ -159,7 +169,7 @@ describe("refresh merge", () => {
       flowId: "flow-1",
       listRuns: async () => page([run("recent")], false),
       pollableRefresh: {
-        getRun: async (_flowId, runId) => {
+        getStatus: async (_flowId, runId) => {
           fetched.push(runId);
           return run(runId, "completed");
         },
@@ -183,7 +193,7 @@ describe("refresh merge", () => {
       flowId: "flow-1",
       listRuns: async () => page([run("recent")], false),
       pollableRefresh: {
-        getRun: async (_flowId: string, runId: string) => {
+        getStatus: async (_flowId: string, runId: string) => {
           fetched.push(runId);
           // Stay running so the pollable set does not shrink between cycles.
           return run(runId, "running");
@@ -209,7 +219,7 @@ describe("refresh merge", () => {
       flowId: "flow-1",
       listRuns: async () => page([run("recent")], false),
       pollableRefresh: {
-        getRun: async (_flowId, runId) => {
+        getStatus: async (_flowId, runId) => {
           fetched.push(runId);
           if (runId === "gone") throw new Error("404");
           return run(runId, "completed");
@@ -221,6 +231,7 @@ describe("refresh merge", () => {
 
     expect(result.kind).toBe("loaded");
     expect(state.loadError).toBeNull();
+    expect(state.refreshWarning).toBe("failed");
     expect(fetched).toEqual(["gone", "alive"]);
     expect(state.runs.find((item) => item.id === "gone")?.status).toBe("running");
     expect(state.runs.find((item) => item.id === "alive")?.status).toBe("completed");
@@ -470,6 +481,7 @@ describe("syncFlowRunHistoryFlow", () => {
     state.hasMore = true;
     state.nextOffset = 50;
     state.loadError = "old error";
+    state.refreshWarning = "old warning";
     state.loadMoreError = "old more error";
     const generation = state.requestGeneration;
 
@@ -478,6 +490,7 @@ describe("syncFlowRunHistoryFlow", () => {
     expect(state.hasMore).toBe(false);
     expect(state.nextOffset).toBe(0);
     expect(state.loadError).toBeNull();
+    expect(state.refreshWarning).toBeNull();
     expect(state.loadMoreError).toBeNull();
     expect(state.requestGeneration).toBe(generation + 1);
   });

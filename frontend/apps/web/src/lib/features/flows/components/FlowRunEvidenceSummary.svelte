@@ -1,24 +1,37 @@
 <script lang="ts">
+  import type { FlowRunSummary, FlowRunTokenUsage, FlowRunTranscriptionUsage } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
+  import FlowRunTokenUsageBadge from "./FlowRunTokenUsageBadge.svelte";
+  import FlowRunTranscriptionUsageBadge from "./FlowRunTranscriptionUsageBadge.svelte";
 
   let {
     runStatus,
     traceId = null,
-    redactionApplied = false
+    redactionApplied = false,
+    tokenUsage = null,
+    transcriptionUsage = null
   }: {
-    runStatus: string;
+    runStatus: FlowRunSummary["status"];
     traceId?: string | null;
     redactionApplied?: boolean;
+    tokenUsage?: FlowRunTokenUsage | null;
+    transcriptionUsage?: FlowRunTranscriptionUsage | null;
   } = $props();
 </script>
 
 <Card.Root>
   <Card.Content class="flex flex-wrap items-center gap-2 px-4 py-3">
     <FlowRunStatusBadge status={runStatus} size="md" showDot={false} />
+    {#if tokenUsage}
+      <FlowRunTokenUsageBadge {tokenUsage} />
+    {/if}
+    {#if transcriptionUsage}
+      <FlowRunTranscriptionUsageBadge {transcriptionUsage} />
+    {/if}
     {#if traceId}
       <Tooltip.Provider delayDuration={150}>
         <Tooltip.Root>

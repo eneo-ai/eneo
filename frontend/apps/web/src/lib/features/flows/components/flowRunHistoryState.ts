@@ -1,9 +1,11 @@
-import type { FlowRun } from "@eneo/eneo-js";
+import type { FlowRunSummary } from "@eneo/eneo-js";
 
 export interface FlowRunHistoryState {
-  runs: FlowRun[];
+  runs: FlowRunSummary[];
   loading: boolean;
   loadError: string | null;
+  /** Non-fatal failure from refreshing history that is already usable. */
+  refreshWarning: string | null;
   lastLoadedFlowId: string | null;
   isInitialLoad: boolean;
   lastHandledReloadTrigger: number;
@@ -37,12 +39,12 @@ export interface FlowRunHistoryState {
 export type FlowRunHistoryPollTimeout = number | ReturnType<typeof setTimeout>;
 
 export interface FlowRunHistoryListResult {
-  items: FlowRun[];
+  items: FlowRunSummary[];
   has_more: boolean;
 }
 
 export type FlowRunHistoryLoadResult =
-  | { kind: "loaded"; runs: FlowRun[] }
+  | { kind: "loaded"; runs: FlowRunSummary[] }
   | { kind: "failed"; message: string; error: unknown }
   | { kind: "no_flow" }
   | { kind: "already_loading" }
@@ -64,8 +66,8 @@ export interface LoadFlowRunHistoryOptions {
    * omitting the pair leaves those rows stale until the user reloads.
    */
   pollableRefresh?: {
-    getRun: (flowId: string, runId: string) => Promise<FlowRun>;
-    shouldPollRun: (run: FlowRun) => boolean;
+    getStatus: (flowId: string, runId: string) => Promise<FlowRunSummary>;
+    shouldPollRun: (run: FlowRunSummary) => boolean;
   };
   getErrorMessage: (error: unknown) => string;
 }
@@ -85,13 +87,9 @@ export interface SyncFlowRunHistoryPollingOptions {
 export const FLOW_RUN_HISTORY_PAGE_SIZE = 50;
 
 /**
- * Retained-window budget: the loaded window, its cached search text, and
- * the rendered rows all scale with this bound. Past it, load-more stands
- * down and the UI says older runs are not shown. The list contract ships
- * full input payloads (1 MiB allowed per run), so the theoretical
- * worst-case retained payload at this cap is 200 MiB; measured typical
- * loads are a few kilobytes per run. A sparse list/search contract is the
- * named server-side follow-up that removes the payload-bytes exposure.
+ * Retained-window budget: the loaded window, cached search text, and rendered
+ * rows all scale with this bound. The list contract is a content-free summary;
+ * sensitive input and results are fetched only through audited detail routes.
  */
 export const MAX_LOADED_FLOW_RUNS = 200;
 
@@ -103,6 +101,7 @@ export function createFlowRunHistoryState(): FlowRunHistoryState {
     runs: [],
     loading: true,
     loadError: null,
+    refreshWarning: null,
     lastLoadedFlowId: null,
     isInitialLoad: true,
     lastHandledReloadTrigger: 0,
@@ -141,6 +140,7 @@ export async function loadFlowRunHistory(
   if (!options.flowId) {
     state.runs = [];
     state.loading = false;
+    state.refreshWarning = null;
     state.inFlightGeneration = null;
     return { kind: "no_flow" };
   }
@@ -205,13 +205,14 @@ export async function loadFlowRunHistory(
           state.hasMore = result.has_more;
         }
       }
-      await refreshStalePollableRuns(
+      const refreshWarning = await refreshStalePollableRuns(
         state,
         options,
         generation,
         new Set(result.items.map((run) => run.id))
       );
       if (generation !== state.requestGeneration) return { kind: "stale" };
+      state.refreshWarning = refreshWarning;
     }
     state.isInitialLoad = false;
     return { kind: "loaded", runs: state.runs };
@@ -224,6 +225,9 @@ export async function loadFlowRunHistory(
     } else if (state.runs.length === 0) {
       // Fatal only when there is no usable history to show.
       state.loadError = message;
+      state.refreshWarning = null;
+    } else {
+      state.refreshWarning = message;
     }
     return { kind: "failed", message, error };
   } finally {
@@ -236,7 +240,7 @@ export async function loadFlowRunHistory(
   }
 }
 
-function mergeNewestPage(loaded: FlowRun[], page: FlowRun[]): FlowRun[] {
+function mergeNewestPage(loaded: FlowRunSummary[], page: FlowRunSummary[]): FlowRunSummary[] {
   const pageById = new Map(page.map((run) => [run.id, run]));
   const loadedIds = new Set(loaded.map((run) => run.id));
   const fresh = page.filter((run) => !loadedIds.has(run.id));
@@ -248,31 +252,32 @@ async function refreshStalePollableRuns(
   options: LoadFlowRunHistoryOptions,
   generation: number,
   covered: Set<string>
-): Promise<void> {
+): Promise<string | null> {
   const { pollableRefresh, flowId } = options;
-  if (!pollableRefresh || !flowId) return;
+  if (!pollableRefresh || !flowId) return null;
   const pollable = state.runs.filter(
     (run) => pollableRefresh.shouldPollRun(run) && !covered.has(run.id)
   );
-  if (pollable.length === 0) return;
+  if (pollable.length === 0) return null;
   // Round-robin through the pollable stragglers so a large set is refreshed
   // fairly across cycles instead of starving everything past the budget.
   const start = state.pollRotation % pollable.length;
   const rotated = [...pollable.slice(start), ...pollable.slice(0, start)];
   const batch = rotated.slice(0, MAX_POLLABLE_RUN_REFRESHES);
   state.pollRotation = (start + batch.length) % Math.max(pollable.length, 1);
+  let warning: string | null = null;
   for (const run of batch) {
-    let updated: FlowRun;
+    let updated: FlowRunSummary;
     try {
-      updated = await pollableRefresh.getRun(flowId, run.id);
-    } catch {
-      // A straggler fetch failure leaves that row stale; the loaded
-      // history stays usable.
+      updated = await pollableRefresh.getStatus(flowId, run.id);
+    } catch (error) {
+      warning ??= options.getErrorMessage(error);
       continue;
     }
-    if (generation !== state.requestGeneration) return;
+    if (generation !== state.requestGeneration) return warning;
     state.runs = state.runs.map((existing) => (existing.id === updated.id ? updated : existing));
   }
+  return warning;
 }
 
 /**
@@ -291,6 +296,7 @@ export function syncFlowRunHistoryFlow(
     state.hasMore = false;
     state.nextOffset = 0;
     state.loadError = null;
+    state.refreshWarning = null;
     state.loadMoreError = null;
     state.pollRotation = 0;
     state.requestGeneration += 1;
@@ -302,6 +308,8 @@ export function syncFlowRunHistoryFlow(
     state.runs = [];
     state.hasMore = false;
     state.nextOffset = 0;
+    state.loadError = null;
+    state.refreshWarning = null;
     state.loadMoreError = null;
     state.pollRotation = 0;
     state.loading = false;

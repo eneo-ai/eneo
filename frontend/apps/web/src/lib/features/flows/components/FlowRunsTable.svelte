@@ -4,7 +4,7 @@
     type Eneo,
     type Flow,
     type FlowRun,
-    type FlowRunResultFile
+    type FlowRunSummary
   } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -18,21 +18,14 @@
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
   import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
-  import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
-  import FlowRunTokenUsageBadge from "./FlowRunTokenUsageBadge.svelte";
-  import FlowRunTranscriptionUsageBadge from "./FlowRunTranscriptionUsageBadge.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "$lib/components/toast";
   import { getFlowRunStatusLabel } from "./flowRunStatusLabel";
   import { getRedispatchToastKind } from "./flowRunRedispatchFeedback";
   import { m } from "$lib/paraglide/messages";
   import type { FlowRunProgressSnapshot } from "./flowRunProgress";
-  import {
-    getConfirmedOptimisticFlowRunIds,
-    mergeOptimisticFlowRuns,
-    shouldAutoFocusOptimisticFlowRun
-  } from "./flowRunsOptimistic";
+  import { getConfirmedOptimisticFlowRunIds, mergeOptimisticFlowRuns } from "./flowRunsOptimistic";
   import {
     canRedispatchFlowRun,
     FLOW_RUN_STATUS_FILTER_OPTIONS,
@@ -42,12 +35,10 @@
     shouldPollFlowRunStatus,
     type FlowRunStatusFilter
   } from "./flowRunStatusSets";
-  import { getActiveFlowRunId, shouldAutoFocusFlowRun } from "./flowRunsFocus";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { IsMobile } from "$lib/hooks/is-mobile.svelte";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
-  import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
   import {
     createFlowRunHistoryState,
     destroyFlowRunHistoryPolling,
@@ -61,7 +52,6 @@
     DEFAULT_FLOW_RUN_HISTORY_SORT,
     createFlowRunStatusCounts,
     filterFlowRuns,
-    primeFlowRunInputSearchText,
     getFlowRunHistoryAriaSort,
     nextFlowRunHistorySortState,
     sortFlowRuns,
@@ -76,7 +66,6 @@
     visible = true,
     optimisticRuns = [],
     reloadTrigger = 0,
-    latestRunPayload = $bindable(null),
     onOptimisticRunsConfirmed
   }: {
     flow: Flow;
@@ -85,7 +74,6 @@
     visible?: boolean;
     optimisticRuns?: FlowRun[];
     reloadTrigger?: number;
-    latestRunPayload?: Record<string, unknown> | null;
     onOptimisticRunsConfirmed?: (runIds: string[]) => void;
   } = $props();
 
@@ -125,8 +113,7 @@
 
   const userMode = getFlowUserMode();
   const showAdvancedControls = $derived($userMode === "power_user");
-  // Tokens column only exists in Avancerad, so the expanded-row colspan follows.
-  const historyTableColumnCount = $derived(showAdvancedControls ? 6 : 5);
+  const historyTableColumnCount = 5;
   const historyModeDescription = $derived(
     showAdvancedControls ? m.flow_history_power_user_mode_desc() : m.flow_history_user_mode_desc()
   );
@@ -152,7 +139,7 @@
     return getFlowRunStatusLabel(status, statusTranslations);
   }
 
-  function getRunVersionLabel(run: FlowRun): string {
+  function getRunVersionLabel(run: FlowRunSummary): string {
     return `v${run.flow_version}`;
   }
 
@@ -172,15 +159,6 @@
   const renderedRuns = $derived(visibleRuns.slice(0, renderLimit));
   const hasHiddenMatches = $derived(visibleRuns.length > renderLimit);
 
-  $effect(() => {
-    const newestOptimisticRun = optimisticRuns[0];
-    if (shouldAutoFocusOptimisticFlowRun(newestOptimisticRun, lastOptimisticAutoFocusedRunId)) {
-      selectedRunId = newestOptimisticRun.id;
-      lastOptimisticAutoFocusedRunId = newestOptimisticRun.id;
-      latestRunPayload = newestOptimisticRun.input_payload_json ?? latestRunPayload;
-    }
-  });
-
   function toggleSort(key: FlowRunHistorySortKey) {
     sortState = nextFlowRunHistorySortState(sortState, key);
   }
@@ -193,8 +171,6 @@
   let showCancelConfirm = $state(false);
   let pendingCancelRunId: string | null = $state(null);
   let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
-  let lastAutoFocusedRunId: string | null = $state(null);
-  let lastOptimisticAutoFocusedRunId: string | null = $state(null);
 
   async function loadRuns(mode: "refresh" | "more" = "refresh") {
     const result = await loadFlowRunHistory(history, {
@@ -203,7 +179,7 @@
       listRuns: async (flowId, page) =>
         eneo.flows.runs.list({ flowId, limit: page.limit, offset: page.offset }),
       pollableRefresh: {
-        getRun: async (flowId, runId) => eneo.flows.runs.get({ id: runId, flowId }),
+        getStatus: async (flowId, runId) => eneo.flows.runs.status({ id: runId, flowId }),
         shouldPollRun: (run) => shouldPollFlowRunStatus(run.status)
       },
       getErrorMessage: (error) =>
@@ -215,37 +191,10 @@
     });
 
     if (result.kind === "loaded") {
-      // Hostile input payloads pay their enumeration cost off the keystroke
-      // path, batched through the task queue so page load never blocks on
-      // it either. Priming is an optimization only: the search cache also
-      // fills lazily on a miss.
-      const toPrime = [...result.runs];
-      const primeBatch = () => {
-        for (const loadedRun of toPrime.splice(0, 25)) {
-          primeFlowRunInputSearchText(loadedRun);
-        }
-        if (toPrime.length > 0) setTimeout(primeBatch, 0);
-      };
-      setTimeout(primeBatch, 0);
       const nextRuns = result.runs;
       const confirmedOptimisticRunIds = getConfirmedOptimisticFlowRunIds(nextRuns, optimisticRuns);
       if (confirmedOptimisticRunIds.length > 0) {
         onOptimisticRunsConfirmed?.(confirmedOptimisticRunIds);
-      }
-      latestRunPayload =
-        history.runs.length > 0 ? (history.runs[0].input_payload_json ?? null) : null;
-      const activeRunId = getActiveFlowRunId(nextRuns);
-      if (
-        activeRunId &&
-        shouldAutoFocusFlowRun({
-          runs: nextRuns,
-          activeRunId,
-          selectedRunId,
-          lastAutoFocusedRunId
-        })
-      ) {
-        selectedRunId = activeRunId;
-        lastAutoFocusedRunId = activeRunId;
       }
     } else if (result.kind === "failed") {
       console.error("Error loading flow runs", result.error);
@@ -293,22 +242,7 @@
     return `${(ms / 60000).toFixed(1)}m`;
   }
 
-  async function downloadArtifact(runId: string, fileId: string) {
-    try {
-      const { url } = await eneo.flows.runs.artifactSignedUrl({
-        flowId: flow.id,
-        runId,
-        fileId,
-        contentDisposition: "attachment"
-      });
-      window.open(url, "_blank");
-    } catch (e) {
-      console.error("Failed to download artifact", e);
-      toast.error(m.flow_run_download_artifact_failed());
-    }
-  }
-
-  async function redispatchRun(run: FlowRun) {
+  async function redispatchRun(run: FlowRunSummary) {
     redispatchingRunId = run.id;
     try {
       const result = await eneo.flows.runs.redispatch({
@@ -371,23 +305,14 @@
   function handleReviewCheckpointChanged() {
     void loadRuns();
   }
-
-  function getPrimaryResultFile(resultFiles: FlowRunResultFile[]): FlowRunResultFile | null {
-    return resultFiles.find((file) => file.availability === "available") ?? resultFiles[0] ?? null;
-  }
-
-  function getRunErrorMessage(run: FlowRun): string | null {
-    return run.error?.message ?? null;
-  }
 </script>
 
-{#snippet stepRunDetail(run: FlowRun)}
+{#snippet stepRunDetail(run: FlowRunSummary)}
   {#if isFlowRunActive(run.status)}
     <FlowRunProgressPanel
       runId={run.id}
       flowId={flow.id}
       {eneo}
-      runStatus={run.status}
       runStartedAt={run.started_at ?? run.created_at}
       initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
       onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
@@ -408,13 +333,6 @@
       runStatus={run.status}
       fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
     />
-  {/if}
-{/snippet}
-
-{#snippet failedRunAlert(run: FlowRun)}
-  {@const errorMessage = getRunErrorMessage(run)}
-  {#if errorMessage}
-    <FlowRunErrorAlert error={run.error} message={errorMessage} steps={flow.steps} />
   {/if}
 {/snippet}
 
@@ -456,6 +374,22 @@
       <p class="text-muted text-sm">{m.flow_no_runs_yet()}</p>
     </div>
   {:else}
+    {#if history.refreshWarning}
+      <Alert.Root>
+        <Alert.Title>{m.flow_history_refresh_failed_title()}</Alert.Title>
+        <Alert.Description>{m.flow_history_refresh_failed_desc()}</Alert.Description>
+        <Alert.Action>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={history.inFlightGeneration !== null}
+            onclick={() => void loadRuns()}
+          >
+            {m.flow_retry()}
+          </Button>
+        </Alert.Action>
+      </Alert.Root>
+    {/if}
     <div class="relative mb-2 max-w-md">
       <Input
         type="search"
@@ -634,13 +568,6 @@
                   <span class="block px-4">{m.duration()}</span>
                 {/if}
               </Table.Head>
-              {#if showAdvancedControls}
-                <Table.Head
-                  class="text-muted hidden h-11 px-4 text-xs font-medium tracking-wide uppercase lg:table-cell"
-                >
-                  {m.flow_run_tokens()}
-                </Table.Head>
-              {/if}
               <Table.Head
                 class="text-muted h-11 px-4 text-right text-xs font-medium tracking-wide uppercase"
               >
@@ -688,38 +615,12 @@
                     —
                   {/if}
                 </Table.Cell>
-                {#if showAdvancedControls}
-                  <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                  <Table.Cell
-                    class="hidden px-4 py-3 align-middle lg:table-cell"
-                    onclick={(e: MouseEvent) => e.stopPropagation()}
-                  >
-                    <div class="flex items-center gap-1.5">
-                      <FlowRunTokenUsageBadge tokenUsage={run.token_usage} />
-                      <FlowRunTranscriptionUsageBadge
-                        transcriptionUsage={run.transcription_usage}
-                      />
-                    </div>
-                  </Table.Cell>
-                {/if}
                 <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
                 <Table.Cell
                   class="px-2 py-2 text-right align-middle"
                   onclick={(e: MouseEvent) => e.stopPropagation()}
                 >
                   <div class="inline-flex items-center gap-1">
-                    {#if run.status === "completed"}
-                      {@const resultFiles = run.result_files ?? []}
-                      {@const primaryResultFile = getPrimaryResultFile(resultFiles)}
-                      {#if primaryResultFile}
-                        <FlowRunResultFileButton
-                          compact
-                          file={primaryResultFile}
-                          extraCount={Math.max(resultFiles.length - 1, 0)}
-                          onDownload={(fileId) => downloadArtifact(run.id, fileId)}
-                        />
-                      {/if}
-                    {/if}
                     <Button
                       variant="outline"
                       size="sm"
@@ -759,13 +660,6 @@
                   </div>
                 </Table.Cell>
               </Table.Row>
-              {#if run.status === "failed" && getRunErrorMessage(run)}
-                <Table.Row class="border-default hover:bg-transparent">
-                  <Table.Cell colspan={historyTableColumnCount} class="px-4 py-2">
-                    {@render failedRunAlert(run)}
-                  </Table.Cell>
-                </Table.Row>
-              {/if}
               {#if isExpanded && !mobileViewport.current}
                 <Table.Row class="border-default hover:bg-transparent">
                   <Table.Cell
@@ -805,10 +699,6 @@
                   {new Date(run.created_at).toLocaleString(getLocale())}
                 </p>
                 <div class="flex shrink-0 items-center gap-1.5">
-                  {#if showAdvancedControls}
-                    <FlowRunTokenUsageBadge tokenUsage={run.token_usage} interactive={false} />
-                    <FlowRunTranscriptionUsageBadge transcriptionUsage={run.transcription_usage} />
-                  {/if}
                   {#if run.status === "completed" || run.status === "failed"}
                     <p class="text-muted text-xs tabular-nums">
                       {formatDuration(run.created_at, run.updated_at)}
@@ -821,11 +711,6 @@
                 </div>
               </div>
             </button>
-            {#if run.status === "failed" && getRunErrorMessage(run)}
-              <div class="border-default border-t px-3 py-3">
-                {@render failedRunAlert(run)}
-              </div>
-            {/if}
             {#if isFlowRunCancellable(run.status)}
               <div class="border-default flex items-center gap-2 border-t px-4 py-2">
                 {#if canRedispatchFlowRun(run.status)}

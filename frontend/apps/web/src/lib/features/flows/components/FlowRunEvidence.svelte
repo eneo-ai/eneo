@@ -3,6 +3,7 @@
     components,
     FlowRunEvidenceWithTypedSteps,
     FlowRunResultFile,
+    FlowRunSummary,
     FlowRunStep,
     Eneo
   } from "@eneo/eneo-js";
@@ -44,7 +45,7 @@
     flowId: string;
     sensitiveCareDataFlow?: boolean;
     eneo: Eneo;
-    runStatus: string;
+    runStatus: FlowRunSummary["status"];
     fallbackSnapshot?: FlowRunProgressSnapshot | null;
   } = $props();
 
@@ -367,25 +368,22 @@
   </Alert.Root>
 {:else}
   <div class="flex flex-col gap-4">
+    <FlowRunEvidenceSummary
+      {runStatus}
+      traceId={evidence.debug_export?.run?.trace_id ?? null}
+      redactionApplied={evidence.debug_export?.security?.redaction_applied === true}
+      tokenUsage={evidence.debug_export?.run?.summary?.token_usage ?? null}
+      transcriptionUsage={evidence.debug_export?.run?.summary?.transcription_usage ?? null}
+    />
     {#if $mode === "power_user"}
-      <!-- Power-user toolbar already includes status + trace + redaction badges, so the
-           summary card is only rendered for Enkel mode to avoid duplication. -->
       <FlowRunEvidenceToolbar
         debugExport={evidence.debug_export}
         {evidence}
         {copiedKey}
         {sensitiveCareDataFlow}
-        {runStatus}
-        traceId={evidence.debug_export?.run?.trace_id ?? null}
         onDownloadCanonicalEvidence={downloadCanonicalEvidenceExport}
         onCopyPayload={copyPayload}
         onDownloadJsonArtifact={downloadJsonArtifact}
-      />
-    {:else}
-      <FlowRunEvidenceSummary
-        {runStatus}
-        traceId={evidence.debug_export?.run?.trace_id ?? null}
-        redactionApplied={evidence.debug_export?.security?.redaction_applied === true}
       />
     {/if}
 

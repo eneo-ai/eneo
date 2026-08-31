@@ -1,10 +1,8 @@
 <script lang="ts">
-  import { fly, fade, slide } from "svelte/transition";
+  import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { browser } from "$app/environment";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import * as Alert from "$lib/components/ui/alert/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { serializeEvidencePayload } from "./flowRunEvidenceActions";
@@ -21,17 +19,13 @@
 
   let {
     snapshot,
-    stale = false,
     loadingTerminalDetails = false,
     runStartedAt = null,
-    onRefresh,
     onDownloadArtifact
   }: {
     snapshot: FlowRunProgressSnapshot;
-    stale?: boolean;
     loadingTerminalDetails?: boolean;
     runStartedAt?: string | null;
-    onRefresh?: () => void;
     onDownloadArtifact?: (fileId: string) => Promise<void>;
   } = $props();
 
@@ -184,24 +178,6 @@
           style:transform="scaleX({Math.max(0, Math.min(1, progressPercent / 100))})"
         ></div>
       </div>
-    </div>
-  {/if}
-
-  {#if stale}
-    <div transition:slide={{ duration: prefersReducedMotion ? 0 : 200, easing: cubicOut }}>
-      <Alert.Root class="flex items-center gap-3">
-        <Alert.Description class="flex-1 text-sm">{m.flow_run_progress_stale()}</Alert.Description>
-        {#if onRefresh}
-          <Button
-            variant="outline"
-            size="sm"
-            class="h-7 shrink-0 text-xs"
-            onclick={() => onRefresh?.()}
-          >
-            {m.flow_run_progress_refresh()}
-          </Button>
-        {/if}
-      </Alert.Root>
     </div>
   {/if}
 

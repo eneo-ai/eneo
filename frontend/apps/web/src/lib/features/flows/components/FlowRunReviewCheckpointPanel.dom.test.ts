@@ -628,12 +628,11 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     expect(screen.getByRole("button", { name: /Hallå\./ }).textContent).toContain("SPEAKER_01");
   });
 
-  it("still shows the transcript when the run's steps cannot be loaded", async () => {
+  it("keeps the transcript visible and retries when audio context cannot be loaded", async () => {
+    const steps = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([]);
     const eneo = buildEneo({
       activeCheckpoint: buildSpeakerCheckpoint(),
-      steps: vi.fn(async () => {
-        throw new Error("boom");
-      })
+      steps
     });
 
     render(FlowRunReviewCheckpointPanel, {
@@ -641,5 +640,12 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     });
 
     await screen.findByRole("button", { name: /Hej\./ });
+    await screen.findByText(m.flow_run_review_audio_context_failed());
+
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_retry() }));
+    await waitFor(() => expect(steps).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByText(m.flow_run_review_audio_context_failed())).toBeNull()
+    );
   });
 });

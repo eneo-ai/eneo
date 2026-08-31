@@ -1,4 +1,4 @@
-import type { FlowRun } from "@eneo/eneo-js";
+import type { FlowRun, FlowRunSummary } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FLOW_RUN_HISTORY_SORT,
@@ -13,7 +13,7 @@ import {
 } from "./flowRunHistoryPresentation";
 import type { FlowRunStatusFilter } from "./flowRunStatusSets";
 import { FLOW_RUN_STATUS_VALUES } from "./flowRunStatusSets";
-import { makeFlowRun, makeFlowRunResultFile } from "./flowRunHistoryTestFixtures";
+import { makeFlowRun } from "./flowRunHistoryTestFixtures";
 
 const PLAIN_LABELS: FlowRunSearchLabels = {
   labelsKey: "test",
@@ -22,14 +22,14 @@ const PLAIN_LABELS: FlowRunSearchLabels = {
 };
 
 function visible(
-  runs: FlowRun[],
+  runs: FlowRunSummary[],
   options: {
     statusFilter: FlowRunStatusFilter;
     sortState: FlowRunHistorySortState;
     searchQuery?: string;
     labels?: FlowRunSearchLabels;
   }
-): FlowRun[] {
+): FlowRunSummary[] {
   return filterFlowRuns(sortFlowRuns(runs, options.sortState), {
     statusFilter: options.statusFilter,
     searchQuery: options.searchQuery,
@@ -39,8 +39,10 @@ function visible(
 
 function run(
   id: string,
-  overrides: Partial<FlowRun> & Pick<FlowRun, "status"> = { status: "completed" }
-): FlowRun {
+  overrides: Partial<FlowRunSummary> & Pick<FlowRunSummary, "status"> = {
+    status: "completed"
+  }
+): FlowRunSummary {
   return makeFlowRun({
     id,
     created_at: "2026-05-14T10:00:00.000Z",
@@ -221,13 +223,16 @@ describe("sort state helpers", () => {
 });
 
 describe("search projection", () => {
-  const searchRun = (id: string, status: FlowRun["status"], created: string): FlowRun =>
+  const searchRun = (
+    id: string,
+    status: FlowRunSummary["status"],
+    created: string
+  ): FlowRunSummary =>
     makeFlowRun({
       id,
       status,
       created_at: created,
-      flow_version: 3,
-      input_payload_json: { arende: "Bygglov Storgatan 5" }
+      flow_version: 3
     });
 
   const swedishLabels: FlowRunSearchLabels = {
@@ -242,7 +247,7 @@ describe("search projection", () => {
     labels: swedishLabels
   };
 
-  it("matches on run id, date, status label and input content", () => {
+  it("matches on run id, date, status label and version", () => {
     const runs = [
       searchRun("a1b2", "completed", "2026-08-25T09:00:00Z"),
       searchRun("c3d4", "failed", "2026-08-24T09:00:00Z")
@@ -250,18 +255,17 @@ describe("search projection", () => {
     expect(visible(runs, { ...options, searchQuery: "a1b2" })).toHaveLength(1);
     expect(visible(runs, { ...options, searchQuery: "2026-08-24" })).toHaveLength(1);
     expect(visible(runs, { ...options, searchQuery: "klar" })).toHaveLength(1);
-    expect(visible(runs, { ...options, searchQuery: "storgatan" })).toHaveLength(2);
+    expect(visible(runs, { ...options, searchQuery: "v3" })).toHaveLength(2);
     expect(visible(runs, { ...options, searchQuery: "finns-inte" })).toHaveLength(0);
   });
 
-  it("matches on result file names", () => {
-    const withFile = makeFlowRun({
+  it("does not inspect sensitive fields present on an optimistic full run", () => {
+    const fullRun: FlowRun = makeFlowRun({
       id: "a1b2",
-      result_files: [makeFlowRunResultFile({ name: "beslut_bygglov.docx" })]
+      input_payload_json: { arende: "Sekretessärende Storgatan 5" }
     });
-    const runs = [withFile, searchRun("c3d4", "failed", "2026-08-24T09:00:00Z")];
-    expect(visible(runs, { ...options, searchQuery: "beslut_bygglov" })).toHaveLength(1);
-    expect(visible(runs, { ...options, searchQuery: ".docx" })).toHaveLength(1);
+
+    expect(visible([fullRun], { ...options, searchQuery: "sekretessärende" })).toHaveLength(0);
   });
 
   it("matches on the displayed date label", () => {
@@ -273,18 +277,9 @@ describe("search projection", () => {
     expect(visible(runs, { ...options, labels, searchQuery: "25 augusti" })).toHaveLength(1);
   });
 
-  it("runs input reads and label formatting once per run per label set", () => {
-    let inputReads = 0;
+  it("formats labels once per run per label set", () => {
     let dateLabelCalls = 0;
-    const target = makeFlowRun({
-      id: "a1b2",
-      input_payload_json: {
-        get arende() {
-          inputReads += 1;
-          return "Bygglov Storgatan 5";
-        }
-      } as FlowRun["input_payload_json"]
-    });
+    const target = makeFlowRun({ id: "a1b2" });
     const runs = [target];
     const countingLabels: FlowRunSearchLabels = {
       labelsKey: "sv",
@@ -295,17 +290,13 @@ describe("search projection", () => {
       }
     };
 
-    expect(
-      visible(runs, { ...options, labels: countingLabels, searchQuery: "storgatan" })
-    ).toHaveLength(1);
     expect(visible(runs, { ...options, labels: countingLabels, searchQuery: "klar" })).toHaveLength(
       1
     );
     expect(
       visible(runs, { ...options, labels: countingLabels, searchQuery: "finns-inte" })
     ).toHaveLength(0);
-    // The label callbacks and input reads ran only on the first miss.
-    expect(inputReads).toBe(1);
+    // Label callbacks run only on the first cache miss.
     expect(dateLabelCalls).toBe(1);
 
     const englishLabels: FlowRunSearchLabels = {
@@ -319,40 +310,7 @@ describe("search projection", () => {
     expect(visible(runs, { ...options, labels: englishLabels, searchQuery: "klar" })).toHaveLength(
       0
     );
-    // The input text is payload-keyed and survives a label-set switch;
-    // only the label-derived parts rebuild.
-    expect(inputReads).toBe(1);
     expect(dateLabelCalls).toBe(2);
-  });
-
-  it("matches multiselect array values in the input", () => {
-    const runs = [
-      makeFlowRun({
-        id: "a1b2",
-        input_payload_json: { verksamheter: ["Skola", "Äldreomsorg"], antal: 3 }
-      })
-    ];
-    expect(visible(runs, { ...options, searchQuery: "äldreomsorg" })).toHaveLength(1);
-    expect(visible(runs, { ...options, searchQuery: "skola" })).toHaveLength(1);
-  });
-
-  it("bounds search-text build cost and size for hostile payloads", () => {
-    const huge = "x".repeat(1_000_000) + "SLUTMARKÖR";
-    const manyKeys = Object.fromEntries(
-      Array.from({ length: 50_000 }, (_, i) => [`nyckel_${i}`, `värde_${i}`])
-    );
-    const runs = [
-      makeFlowRun({ id: "big-string", input_payload_json: { text: huge } }),
-      makeFlowRun({ id: "many-keys", input_payload_json: manyKeys })
-    ];
-    const t0 = performance.now();
-    // The tail of a megabyte value is beyond the per-value budget: honest
-    // truncation, not silent full-payload search.
-    expect(visible(runs, { ...options, searchQuery: "slutmarkör" })).toHaveLength(0);
-    expect(visible(runs, { ...options, searchQuery: "nyckel_49999" })).toHaveLength(0);
-    // Values within the budget match.
-    expect(visible(runs, { ...options, searchQuery: "nyckel_1" })).toHaveLength(1);
-    expect(performance.now() - t0).toBeLessThan(500);
   });
 
   it("combines search with the status filter", () => {

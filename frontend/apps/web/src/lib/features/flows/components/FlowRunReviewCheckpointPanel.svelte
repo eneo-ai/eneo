@@ -56,6 +56,7 @@
   let storedSegments = $state<TranscriptSegment[] | null>(null);
   let audioFileIds = $state<string[]>([]);
   let audioContextPending = $state(true);
+  let audioContextError: string | null = $state(null);
   const isSpeakerMapping = $derived(isSpeakerMappingCheckpoint(checkpoint?.current_payload_json));
   // Stored segments carry raw labels, so the reviewer's draft names apply
   // live; the rendered text already has the saved names baked in.
@@ -155,6 +156,7 @@
   async function loadTranscriptContext(payload: Record<string, unknown> | null | undefined) {
     const source = getSpeakerMappingSourceStep(payload);
     audioContextPending = true;
+    audioContextError = null;
     try {
       const steps = await eneo.flows.runs.steps({ flowId, runId });
       const sourceStep =
@@ -168,8 +170,11 @@
       storedSegments = segmentsFromMetadata(transcription);
       audioFileIds = fileIds;
     } catch (error) {
-      // The transcript is still reviewable as text; only playback is lost.
       console.error("Failed to load transcript context", error);
+      audioContextError = getFlowRuntimeErrorMessage(
+        error,
+        m.flow_run_review_audio_context_failed()
+      );
     } finally {
       audioContextPending = false;
     }
@@ -474,6 +479,20 @@
           <Field.Label class="text-primary text-xs font-medium">
             {m.flow_run_review_speakers_preview()}
           </Field.Label>
+          {#if audioContextError}
+            <Alert.Root>
+              <Alert.Description>{audioContextError}</Alert.Description>
+              <Alert.Action>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => void loadTranscriptContext(checkpoint?.current_payload_json)}
+                >
+                  {m.flow_retry()}
+                </Button>
+              </Alert.Action>
+            </Alert.Root>
+          {/if}
           {#key checkpoint.id}
             <TranscriptPlayer
               segments={transcriptSegments}

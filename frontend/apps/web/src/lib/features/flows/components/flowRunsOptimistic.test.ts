@@ -1,11 +1,7 @@
 import type { FlowRun } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 
-import {
-  getConfirmedOptimisticFlowRunIds,
-  mergeOptimisticFlowRuns,
-  shouldAutoFocusOptimisticFlowRun
-} from "./flowRunsOptimistic";
+import { getConfirmedOptimisticFlowRunIds, mergeOptimisticFlowRuns } from "./flowRunsOptimistic";
 
 function run(id: string): FlowRun {
   return {
@@ -47,10 +43,5 @@ describe("mergeOptimisticFlowRuns", () => {
     expect(
       getConfirmedOptimisticFlowRunIds([run("run-b"), run("run-old")], [run("run-b"), run("run-a")])
     ).toEqual(["run-b"]);
-  });
-
-  it("auto-focuses an optimistic run only once so polling does not steal manual selection", () => {
-    expect(shouldAutoFocusOptimisticFlowRun(run("run-new"), null)).toBe(true);
-    expect(shouldAutoFocusOptimisticFlowRun(run("run-new"), "run-new")).toBe(false);
   });
 });

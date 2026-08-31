@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { EneoError, type FlowGraph, type FlowRunStep, type Eneo } from "@eneo/eneo-js";
+  import { type FlowGraph, type FlowRunStep, type Eneo } from "@eneo/eneo-js";
   import { onMount, untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -8,17 +8,11 @@
   import { m } from "$lib/paraglide/messages";
   import FlowRunProgressView from "./FlowRunProgressView.svelte";
   import { buildFlowRunProgressSnapshot, type FlowRunProgressSnapshot } from "./flowRunProgress";
-  import { isFlowRunActive } from "./flowRunStatusSets";
-
-  const POLL_INTERVAL_MS = 3000;
-  const INITIAL_PROGRESS_RETRY_DELAYS_MS = [250, 750, 1500] as const;
-  const STALE_WARNING_THRESHOLD = 3;
 
   let {
     runId,
     flowId,
     eneo,
-    runStatus,
     runStartedAt = null,
     initialSnapshot = null,
     onSnapshotUpdate
@@ -26,7 +20,6 @@
     runId: string;
     flowId: string;
     eneo: Eneo;
-    runStatus: string;
     runStartedAt?: string | null;
     initialSnapshot?: FlowRunProgressSnapshot | null;
     onSnapshotUpdate?: (snapshot: FlowRunProgressSnapshot) => void;
@@ -34,11 +27,10 @@
 
   let loading = $state(untrack(() => initialSnapshot === null));
   let loadError: string | null = $state(null);
+  let refreshFailed = $state(false);
+  let refreshing = $state(false);
   let graphSnapshot: FlowGraph | null = $state(null);
   let snapshot: FlowRunProgressSnapshot = $state(untrack(() => initialSnapshot ?? { steps: [] }));
-  let pollFailureCount = $state(0);
-  let pollTimeout: ReturnType<typeof setTimeout> | null = null;
-  let isPolling = $state(false);
 
   async function fetchGraphSnapshot() {
     return await eneo.flows.graph({ id: flowId, run_id: runId });
@@ -54,67 +46,32 @@
     onSnapshotUpdate?.(snapshot);
   }
 
-  function isNotFoundError(error: unknown): boolean {
-    if (error instanceof EneoError) return error.status === 404;
-    if (error !== null && typeof error === "object") {
-      const status = (error as { status?: unknown }).status;
-      return status === 404;
-    }
-    return false;
-  }
-
-  function shouldRetryInitialProgressLoad(
-    error: unknown,
-    retryDelay: number | undefined
-  ): retryDelay is number {
-    return retryDelay !== undefined && isFlowRunActive(runStatus) && isNotFoundError(error);
-  }
-
-  async function wait(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   async function loadInitial() {
     loading = snapshot.steps.length === 0;
     loadError = null;
     try {
-      for (let attemptIndex = 0; ; attemptIndex += 1) {
-        try {
-          const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
-          applySnapshot({ graph, steps });
-          pollFailureCount = 0;
-          return;
-        } catch (error) {
-          const retryDelay = INITIAL_PROGRESS_RETRY_DELAYS_MS[attemptIndex];
-          if (shouldRetryInitialProgressLoad(error, retryDelay)) {
-            await wait(retryDelay);
-            continue;
-          }
-          console.error("Failed to load live run progress", error);
-          loadError = error instanceof Error ? error.message : m.flow_run_progress_load_failed();
-          return;
-        }
-      }
+      const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
+      applySnapshot({ graph, steps });
     } catch (error) {
       console.error("Failed to load live run progress", error);
-      loadError = error instanceof Error ? error.message : m.flow_run_progress_load_failed();
+      loadError = m.flow_run_progress_load_failed();
     } finally {
       loading = false;
     }
   }
 
-  async function pollStepStatuses() {
-    if (isPolling) return;
-    isPolling = true;
+  async function refreshStepStatuses() {
+    if (refreshing) return;
+    refreshing = true;
+    refreshFailed = false;
     try {
       const steps = await fetchStepStatuses();
       applySnapshot({ graph: graphSnapshot, steps });
-      pollFailureCount = 0;
     } catch (error) {
       console.error("Failed to refresh live run progress", error);
-      pollFailureCount += 1;
+      refreshFailed = true;
     } finally {
-      isPolling = false;
+      refreshing = false;
     }
   }
 
@@ -135,33 +92,6 @@
 
   onMount(() => {
     void loadInitial();
-  });
-
-  $effect(() => {
-    const active = isFlowRunActive(runStatus);
-    if (active && pollTimeout === null) {
-      const scheduleNextPoll = () => {
-        pollTimeout = setTimeout(async () => {
-          await pollStepStatuses();
-          pollTimeout = null;
-          if (isFlowRunActive(runStatus)) {
-            scheduleNextPoll();
-          }
-        }, POLL_INTERVAL_MS);
-      };
-      scheduleNextPoll();
-    } else if (!active && pollTimeout !== null) {
-      clearTimeout(pollTimeout);
-      pollTimeout = null;
-    }
-  });
-
-  $effect(() => {
-    return () => {
-      if (pollTimeout !== null) {
-        clearTimeout(pollTimeout);
-      }
-    };
   });
 </script>
 
@@ -188,11 +118,23 @@
     </Button>
   </Alert.Root>
 {:else}
-  <FlowRunProgressView
-    {snapshot}
-    stale={pollFailureCount >= STALE_WARNING_THRESHOLD}
-    {runStartedAt}
-    onRefresh={() => void pollStepStatuses()}
-    onDownloadArtifact={downloadArtifact}
-  />
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <p class="text-muted max-w-2xl text-xs leading-relaxed">
+      {m.flow_run_progress_manual_refresh()}
+    </p>
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={refreshing}
+      onclick={() => void refreshStepStatuses()}
+    >
+      {m.flow_run_progress_refresh()}
+    </Button>
+  </div>
+  {#if refreshFailed}
+    <Alert.Root variant="destructive" class="mt-3">
+      <Alert.Description>{m.flow_run_progress_refresh_failed()}</Alert.Description>
+    </Alert.Root>
+  {/if}
+  <FlowRunProgressView {snapshot} {runStartedAt} onDownloadArtifact={downloadArtifact} />
 {/if}

@@ -58,6 +58,70 @@ afterEach(() => {
 });
 
 describe("FlowRunsTable search and pagination", () => {
+  it("loads audited step details only after an explicit user action", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { eneo, calls, graphCalls, stepCalls } = makeRunsListEneo(() => ({
+        items: [makeFlowRun({ id: "aaa", status: "running" })],
+        has_more: false
+      }));
+      renderTable(eneo);
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(graphCalls).toHaveLength(0);
+      expect(stepCalls).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(graphCalls).toHaveLength(0);
+      expect(stepCalls).toHaveLength(0);
+
+      await fireEvent.click(screen.getByTestId("flow-run-evidence-toggle-aaa"));
+      await waitFor(() => expect(graphCalls).toHaveLength(1));
+      await waitFor(() => expect(stepCalls).toHaveLength(1));
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(graphCalls).toHaveLength(1);
+      expect(stepCalls).toHaveLength(1);
+
+      await fireEvent.click(screen.getByRole("button", { name: m.flow_run_progress_refresh() }));
+      await waitFor(() => expect(stepCalls).toHaveLength(2));
+      expect(graphCalls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps history visible and offers retry when background refresh fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let requestCount = 0;
+      const { eneo, calls } = makeRunsListEneo(() => {
+        requestCount += 1;
+        if (requestCount === 2) throw new Error("temporary refresh failure");
+        return {
+          items: [makeFlowRun({ id: "aaa", status: "running" })],
+          has_more: false
+        };
+      });
+      renderTable(eneo);
+
+      await waitFor(() => expect(calls).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() =>
+        expect(screen.getByText(m.flow_history_refresh_failed_title())).toBeTruthy()
+      );
+      expect(screen.getByTestId("flow-run-evidence-toggle-aaa")).toBeTruthy();
+
+      await fireEvent.click(screen.getByRole("button", { name: m.flow_retry() }));
+      await waitFor(() => expect(calls).toHaveLength(3));
+      await waitFor(() =>
+        expect(screen.queryByText(m.flow_history_refresh_failed_title())).toBeNull()
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the load-more action reachable when a search has zero matches", async () => {
     const { eneo, calls } = makeRunsListEneo(() => ({
       items: [run("aaa", "2026-08-25T09:00:00Z")],

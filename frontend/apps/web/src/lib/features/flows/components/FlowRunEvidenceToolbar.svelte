@@ -1,18 +1,14 @@
 <script lang="ts">
   import type { FlowRunDebugExport } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
-  import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
 
   let {
     debugExport,
     evidence,
     copiedKey,
     sensitiveCareDataFlow = false,
-    runStatus,
-    traceId = null,
     onDownloadCanonicalEvidence,
     onCopyPayload,
     onDownloadJsonArtifact
@@ -21,14 +17,11 @@
     evidence: Record<string, unknown>;
     copiedKey: string | null;
     sensitiveCareDataFlow?: boolean;
-    runStatus: string;
-    traceId?: string | null;
     onDownloadCanonicalEvidence: () => Promise<void>;
     onCopyPayload: (key: string, payload: unknown, failureMessage: string) => Promise<void>;
     onDownloadJsonArtifact: (fileName: string, payload: unknown, failureMessage: string) => void;
   } = $props();
 
-  let redactionApplied = $derived(debugExport?.security?.redaction_applied === true);
   let hideExportActions = $derived(sensitiveCareDataFlow);
 </script>
 
@@ -37,34 +30,6 @@
   aria-label={m.flow_run_debug_tools()}
 >
   <div class="flex flex-wrap items-center justify-between gap-3">
-    <div class="flex flex-wrap items-center gap-2">
-      <FlowRunStatusBadge status={runStatus} size="md" showDot={false} />
-      {#if traceId}
-        <Tooltip.Provider delayDuration={150}>
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              <Badge variant="outline" class="bg-primary text-muted font-mono text-xs">
-                {m.flow_run_evidence_trace_id()}: {traceId}
-              </Badge>
-            </Tooltip.Trigger>
-            <Tooltip.Content>{m.flow_run_evidence_trace_id_tooltip()}</Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
-      {/if}
-      {#if redactionApplied}
-        <Tooltip.Provider delayDuration={150}>
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              <Badge variant="outline" class="bg-primary text-xs">
-                {m.flow_run_evidence_redacted()}
-              </Badge>
-            </Tooltip.Trigger>
-            <Tooltip.Content>{m.flow_run_evidence_redacted_tooltip()}</Tooltip.Content>
-          </Tooltip.Root>
-        </Tooltip.Provider>
-      {/if}
-    </div>
-
     {#if hideExportActions}
       <Badge variant="outline" class="bg-primary text-muted text-xs">
         {m.flow_sensitive_evidence_export_disabled()}

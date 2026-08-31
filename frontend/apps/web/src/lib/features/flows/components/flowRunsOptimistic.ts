@@ -1,6 +1,9 @@
-import type { FlowRun } from "@eneo/eneo-js";
+import type { FlowRun, FlowRunSummary } from "@eneo/eneo-js";
 
-export function mergeOptimisticFlowRuns(runs: FlowRun[], optimisticRuns: FlowRun[]): FlowRun[] {
+export function mergeOptimisticFlowRuns(
+  runs: FlowRunSummary[],
+  optimisticRuns: FlowRun[]
+): FlowRunSummary[] {
   if (optimisticRuns.length === 0) return runs;
 
   const existingIds = new Set(runs.map((run) => run.id));
@@ -10,18 +13,11 @@ export function mergeOptimisticFlowRuns(runs: FlowRun[], optimisticRuns: FlowRun
 }
 
 export function getConfirmedOptimisticFlowRunIds(
-  runs: FlowRun[],
+  runs: FlowRunSummary[],
   optimisticRuns: FlowRun[]
 ): string[] {
   if (optimisticRuns.length === 0 || runs.length === 0) return [];
 
   const existingIds = new Set(runs.map((run) => run.id));
   return optimisticRuns.filter((run) => existingIds.has(run.id)).map((run) => run.id);
-}
-
-export function shouldAutoFocusOptimisticFlowRun(
-  newestOptimisticRun: FlowRun | undefined,
-  lastAutoFocusedRunId: string | null
-): newestOptimisticRun is FlowRun {
-  return Boolean(newestOptimisticRun && newestOptimisticRun.id !== lastAutoFocusedRunId);
 }
