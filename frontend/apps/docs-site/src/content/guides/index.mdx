@@ -76,10 +76,10 @@ Deploy Eneo in production environments:
 
 Run the one-time legacy content adoption safely:
 
-- Understand why it is required without S3
-- Estimate PostgreSQL disk and wall time
+- Follow the offline `db-init` and online worker phases
+- Estimate PostgreSQL disk, WAL headroom, and wall time
 - Pause or restore when capacity runs low
-- Verify, close the recovery window, and reclaim disk
+- Record a release-candidate result and verify completion before cleanup
 
 ### [Choose Content Storage](/guides/object-content-storage)
 
