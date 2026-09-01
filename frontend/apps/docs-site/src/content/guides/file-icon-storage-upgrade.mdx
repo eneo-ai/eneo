@@ -1,34 +1,38 @@
 # Upgrade Legacy File and Icon Storage
 
-import { Callout, Steps } from "nextra/components";
+import { Callout, Steps, Tabs } from "nextra/components";
 
 ## TL;DR
 
-- This is a **one-time adoption** of File and Icon bytes written by older Eneo
-  releases. New uploads already use the object-content model.
-- Older releases split byte storage, integrity, limits, and cleanup across File
-  and Icon code and environment settings. The adoption brings existing data
-  under one object-content owner. PostgreSQL remains a complete byte backend;
-  S3-compatible storage is optional.
-- `db-init` expands the schema and inventories rows. The worker then asks
-  PostgreSQL to hash and copy one frozen payload at a time inside the database;
-  it does not stream the payload through Python. Eneo can stay available while
-  this runs. Inline work starts automatically up to 5 GiB of affected logical
-  payload;
-  larger sets wait for an explicit capacity decision. This release does not
-  adopt legacy bytes directly to object storage, so adoption waits if that
-  target is selected.
-- Plan free database-host disk from the reported legacy payload estimate. As a
-  conservative starting point, use **2.5 times that estimate** when retained WAL
-  is unknown.
-- Run the upgrade at a quiet time for large installations. At the default
-  one-minute cadence, representative examples take about 16 minutes for 1 GiB
-  and 2 hours 45 minutes for 10 GiB. These are planning examples, not minimum
-  and maximum times.
-- Do not delete the old columns after the worker finishes. Keep them through a
-  verification period and a tested restore. A later contract release removes
-  them after a fail-closed reference check; physical disk reclamation is a
-  separate operator job.
+This is a **one-time adoption** of File and Icon bytes written by older Eneo
+releases.
+
+<Callout type="info">
+  **Normal availability:** `db-init` keeps the API closed while Eneo expands the
+  schema, installs the legacy write fence, and inventories row metadata. After
+  it succeeds, Eneo starts normally. The maintenance worker then copies and
+  verifies bounded batches while old files remain readable.
+</Callout>
+
+New uploads use object content as soon as the new release starts. They do not
+wait for the legacy adoption or write bytes back to the old columns.
+
+The default capacity path depends on the **combined logical size of affected
+legacy payloads**, not the size of the whole database or the largest file:
+
+- **At or below 5 GiB:** no action. The online worker starts automatically.
+- **Above 5 GiB:** check disk and WAL headroom, set the reported capacity
+  acknowledgement, and recreate the worker.
+
+PostgreSQL inline remains a complete byte backend, so this adoption is required
+even when the deployment does not use S3-compatible storage. Run large
+deployments at a quiet time and verify representative files and a current
+restore before closing the recovery window. Do not delete the old columns when
+the worker finishes; a later contract release owns their removal.
+
+This release adopts legacy payloads into PostgreSQL inline. If object storage is
+selected before the campaign starts, the worker waits rather than silently
+changing the destination; follow [Run and monitor](#run-and-monitor).
 
 ## What this changes
 
@@ -92,20 +96,22 @@ and label them as one restore point.
 Follow the exact stop and deployment commands in [Deploy Eneo: Updating
 Eneo](/guides/deployment#updating-eneo).
 
-### Check disk before the worker starts
+### Choose the capacity path
 
-The 5 GiB automatic threshold is not a free-space detector. An inline set at or
-below the threshold starts automatically after admission. A larger set waits
-for explicit acknowledgement. To inspect the final estimate before **any**
-copy, set this in `env_backend.env` before starting the new worker:
+Keep the standard 5 GiB threshold unless the deployment requires approval before
+**every** inline copy. A smaller ready set starts automatically; a larger set
+finishes admission and waits without making old files unavailable.
+
+For the stricter path, set this in `env_backend.env` before starting the new
+worker:
 
 ```dotenv
 FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0
 ```
 
-The worker will classify the inventory, then log `waiting_for_capacity` without
-making old files unavailable. Use its warning and the query below to get the
-stable payload estimate before acknowledging any copy.
+This is optional, not a normal upgrade requirement. In both paths, the worker
+logs `waiting_for_capacity` with the exact acknowledgement when a decision is
+required.
 
 ### Deploy without old writers
 
@@ -119,45 +125,141 @@ legacy write fence.
 
 ### Disk: use the affected bytes, not total database size
 
-Let `L` be the worker's exact logical byte total for legacy File/Icon payloads
-that still need adoption. It is not the physical PostgreSQL allocation or WAL
-volume.
+Use these values:
 
-| Capacity                             | Simple planning rule                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------- |
-| New persistent PostgreSQL allocation | About `L` for the verified inline copy                                                |
-| Free database-host disk              | Start with at least `L + peak retained WAL + safety margin`                           |
-| When retained WAL is unknown         | Use `2.5 × L` free as a conservative starting point, then validate on a restored copy |
-| Backup or replica storage            | Plan separately when it uses another volume or host                                   |
+- `L`: the worker's exact logical bytes still requiring an inline copy.
+- `D`: expected physical database growth for that copy.
+- `W_now`: WAL currently stored on the same volume.
+- `W_peak`: highest simultaneous WAL use expected during the run.
+- `M`: the free-space floor the operator wants to preserve for normal service.
 
-Example: a 200 GB database with 10 GB of affected legacy payload does **not**
-need another 200 GB. Expect about 10 GB of new persistent payload allocation.
-If WAL retention is unknown, start planning from roughly 25 GB free on the
-database host. A replication slot, WAL archive, or backup written to the same
-disk can require more.
+The capacity check is:
 
-Use this query for the capacity decision only after setting the automatic
-threshold to zero and seeing `waiting_for_capacity` in the worker log. Run it on
-demand, not as a frequent monitor:
-
-```sql
-SELECT count(*) FILTER (WHERE state = 'pending') AS pending_items,
-       count(*) FILTER (WHERE state = 'ready') AS ready_items,
-       pg_size_pretty(
-           coalesce(sum(payload_size_estimate)
-               FILTER (WHERE state = 'ready'), 0)::bigint
-       ) AS ready_payload_estimate,
-       coalesce(sum(payload_size_estimate)
-           FILTER (WHERE state = 'ready'), 0)::bigint
-           AS ready_payload_bytes
-FROM file_icon_backfill_items;
+```text
+free space now >= D + max(W_peak - W_now, 0) + M
 ```
 
-Wait until `pending_items` is zero before treating `ready_payload_bytes` as the
-stable capacity decision. Then set
-`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK=<ready_payload_bytes>` and recreate the
-worker. The acknowledgement records an operator decision; it does not reserve
-disk.
+This does not count the whole database, WAL already occupying the volume, or
+WAL generated and recycled over time. Keep backup and replica capacity separate
+when they use another volume or host.
+
+<Callout type="info">
+  **Measured planning evidence:** with random 640 KiB payloads, the 1 GiB and 10
+  GiB tests used about `1.043 x L` and `1.041 x L` of new database allocation.
+  For a similar payload profile, `D = 1.05 x L` is therefore a useful first
+  estimate. The 10 GiB test also generated about 11 GiB of WAL over the complete
+  run, but did not measure a 25 GiB simultaneous peak or prove that 25 GiB must
+  be free. Many small payloads or different PostgreSQL storage settings can
+  change the database overhead, so confirm `D` on a restored copy when the
+  margin is tight.
+</Callout>
+
+There is no safe fixed multiplier for the complete calculation when WAL
+retention is unknown or unbounded. On a production-equivalent restored copy,
+record database size, `pg_wal` size, and free disk before the first copy and at
+their peaks. Reproduce production slots, archiving, volumes, and representative
+traffic before setting the acknowledgement.
+
+Check current local WAL and replication-slot retention in `psql`:
+
+```sql
+SELECT current_setting('max_wal_size') AS max_wal_size,
+       pg_size_pretty(
+           coalesce((SELECT sum(size) FROM pg_ls_waldir()), 0)::bigint
+       ) AS current_pg_wal_size;
+
+SELECT slot_name,
+       active,
+       pg_size_pretty(
+           pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)::bigint
+       ) AS retained_wal
+FROM pg_replication_slots
+WHERE restart_lsn IS NOT NULL
+ORDER BY slot_name;
+
+SELECT failed_count,
+       last_failed_time,
+       last_archived_time,
+       stats_reset
+FROM pg_stat_archiver;
+```
+
+`max_wal_size` is a soft checkpoint target, not a WAL cap. The archiver counters
+are cumulative since `stats_reset`; compare the latest failed and successful
+times to see whether archiving recovered. A large or growing slot, an unresolved
+archive failure, or an unknown WAL volume must be resolved or included in the
+capacity plan. `pg_ls_waldir()` normally requires superuser or `pg_monitor`
+privileges. These queries do not measure an external archive or replica volume.
+
+Use this query after seeing `waiting_for_capacity`. It reports `L` and the
+benchmark-derived `1.05 x L` estimate for `D`. Run it on demand, not as a
+frequent monitor:
+
+```sql
+WITH capacity AS (
+    SELECT count(*) FILTER (WHERE state = 'pending') AS pending_items,
+           count(*) FILTER (WHERE state = 'ready') AS ready_items,
+           coalesce(sum(payload_size_estimate)
+               FILTER (WHERE state = 'ready'), 0)::bigint
+               AS ready_payload_bytes
+    FROM file_icon_backfill_items
+)
+SELECT pending_items,
+       ready_items,
+       ready_payload_bytes,
+       pg_size_pretty(ready_payload_bytes) AS ready_payload_size,
+       ceil(ready_payload_bytes::numeric * 1.05)::bigint
+           AS benchmark_profile_db_growth_bytes,
+       pg_size_pretty(
+           ceil(ready_payload_bytes::numeric * 1.05)::bigint
+       ) AS benchmark_profile_db_growth_size
+FROM capacity;
+```
+
+Wait until `pending_items` is zero before treating `ready_payload_bytes` as a
+stable cross-check. Copy the required byte count from the worker's
+`waiting_for_capacity` warning and set
+`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` to at least that value, then recreate
+the worker. The warning remains authoritative during recovery because
+replacement copies can increase the cumulative requirement beyond the current
+ready set. The acknowledgement records an operator decision; it does not detect
+or reserve disk.
+
+```dotenv
+FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK=<reported_required_bytes>
+```
+
+The worker reads this value at process startup. Recreate only the maintenance
+worker, using the same Compose files and profile as the deployment. The reference
+service is named `worker`; split deployments may use another service name.
+
+<Tabs
+  items={["PostgreSQL inline or external endpoint", "Bundled object store"]}
+>
+  <Tabs.Tab>
+
+```bash
+docker compose up -d --force-recreate --no-deps worker
+```
+
+  </Tabs.Tab>
+  <Tabs.Tab>
+
+```bash
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  up -d --force-recreate --no-deps worker
+```
+
+  </Tabs.Tab>
+</Tabs>
+
+Completed batches and campaign state are stored in PostgreSQL. Recreating the
+worker resumes them; it does not restart the adoption. A platform that can only
+redeploy the whole stack may do so, but the API has a short interruption. Do not
+rerun `db-init` only to apply this acknowledgement.
 
 If a campaign is already `active`, this query excludes leased and completed
 bytes and no longer represents its original capacity requirement. Use the
@@ -179,20 +281,21 @@ There are two different clocks:
 A useful default estimate is:
 
 ```text
-minutes ≈ ceil(items / 200)
-        + max(ceil(payload MiB / 128), ceil(items / 200))
+admission runs = ceil(items / 200)
+copy runs      = max(ceil(payload MiB / 128), ceil(items / 200))
+scheduled runs = admission runs + copy runs - 1
 ```
 
-| Example legacy set                           | Approximate online worker time |
-| -------------------------------------------- | ------------------------------ |
-| 1 GiB in about 1,600 items                   | About 16 minutes               |
-| 5 GiB in about 8,000 similarly sized items   | About 1 hour 20 minutes        |
-| 10 GiB in about 16,000 similarly sized items | About 2 hours 45 minutes       |
+- **1 GiB in about 1,600 items:** about 15 scheduled runs.
+- **5 GiB in about 8,000 similarly sized items:** about 1 hour 19 minutes.
+- **10 GiB in 16,384 measured items:** 163 scheduled runs, about 2 hours 42
+  minutes.
 
-These are scheduling examples, not minimum or maximum times, and exclude
+The last admission run can perform the first copy, which accounts for the minus
+one. These are scheduling examples, not minimum or maximum times, and exclude
 `db-init`. Many small items hit the row bound; large items hit the byte bound.
-The one-minute cadence deliberately leaves room for normal traffic, while slow
-storage, retries, checkpoints, and foreground load can add time.
+The worker runs at startup and then once per minute. Slow storage, retries,
+checkpoints, and foreground load can add time.
 
 Do not add CPU or RAM only because of these examples. First confirm ordinary
 headroom and monitor database I/O, WAL, free disk, CPU, worker memory, and API
@@ -221,24 +324,97 @@ defaults unless a restored-production canary shows that higher bounds preserve
 API latency, memory, I/O, WAL, and checkpoint behavior. Do not disable planner
 features globally to speed up this one-time job.
 
+### Record a release-candidate result
+
+Use a restored production backup and record enough evidence to forecast the
+live deployment:
+
+- **Inventory:** legacy item count and stable logical payload bytes.
+- **Duration:** `db-init`, admission, and adoption time.
+- **Database host:** free disk before, lowest free disk, database growth, and WAL
+  retention.
+- **Runtime load:** database CPU and I/O, worker memory, API latency, and error
+  rate.
+- **File behavior:** representative old downloads and a new upload plus download.
+- **Completion:** campaign state, failed items, and final ledger counts.
+- **Recovery:** result of restoring the current backup.
+
+A fast workstation or local SSD is useful for finding defects, but it is not a
+duration forecast for another PostgreSQL host. Compare the restored test with
+the target host's storage, WAL, replica, and backup configuration.
+
 ## Run and monitor
 
 The application can serve frozen legacy content while the worker runs, waits,
 or is paused. New uploads use the selected object-content target immediately;
 they do not write back to legacy columns.
 
+<Steps>
+### Read the worker status
+
 ```bash
 docker compose logs --since=30m worker \
   | grep "File/Icon legacy backfill"
 ```
 
-| State                      | Meaning and next action                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------- |
-| `active`                   | Admission or adoption is progressing. Monitor disk, WAL, I/O, errors, and API latency.      |
-| `waiting_for_capacity`     | Eneo is available. Check the estimate and disk, then acknowledge or add capacity.           |
-| `waiting_for_object_store` | This release cannot adopt legacy bytes directly to object storage. Follow the choice below. |
-| `halted`                   | An item or destination needs operator action. Fix the logged cause before resuming.         |
-| `complete`                 | Every item is adopted or safely cancelled because its owner was deleted.                    |
+Use the same Compose files and profile as the deployment. The reference service
+is named `worker`; split deployments may call it the maintenance worker.
+
+`waiting_for_capacity` means the application is available while the worker waits
+for the exact acknowledgement. `waiting_for_object_store` means this release
+cannot adopt legacy bytes directly to the selected remote target.
+
+### Check ledger progress
+
+Run this SQL in `psql` on demand. It reads ledger metadata, not payload bytes:
+
+```sql
+SELECT count(*) FILTER (WHERE state = 'pending') AS pending_items,
+       count(*) FILTER (WHERE state = 'ready') AS ready_items,
+       count(*) FILTER (WHERE state = 'leased') AS leased_items,
+       count(*) FILTER (WHERE state = 'failed') AS failed_items,
+       count(*) FILTER (WHERE state = 'done') AS done_items,
+       count(*) FILTER (WHERE state = 'cancelled') AS cancelled_items,
+       round(
+           100.0 * count(*) FILTER (
+               WHERE state IN ('done', 'cancelled')
+           ) / nullif(count(*), 0),
+           1
+       ) AS finished_percent,
+       pg_size_pretty(
+           coalesce(sum(payload_size_estimate) FILTER (
+               WHERE state NOT IN ('done', 'cancelled')
+           ), 0)::bigint
+       ) AS estimated_remaining_size
+FROM file_icon_backfill_items;
+```
+
+During admission, `pending` decreases and `ready` increases. During adoption,
+`ready` decreases and `done` increases. A persistent `failed` state needs
+operator action.
+
+### Check the campaign decision
+
+```sql
+SELECT target_kind,
+       state,
+       halt_reason,
+       capacity_admitted_bytes,
+       resume_revision
+FROM file_icon_backfill_campaign;
+```
+
+No campaign row while the worker waits for capacity or object storage is normal;
+those pre-campaign states are reported in the worker log.
+
+- **`active`:** admission or adoption is progressing. Monitor disk, WAL, I/O,
+  errors, and API latency.
+- **`halted`:** an item or destination needs operator action. Fix the logged cause
+  before resuming.
+- **`complete`:** every item is adopted or safely cancelled because its owner was
+  deleted.
+
+</Steps>
 
 For `waiting_for_object_store`, either wait for a compatible release or select
 **PostgreSQL inline** in **Admin > Storage**. Selecting inline also changes the
@@ -247,12 +423,9 @@ Keep inline selected until the campaign is `complete`; changing the target
 earlier halts the campaign. Then reselect object storage and queue verified
 moves for content that should be remote.
 
-After a campaign starts, inspect its durable state with:
-
-```sql
-SELECT target_kind, state, halt_reason, resume_revision, resume_cursor_id
-FROM file_icon_backfill_campaign;
-```
+Treat `campaign.state = 'complete'` together with no `pending`, `ready`,
+`leased`, or `failed` item as completion evidence. The worker may emit no new
+backfill log after completion, so an empty grep result is not proof of failure.
 
 For full remaining-count and failed-item queries, use the [detailed deployment
 runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#upgrade-and-rollback).
@@ -262,6 +435,8 @@ runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CON
 ### Pause or respond to low disk
 
 Stop the worker first:
+
+Use the same Compose files and profile as the deployment:
 
 ```bash
 docker compose stop worker
@@ -339,6 +514,26 @@ technical debt that caused the difficult upgrade.
 Yes. It adopts payloads written by older releases. New uploads already use
 object content and do not enter the legacy columns. A later explicit move from
 PostgreSQL to object storage is a different, verified storage operation.
+
+### Why is the automatic threshold 5 GiB, and can we change it?
+
+The threshold limits how much unacknowledged PostgreSQL growth a deployment can
+start. It is not a free-space detector or a claim that 10 GiB requires 25 GiB
+free. The benchmark measured about 10.4 GiB of persistent growth for 10 GiB of
+payload; its 11 GiB of generated WAL was written over time and was not a measured
+simultaneous disk peak.
+
+The default remains 5 GiB because Eneo cannot know whether the database volume
+also retains WAL for replication or archiving. Raising the default to 10 GiB
+would let that copy start without an operator checking the deployment. The wait
+above 5 GiB is therefore a capacity acknowledgement, not an error or a storage
+limit.
+
+For a set above 5 GiB, keep the automatic threshold unchanged and set the exact
+`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` after checking the host. Set the
+automatic threshold to zero only when every non-empty copy must wait for an
+operator. Keep other tuning in the [detailed deployment
+runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#upgrade-and-rollback).
 
 ### Does the application stay available?
 
