@@ -956,6 +956,48 @@ export function initFlows(client) {
         }
       },
 
+      transcriptCorrections: {
+        /**
+         * List stored transcript corrections for a run, one entry per
+         * transcription step that has corrections. Entries flagged `stale`
+         * anchor to a transcript that has since been replaced and must not
+         * be applied.
+         *
+         * @param {{flowId: string, runId: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptCorrections[]>}
+         */
+        list: async ({ flowId, runId }) => {
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/", {
+            method: "get",
+            params: { path: { id: flowId, run_id: runId } }
+          });
+        },
+
+        /**
+         * Replace one transcription step's correction list. Send the full
+         * `occurrences` list; `expectedRevision` is the compare token
+         * (null creates the step's first set, an empty list clears it).
+         *
+         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[]}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptCorrections>}
+         */
+        save: async ({ flowId, runId, stepId, expectedRevision = null, occurrences }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/",
+            {
+              method: "patch",
+              params: { path: { id: flowId, run_id: runId, step_id: stepId } },
+              requestBody: {
+                "application/json": {
+                  expected_revision: expectedRevision,
+                  occurrences
+                }
+              }
+            }
+          );
+        }
+      },
+
       /**
        * Generate signed URL for a flow run artifact download.
        * Uses tenant-scoped access so any user with flow access can download artifacts.

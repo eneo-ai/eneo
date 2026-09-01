@@ -30,6 +30,11 @@
     segmentsFromMetadata,
     type TranscriptSegment
   } from "$lib/features/flows/transcriptSegments";
+  import TranscriptCorrectionReviewDialog from "./TranscriptCorrectionReviewDialog.svelte";
+  import {
+    createTranscriptCorrectionsController,
+    type TranscriptCorrectionsController
+  } from "$lib/features/flows/transcriptCorrectionsController.svelte";
 
   let {
     runId,
@@ -54,9 +59,35 @@
   // The transcription step's stored segments and audio, loaded once per
   // checkpoint so the reviewer can listen while naming speakers.
   let storedSegments = $state<TranscriptSegment[] | null>(null);
+  let transcriptStepId = $state<string | null>(null);
   let audioFileIds = $state<string[]>([]);
   let audioContextPending = $state(true);
   let audioContextError: string | null = $state(null);
+
+  // Text corrections share the run-scoped store with the finished-run
+  // evidence view, so a fix made during review survives into the final run.
+  let correctionsController = $state<TranscriptCorrectionsController | null>(null);
+
+  // Created imperatively, never in an $effect: prop reads inside a reactive
+  // context chain into the run-history polling signals, which would re-create
+  // the controller (and refetch corrections) on every 5s poll tick.
+  function setupCorrectionsController() {
+    const segments = storedSegments;
+    const stepId = transcriptStepId;
+    if (!segments || !stepId) {
+      correctionsController = null;
+      return;
+    }
+    const controller = createTranscriptCorrectionsController({
+      eneo,
+      flowId,
+      runId,
+      stepId,
+      rawSegments: segments
+    });
+    correctionsController = controller;
+    void controller.load();
+  }
   const isSpeakerMapping = $derived(isSpeakerMappingCheckpoint(checkpoint?.current_payload_json));
   // Stored segments carry raw labels, so the reviewer's draft names apply
   // live; the rendered text already has the saved names baked in.
@@ -168,7 +199,9 @@
         ? transcription.file_ids.filter((id): id is string => typeof id === "string")
         : (sourceStep?.runtime_input_file_ids ?? []);
       storedSegments = segmentsFromMetadata(transcription);
+      transcriptStepId = sourceStep?.step_id ?? null;
       audioFileIds = fileIds;
+      setupCorrectionsController();
     } catch (error) {
       console.error("Failed to load transcript context", error);
       audioContextError = getFlowRuntimeErrorMessage(
@@ -493,6 +526,22 @@
               </Alert.Action>
             </Alert.Root>
           {/if}
+          {#if correctionsController?.error}
+            <Alert.Root variant="destructive">
+              <Alert.Description class="text-xs">
+                {correctionsController.error}
+              </Alert.Description>
+            </Alert.Root>
+          {/if}
+          {#if correctionsController && correctionsController.staleCount > 0}
+            <Alert.Root>
+              <Alert.Description class="text-xs">
+                {m.flow_run_transcript_corrections_stale({
+                  count: String(correctionsController.staleCount)
+                })}
+              </Alert.Description>
+            </Alert.Root>
+          {/if}
           {#key checkpoint.id}
             <TranscriptPlayer
               segments={transcriptSegments}
@@ -501,6 +550,15 @@
               {speakerNames}
               textFallback={draftValueText}
               audioPending={audioContextPending}
+              editable={canDecide &&
+                storedSegments !== null &&
+                (correctionsController?.ready ?? false)}
+              corrections={correctionsController?.occurrences ?? []}
+              busy={(correctionsController?.saving ?? false) || activeAction !== null}
+              onSaveLine={correctionsController ? correctionsController.saveLine : undefined}
+              onRevertLine={correctionsController
+                ? (segmentIndex) => void correctionsController?.revertLine(segmentIndex)
+                : undefined}
               class="lg:min-h-80"
             />
           {/key}
@@ -591,4 +649,17 @@
       </Button>
     </div>
   </div>
+{/if}
+
+{#if correctionsController?.dialog && storedSegments}
+  <TranscriptCorrectionReviewDialog
+    open={true}
+    originalText={correctionsController.dialog.originalText}
+    correctedText={correctionsController.dialog.correctedText}
+    candidates={correctionsController.dialog.candidates}
+    segments={storedSegments}
+    busy={correctionsController.saving}
+    onConfirm={(selected) => void correctionsController?.confirmSuggestions(selected)}
+    onSkip={() => void correctionsController?.dismissSuggestions()}
+  />
 {/if}

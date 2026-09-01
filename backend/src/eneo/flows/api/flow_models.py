@@ -2458,3 +2458,121 @@ class FlowRunEvidenceExportResponse(BaseModel):
             "FlowRunEvidenceResponse for the typed read-model endpoint."
         )
     )
+
+
+FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE: dict[str, Any] = {
+    "segment_index": 4,
+    "char_start": 27,
+    "char_end": 33,
+    "original": "sugary",
+    "corrected": "Çagri",
+}
+
+FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "occurrences": [FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE],
+    "revision": 2,
+    "stale": False,
+    "edited_by_principal_type": "user",
+    "created_at": "2026-03-17T10:12:00Z",
+    "updated_at": "2026-03-17T10:14:30Z",
+}
+
+FLOW_TRANSCRIPT_CORRECTIONS_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
+    "expected_revision": 1,
+    "occurrences": [FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE],
+}
+
+
+class TranscriptCorrectionOccurrencePublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE},
+    )
+
+    segment_index: int = Field(
+        ge=0,
+        description=(
+            "Index into the transcription step's stored `transcription.segments` "
+            "array (the same array the steps listing returns)."
+        ),
+    )
+    char_start: int = Field(
+        ge=0,
+        description="Inclusive character offset into the segment's `text`.",
+    )
+    char_end: int = Field(
+        ge=1,
+        description="Exclusive character offset; must be greater than `char_start`.",
+    )
+    original: str = Field(
+        min_length=1,
+        description=(
+            "The exact text currently at `[char_start, char_end)`. A mismatch "
+            "returns `400` with code "
+            "`flow_transcript_corrections_invalid_occurrence`."
+        ),
+    )
+    corrected: str = Field(
+        description="Replacement text; an empty string deletes the span.",
+    )
+
+    @model_validator(mode="after")
+    def validate_char_range(self) -> Self:
+        if self.char_end <= self.char_start:
+            raise ValueError("char_end must be greater than char_start")
+        return self
+
+
+class FlowTranscriptCorrectionsPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE},
+    )
+
+    flow_run_id: UUID
+    step_id: UUID
+    occurrences: list[TranscriptCorrectionOccurrencePublic]
+    revision: int = Field(
+        description=(
+            "Compare token for the next edit. Send it back as "
+            "`expected_revision`; a stale value returns `400` with code "
+            "`flow_transcript_corrections_stale_revision`."
+        ),
+    )
+    stale: bool = Field(
+        description=(
+            "True when the step's stored transcript changed after these "
+            "corrections were written (re-run or re-transcription). Stale "
+            "corrections anchor to text that no longer exists and must not be "
+            "applied."
+        ),
+    )
+    edited_by_principal_type: PrincipalType
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowTranscriptCorrectionsEditRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_TRANSCRIPT_CORRECTIONS_EDIT_REQUEST_EXAMPLE},
+    )
+
+    expected_revision: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Revision observed by the editor, or null when creating the step's "
+            "first correction set. Stale values return `400` with code "
+            "`flow_transcript_corrections_stale_revision`."
+        ),
+    )
+    occurrences: list[TranscriptCorrectionOccurrencePublic] = Field(
+        max_length=2000,
+        description=(
+            "The full replacement list for this step (replace-style). An empty "
+            "list clears the step's corrections while keeping the revision "
+            "history monotonic."
+        ),
+    )

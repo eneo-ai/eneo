@@ -1205,6 +1205,27 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Allow only DOCX files for template upload.",
         user_action="Choose a DOCX file and try again.",
     ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The step's transcript corrections changed after the caller loaded them.",
+        consumer_action="Refetch the corrections and retry with the latest revision.",
+        user_action="Reload the transcript and try the correction again.",
+    ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_SEGMENTS_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The step stored no structured transcript lines to anchor corrections to.",
+        consumer_action="Offer the transcript read-only when the step metadata has no segments.",
+        user_action="This transcript cannot be corrected because it has no structured lines.",
+    ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="A submitted correction does not match the stored transcript text.",
+        consumer_action="Rebuild the occurrence anchors from the current segments and retry.",
+        user_action="Reload the transcript and apply the correction again.",
+    ),
     FlowApiErrorCode.TEMPLATE_MISSING_CONTENT: _entry(
         category="Template asset",
         surfaced_through="API error response",

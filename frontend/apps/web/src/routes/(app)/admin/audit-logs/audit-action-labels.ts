@@ -533,6 +533,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_review_checkpoint_edited,
     description: m.audit_action_flow_run_review_checkpoint_edited_description
   },
+  flow_run_transcript_corrections_edited: {
+    name: m.audit_action_flow_run_transcript_corrections_edited,
+    description: m.audit_action_flow_run_transcript_corrections_edited_description
+  },
   flow_run_review_checkpoint_approved: {
     name: m.audit_action_flow_run_review_checkpoint_approved,
     description: m.audit_action_flow_run_review_checkpoint_approved_description

@@ -2320,3 +2320,89 @@ class BuilderPlans(BasePublic):
             name="ck_builder_plans_status",
         ),
     )
+
+
+class FlowTranscriptCorrections(BasePublic):
+    """Stores non-destructive transcript corrections per transcription step result. Writer: FlowTranscriptCorrectionsRepository. Purpose: keep user-confirmed char-range replacements applied on read, never rewriting the stored transcript."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_transcript_corrections_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_transcript_corrections_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    occurrences_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    revision: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    schema_version: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    segments_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    edited_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="RESTRICT",
+            name="fk_transcript_corrections_edited_by_user",
+        ),
+        nullable=True,
+    )
+    edited_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="RESTRICT",
+            name="fk_transcript_corrections_edited_by_service",
+        ),
+        nullable=True,
+    )
+    edited_by_principal_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_flow_transcript_corrections_revision",
+        ),
+        CheckConstraint(
+            "schema_version >= 1",
+            name="ck_flow_transcript_corrections_schema_version",
+        ),
+        CheckConstraint(
+            "("
+            "edited_by_principal_type = 'user' "
+            "AND edited_by_user_id IS NOT NULL "
+            "AND edited_by_service_id IS NULL"
+            ") OR ("
+            "edited_by_principal_type = 'service_key' "
+            "AND edited_by_user_id IS NULL "
+            "AND edited_by_service_id IS NOT NULL"
+            ")",
+            name="ck_flow_transcript_corrections_editor_principal",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_transcript_corrections_run_tenant",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            name="uq_flow_transcript_corrections_run_step",
+        ),
+    )

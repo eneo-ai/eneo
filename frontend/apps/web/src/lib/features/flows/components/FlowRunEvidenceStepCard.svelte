@@ -16,7 +16,9 @@
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import TranscriptPlayer, { type SignedAudio } from "./TranscriptPlayer.svelte";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import { parseTranscript, type TranscriptSegment } from "$lib/features/flows/transcriptSegments";
+  import type { TranscriptCorrectionsController } from "$lib/features/flows/transcriptCorrectionsController.svelte";
   import {
     isReviewPolicyRunErrorRelevantForStep,
     type FlowReviewPolicyErrorStep
@@ -48,6 +50,8 @@
   export type FlowRunTranscriptContext = {
     fileIds: string[];
     segments: TranscriptSegment[] | null;
+    /** The transcription step the segments (and any corrections) anchor to. */
+    stepId: string | null;
     getAudioUrl: (fileIndex: number) => Promise<SignedAudio>;
   };
 
@@ -65,6 +69,7 @@
     runError = null,
     reviewPolicyDefinitionSteps = [],
     transcriptContext = null,
+    correctionsController = null,
     copiedKey,
     expanded,
     panelId,
@@ -90,6 +95,8 @@
     runError?: FlowRunError | null;
     reviewPolicyDefinitionSteps?: readonly FlowReviewPolicyErrorStep[];
     transcriptContext?: FlowRunTranscriptContext | null;
+    /** Shared transcript-corrections lifecycle; null disables editing. */
+    correctionsController?: TranscriptCorrectionsController | null;
     copiedKey: string | null;
     expanded: boolean;
     panelId: string;
@@ -254,12 +261,36 @@
             {/if}
 
             {#if transcriptSegments && transcriptContext && !hasResultFiles}
+              {#if correctionsController?.error}
+                <Alert.Root variant="destructive" class="mt-1">
+                  <Alert.Description class="text-xs">
+                    {correctionsController.error}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
+              {#if correctionsController && correctionsController.staleCount > 0}
+                <Alert.Root class="mt-1">
+                  <Alert.Description class="text-xs">
+                    {m.flow_run_transcript_corrections_stale({
+                      count: String(correctionsController.staleCount)
+                    })}
+                  </Alert.Description>
+                </Alert.Root>
+              {/if}
               <TranscriptPlayer
                 segments={transcriptSegments}
                 fileCount={transcriptContext.fileIds.length}
                 getAudioUrl={transcriptContext.getAudioUrl}
                 speakerNames={transcriptSpeakerNames}
                 textFallback={outputText}
+                editable={transcriptContext.segments !== null &&
+                  (correctionsController?.ready ?? false)}
+                corrections={correctionsController?.occurrences ?? []}
+                busy={correctionsController?.saving ?? false}
+                onSaveLine={correctionsController ? correctionsController.saveLine : undefined}
+                onRevertLine={correctionsController
+                  ? (segmentIndex) => void correctionsController?.revertLine(segmentIndex)
+                  : undefined}
                 class="mt-1"
               />
             {:else if result.output_payload_json.text && !result.output_payload_json.structured && !hasResultFiles}

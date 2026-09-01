@@ -30,6 +30,11 @@
     type FlowRunTranscriptContext
   } from "./FlowRunEvidenceStepCard.svelte";
   import { segmentsFromMetadata } from "$lib/features/flows/transcriptSegments";
+  import TranscriptCorrectionReviewDialog from "./TranscriptCorrectionReviewDialog.svelte";
+  import {
+    createTranscriptCorrectionsController,
+    type TranscriptCorrectionsController
+  } from "$lib/features/flows/transcriptCorrectionsController.svelte";
   import type { FlowRunProgressSnapshot } from "./flowRunProgress";
   import { getReviewPolicyErrorStepsFromDefinitionSnapshot } from "$lib/features/flows/flowRuntimeErrorMapping";
 
@@ -108,6 +113,7 @@
       loadError = true;
     }
     loading = false;
+    setupCorrectionsController();
   });
 
   $effect(() => {
@@ -277,6 +283,7 @@
       return {
         fileIds,
         segments: segmentsFromMetadata(transcription as Record<string, unknown>),
+        stepId: result.step_id,
         getAudioUrl: (fileIndex: number) => {
           const fileId = fileIds[fileIndex];
           if (!fileId) return Promise.reject(new Error("No audio file for this part"));
@@ -291,6 +298,29 @@
     }
     return null;
   });
+
+  // One corrections controller per loaded transcript. Created imperatively,
+  // never in an $effect: prop reads inside a reactive context chain into
+  // polling signals, which would re-create the controller (and refetch
+  // corrections) on every poll tick.
+  let correctionsController = $state<TranscriptCorrectionsController | null>(null);
+
+  function setupCorrectionsController() {
+    const context = transcriptContext;
+    if (!context?.segments || !context.stepId) {
+      correctionsController = null;
+      return;
+    }
+    const controller = createTranscriptCorrectionsController({
+      eneo,
+      flowId,
+      runId,
+      stepId: context.stepId,
+      rawSegments: context.segments
+    });
+    correctionsController = controller;
+    void controller.load();
+  }
 
   function getStepTranscription(result: FlowRunStep): FlowRunTranscriptionTelemetry | null {
     const payload = result.input_payload_json;
@@ -484,6 +514,7 @@
         runError={evidence.run.error ?? null}
         {reviewPolicyDefinitionSteps}
         {transcriptContext}
+        {correctionsController}
         {copiedKey}
         expanded={expandedSteps.includes(result.step_order)}
         panelId={getStepPanelId(result.step_order)}
@@ -498,4 +529,17 @@
       />
     {/each}
   </div>
+{/if}
+
+{#if correctionsController?.dialog && transcriptContext?.segments}
+  <TranscriptCorrectionReviewDialog
+    open={true}
+    originalText={correctionsController.dialog.originalText}
+    correctedText={correctionsController.dialog.correctedText}
+    candidates={correctionsController.dialog.candidates}
+    segments={transcriptContext.segments}
+    busy={correctionsController.saving}
+    onConfirm={(selected) => void correctionsController?.confirmSuggestions(selected)}
+    onSkip={() => void correctionsController?.dismissSuggestions()}
+  />
 {/if}

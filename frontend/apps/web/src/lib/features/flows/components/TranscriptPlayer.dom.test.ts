@@ -146,3 +146,77 @@ describe("TranscriptPlayer", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 });
+
+describe("TranscriptPlayer editing", () => {
+  const EDIT_LABEL = /Redigera raden vid|Edit the line at/;
+
+  it("offers no edit affordance unless editable", () => {
+    render(TranscriptPlayer, {
+      props: { segments: parseTranscript(TRANSCRIPT), getAudioUrl: signed() }
+    });
+
+    expect(screen.queryByRole("button", { name: EDIT_LABEL })).toBeNull();
+  });
+
+  it("swaps the line into a textarea and cancels on Escape", async () => {
+    render(TranscriptPlayer, {
+      props: {
+        segments: parseTranscript(TRANSCRIPT),
+        getAudioUrl: signed(),
+        editable: true,
+        onSaveLine: vi.fn(async () => true)
+      }
+    });
+
+    await fireEvent.click(screen.getAllByRole("button", { name: EDIT_LABEL })[1]);
+    const textarea = screen.getByRole("textbox", { name: EDIT_LABEL }) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("Tack så mycket.");
+
+    await fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: EDIT_LABEL })).toBeNull();
+  });
+
+  it("commits the edited text through onSaveLine and closes on success", async () => {
+    const onSaveLine = vi.fn(async () => true);
+    render(TranscriptPlayer, {
+      props: {
+        segments: parseTranscript(TRANSCRIPT),
+        getAudioUrl: signed(),
+        editable: true,
+        onSaveLine
+      }
+    });
+
+    await fireEvent.click(screen.getAllByRole("button", { name: EDIT_LABEL })[1]);
+    const textarea = screen.getByRole("textbox", { name: EDIT_LABEL }) as HTMLTextAreaElement;
+    await fireEvent.input(textarea, { target: { value: "Tack så hemskt mycket." } });
+    await fireEvent.click(screen.getByRole("button", { name: /Spara|Save/ }));
+
+    expect(onSaveLine).toHaveBeenCalledWith(1, "Tack så hemskt mycket.");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: EDIT_LABEL })).toBeNull());
+  });
+
+  it("overlays corrections on the raw text and reverts through onRevertLine", async () => {
+    const onRevertLine = vi.fn();
+    render(TranscriptPlayer, {
+      props: {
+        segments: parseTranscript(TRANSCRIPT),
+        getAudioUrl: signed(),
+        editable: true,
+        corrections: [
+          { segment_index: 0, char_start: 0, char_end: 3, original: "Hej", corrected: "Tja" }
+        ],
+        onSaveLine: vi.fn(async () => true),
+        onRevertLine
+      }
+    });
+
+    expect(screen.getByText(/Tja och välkomna/)).toBeTruthy();
+    const revert = screen.getByRole("button", {
+      name: /Ångra rättningen|Undo the correction/
+    });
+    await fireEvent.click(revert);
+
+    expect(onRevertLine).toHaveBeenCalledWith(0);
+  });
+});

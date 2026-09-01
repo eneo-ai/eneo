@@ -152,6 +152,13 @@ class FlowApiErrorCode(str, Enum):
     REVIEW_ALREADY_RESUMED = "flow_review_already_resumed"
     REVIEW_REJECTED = "flow_review_rejected"
     REVIEW_CANCELLED = "flow_review_cancelled"
+    TRANSCRIPT_CORRECTIONS_STALE_REVISION = "flow_transcript_corrections_stale_revision"
+    TRANSCRIPT_CORRECTIONS_SEGMENTS_UNAVAILABLE = (
+        "flow_transcript_corrections_segments_unavailable"
+    )
+    TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE = (
+        "flow_transcript_corrections_invalid_occurrence"
+    )
     REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT = "flow_review_open_active_conflict_invariant"
     REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT = (
         "flow_review_open_step_result_incomplete_invariant"

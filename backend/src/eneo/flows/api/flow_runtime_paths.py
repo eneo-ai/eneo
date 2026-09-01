@@ -50,6 +50,13 @@ FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH: Final[str] = (
     "/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"
 )
 
+FLOW_RUN_TRANSCRIPT_CORRECTIONS_PATH: Final[str] = (
+    "/{id}/runs/{run_id}/transcript-corrections/"
+)
+FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH: Final[str] = (
+    "/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/"
+)
+
 FLOW_RUN_EVIDENCE_PATH: Final[str] = "/{id}/runs/{run_id}/evidence/"
 FLOW_RUN_PROVIDER_CALLS_PATH: Final[str] = "/{id}/runs/{run_id}/provider-calls/"
 FLOW_RUN_EVIDENCE_EXPORT_PATH: Final[str] = "/{id}/runs/{run_id}/evidence/export"
@@ -232,6 +239,23 @@ class FlowRuntimePathsPublic(BaseModel):
             "result's `runtime_input_file_ids` and send a SignedURLRequest body."
         )
     )
+    transcript_corrections_template: str = Field(
+        description=(
+            "GET template for listing stored transcript corrections on a run, one "
+            "entry per transcription step that has corrections. Replace `{run_id}` "
+            "with the id returned by create_run. Entries flagged `stale` anchor to "
+            "a transcript that has since been replaced and must not be applied."
+        )
+    )
+    edit_transcript_corrections_template: str = Field(
+        description=(
+            "PATCH template for replacing the transcript corrections of one "
+            "transcription step. Replace `{run_id}` and `{step_id}` with values "
+            "from the steps listing, then send `expected_revision` (null to "
+            "create) and the full `occurrences` list; an empty list clears the "
+            "step's corrections."
+        )
+    )
 
 
 def _flow_runtime_public_schema_extra(schema: JsonDict) -> None:
@@ -369,6 +393,16 @@ def build_flow_runtime_paths(
         ),
         input_file_signed_url_template=_flow_path(
             FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
+            flow_id=flow_id_value,
+            api_prefix=api_prefix,
+        ),
+        transcript_corrections_template=_flow_path(
+            FLOW_RUN_TRANSCRIPT_CORRECTIONS_PATH,
+            flow_id=flow_id_value,
+            api_prefix=api_prefix,
+        ),
+        edit_transcript_corrections_template=_flow_path(
+            FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH,
             flow_id=flow_id_value,
             api_prefix=api_prefix,
         ),

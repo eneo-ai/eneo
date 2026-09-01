@@ -1,6 +1,8 @@
 <script lang="ts">
   import { IconPlay } from "@eneo/icons/play";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import PencilLine from "lucide-svelte/icons/pencil-line";
+  import Undo2 from "lucide-svelte/icons/undo-2";
   import { untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -13,6 +15,10 @@
     speakerColorIndex,
     type TranscriptSegment
   } from "$lib/features/flows/transcriptSegments";
+  import {
+    applyTextCorrections,
+    type CorrectionOccurrence
+  } from "$lib/features/flows/transcriptCorrections";
 
   export type SignedAudio = { url: string; expires_at: number };
 
@@ -23,6 +29,11 @@
     speakerNames = {},
     textFallback = "",
     audioPending = false,
+    editable = false,
+    corrections = [],
+    busy = false,
+    onSaveLine,
+    onRevertLine,
     class: className = ""
   }: {
     /** Transcript lines in time; empty when the transcript has no timestamps. */
@@ -37,6 +48,16 @@
     textFallback?: string;
     /** True while the caller is still finding out which audio files exist. */
     audioPending?: boolean;
+    /** Offers per-line editing; the caller owns saving through onSaveLine. */
+    editable?: boolean;
+    /** Stored corrections, applied as an overlay on the raw segment text. */
+    corrections?: readonly CorrectionOccurrence[];
+    /** Disables edit controls while the caller is saving. */
+    busy?: boolean;
+    /** Commits one edited line; resolve true to close the line's editor. */
+    onSaveLine?: (segmentIndex: number, editedText: string) => Promise<boolean>;
+    /** Drops the stored corrections of one line. */
+    onRevertLine?: (segmentIndex: number) => void;
     class?: string;
   } = $props();
 
@@ -72,7 +93,11 @@
   // resolves late would otherwise swap the source under a playing track.
   let loadGeneration = 0;
 
-  const shown = $derived(applySpeakerNames(segments, speakerNames));
+  // Corrections rewrite text, speaker names rewrite labels; the overlays are
+  // orthogonal and compose. The raw `segments` prop is never mutated.
+  const applied = $derived(applyTextCorrections(segments, corrections));
+  const shown = $derived(applySpeakerNames(applied.segments, speakerNames));
+  const correctedFrom = $derived(applied.correctedFrom);
   const totalFiles = $derived(Math.max(fileCount, countFiles(segments)));
   const hasSegments = $derived(shown.length > 0);
   const withHours = $derived(duration >= 3600 || shown.some((segment) => segment.end >= 3600));
@@ -155,6 +180,42 @@
     }
     audioEl.currentTime = segment.start;
     void audioEl.play().catch(markPlayFailure);
+  }
+
+  let editingIndex = $state(-1);
+  let draftText = $state("");
+
+  function startEdit(segment: TranscriptSegment) {
+    editingIndex = segment.index;
+    draftText = applied.segments[segment.index]?.text ?? segment.text;
+    // The list must not scroll away under an open editor while audio plays.
+    follow = false;
+  }
+
+  function cancelEdit() {
+    editingIndex = -1;
+    draftText = "";
+  }
+
+  async function commitEdit(segmentIndex: number) {
+    if (!onSaveLine) return;
+    const accepted = await onSaveLine(segmentIndex, draftText);
+    if (accepted) cancelEdit();
+  }
+
+  function onEditKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelEdit();
+    } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      if (editingIndex >= 0) void commitEdit(editingIndex);
+    }
+  }
+
+  function focusTextarea(node: HTMLTextAreaElement) {
+    node.focus();
+    node.setSelectionRange(node.value.length, node.value.length);
   }
 
   function selectFile(fileIndex: number) {
@@ -396,44 +457,130 @@
               {m.flow_run_transcript_part({ n: String(segment.fileIndex + 1) })}
             </li>
           {/if}
-          <li>
-            <button
-              type="button"
-              data-segment-index={segment.index}
-              class="hover:bg-hover-dimmer focus-visible:ring-accent-default flex w-full items-start gap-2 rounded-md border-l-4 border-transparent px-2 py-1.5 text-left text-sm leading-relaxed transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:hover:bg-transparent {segment.index ===
-              activeIndex
-                ? 'border-accent-default bg-accent-dimmer ring-accent-default/40 ring-1 ring-inset'
-                : ''}"
-              aria-current={segment.index === activeIndex ? "true" : undefined}
-              disabled={!seekable}
-              title={m.flow_run_transcript_seek_to({ time: formatClock(segment.start, withHours) })}
-              onclick={() => seekToSegment(segment)}
-            >
-              <span
-                class="mt-0.5 w-14 shrink-0 text-xs tabular-nums sm:w-[4.5rem] {segment.index ===
-                activeIndex
-                  ? 'text-accent-stronger font-semibold'
-                  : 'text-muted'}"
+          <li class="flex items-start gap-1">
+            {#if editable && editingIndex === segment.index}
+              <div
+                class="border-accent-default/40 min-w-0 flex-1 rounded-md border px-2 py-1.5"
+                data-segment-index={segment.index}
               >
-                {formatClock(segment.start, withHours)}
-              </span>
-              <span class="min-w-0 flex-1">
-                {#if segment.speaker}
-                  <span
-                    class="mr-1.5 inline-block rounded px-1.5 py-px align-baseline text-xs font-semibold {speakerClass(
-                      segment.speaker
-                    )}"
+                <div class="text-muted mb-1 flex items-center gap-2 text-xs">
+                  <span class="tabular-nums">{formatClock(segment.start, withHours)}</span>
+                  {#if segment.speaker}
+                    <span
+                      class="rounded px-1.5 py-px font-semibold {speakerClass(segment.speaker)}"
+                    >
+                      {segment.speaker}
+                    </span>
+                  {/if}
+                </div>
+                <textarea
+                  bind:value={draftText}
+                  use:focusTextarea
+                  class="border-default bg-primary focus-visible:ring-accent-default min-h-16 w-full resize-y rounded-md border px-2 py-1.5 text-sm leading-relaxed focus-visible:ring-2 focus-visible:outline-none"
+                  spellcheck="false"
+                  aria-label={m.flow_run_transcript_edit_line({
+                    time: formatClock(segment.start, withHours)
+                  })}
+                  onkeydown={onEditKeydown}></textarea>
+                <div class="mt-1 flex justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-7 text-xs"
+                    disabled={busy}
+                    onclick={cancelEdit}
                   >
-                    {segment.speaker}
-                  </span>
-                {/if}
+                    {m.cancel()}
+                  </Button>
+                  <Button
+                    size="sm"
+                    class="h-7 text-xs"
+                    disabled={busy}
+                    onclick={() => void commitEdit(segment.index)}
+                  >
+                    {busy ? m.saving() : m.save()}
+                  </Button>
+                </div>
+              </div>
+            {:else}
+              <button
+                type="button"
+                data-segment-index={segment.index}
+                class="hover:bg-hover-dimmer focus-visible:ring-accent-default flex min-w-0 flex-1 items-start gap-2 rounded-md border-l-4 border-transparent px-2 py-1.5 text-left text-sm leading-relaxed transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:hover:bg-transparent {segment.index ===
+                activeIndex
+                  ? 'border-accent-default bg-accent-dimmer ring-accent-default/40 ring-1 ring-inset'
+                  : ''}"
+                aria-current={segment.index === activeIndex ? "true" : undefined}
+                disabled={!seekable}
+                title={m.flow_run_transcript_seek_to({
+                  time: formatClock(segment.start, withHours)
+                })}
+                onclick={() => seekToSegment(segment)}
+              >
                 <span
-                  class={segment.index === activeIndex
-                    ? "text-primary font-medium"
-                    : "text-primary"}>{segment.text}</span
+                  class="mt-0.5 w-14 shrink-0 text-xs tabular-nums sm:w-[4.5rem] {segment.index ===
+                  activeIndex
+                    ? 'text-accent-stronger font-semibold'
+                    : 'text-muted'}"
                 >
-              </span>
-            </button>
+                  {formatClock(segment.start, withHours)}
+                </span>
+                <span class="min-w-0 flex-1">
+                  {#if segment.speaker}
+                    <span
+                      class="mr-1.5 inline-block rounded px-1.5 py-px align-baseline text-xs font-semibold {speakerClass(
+                        segment.speaker
+                      )}"
+                    >
+                      {segment.speaker}
+                    </span>
+                  {/if}
+                  <span
+                    class="{segment.index === activeIndex
+                      ? 'text-primary font-medium'
+                      : 'text-primary'} {correctedFrom.has(segment.index)
+                      ? 'decoration-accent-default underline decoration-dotted underline-offset-2'
+                      : ''}"
+                    title={correctedFrom.has(segment.index)
+                      ? m.flow_run_transcript_corrected_from({
+                          original: correctedFrom.get(segment.index) ?? ""
+                        })
+                      : undefined}>{segment.text}</span
+                  >
+                </span>
+              </button>
+              {#if editable}
+                <div class="flex shrink-0 items-center gap-0.5 pt-1">
+                  {#if correctedFrom.has(segment.index)}
+                    <button
+                      type="button"
+                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+                      aria-label={m.flow_run_transcript_revert({
+                        time: formatClock(segment.start, withHours)
+                      })}
+                      title={m.flow_run_transcript_corrected_from({
+                        original: correctedFrom.get(segment.index) ?? ""
+                      })}
+                      disabled={busy}
+                      onclick={() => onRevertLine?.(segment.index)}
+                    >
+                      <Undo2 class="size-3.5" />
+                    </button>
+                  {/if}
+                  <button
+                    type="button"
+                    class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+                    aria-label={m.flow_run_transcript_edit_line({
+                      time: formatClock(segment.start, withHours)
+                    })}
+                    disabled={busy}
+                    onclick={() => startEdit(segment)}
+                  >
+                    <PencilLine class="size-3.5" />
+                  </button>
+                </div>
+              {/if}
+            {/if}
           </li>
         {/each}
       </ol>

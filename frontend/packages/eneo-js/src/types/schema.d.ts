@@ -3066,7 +3066,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 169 actions with their enabled status for the modal UI.
+     * @description Retrieve all 170 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -5109,6 +5109,74 @@ export interface paths {
      *     runs.
      */
     get: operations["list_flow_run_steps"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Edit flow run transcript corrections
+     * @description Replace the transcript corrections of one transcription step.
+     *
+     *     The request is replace-style: send the full `occurrences` list for the step, with
+     *     `expected_revision` as the compare token (`null` creates the step's first set, an empty
+     *     list clears the corrections). Every occurrence must anchor exactly: `original` must equal
+     *     the current text at `[char_start, char_end)` of the addressed segment, ranges must not
+     *     overlap within a segment, and the step must have stored structured transcript lines.
+     *     Anchoring failures return `400` with code `flow_transcript_corrections_invalid_occurrence`;
+     *     steps without structured lines return `flow_transcript_corrections_segments_unavailable`.
+     *
+     *     Service-key principals may edit corrections only for runs they own (key must have
+     *     `resource_permissions.flows = write`).
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
+     */
+    patch: operations["edit_flow_run_transcript_corrections"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List flow run transcript corrections
+     * @description List stored transcript corrections for one flow run.
+     *
+     *     Corrections are non-destructive char-range replacements anchored to the structured
+     *     transcript lines a transcription step stored (`transcription.segments` in the step's
+     *     `input_payload_json` from the steps listing). The stored transcript is never rewritten:
+     *     clients apply the returned occurrences on read and can always show the `original` text
+     *     of every corrected span.
+     *
+     *     The response holds one entry per transcription step that has corrections. An entry
+     *     flagged `stale` anchors to a transcript that has since been replaced (step re-run or
+     *     re-transcription); render the notice, never apply stale occurrences.
+     *
+     *     Current content visibility follows run-detail visibility: callers can inspect their own
+     *     runs, tenant admins can inspect runs across the tenant, trusted in-space operators can
+     *     inspect content for runs in their space, and service-key principals can inspect only
+     *     their own runs.
+     */
+    get: operations["list_flow_run_transcript_corrections"];
     put?: never;
     post?: never;
     delete?: never;
@@ -10617,6 +10685,7 @@ export interface components {
       | "flow_run_review_checkpoint_resumed"
       | "flow_run_review_checkpoint_cancelled"
       | "flow_run_review_checkpoint_expired"
+      | "flow_run_transcript_corrections_edited"
       | "ai_builder_session_created"
       | "ai_builder_plan_approved"
       | "ai_builder_plan_revised"
@@ -15788,6 +15857,9 @@ export interface components {
       | "flow_review_already_resumed"
       | "flow_review_rejected"
       | "flow_review_cancelled"
+      | "flow_transcript_corrections_stale_revision"
+      | "flow_transcript_corrections_segments_unavailable"
+      | "flow_transcript_corrections_invalid_occurrence"
       | "flow_review_open_active_conflict_invariant"
       | "flow_review_open_step_result_incomplete_invariant"
       | "flow_review_open_multiple_active_checkpoints_invariant"
@@ -21488,6 +21560,11 @@ export interface components {
        */
       delete_runtime_file_template: string;
       /**
+       * Edit Transcript Corrections Template
+       * @description PATCH template for replacing the transcript corrections of one transcription step. Replace `{run_id}` and `{step_id}` with values from the steps listing, then send `expected_revision` (null to create) and the full `occurrences` list; an empty list clears the step's corrections.
+       */
+      edit_transcript_corrections_template: string;
+      /**
        * Evidence Template
        * @description GET template for rich run evidence. Service keys (`sk_`) need `resource_permissions.flows >= read` before `resource_permissions.flow_evidence` is evaluated. For own-run evidence, `flow_evidence >= read` allows view, `flow_evidence >= write` allows redacted export, and `flow_evidence = admin` allows raw export when tenant Flow evidence policy also permits it. Service keys can inspect only their own runs.
        */
@@ -21549,6 +21626,11 @@ export interface components {
        * @description GET path for the published run contract. Call this before creating a run to discover required inputs, review checkpoints, final output delivery, and the published version to pin.
        */
       run_contract: string;
+      /**
+       * Transcript Corrections Template
+       * @description GET template for listing stored transcript corrections on a run, one entry per transcription step that has corrections. Replace `{run_id}` with the id returned by create_run. Entries flagged `stale` anchor to a transcript that has since been replaced and must not be applied.
+       */
+      transcript_corrections_template: string;
       /**
        * Upload Step Runtime File Template
        * @description POST template for uploading files for a specific runtime step. Replace `{step_id}` with a step id from the run contract, then send `multipart/form-data` with the binary file in the `upload_file` field. Use the returned file id in `step_inputs[step_id].file_ids`; the same file id may be reused for other compatible runtime steps within this Flow.
@@ -21639,6 +21721,7 @@ export interface components {
      *         "cancel_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/cancel/",
      *         "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
      *         "delete_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runtime-files/{file_id}/",
+     *         "edit_transcript_corrections_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/{step_id}/transcript-corrections/",
      *         "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
      *         "export_evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/export",
      *         "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
@@ -21658,6 +21741,7 @@ export interface components {
      *           "resume_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/"
      *         },
      *         "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
+     *         "transcript_corrections_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/transcript-corrections/",
      *         "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
@@ -22482,6 +22566,89 @@ export interface components {
       template_file_id?: string | null;
       /** Template Name */
       template_name?: string | null;
+    };
+    /**
+     * FlowTranscriptCorrectionsEditRequest
+     * @example {
+     *       "expected_revision": 1,
+     *       "occurrences": [
+     *         {
+     *           "char_end": 33,
+     *           "char_start": 27,
+     *           "corrected": "Çagri",
+     *           "original": "sugary",
+     *           "segment_index": 4
+     *         }
+     *       ]
+     *     }
+     */
+    FlowTranscriptCorrectionsEditRequest: {
+      /**
+       * Expected Revision
+       * @description Revision observed by the editor, or null when creating the step's first correction set. Stale values return `400` with code `flow_transcript_corrections_stale_revision`.
+       */
+      expected_revision?: number | null;
+      /**
+       * Occurrences
+       * @description The full replacement list for this step (replace-style). An empty list clears the step's corrections while keeping the revision history monotonic.
+       */
+      occurrences: components["schemas"]["TranscriptCorrectionOccurrencePublic"][];
+    };
+    /**
+     * FlowTranscriptCorrectionsPublic
+     * @example {
+     *       "created_at": "2026-03-17T10:12:00Z",
+     *       "edited_by_principal_type": "user",
+     *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *       "occurrences": [
+     *         {
+     *           "char_end": 33,
+     *           "char_start": 27,
+     *           "corrected": "Çagri",
+     *           "original": "sugary",
+     *           "segment_index": 4
+     *         }
+     *       ],
+     *       "revision": 2,
+     *       "stale": false,
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "updated_at": "2026-03-17T10:14:30Z"
+     *     }
+     */
+    FlowTranscriptCorrectionsPublic: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      edited_by_principal_type: components["schemas"]["PrincipalType"];
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /** Occurrences */
+      occurrences: components["schemas"]["TranscriptCorrectionOccurrencePublic"][];
+      /**
+       * Revision
+       * @description Compare token for the next edit. Send it back as `expected_revision`; a stale value returns `400` with code `flow_transcript_corrections_stale_revision`.
+       */
+      revision: number;
+      /**
+       * Stale
+       * @description True when the step's stored transcript changed after these corrections were written (re-run or re-transcription). Stale corrections anchor to text that no longer exists and must not be applied.
+       */
+      stale: boolean;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
     };
     /** FormFieldChange */
     FormFieldChange: {
@@ -31505,6 +31672,43 @@ export interface components {
        * @default []
        */
       rejected_tools?: components["schemas"]["MCPServerToolPublic"][];
+    };
+    /**
+     * TranscriptCorrectionOccurrencePublic
+     * @example {
+     *       "char_end": 33,
+     *       "char_start": 27,
+     *       "corrected": "Çagri",
+     *       "original": "sugary",
+     *       "segment_index": 4
+     *     }
+     */
+    TranscriptCorrectionOccurrencePublic: {
+      /**
+       * Char End
+       * @description Exclusive character offset; must be greater than `char_start`.
+       */
+      char_end: number;
+      /**
+       * Char Start
+       * @description Inclusive character offset into the segment's `text`.
+       */
+      char_start: number;
+      /**
+       * Corrected
+       * @description Replacement text; an empty string deletes the span.
+       */
+      corrected: string;
+      /**
+       * Original
+       * @description The exact text currently at `[char_start, char_end)`. A mismatch returns `400` with code `flow_transcript_corrections_invalid_occurrence`.
+       */
+      original: string;
+      /**
+       * Segment Index
+       * @description Index into the transcription step's stored `transcription.segments` array (the same array the steps listing returns).
+       */
+      segment_index: number;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -52000,6 +52204,159 @@ export interface operations {
            *       "message": "Evidence audit logging is unavailable."
            *     }
            */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  edit_flow_run_transcript_corrections: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run. */
+        id: string;
+        /** @description Identifier of the run to mutate. */
+        run_id: string;
+        /** @description Identifier of the transcription step whose corrections should be replaced. */
+        step_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowTranscriptCorrectionsEditRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTranscriptCorrectionsPublic"];
+        };
+      };
+      /** @description Transcript corrections edit failed. Machine-readable codes are `flow_transcript_corrections_stale_revision`, `flow_transcript_corrections_segments_unavailable`, and `flow_transcript_corrections_invalid_occurrence` (whose context carries `reason` plus the offending anchor fields). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to review flows."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run or step result not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow run step result not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_run_transcript_corrections: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the requested run. */
+        id: string;
+        /** @description Identifier of the run whose corrections should be listed. */
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTranscriptCorrectionsPublic"][];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow run not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };

@@ -326,6 +326,9 @@ export type FlowRunReviewCheckpoint = components["schemas"]["FlowRunReviewCheckp
 export type FlowRunReviewCheckpointState = components["schemas"]["FlowRunReviewCheckpointState"];
 export type FlowRunReviewCheckpointResumeResponse =
   components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
+export type FlowRunTranscriptCorrections = components["schemas"]["FlowTranscriptCorrectionsPublic"];
+export type FlowTranscriptCorrectionOccurrence =
+  components["schemas"]["TranscriptCorrectionOccurrencePublic"];
 export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
 export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"> & {
   step_results: FlowRunStep[];

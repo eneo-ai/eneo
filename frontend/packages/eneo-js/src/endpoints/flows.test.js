@@ -875,3 +875,65 @@ function expectFlowPackageFile(file, expected) {
   expect(file.type).toBe(expected.type);
   expect(file.size).toBe(expected.size);
 }
+
+describe("flows transcript corrections endpoints", () => {
+  it("lists transcript corrections from the run-level route", async () => {
+    const fetch = vi.fn(async () => []);
+    const flows = initFlows({ fetch });
+
+    await flows.runs.transcriptCorrections.list({ flowId: "flow-1", runId: "run-1" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/");
+    expect(fetch.mock.calls[0][1].method).toBe("get");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", run_id: "run-1" }
+    });
+  });
+
+  it("saves transcript corrections through the step-level patch route", async () => {
+    const fetch = vi.fn(async () => ({ revision: 2 }));
+    const flows = initFlows({ fetch });
+    const occurrences = [
+      { segment_index: 0, char_start: 11, char_end: 17, original: "sugary", corrected: "Çagri" }
+    ];
+
+    await flows.runs.transcriptCorrections.save({
+      flowId: "flow-1",
+      runId: "run-1",
+      stepId: "step-1",
+      expectedRevision: 1,
+      occurrences
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/"
+    );
+    expect(fetch.mock.calls[0][1].method).toBe("patch");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", run_id: "run-1", step_id: "step-1" }
+    });
+    expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
+      expected_revision: 1,
+      occurrences
+    });
+  });
+
+  it("defaults expectedRevision to null when creating the first set", async () => {
+    const fetch = vi.fn(async () => ({ revision: 1 }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.transcriptCorrections.save({
+      flowId: "flow-1",
+      runId: "run-1",
+      stepId: "step-1",
+      occurrences: []
+    });
+
+    expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
+      expected_revision: null,
+      occurrences: []
+    });
+  });
+});
