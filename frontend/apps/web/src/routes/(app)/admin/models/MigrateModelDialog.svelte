@@ -305,10 +305,19 @@
     <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
       <div class="flex flex-col gap-5">
         <p class="text-muted-foreground text-sm">
-          {m.migrate_model_description({
-            name: sourceModel.nickname ? sourceModel.nickname : sourceModel.name
-          })}
+          {modelType === "transcriptionModel"
+            ? m.migrate_transcription_model_description({ name: labelFor(sourceModel) })
+            : m.migrate_model_description({ name: labelFor(sourceModel) })}
         </p>
+
+        {#if !sourceModel.is_org_enabled && sourceModel.provider_id != null && !sourceAlreadyMigrated}
+          <div
+            class="border-border bg-muted/30 text-muted-foreground flex items-start gap-2 rounded-lg border px-4 py-3 text-sm"
+          >
+            <Info size={16} class="mt-0.5 flex-shrink-0" aria-hidden="true" />
+            <span>{m.migrate_model_source_inactive()}</span>
+          </div>
+        {/if}
 
         {#if sourceAlreadyMigrated}
           <div
