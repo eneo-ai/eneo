@@ -22,9 +22,18 @@ from hashlib import sha256
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import numpy as np
 import pytest
 
-from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
+from eneo.embedding_models.infrastructure.adapters.base import (
+    PartialEmbeddingBatchError,
+)
+from eneo.files.chunk_embedding_list import ChunkEmbeddingList
+from eneo.worker.crawl_context import (
+    CrawlContext,
+    EmbeddingModelSpec,
+    FailureReason,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -204,103 +213,20 @@ def mock_embeddings_service():
 # =============================================================================
 
 
-class TestEmbeddingSemaphoreBehavior:
-    """Tests for the module-level embedding semaphore that limits concurrent API calls."""
+class TestEmbeddingRequestPolicy:
+    """Crawler policy is passed to the adapter that owns provider requests."""
 
     @pytest.mark.asyncio
-    async def test_semaphore_limits_concurrent_embedding_calls(
+    async def test_request_limit_and_timeout_reach_the_embedding_service(
         self, crawl_context, embedding_model_spec
     ):
-        """
-        INVARIANT: Embedding semaphore must limit concurrent API calls.
-
-        Scenario: 5 pages with semaphore limit of 2
-        Expected: At most 2 embedding calls execute concurrently at any time
-        """
-        concurrent_calls = []
-        max_concurrent = 0
-        current_concurrent = 0
-
-        async def mock_get_embeddings_with_tracking(model, chunks):
-            nonlocal current_concurrent, max_concurrent
-            current_concurrent += 1
-            max_concurrent = max(max_concurrent, current_concurrent)
-            concurrent_calls.append(current_concurrent)
-            await asyncio.sleep(0.05)  # Simulate API latency
-            current_concurrent -= 1
+        async def mock_get_embeddings(model, chunks):
             return [(chunk, [0.1] * 384) for chunk in chunks]
 
-        # Create a service with tracking
         service = MagicMock()
-        service.get_embeddings = AsyncMock(
-            side_effect=mock_get_embeddings_with_tracking
-        )
-
-        # Patch the semaphore to have limit of 2
+        service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
+        container = create_mock_container(service)
         semaphore = asyncio.Semaphore(2)
-
-        page_buffer = [
-            {"url": f"https://example.com/page{i}", "content": f"Content for page {i}"}
-            for i in range(5)
-        ]
-
-        # Mock session to avoid actual DB operations
-        # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
-        mock_session = create_mock_session()
-        mock_sm = create_mock_sessionmanager(mock_session)
-
-        with (
-            patch(
-                "eneo.worker.crawl.persistence._get_embedding_semaphore",
-                return_value=semaphore,
-            ),
-            patch("eneo.database.database.sessionmanager", mock_sm),
-        ):
-            from eneo.worker.crawl_tasks import persist_batch
-
-            await persist_batch(
-                page_buffer=page_buffer,
-                ctx=crawl_context,
-                embedding_model=embedding_model_spec,
-                container=create_mock_container(service),
-            )
-
-        # Verify semaphore limited concurrency
-        assert max_concurrent <= 2, (
-            f"Semaphore should limit to 2 concurrent calls, but saw {max_concurrent}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_semaphore_released_on_embedding_exception(
-        self, crawl_context, embedding_model_spec
-    ):
-        """
-        INVARIANT: Semaphore must be released even when embedding API throws exception.
-
-        Scenario: Embedding API raises exception for page 2
-        Expected: Semaphore is released, subsequent pages can still be processed
-        """
-        call_count = 0
-
-        async def mock_get_embeddings_with_failure(model, chunks):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                raise RuntimeError("Simulated embedding API failure")
-            return [(chunk, [0.1] * 384) for chunk in chunks]
-
-        service = MagicMock()
-        service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings_with_failure)
-
-        # Use semaphore with limit 1 to ensure sequential execution
-        semaphore = asyncio.Semaphore(1)
-
-        page_buffer = [
-            {"url": f"https://example.com/page{i}", "content": f"Content for page {i}"}
-            for i in range(3)
-        ]
-
-        # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.execute = AsyncMock(return_value=create_mock_result())
         mock_sm = create_mock_sessionmanager(mock_session)
@@ -314,98 +240,190 @@ class TestEmbeddingSemaphoreBehavior:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
-                page_buffer=page_buffer,
+            success, failed, _, _ = await persist_batch(
+                page_buffer=[
+                    {
+                        "url": "https://example.com/one",
+                        "content": "First municipal page",
+                    },
+                    {
+                        "url": "https://example.com/two",
+                        "content": "Second municipal page",
+                    },
+                ],
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
-                container=create_mock_container(service),
+                container=container,
             )
 
-        # Verify all pages were attempted (semaphore was released after failure)
-        assert call_count == 3, (
-            f"All 3 pages should be attempted, but only {call_count} were tried"
+        assert success == 2
+        assert failed == 0
+        container.create_embeddings_service.assert_called_once_with(
+            request_semaphore=semaphore,
+            request_timeout_seconds=crawl_context.embedding_timeout_seconds,
         )
-        # Page 2 should have failed
-        assert failed >= 1, "At least one page should have failed"
+
+
+# =============================================================================
+# TEST CLASS: Packed Embedding Requests
+# =============================================================================
+
+
+class TestPackedEmbeddingRequests:
+    """Pages share the model-owned provider batches without changing output."""
 
     @pytest.mark.asyncio
-    async def test_semaphore_released_on_timeout(
+    async def test_small_pages_share_one_embedding_operation(
         self, crawl_context, embedding_model_spec
     ):
-        """
-        INVARIANT: Semaphore must be released when embedding times out.
-
-        Scenario: Page 2 embedding takes longer than timeout
-        Expected: Timeout occurs, semaphore released, page 3 processes normally
-        """
-        call_count = 0
-
-        async def mock_get_embeddings_with_slow_page(model, chunks):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                await asyncio.sleep(
-                    10
-                )  # Will timeout (ctx timeout is 15s, but we'll patch shorter)
-            return [(chunk, [0.1] * 384) for chunk in chunks]
+        async def mock_get_embeddings(model, chunks):
+            return [(chunk, [float(index), 0.5]) for index, chunk in enumerate(chunks)]
 
         service = MagicMock()
-        service.get_embeddings = AsyncMock(
-            side_effect=mock_get_embeddings_with_slow_page
-        )
-
-        semaphore = asyncio.Semaphore(1)
-
-        # Create context with very short timeout
-        short_timeout_ctx = CrawlContext(
-            website_id=crawl_context.website_id,
-            tenant_id=crawl_context.tenant_id,
-            tenant_slug=crawl_context.tenant_slug,
-            user_id=crawl_context.user_id,
-            attempt_id=crawl_context.attempt_id,
-            lease_owner=crawl_context.lease_owner,
-            embedding_model_id=crawl_context.embedding_model_id,
-            embedding_model_name=crawl_context.embedding_model_name,
-            embedding_model_open_source=crawl_context.embedding_model_open_source,
-            embedding_model_family=crawl_context.embedding_model_family,
-            embedding_model_dimensions=crawl_context.embedding_model_dimensions,
-            http_auth_user=None,
-            http_auth_pass=None,
-            embedding_timeout_seconds=1,  # 1 second timeout
-            max_transaction_wall_time_seconds=30,
-        )
-
-        page_buffer = [
-            {"url": f"https://example.com/page{i}", "content": f"Content for page {i}"}
-            for i in range(3)
-        ]
-
-        # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
+        service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
         mock_session = create_mock_session()
         mock_session.execute = AsyncMock(return_value=create_mock_result())
-
         mock_sm = create_mock_sessionmanager(mock_session)
 
         with (
             patch(
                 "eneo.worker.crawl.persistence._get_embedding_semaphore",
-                return_value=semaphore,
+                return_value=asyncio.Semaphore(2),
             ),
             patch("eneo.database.database.sessionmanager", mock_sm),
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
-                page_buffer=page_buffer,
-                ctx=short_timeout_ctx,
+            success, failed, persisted, _ = await persist_batch(
+                page_buffer=[
+                    {
+                        "url": f"https://example.com/page-{index}",
+                        "content": f"Distinct municipal page {index}.",
+                    }
+                    for index in range(3)
+                ],
+                ctx=crawl_context,
                 embedding_model=embedding_model_spec,
                 container=create_mock_container(service),
             )
 
-        # Page 2 timed out, but page 3 should have been attempted
-        assert call_count == 3, (
-            f"All 3 pages should be attempted after timeout, got {call_count}"
-        )
+        assert success == 3
+        assert failed == 0
+        assert persisted == [
+            "https://example.com/page-0",
+            "https://example.com/page-1",
+            "https://example.com/page-2",
+        ]
+        service.get_embeddings.assert_awaited_once()
+        assert len(service.get_embeddings.await_args.kwargs["chunks"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_timeout_publishes_only_complete_page_prefix(
+        self, crawl_context, embedding_model_spec
+    ):
+        async def fail_after_first_page(model, chunks):
+            completed = ChunkEmbeddingList()
+            completed.add(chunks[:1], [[0.25, 0.5]])
+            raise PartialEmbeddingBatchError(
+                completed=completed,
+                completed_count=1,
+                cause=TimeoutError("provider request timed out"),
+            )
+
+        service = MagicMock()
+        service.get_embeddings = AsyncMock(side_effect=fail_after_first_page)
+        mock_session = create_mock_session()
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(1),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, persisted, failures = await persist_batch(
+                page_buffer=[
+                    {
+                        "url": f"https://example.com/page-{index}",
+                        "content": f"Distinct municipal page {index}.",
+                    }
+                    for index in range(3)
+                ],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
+            )
+
+        assert success == 1
+        assert failed == 2
+        assert persisted == ["https://example.com/page-0"]
+        assert failures == {
+            FailureReason.EMBEDDING_TIMEOUT.value: [
+                "https://example.com/page-1",
+                "https://example.com/page-2",
+            ]
+        }
+        assert mock_session.begin_nested.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_incomplete_page_is_never_published(
+        self, crawl_context, embedding_model_spec
+    ):
+        async def fail_inside_first_page(model, chunks):
+            assert len(chunks) > 1
+            completed = ChunkEmbeddingList()
+            completed.add(chunks[:1], [[0.25, 0.5]])
+            raise PartialEmbeddingBatchError(
+                completed=completed,
+                completed_count=1,
+                cause=RuntimeError("provider unavailable"),
+            )
+
+        service = MagicMock()
+        service.get_embeddings = AsyncMock(side_effect=fail_inside_first_page)
+        mock_session = create_mock_session()
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(1),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, persisted, failures = await persist_batch(
+                page_buffer=[
+                    {
+                        "url": "https://example.com/large",
+                        "content": "municipal information " * 600,
+                    },
+                    {
+                        "url": "https://example.com/after-large",
+                        "content": "A later page must also remain unpublished.",
+                    },
+                ],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
+            )
+
+        assert success == 0
+        assert failed == 2
+        assert persisted == []
+        assert failures == {
+            FailureReason.EMBEDDING_ERROR.value: [
+                "https://example.com/large",
+                "https://example.com/after-large",
+            ]
+        }
+        mock_session.begin_nested.assert_not_awaited()
 
 
 # =============================================================================
@@ -417,6 +435,61 @@ class TestMemoryCapsEnforcement:
     """Tests for memory cap enforcement during Phase 1."""
 
     @pytest.mark.asyncio
+    async def test_prepared_embeddings_are_retained_as_float32(
+        self, crawl_context, embedding_model_spec
+    ):
+        """The database seam receives compact vectors with truthful byte size."""
+        source_embedding = [0.123456789, -0.25, 4.5]
+
+        async def mock_get_embeddings(model, chunks):
+            return [(chunk, source_embedding) for chunk in chunks]
+
+        service = MagicMock()
+        service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
+        mock_session = create_mock_session()
+        mock_session.execute = AsyncMock(return_value=create_mock_result())
+        mock_sm = create_mock_sessionmanager(mock_session)
+
+        with (
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(1),
+            ),
+            patch("eneo.database.database.sessionmanager", mock_sm),
+        ):
+            from eneo.worker.crawl_tasks import persist_batch
+
+            success, failed, _, _ = await persist_batch(
+                page_buffer=[
+                    {
+                        "url": "https://example.com/page",
+                        "content": "A compact vector must keep its exact float32 value.",
+                    }
+                ],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(service),
+            )
+
+        chunk_insert = next(
+            call.args[0]
+            for call in mock_session.execute.await_args_list
+            if getattr(getattr(call.args[0], "table", None), "name", None)
+            == "info_blob_chunks"
+        )
+        retained_embedding = chunk_insert.compile().params["embedding_m0"]
+
+        assert success == 1
+        assert failed == 0
+        assert isinstance(retained_embedding, np.ndarray)
+        assert retained_embedding.dtype == np.float32
+        assert retained_embedding.nbytes == len(source_embedding) * 4
+        np.testing.assert_array_equal(
+            retained_embedding,
+            np.asarray(source_embedding, dtype=np.float32),
+        )
+
+    @pytest.mark.asyncio
     async def test_embedding_bytes_cap_flushes_without_dropping_tail(
         self, crawl_context, embedding_model_spec
     ):
@@ -424,8 +497,8 @@ class TestMemoryCapsEnforcement:
         INVARIANT: When embedding bytes exceed max_batch_embedding_bytes,
         the prepared subset is flushed and every remaining page is continued.
 
-        Scenario: 10 pages, but embedding cap set very low (1KB)
-        Expected: All pages are attempted across bounded embedding batches
+        Scenario: 10 pages, but embedding cap set very low (10KB)
+        Expected: One packed embedding operation, then bounded DB publications
         """
         # Each embedding is ~1536 floats * 4 bytes = 6KB per chunk
         # With multiple chunks per page, cap should trigger quickly
@@ -466,17 +539,6 @@ class TestMemoryCapsEnforcement:
             for i in range(10)
         ]
 
-        pages_embedded = 0
-
-        original_mock = service.get_embeddings
-
-        async def counting_mock(model, chunks):
-            nonlocal pages_embedded
-            pages_embedded += 1
-            return await original_mock(model, chunks)
-
-        service.get_embeddings = AsyncMock(side_effect=counting_mock)
-
         # CRITICAL: Use create_mock_session() NOT AsyncMock() - see helper docstring
         mock_session = create_mock_session()
         mock_session.execute = AsyncMock(return_value=create_mock_result())
@@ -492,14 +554,18 @@ class TestMemoryCapsEnforcement:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            await persist_batch(
+            success, failed, persisted, _ = await persist_batch(
                 page_buffer=page_buffer,
                 ctx=small_cap_ctx,
                 embedding_model=embedding_model_spec,
                 container=create_mock_container(service),
             )
 
-        assert pages_embedded == 10
+        assert success == 10
+        assert failed == 0
+        assert len(persisted) == 10
+        service.get_embeddings.assert_awaited_once()
+        assert mock_sm.session.call_count > 1
 
 
 # =============================================================================

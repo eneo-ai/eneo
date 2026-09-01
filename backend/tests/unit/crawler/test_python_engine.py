@@ -3,6 +3,7 @@ import hashlib
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 from urllib.parse import quote
 
 import pytest
@@ -40,6 +41,7 @@ def _request(
     max_seconds: float = 10,
     download_files: bool = True,
     concurrency: int = 2,
+    request_delay_seconds: float = 0,
     conditional_gets: tuple[ConditionalGet, ...] = (),
 ) -> CrawlRequest:
     return CrawlRequest(
@@ -54,6 +56,7 @@ def _request(
             max_response_bytes=max_response_bytes,
             max_file_bytes=max_file_bytes,
             concurrency=concurrency,
+            request_delay_seconds=request_delay_seconds,
             retries=1,
         ),
         conditional_gets=conditional_gets,
@@ -112,6 +115,292 @@ async def test_crawl_emits_pages_incrementally_and_follows_scoped_links() -> Non
     assert "Relevant innehåll" in pages[1].content
     assert events[-1] == CrawlFinished(
         status="completed", pages_crawled=2, pages_failed=0
+    )
+
+
+async def test_page_fetches_refill_available_slots_before_the_slowest_finishes() -> (
+    None
+):
+    slow_started = asyncio.Event()
+    release_slow = asyncio.Event()
+    replacement_started = asyncio.Event()
+    active = 0
+    peak = 0
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=(
+                '<main><a href="/start/slow">Slow</a>'
+                '<a href="/start/fast-1">Fast one</a>'
+                '<a href="/start/fast-2">Fast two</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def child(request: web.Request) -> web.Response:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            if request.path == "/start/slow":
+                slow_started.set()
+                await release_slow.wait()
+            elif request.path == "/start/fast-1":
+                await slow_started.wait()
+            else:
+                replacement_started.set()
+            return web.Response(text="<main>ok</main>", content_type="text/html")
+        finally:
+            active -= 1
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/{name}", child)
+
+    async with _serve(app) as base_url:
+
+        async def collect() -> list[CrawlEvent]:
+            return [
+                event
+                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                    _request(
+                        f"{base_url}/start",
+                        max_pages=4,
+                        concurrency=2,
+                        download_files=False,
+                    )
+                )
+            ]
+
+        crawl_task = asyncio.create_task(collect())
+        replacement_started_in_time = True
+        try:
+            await asyncio.wait_for(replacement_started.wait(), timeout=0.1)
+        except TimeoutError:
+            replacement_started_in_time = False
+        finally:
+            release_slow.set()
+        events = await asyncio.wait_for(crawl_task, timeout=1)
+
+    assert replacement_started_in_time
+    assert peak == 2
+    assert {event.url for event in events if isinstance(event, PageCrawled)} == {
+        f"{base_url}/start",
+        f"{base_url}/start/slow",
+        f"{base_url}/start/fast-1",
+        f"{base_url}/start/fast-2",
+    }
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=4, pages_failed=0
+    )
+
+
+async def test_page_refill_applies_one_delay_while_other_requests_finish() -> None:
+    starts: dict[str, float] = {}
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=(
+                '<main><a href="/start/slow">Slow</a>'
+                '<a href="/start/fast-1">Fast one</a>'
+                '<a href="/start/fast-2">Fast two</a>'
+                '<a href="/start/fast-3">Fast three</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def child(request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        starts[name] = asyncio.get_running_loop().time()
+        if name == "slow":
+            await asyncio.sleep(0.01)
+        return web.Response(text="<main>ok</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/{name}", child)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    max_pages=5,
+                    concurrency=2,
+                    request_delay_seconds=0.05,
+                    download_files=False,
+                )
+            )
+        ]
+
+    assert starts["fast-2"] - starts["fast-1"] >= 0.04
+    assert abs(starts["fast-3"] - starts["fast-2"]) < 0.02
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=5, pages_failed=0
+    )
+
+
+async def test_expired_refill_delay_does_not_spin_at_page_limit(monkeypatch) -> None:
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=(
+                '<main><a href="/start/slow">Slow</a>'
+                '<a href="/start/fast">Fast</a>'
+                '<a href="/start/not-fetched">Not fetched</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def child(request: web.Request) -> web.Response:
+        if request.match_info["name"] == "slow":
+            await asyncio.sleep(0.15)
+        return web.Response(text="<main>ok</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/{name}", child)
+
+    real_wait = asyncio.wait
+    wait_spy = AsyncMock(wraps=real_wait)
+    monkeypatch.setattr("eneo.crawler.python_engine.asyncio.wait", wait_spy)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    max_pages=3,
+                    concurrency=2,
+                    request_delay_seconds=0.02,
+                    download_files=False,
+                )
+            )
+        ]
+
+    assert wait_spy.await_count < 20
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=3,
+        pages_failed=0,
+        reason="page_limit",
+    )
+
+
+async def test_page_limit_selection_is_independent_of_response_order() -> None:
+    slow_sibling = "a"
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=('<main><a href="/start/a">A</a><a href="/start/b">B</a></main>'),
+            content_type="text/html",
+        )
+
+    async def sibling(request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        if name == slow_sibling:
+            await asyncio.sleep(0.05)
+        return web.Response(
+            text=f'<main><a href="/start/{name}/child">Child</a></main>',
+            content_type="text/html",
+        )
+
+    async def child(_: web.Request) -> web.Response:
+        return web.Response(text="<main>child</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/{name}", sibling)
+    app.router.add_get("/start/{name}/child", child)
+
+    async with _serve(app) as base_url:
+
+        async def selected_urls() -> list[str]:
+            events = [
+                event
+                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                    _request(
+                        f"{base_url}/start",
+                        max_pages=4,
+                        concurrency=2,
+                        download_files=False,
+                    )
+                )
+            ]
+            return [event.url for event in events if isinstance(event, PageCrawled)]
+
+        first_selection = await selected_urls()
+        slow_sibling = "b"
+        second_selection = await selected_urls()
+
+    expected_selection = {
+        f"{base_url}/start",
+        f"{base_url}/start/a",
+        f"{base_url}/start/b",
+        f"{base_url}/start/a/child",
+    }
+    assert len(first_selection) == len(second_selection) == len(expected_selection)
+    assert set(first_selection) == set(second_selection) == expected_selection
+
+
+async def test_link_reorder_window_stays_bounded_behind_slow_page() -> None:
+    concurrency = 2
+    expected_window = concurrency * 2
+    slow_started = asyncio.Event()
+    release_slow = asyncio.Event()
+    window_filled = asyncio.Event()
+    started_children: list[str] = []
+
+    async def start(_: web.Request) -> web.Response:
+        links = "".join(
+            f'<a href="/start/page-{index}">Page {index}</a>' for index in range(20)
+        )
+        return web.Response(text=f"<main>{links}</main>", content_type="text/html")
+
+    async def child(request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        started_children.append(name)
+        if len(started_children) >= expected_window:
+            window_filled.set()
+        if name == "page-0":
+            slow_started.set()
+            await release_slow.wait()
+        else:
+            await slow_started.wait()
+        return web.Response(text="<main>ok</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/{name}", child)
+
+    async with _serve(app) as base_url:
+
+        async def collect() -> list[CrawlEvent]:
+            return [
+                event
+                async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                    _request(
+                        f"{base_url}/start",
+                        max_pages=21,
+                        concurrency=concurrency,
+                        download_files=False,
+                    )
+                )
+            ]
+
+        crawl_task = asyncio.create_task(collect())
+        try:
+            await asyncio.wait_for(window_filled.wait(), timeout=1)
+            await asyncio.sleep(0.05)
+            assert len(started_children) == expected_window
+        finally:
+            release_slow.set()
+        events = await asyncio.wait_for(crawl_task, timeout=2)
+
+    assert len([event for event in events if isinstance(event, PageCrawled)]) == 21
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=21, pages_failed=0
     )
 
 
@@ -631,6 +920,84 @@ async def test_process_wide_http_capacity_bounds_concurrent_crawls(monkeypatch) 
         )
 
     assert peak == 1
+
+
+async def test_waiting_crawl_gets_next_global_slot_when_twenty_are_busy(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity", None)
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity_loop", None)
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity_limit", None)
+    all_slow_slots_started = asyncio.Event()
+    release_slow_slot = asyncio.Semaphore(0)
+    fast_started = asyncio.Event()
+    slow_refilled_before_fast = False
+    active_slow_children = 0
+
+    async def slow_seed(request: web.Request) -> web.Response:
+        crawl = request.match_info["crawl"]
+        links = "".join(
+            f'<a href="/slow/{crawl}/child-{index}">child</a>' for index in range(5)
+        )
+        return web.Response(
+            text=f"<main>{links}</main>",
+            content_type="text/html",
+        )
+
+    async def slow_child(request: web.Request) -> web.Response:
+        nonlocal active_slow_children, slow_refilled_before_fast
+        if request.match_info["child"] == "4" and not fast_started.is_set():
+            slow_refilled_before_fast = True
+        active_slow_children += 1
+        if active_slow_children == 20:
+            all_slow_slots_started.set()
+        try:
+            await release_slow_slot.acquire()
+            return web.Response(
+                text="<main>slow child</main>", content_type="text/html"
+            )
+        finally:
+            active_slow_children -= 1
+
+    async def fast(_: web.Request) -> web.Response:
+        fast_started.set()
+        return web.Response(text="<main>fast</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/slow/{crawl}", slow_seed)
+    app.router.add_get("/slow/{crawl}/child-{child}", slow_child)
+    app.router.add_get("/fast", fast)
+
+    async with _serve(app) as base_url:
+        engine = PythonCrawlEngine(global_concurrency=20, allow_private_network=True)
+
+        async def collect(path: str) -> list[CrawlEvent]:
+            return [
+                event
+                async for event in engine.crawl(
+                    _request(
+                        f"{base_url}/{path}",
+                        max_pages=6,
+                        concurrency=4,
+                        download_files=False,
+                    )
+                )
+            ]
+
+        slow_tasks = [
+            asyncio.create_task(collect(f"slow/{index}")) for index in range(5)
+        ]
+        await asyncio.wait_for(all_slow_slots_started.wait(), timeout=1)
+        fast_task = asyncio.create_task(collect("fast"))
+        await asyncio.sleep(0.02)
+        release_slow_slot.release()
+        await asyncio.wait_for(fast_started.wait(), timeout=1)
+        for _ in range(24):
+            release_slow_slot.release()
+        await asyncio.wait_for(asyncio.gather(*slow_tasks, fast_task), timeout=1)
+
+    assert fast_started.is_set()
+    assert not slow_refilled_before_fast
 
 
 async def test_sitemap_lastmod_emits_stable_snapshot() -> None:

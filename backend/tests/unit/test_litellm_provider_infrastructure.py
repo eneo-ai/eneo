@@ -1,6 +1,7 @@
+import asyncio
 import logging
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -14,6 +15,9 @@ from eneo.embedding_models.infrastructure.adapters import base as embedding_adap
 from eneo.embedding_models.infrastructure.adapters import (
     litellm_embeddings as litellm_embeddings_module,
 )
+from eneo.embedding_models.infrastructure.adapters.base import (
+    PartialEmbeddingBatchError,
+)
 from eneo.embedding_models.infrastructure.adapters.litellm_embeddings import (
     LiteLLMEmbeddingAdapter,
 )
@@ -22,6 +26,7 @@ from eneo.embedding_models.infrastructure.create_embeddings_service import (
 )
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
+    OpenAIException,
     ProviderRejectedRequestException,
 )
 from eneo.model_providers.domain.model_route import resolve_model_route
@@ -83,6 +88,149 @@ def test_azure_provider_fields_are_resolved_once_from_canonical_definition():
     }
 
 
+@pytest.mark.asyncio
+async def test_embedding_failure_carries_the_completed_prefix():
+    chunks = [SimpleNamespace(text=f"text {index}") for index in range(4)]
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=2,
+            max_input=None,
+        ),
+        credential_resolver=None,
+    )
+    adapter._get_embeddings = AsyncMock(
+        side_effect=[[[0.1], [0.2]], TimeoutError("provider request timed out")]
+    )
+
+    with pytest.raises(PartialEmbeddingBatchError) as exc_info:
+        await adapter.get_embeddings(chunks)
+
+    error = exc_info.value
+    assert error.completed_count == 2
+    assert error.cause.args == ("provider request timed out",)
+    assert [(chunk.text, vector) for chunk, vector in error.completed] == [
+        ("text 0", [0.1]),
+        ("text 1", [0.2]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_embedding_timeout_starts_after_a_request_slot_is_available(
+    monkeypatch,
+):
+    async def successful_aembedding(**kwargs):
+        return SimpleNamespace(data=[{"embedding": [0.5]} for _ in kwargs["input"]])
+
+    monkeypatch.setattr(litellm_transport, "aembedding", successful_aembedding)
+    request_slots = asyncio.Semaphore(1)
+    await request_slots.acquire()
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=1,
+            max_input=None,
+        ),
+        credential_resolver=None,
+        request_semaphore=request_slots,
+        request_timeout_seconds=0.01,
+    )
+
+    embedding_task = asyncio.create_task(
+        adapter.get_embeddings([SimpleNamespace(text="hello")])
+    )
+    await asyncio.sleep(0.03)
+    assert not embedding_task.done()
+
+    request_slots.release()
+    result = await asyncio.wait_for(embedding_task, timeout=1)
+    assert list(result)[0][1] == [0.5]
+
+
+@pytest.mark.asyncio
+async def test_embedding_request_slot_is_released_between_batches(monkeypatch):
+    calls: list[str] = []
+    first_request_started = asyncio.Event()
+    release_first_request = asyncio.Event()
+
+    async def controlled_aembedding(**kwargs):
+        text = kwargs["input"][0]
+        calls.append(text)
+        if len(calls) == 1:
+            first_request_started.set()
+            await release_first_request.wait()
+        return SimpleNamespace(data=[{"embedding": [0.5]}])
+
+    monkeypatch.setattr(litellm_transport, "aembedding", controlled_aembedding)
+    request_slots = asyncio.Semaphore(1)
+
+    def create_adapter() -> LiteLLMEmbeddingAdapter:
+        return LiteLLMEmbeddingAdapter(
+            model=SimpleNamespace(
+                name="m",
+                family=None,
+                litellm_model_name="openai/m",
+                dimensions=None,
+                max_batch_size=1,
+                max_input=None,
+            ),
+            credential_resolver=None,
+            request_semaphore=request_slots,
+        )
+
+    first_crawl = asyncio.create_task(
+        create_adapter().get_embeddings(
+            [SimpleNamespace(text="crawl-a-1"), SimpleNamespace(text="crawl-a-2")]
+        )
+    )
+    await first_request_started.wait()
+    second_crawl = asyncio.create_task(
+        create_adapter().get_embeddings([SimpleNamespace(text="crawl-b-1")])
+    )
+    await asyncio.sleep(0)
+    release_first_request.set()
+
+    first_result, second_result = await asyncio.gather(first_crawl, second_crawl)
+    assert len(list(first_result)) == 2
+    assert len(list(second_result)) == 1
+    assert calls.index("crawl-b-1") < calls.index("crawl-a-2")
+
+
+@pytest.mark.asyncio
+async def test_provider_credentials_are_resolved_once_per_adapter(monkeypatch):
+    async def successful_aembedding(**kwargs):
+        return SimpleNamespace(data=[{"embedding": [0.5]} for _ in kwargs["input"]])
+
+    monkeypatch.setattr(litellm_transport, "aembedding", successful_aembedding)
+    resolver = Mock(provider_type="openai")
+    resolver.get_api_key.return_value = "secret"
+    resolver.get_credential_field.return_value = None
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=1,
+            max_input=None,
+        ),
+        credential_resolver=resolver,
+    )
+
+    result = await adapter.get_embeddings(
+        [SimpleNamespace(text="first"), SimpleNamespace(text="second")]
+    )
+
+    assert len(list(result)) == 2
+    assert resolver.get_api_key.call_count == 1
+
+
 def test_bad_request_error_does_not_leak_provider_details():
     provider_error = BadRequestError(
         message="secret upstream deployment details",
@@ -135,6 +283,142 @@ async def test_provider_rejected_embedding_request_is_not_retried(monkeypatch):
         await get_embeddings(adapter, ["hello"])
 
     assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_timeout_is_not_retried(monkeypatch):
+    attempts = 0
+
+    async def slow_aembedding(**_kwargs):
+        nonlocal attempts
+        attempts += 1
+        await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(litellm_transport, "aembedding", slow_aembedding)
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=None,
+            max_input=None,
+        ),
+        credential_resolver=None,
+        request_timeout_seconds=0.001,
+    )
+    # Keep a regression fast if the timeout is retried again.
+    get_embeddings = LiteLLMEmbeddingAdapter._get_embeddings.retry_with(
+        wait=wait_fixed(0)
+    )
+
+    with pytest.raises(TimeoutError):
+        await get_embeddings(adapter, ["hello"])
+
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_without_crawler_deadline_keeps_existing_retry(
+    monkeypatch,
+):
+    attempts = 0
+
+    async def flaky_aembedding(**_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("provider timed out before accepting the request")
+        return SimpleNamespace(data=[{"embedding": [0.5]}])
+
+    monkeypatch.setattr(litellm_transport, "aembedding", flaky_aembedding)
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=None,
+            max_input=None,
+        ),
+        credential_resolver=None,
+    )
+    get_embeddings = LiteLLMEmbeddingAdapter._get_embeddings.retry_with(
+        wait=wait_fixed(0)
+    )
+
+    result = await get_embeddings(adapter, ["hello"])
+
+    assert result == [[0.5]]
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_timeout_with_crawler_deadline_keeps_existing_retry(
+    monkeypatch,
+):
+    attempts = 0
+
+    async def flaky_aembedding(**_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("provider timed out before accepting the request")
+        return SimpleNamespace(data=[{"embedding": [0.5]}])
+
+    monkeypatch.setattr(litellm_transport, "aembedding", flaky_aembedding)
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=None,
+            max_input=None,
+        ),
+        credential_resolver=None,
+        request_timeout_seconds=1,
+    )
+    get_embeddings = LiteLLMEmbeddingAdapter._get_embeddings.retry_with(
+        wait=wait_fixed(0)
+    )
+
+    result = await get_embeddings(adapter, ["hello"])
+
+    assert result == [[0.5]]
+    assert attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_terminal_provider_timeout_keeps_public_error_mapping(monkeypatch):
+    attempts = 0
+
+    async def timing_out_aembedding(**_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise TimeoutError("provider timed out before accepting the request")
+
+    monkeypatch.setattr(litellm_transport, "aembedding", timing_out_aembedding)
+    adapter = LiteLLMEmbeddingAdapter(
+        model=SimpleNamespace(
+            name="m",
+            family=None,
+            litellm_model_name="openai/m",
+            dimensions=None,
+            max_batch_size=None,
+            max_input=None,
+        ),
+        credential_resolver=None,
+    )
+    get_embeddings = LiteLLMEmbeddingAdapter._get_embeddings.retry_with(
+        wait=wait_fixed(0)
+    )
+
+    with pytest.raises(OpenAIException) as exc_info:
+        await get_embeddings(adapter, ["hello"])
+
+    assert exc_info.value.code == "provider_unavailable"
+    assert attempts == 3
 
 
 @pytest.mark.asyncio

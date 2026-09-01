@@ -596,14 +596,6 @@ class TestHighRiskExactRouteGuards:
         )
         assert _route_has_dep_name(route, "require_session_auth")
 
-    def test_crawler_probe_requires_bearer_session(self):
-        route = _find_route_by_method_and_paths(
-            "POST",
-            "/crawler/diagnostics/{website_id}/probe/",
-            "/crawler/diagnostics/{website_id}/probe",
-        )
-        assert _route_has_dep_name(route, "require_session_auth")
-
     def test_files_routes_have_scope_resource_and_delete_scope_guards(self):
         list_route = _find_route_by_method_and_paths("GET", "/files/", "/files")
         post_route = _find_route_by_method_and_paths("POST", "/files/", "/files")

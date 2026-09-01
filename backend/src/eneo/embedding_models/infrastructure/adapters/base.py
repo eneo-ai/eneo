@@ -16,6 +16,24 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+class PartialEmbeddingBatchError(Exception):
+    """Preserve the ordered prefix completed before a provider batch failed."""
+
+    def __init__(
+        self,
+        *,
+        completed: ChunkEmbeddingList,
+        completed_count: int,
+        cause: Exception,
+    ) -> None:
+        super().__init__(
+            f"Embedding provider failed after {completed_count} completed chunks"
+        )
+        self.completed = completed
+        self.completed_count = completed_count
+        self.cause = cause
+
+
 class EmbeddingModelAdapter(abc.ABC):
     """Base class for embedding model adapters.
 

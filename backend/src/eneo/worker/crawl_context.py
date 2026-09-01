@@ -12,6 +12,11 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
+import numpy as np
+from numpy.typing import NDArray
+
+Float32Vector = NDArray[np.float32]
+
 
 class FailureReason(str, Enum):
     """Categorized failure reasons for crawl page persistence.
@@ -165,7 +170,7 @@ class PreparedPage:
 
     # Pre-computed embeddings (Phase 1 result)
     chunks: list[str]  # Text chunks
-    embeddings: list[list[float]]  # Embedding vectors per chunk
+    embeddings: list[Float32Vector]  # Compact vectors retained until persistence
 
     # Context for persistence
     tenant_id: UUID

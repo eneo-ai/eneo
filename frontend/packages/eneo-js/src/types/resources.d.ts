@@ -1,7 +1,5 @@
 import { components } from "./schema";
 
-export type CrawlerProbe = components["schemas"]["CrawlerProbeModel"];
-
 export type Assistant =
   components["schemas"]["AssistantPublic"] | components["schemas"]["DefaultAssistant"];
 

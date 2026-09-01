@@ -7,6 +7,7 @@ from hashlib import sha256
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+import numpy as np
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -38,6 +39,8 @@ from eneo.main.exceptions import (
 )
 from eneo.object_content.content import ContentState, StorageKind
 from eneo.websites.domain.crawl_run import CrawlType
+from eneo.worker.crawl.persistence import _publish_prepared_pages
+from eneo.worker.crawl_context import CrawlContext, PreparedPage
 
 
 async def _seed_active_document(
@@ -101,6 +104,97 @@ def _embedding_result(*, model, chunks):
     result = ChunkEmbeddingList()
     result.add(chunks, [[0.7, 0.8, 0.9] for _ in chunks])
     return result
+
+
+async def test_crawler_float32_vector_round_trips_through_postgres(
+    db_container,
+    monkeypatch,
+) -> None:
+    content = "Float32 crawler publication contract"
+    title = "https://knowledge-version.example.com/float32"
+    source_vector = np.asarray([0.12345679, -0.5, 0.9876543], dtype=np.float32)
+
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        tenant = container.tenant()
+        embedding_model_id = await session.scalar(
+            sa.select(EmbeddingModels.id).limit(1)
+        )
+        assert embedding_model_id is not None
+        website = Websites(
+            name="Float32 publication website",
+            url="https://knowledge-version.example.com",
+            download_files=False,
+            crawl_type=CrawlType.CRAWL,
+            update_interval="never",
+            size=0,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            embedding_model_id=embedding_model_id,
+        )
+        session.add(website)
+        await session.flush()
+        website_id = website.id
+        user_id = user.id
+        tenant_id = user.tenant_id
+        tenant_slug = tenant.slug
+
+    ctx = CrawlContext(
+        website_id=website_id,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        user_id=user_id,
+        attempt_id=uuid4(),
+        lease_owner="float32-round-trip",
+        embedding_model_id=embedding_model_id,
+        embedding_model_name="round-trip-model",
+        embedding_model_open_source=False,
+        embedding_model_family=None,
+        embedding_model_dimensions=len(source_vector),
+    )
+    prepared = PreparedPage(
+        url=title,
+        title=title,
+        content=content,
+        content_hash=sha256(content.encode("utf-8")).digest(),
+        http_etag=None,
+        http_last_modified=None,
+        chunks=[content],
+        embeddings=[source_vector],
+        tenant_id=tenant_id,
+        website_id=website_id,
+        user_id=user_id,
+        embedding_model_id=embedding_model_id,
+    )
+    lease_check = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.worker.crawl.persistence._require_current_publication_lease",
+        lease_check,
+    )
+
+    published, failures = await _publish_prepared_pages(
+        prepared_pages=[prepared],
+        ctx=ctx,
+    )
+
+    assert published == [title]
+    assert failures == {}
+    lease_check.assert_awaited_once()
+    async with db_container() as container:
+        stored_vector = await container.session().scalar(
+            sa.select(InfoBlobChunks.embedding)
+            .join(InfoBlobs)
+            .where(
+                InfoBlobs.website_id == website_id,
+                InfoBlobs.title == title,
+            )
+        )
+    assert stored_vector is not None
+    np.testing.assert_array_equal(
+        np.asarray(stored_vector, dtype=np.float32),
+        source_vector,
+    )
 
 
 async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:

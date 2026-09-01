@@ -322,56 +322,95 @@ class PythonCrawlEngine:
                     robots_request_delay,
                 )
                 # A robots crawl-delay is a per-origin serial contract. Eneo's
-                # configured pacing instead delays bounded concurrent batches.
+                # configured pacing instead delays refilling freed HTTP slots.
                 per_crawl_concurrency = (
                     1 if robots_request_delay else request.limits.concurrency
                 )
+                link_reorder_window = per_crawl_concurrency * 2
 
+                pending_pages: dict[asyncio.Task[_FetchResult], int] = {}
+                completed_links: dict[int, tuple[str, ...]] = {}
+                next_sequence = 0
+                next_result_sequence = 0
+                refill_at: float | None = None
+
+                def fill_page_capacity() -> None:
+                    nonlocal next_sequence
+                    while (
+                        frontier
+                        and len(pending_pages) < per_crawl_concurrency
+                        and pages_seen + len(pending_pages) < request.limits.max_pages
+                        and (
+                            not follow_page_links
+                            or next_sequence - next_result_sequence
+                            < link_reorder_window
+                        )
+                    ):
+                        url = frontier.popleft()
+                        task = asyncio.create_task(
+                            self._fetch(
+                                session,
+                                url,
+                                seed_url,
+                                request,
+                                robots,
+                                validators,
+                                origin_authorization,
+                                path_scope=follow_page_links,
+                            )
+                        )
+                        pending_pages[task] = next_sequence
+                        next_sequence += 1
+
+                crawl_timed_out = False
+                fill_page_capacity()
                 try:
-                    while frontier and pages_seen < request.limits.max_pages:
-                        remaining = request.limits.max_seconds - (
-                            monotonic() - started_at
-                        )
-                        if remaining <= 0:
-                            raise TimeoutError
+                    while pending_pages or (
+                        frontier and pages_seen < request.limits.max_pages
+                    ):
+                        if refill_at is not None and monotonic() >= refill_at:
+                            refill_at = None
+                        if (
+                            frontier
+                            and pages_seen + len(pending_pages)
+                            < request.limits.max_pages
+                            and refill_at is None
+                        ):
+                            fill_page_capacity()
 
-                        batch_size = min(
-                            per_crawl_concurrency,
-                            request.limits.max_pages - pages_seen,
-                            len(frontier),
-                        )
-                        urls = [frontier.popleft() for _ in range(batch_size)]
-                        tasks = [
-                            asyncio.create_task(
-                                self._fetch(
-                                    session,
-                                    url,
-                                    seed_url,
-                                    request,
-                                    robots,
-                                    validators,
-                                    origin_authorization,
-                                    path_scope=follow_page_links,
+                        if not pending_pages:
+                            if refill_at is None:
+                                break
+                            await asyncio.sleep(
+                                min(
+                                    max(0.0, refill_at - monotonic()),
+                                    self._remaining_seconds(started_at, request),
                                 )
                             )
-                            for url in urls
-                        ]
-                        batch_future = asyncio.gather(*tasks)
-                        try:
-                            results = await asyncio.wait_for(
-                                batch_future, timeout=remaining
-                            )
-                        except BaseException:
-                            for task in tasks:
-                                task.cancel()
-                            await asyncio.gather(*tasks, return_exceptions=True)
-                            try:
-                                await batch_future
-                            except BaseException:
-                                pass
-                            raise
+                            continue
 
-                        for result in results:
+                        wait_timeout = self._remaining_seconds(started_at, request)
+                        if refill_at is not None:
+                            wait_timeout = min(
+                                wait_timeout,
+                                max(0.0, refill_at - monotonic()),
+                            )
+                        done, _ = await asyncio.wait(
+                            pending_pages,
+                            timeout=wait_timeout,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if not done:
+                            if refill_at is not None and monotonic() >= refill_at:
+                                continue
+                            raise TimeoutError
+
+                        completed = sorted(done, key=pending_pages.__getitem__)
+                        for task in completed:
+                            sequence = pending_pages.pop(task)
+                            result = task.result()
+                            if follow_page_links:
+                                completed_links[sequence] = result.links
                             if isinstance(result.event, PageCrawled):
                                 pages_crawled += 1
                                 file_links.update(result.event.file_links)
@@ -382,23 +421,34 @@ class PythonCrawlEngine:
                             pages_seen += 1
                             yield result.event
 
-                            if not follow_page_links:
-                                continue
-                            for discovered_url in result.links:
+                        while (
+                            follow_page_links
+                            and next_result_sequence in completed_links
+                        ):
+                            links = completed_links.pop(next_result_sequence)
+                            next_result_sequence += 1
+                            for discovered_url in links:
                                 if discovered_url not in seen and is_in_scope(
                                     discovered_url, seed_url
                                 ):
                                     seen.add(discovered_url)
                                     frontier.append(discovered_url)
 
-                        if request_delay and frontier:
-                            await asyncio.sleep(
-                                min(
-                                    request_delay,
-                                    self._remaining_seconds(started_at, request),
-                                )
-                            )
+                        if (
+                            request_delay
+                            and frontier
+                            and len(pending_pages) < per_crawl_concurrency
+                            and refill_at is None
+                        ):
+                            refill_at = monotonic() + request_delay
                 except TimeoutError:
+                    crawl_timed_out = True
+                finally:
+                    for task in pending_pages:
+                        task.cancel()
+                    await asyncio.gather(*pending_pages, return_exceptions=True)
+
+                if crawl_timed_out:
                     yield CrawlFinished(
                         status="partial",
                         pages_crawled=pages_crawled,

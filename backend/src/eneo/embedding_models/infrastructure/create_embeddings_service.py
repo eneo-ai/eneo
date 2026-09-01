@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING, Optional, Protocol
 from uuid import UUID
 
@@ -61,12 +62,16 @@ class CreateEmbeddingsService:
         config: Optional[Settings] = None,
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
+        request_semaphore: asyncio.Semaphore | None = None,
+        request_timeout_seconds: float | None = None,
     ) -> None:
         super().__init__()
         self.tenant = tenant
         self.config = config or SETTINGS
         self.encryption_service = encryption_service
         self.session = session
+        self.request_semaphore = request_semaphore
+        self.request_timeout_seconds = request_timeout_seconds
 
     async def _get_adapter(self, model: EmbeddingModelLike) -> EmbeddingModelAdapter:
         """Get the appropriate adapter for the embedding model.
@@ -175,6 +180,8 @@ class CreateEmbeddingsService:
             model,
             credential_resolver=credential_resolver,
             litellm_model_name=litellm_model_name,
+            request_semaphore=self.request_semaphore,
+            request_timeout_seconds=self.request_timeout_seconds,
         )
 
     async def get_embeddings(

@@ -12,6 +12,7 @@ Run with: pytest tests/unittests/worker/test_persistence.py -v
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import numpy as np
 import pytest
 
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
@@ -188,7 +189,10 @@ class TestPreparedPageDataclass:
             http_etag=None,
             http_last_modified=None,
             chunks=["chunk1", "chunk2"],
-            embeddings=[[0.1, 0.2], [0.3, 0.4]],
+            embeddings=[
+                np.asarray([0.1, 0.2], dtype=np.float32),
+                np.asarray([0.3, 0.4], dtype=np.float32),
+            ],
             tenant_id=uuid4(),
             website_id=uuid4(),
             user_id=uuid4(),
