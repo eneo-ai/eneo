@@ -24,11 +24,19 @@ legacy payloads**, not the size of the whole database or the largest file:
 - **Above 5 GiB:** check disk and WAL headroom, set the reported capacity
   acknowledgement, and recreate the worker.
 
+During the verification period, affected payloads exist in both layouts. For
+example, 10 GiB of existing legacy payload becomes roughly 20.4 GiB in total:
+the original 10 GiB already on disk plus about 10.4 GiB for the new verified
+copy. The host therefore needs about 10.4 GiB of **additional** database space,
+not another 20.4 GiB, plus temporary WAL growth and its normal free-space floor.
+
 PostgreSQL inline remains a complete byte backend, so this adoption is required
 even when the deployment does not use S3-compatible storage. Run large
 deployments at a quiet time and verify representative files and a current
 restore before closing the recovery window. Do not delete the old columns when
-the worker finishes; a later contract release owns their removal.
+the worker finishes; a later contract release owns their removal. PostgreSQL
+does not return that filesystem space automatically. Run a planned `pg_repack`
+or `VACUUM FULL` after the contract release only when the host needs it back.
 
 This release adopts legacy payloads into PostgreSQL inline. If object storage is
 selected before the campaign starts, the worker waits rather than silently
@@ -142,6 +150,11 @@ free space now >= D + max(W_peak - W_now, 0) + M
 This does not count the whole database, WAL already occupying the volume, or
 WAL generated and recycled over time. Keep backup and replica capacity separate
 when they use another volume or host.
+
+Put simply, the affected file bytes are roughly doubled until the later
+contract release: existing `L` plus new `D`. Capacity planning asks how much
+**additional** free space the new copy and simultaneous WAL growth need; it does
+not count the already allocated `L` a second time.
 
 <Callout type="info">
   **Measured planning evidence:** with random 640 KiB payloads, the 1 GiB and 10
@@ -485,9 +498,9 @@ current restore.
    not enough.
 6. Reclaim filesystem space only if measurements justify it.
 
-Dropping legacy columns is metadata-only in PostgreSQL. Ordinary `VACUUM` makes
-space reusable inside the database but normally does not shrink the table files.
-Choose one tested physical rewrite after the contract release:
+Dropping legacy columns is metadata-only in PostgreSQL. It does not rewrite the
+existing rows, and ordinary `VACUUM` does not perform that rewrite or shrink the
+table files. Choose one tested physical rewrite after the contract release:
 
 - [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
   minimizes blocking but needs the extension, a short final lock, and temporary
