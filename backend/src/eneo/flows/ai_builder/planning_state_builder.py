@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     comparison_scope_is_relevant,
     report_disposition_is_relevant,
+    report_disposition_is_relevant_for_state,
 )
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -406,7 +407,10 @@ def _reconcile_report_disposition_after_classifier_replay(
     value = next(iter(values))
     if value not in legal_slot_values("report_disposition"):
         return
-    if not _report_disposition_slot_is_relevant(state):
+    if not report_disposition_is_relevant_for_state(
+        state,
+        unresolved_values_are_relevant=True,
+    ):
         return
     state.resolved_slots["report_disposition"] = ResolvedSlot(
         name="report_disposition",
@@ -1814,7 +1818,7 @@ def _dependent_slot_is_relevant(
             unresolved_values_are_relevant=unresolved_values_are_relevant,
         )
     if slot_name == "report_disposition":
-        return _report_disposition_slot_is_relevant(
+        return report_disposition_is_relevant_for_state(
             state,
             unresolved_values_are_relevant=unresolved_values_are_relevant,
         )
@@ -1829,34 +1833,6 @@ def _dependent_slot_is_relevant(
         terminal_value is not None and terminal_value != "structured_json"
     )
     return not input_incompatible and not output_incompatible
-
-
-def _report_disposition_slot_is_relevant(
-    state: PlanningState,
-    *,
-    unresolved_values_are_relevant: bool = True,
-) -> bool:
-    primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
-    terminal_output = state.resolved_slots.get("terminal_output")
-    document_material_scope = state.resolved_slots.get("document_material_scope")
-    docx_output_mode = state.resolved_slots.get("docx_output_mode")
-    return report_disposition_is_relevant(
-        primary_runtime_input=(
-            primary_runtime_input.value if primary_runtime_input is not None else None
-        ),
-        terminal_output=(
-            terminal_output.value if terminal_output is not None else None
-        ),
-        document_material_scope=(
-            document_material_scope.value
-            if document_material_scope is not None
-            else None
-        ),
-        docx_output_mode=(
-            docx_output_mode.value if docx_output_mode is not None else None
-        ),
-        unresolved_values_are_relevant=unresolved_values_are_relevant,
-    )
 
 
 def _model_slot_can_replace(

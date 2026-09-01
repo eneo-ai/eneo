@@ -249,6 +249,7 @@ async def test_empty_classifier_response_reopens_heuristic_architecture_slots(
         max_output_tokens=2_000,
     )
     assert "report_disposition" not in context.planning_state.resolved_slots
+    assert context.planning_state.commit_grade_slot_value("report_disposition") is None
     context.planning_state.resolved_slots["post_processing_goal"] = _slot(
         "post_processing_goal",
         "summarize_or_overview",
@@ -265,7 +266,9 @@ async def test_empty_classifier_response_reopens_heuristic_architecture_slots(
     assert policy.allowed_ask_question_targets == (
         "primary_runtime_input",
         "terminal_output",
+        "report_disposition",
     )
+    assert policy.allowed_action_kinds == ("ask_question",)
 
 
 @pytest.mark.asyncio

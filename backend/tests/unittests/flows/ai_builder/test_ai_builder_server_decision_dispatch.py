@@ -511,6 +511,76 @@ async def test_focused_classification_resolves_missed_slot_before_question() -> 
 
 
 @pytest.mark.asyncio
+async def test_focused_classification_resolves_explicit_report_disposition_without_asking() -> (
+    None
+):
+    quote = "Create both one section per source and a combined overview."
+    source_id = "user_message:user-report-disposition"
+    runtime, litellm_client = _focused_runtime(
+        _focused_slot_response(
+            {
+                "slot_name": "report_disposition",
+                "value": "both",
+                "confidence": "high",
+                "reason": "The user explicitly requests both report structures.",
+                "evidence": [{"source_id": source_id, "quote": quote}],
+                "evidence_level": "explicit",
+            }
+        )
+    )
+    state = _confirmed_state()
+    state.architecture_commit = None
+    del state.resolved_slots["report_disposition"]
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=quote,
+            message_id="user-report-disposition",
+        )
+    ]
+    decision = resolve_turn_control(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        requirements_disclosure=build_requirements_disclosure(
+            state,
+            ui_language="en",
+        ),
+        confirmed_requirements_version=None,
+        ui_language="en",
+    ).decision
+    assert isinstance(decision, AskCanonicalQuestion)
+    assert decision.slot_name == "report_disposition"
+
+    persisted_conversation: list[ConversationMessage] = []
+    persisted_states: list[PlanningState] = []
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = _rebuilding_commit_side_effect(
+        persisted_conversation=persisted_conversation,
+        persisted_states=persisted_states,
+    )
+    repo.load_planning_state.side_effect = lambda **_: persisted_states[-1]
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=decision,
+            conversation=conversation,
+            planning_state=state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert result.action_kind == "commit_architecture"
+    assert all(not isinstance(event, AIBuilderQuestionEvent) for event in result.events)
+    assert state.resolved_slots["report_disposition"].value == "both"
+    assert state.focused_classification_attempted_slots == ["report_disposition"]
+    assert litellm_client.acompletion.await_count == 1
+    assert persisted_states[-1].architecture_commit is not None
+    assert persisted_states[-1].architecture_commit.report_disposition == "both"
+    assert persisted_states[-1].resolved_slots["report_disposition"].value == "both"
+
+
+@pytest.mark.asyncio
 async def test_direct_proposal_persists_focused_evidence_for_repository_rebuild() -> (
     None
 ):
@@ -614,6 +684,10 @@ async def test_newer_output_uncertainty_invalidates_persisted_focused_result() -
         "primary_runtime_input",
         "documents",
     )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "synthesized_overview",
+    )
 
     await dispatch_server_decision(
         _request(
@@ -713,6 +787,76 @@ async def test_focused_provider_failure_asks_and_persisted_attempt_is_not_retrie
     assert any(isinstance(event, AIBuilderQuestionEvent) for event in second.events)
     assert replayed_state.focused_classification_attempted_slots == [
         "primary_runtime_input"
+    ]
+    assert litellm_client.acompletion.await_count == 1
+    telemetry = first_request.telemetry.usage_tracker.build_planner_telemetry()
+    assert telemetry["auxiliary_llm_call_count"] == 1
+    assert telemetry["call_records"][0]["provider_failure_kind"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_report_disposition_provider_failure_persists_question_without_commit_or_retry() -> (
+    None
+):
+    runtime, litellm_client = _focused_runtime(_focused_slot_response())
+    litellm_client.acompletion.side_effect = Timeout(
+        "provider timed out",
+        model="focused-test",
+        llm_provider="openai",
+    )
+    state = _confirmed_state()
+    state.architecture_commit = None
+    del state.resolved_slots["report_disposition"]
+    decision = AskCanonicalQuestion(slot_name="report_disposition")
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Build one report from several documents.",
+            message_id="user-report-provider-failure",
+        )
+    ]
+    persisted_conversation: list[ConversationMessage] = []
+    persisted_states: list[PlanningState] = []
+    repo = AsyncMock()
+    repo.commit_turn.side_effect = _rebuilding_commit_side_effect(
+        persisted_conversation=persisted_conversation,
+        persisted_states=persisted_states,
+    )
+    first_request = _request(
+        repo=repo,
+        decision=decision,
+        conversation=conversation,
+        planning_state=state,
+        focused_classification_runtime=runtime,
+    )
+
+    first = await dispatch_server_decision(first_request)
+    replayed_state = persisted_states[-1]
+    second_repo = AsyncMock()
+    second_repo.commit_turn.return_value = 6
+    second = await dispatch_server_decision(
+        _request(
+            repo=second_repo,
+            decision=decision,
+            conversation=persisted_conversation,
+            planning_state=replayed_state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    first_question = next(
+        event for event in first.events if isinstance(event, AIBuilderQuestionEvent)
+    )
+    second_question = next(
+        event for event in second.events if isinstance(event, AIBuilderQuestionEvent)
+    )
+    assert first.action_kind == "ask_question"
+    assert second.action_kind == "ask_question"
+    assert first_question.data.question_id == "report_disposition"
+    assert second_question.data.question_id == "report_disposition"
+    assert replayed_state.architecture_commit is None
+    assert replayed_state.focused_classification_attempted_slots == [
+        "report_disposition"
     ]
     assert litellm_client.acompletion.await_count == 1
     telemetry = first_request.telemetry.usage_tracker.build_planner_telemetry()

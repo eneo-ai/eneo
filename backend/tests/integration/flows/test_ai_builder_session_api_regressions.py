@@ -5438,78 +5438,6 @@ async def test_ai_builder_repo_commit_turn_keeps_the_mapped_file_limit_it_disclo
     assert disclosed.mapped_file_limit == disclosed_limit
 
 
-class _ProviderFreeLiteLLMClient:
-    """A client that fails loudly instead of reaching a provider.
-
-    The acknowledgment must resolve from persisted state alone. Asserting
-    that no provider is reached is the behaviour; patching the discovery
-    runtime would only assert that one internal helper went unused.
-    """
-
-    def __getattr__(self, name: str) -> object:
-        raise AssertionError(
-            f"acknowledgment reached the provider through litellm_client.{name}"
-        )
-
-
-_CLASSIFIED_REQUEST_MESSAGE_ID = "user-request-1"
-
-
-def _inferred_report_disposition_message() -> ConversationMessage:
-    """The classifier's own reading, persisted the way a real turn persists it.
-
-    Built through the production metadata factory rather than a hand-written
-    dict: the grade is the whole point of the case, and a look-alike payload
-    would stop tracking it the moment the contract moves.
-    """
-
-    quote = "en samlad rapport"
-    source_id = f"user_message:{_CLASSIFIED_REQUEST_MESSAGE_ID}"
-    classification = slot_classification_metadata_from_attempt(
-        SlotClassificationAttempt(
-            outcome="resolved",
-            result=SlotClassificationResult(
-                slots=(
-                    ClassifiedSlot(
-                        slot_name="report_disposition",
-                        value="synthesized_overview",
-                        confidence="medium",
-                        reason="Användaren beskriver en samlad rapport.",
-                        evidence=(
-                            ClassifiedEvidence(source_id=source_id, quote=quote),
-                        ),
-                        evidence_level="inferred",
-                    ),
-                )
-            ),
-        ),
-        prompt_hash="c" * 64,
-        classification_input=SlotClassificationInput(
-            sources=(
-                SlotClassificationSource(
-                    source_id=source_id,
-                    kind="user_message",
-                    text=quote,
-                    message_id=_CLASSIFIED_REQUEST_MESSAGE_ID,
-                    file_id=None,
-                    coverage=None,
-                ),
-            ),
-            current_user_message_id=_CLASSIFIED_REQUEST_MESSAGE_ID,
-        ),
-        model="openai/gpt-4o-mini",
-        provider="openai",
-    )
-    metadata = metadata_with_slot_classification(None, classification)
-    assert metadata is not None
-    return ConversationMessage(
-        message_id="classification-1",
-        role="assistant",
-        content="Klassificering.",
-        metadata=metadata,
-    )
-
-
 def _server_decision_telemetry(request_id: str) -> ServerDecisionTelemetry:
     return ServerDecisionTelemetry(
         request_id=request_id,
@@ -5520,310 +5448,6 @@ def _server_decision_telemetry(request_id: str) -> ServerDecisionTelemetry:
             target_kind=TargetKind.CREATE,
         ),
     )
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_accepting_an_inferred_requirement_pins_it_and_converges(
-    client,
-    bearer_token,
-    completion_model_factory,
-    db_container,
-):
-    """Disclosing, accepting, pinning and planning must compose.
-
-    Each part was covered alone: that `commit_turn` keeps the mapped file limit
-    it disclosed, and that an acknowledgment makes no discovery call. Run in
-    sequence against a real repository, neither proof held. The measured
-    sessions disclosed a report disposition the classifier had only inferred;
-    accepting it is what makes it commit-grade, and the compiler reads it from
-    the architecture commit alone. The persisted state was erased of the
-    ceiling it had disclosed, so the acknowledgment re-entered the discovery
-    runtime, and the acceptance either never reached the architecture or was
-    withdrawn again by the next disclosure — `CommitDriftError`, and a session
-    re-confirming until the interaction limit.
-
-    One disclosure is the whole budget: accepting it revises the architecture
-    it described and the turn goes on to the proposal.
-    """
-
-    from eneo.flows.ai_builder.ai_builder_attachment_context import (
-        AIBuilderAttachmentContextPolicy,
-    )
-    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
-        PlannerRequestPreparationInput,
-        ServerOutputPrepared,
-        prepare_planner_request,
-    )
-    from eneo.flows.ai_builder.ai_builder_requirements_state import (
-        resolve_requirements_state,
-    )
-    from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
-        ServerDecisionDispatchRequest,
-        dispatch_server_decision,
-    )
-    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
-    from eneo.flows.ai_builder.ai_builder_turn_controller import (
-        CommitArchitecture,
-        ReviseArchitecture,
-    )
-    from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
-
-    # The shipped deployment ceiling, not the unbounded default: an
-    # acknowledgment under a policy that proposes no ceiling at all is the one
-    # case that never reached production.
-    mapped_execution_policy = FlowMappedExecutionPolicy(
-        max_provider_calls_per_mapped_step=150
-    )
-    disclosed_limit = MappedFileLimit(
-        proposed_value=149,
-        accepted_value=149,
-        provenance="policy_default",
-    )
-    space_id = await _create_space_with_planner_model(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        space_name="AI Builder Confirmed Architecture Plans",
-    )
-    request_text = (
-        "Skapa ett flöde som läser flera dokument och ger en samlad rapport som PDF."
-    )
-    # The measured shape: the three architecture prerequisites are commit-grade
-    # structured answers, while the report disposition is only the classifier's
-    # medium-confidence inferred reading. It is disclosed, but it cannot pin an
-    # architecture until the user accepts it.
-    conversation = [
-        ConversationMessage(
-            message_id=_CLASSIFIED_REQUEST_MESSAGE_ID,
-            role="user",
-            content=request_text,
-        ),
-        _structured_answer_message(
-            question_id="primary_runtime_input",
-            value="documents",
-            content="Dokument",
-        ),
-        _structured_answer_message(
-            question_id="terminal_output",
-            value="pdf_document",
-            content="PDF-dokument",
-        ),
-        _structured_answer_message(
-            question_id="document_material_scope",
-            value="multiple_documents_case",
-            content="Flera dokument",
-        ),
-        _inferred_report_disposition_message(),
-    ]
-    turn_state = build_planning_state_from_conversation(
-        conversation,
-        mapped_execution_policy=mapped_execution_policy,
-    )
-    assert turn_state.mapped_file_limit == disclosed_limit
-    assert turn_state.commit_grade_slot_value("report_disposition") is None
-    undisclosed_draft = derive_architecture_commit_draft(turn_state)
-    assert undisclosed_draft is not None
-    assert undisclosed_draft.report_disposition is None
-
-    async with db_container() as container:
-        repo = AIBuilderRepository(container.session())
-        user = container.user()
-        session = await repo.create_session(
-            tenant_id=user.tenant_id,
-            space_id=UUID(space_id),
-            actor_user_id=user.id,
-            target_kind=TargetKind.CREATE,
-            flow_id=None,
-        )
-        session_id = session.id
-        tenant_id = user.tenant_id
-        disclosing_turn = await _claim_session_send_turn(
-            repo=repo,
-            session_id=session_id,
-            tenant_id=tenant_id,
-            message_content=request_text,
-        )
-        # With nothing pinned yet the controller commits the architecture it can
-        # derive, and that write chains the disclosure the user is asked about.
-        disclosing = await dispatch_server_decision(
-            ServerDecisionDispatchRequest(
-                repo=repo,
-                turn=disclosing_turn,
-                decision=CommitArchitecture(architecture_commit=undisclosed_draft),
-                conversation=conversation,
-                new_messages_start=1,
-                flow=None,
-                confirmed_requirements_version=None,
-                ui_language="sv",
-                telemetry=_server_decision_telemetry("req-disclosure"),
-                planning_state=turn_state,
-                selected_discovery_question_ids=(),
-                requirements_confirmation_required=True,
-                attachment_context=None,
-                schema_candidates=(),
-                schema_direction_pending=False,
-            )
-        )
-        await repo.release_session_send(
-            session_id=session_id,
-            tenant_id=tenant_id,
-            lease=disclosing_turn.lease,
-        )
-        disclosed_conversation = list(
-            (
-                await repo.get_session(session_id=session_id, tenant_id=tenant_id)
-            ).conversation
-        )
-        disclosed_state = await repo.load_planning_state(
-            session_id=session_id, tenant_id=tenant_id
-        )
-
-    assert disclosing.action_kind == "commit_architecture"
-    assert disclosed_state is not None
-    assert disclosed_state.mapped_file_limit == disclosed_limit
-    # The architecture is pinned without the disposition: the classifier only
-    # inferred it, so it cannot drive an irreversible decision yet.
-    assert disclosed_state.architecture_commit is not None
-    assert disclosed_state.architecture_commit.report_disposition is None
-    assert disclosed_state.commit_grade_slot_value("report_disposition") is None
-    disclosure = resolve_requirements_state(disclosed_conversation).latest_summary
-    assert disclosure is not None
-    assert "Högst 149 filer behandlas i samma körning." in disclosure.assumptions
-    assert "Rapportupplägg: Samlad översikt" in disclosure.assumptions
-
-    # The acknowledgment turn: an exact content-free confirmation of the
-    # disclosure the user was shown.
-    acknowledgment = [
-        *disclosed_conversation,
-        ConversationMessage(
-            role="user",
-            content="",
-            metadata={
-                "requirements_confirmed": True,
-                "requirements_version": disclosure.requirements_version,
-            },
-        ),
-    ]
-    prepared = await prepare_planner_request(
-        PlannerRequestPreparationInput(
-            conversation=acknowledgment,
-            litellm_client=_ProviderFreeLiteLLMClient(),
-            completion_model_route=_route(),
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=[],
-            max_input_tokens=8000,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-            ),
-            attachment_context_policy=AIBuilderAttachmentContextPolicy(),
-            mapped_execution_policy=mapped_execution_policy,
-            base_planning_state_version=disclosing.new_planning_state_version,
-            tenant_id=tenant_id,
-            plan_edit_context=None,
-            prior_plan_for_revision=None,
-            persisted_planning_state=disclosed_state,
-            current_turn_start=len(acknowledgment) - 1,
-            usage_tracker=ProposalTurnTelemetry(
-                request_id="req-acknowledgment",
-                model=_route().litellm_model,
-                target_kind=TargetKind.CREATE,
-            ),
-        )
-    )
-
-    # Accepting is what admits the inferred disposition to the architecture,
-    # and it happens without re-reading anything: the provider-free client
-    # would have raised, and the classifier left no new metadata.
-    assert isinstance(prepared, ServerOutputPrepared)
-    assert prepared.slot_classification_metadata is None
-    assert prepared.requirements_state.confirmed
-    assert isinstance(prepared.server_decision, ReviseArchitecture)
-    accepted_draft = prepared.server_decision.architecture_commit
-    assert accepted_draft.report_disposition == "synthesized_overview"
-
-    async with db_container() as container:
-        repo = AIBuilderRepository(container.session())
-        acknowledging_turn = await _claim_session_send_turn(
-            repo=repo,
-            session_id=session_id,
-            tenant_id=tenant_id,
-            message_content="",
-            message_metadata={
-                "requirements_confirmed": True,
-                "requirements_version": disclosure.requirements_version,
-            },
-        )
-        # The revision chains straight into the next decision, so this one call
-        # performs both writes of the real turn.
-        revised = await dispatch_server_decision(
-            ServerDecisionDispatchRequest(
-                repo=repo,
-                turn=acknowledging_turn,
-                decision=prepared.server_decision,
-                conversation=acknowledgment,
-                new_messages_start=len(acknowledgment),
-                flow=None,
-                confirmed_requirements_version=(
-                    prepared.requirements_state.confirmed_requirements_version
-                ),
-                ui_language="sv",
-                telemetry=_server_decision_telemetry("req-acknowledgment"),
-                planning_state=prepared.planning_state,
-                selected_discovery_question_ids=(
-                    prepared.discovery_analysis.selected_question_ids
-                ),
-                requirements_confirmation_required=(
-                    prepared.requirements_confirmation_required
-                ),
-                attachment_context=prepared.attachment_context,
-                schema_candidates=prepared.schema_candidates,
-                schema_direction_pending=prepared.schema_direction_pending,
-            )
-        )
-        await repo.release_session_send(
-            session_id=session_id,
-            tenant_id=tenant_id,
-            lease=acknowledging_turn.lease,
-        )
-        revised_conversation = list(
-            (
-                await repo.get_session(session_id=session_id, tenant_id=tenant_id)
-            ).conversation
-        )
-        revised_state = await repo.load_planning_state(
-            session_id=session_id, tenant_id=tenant_id
-        )
-
-    assert revised.action_kind == "revise_architecture"
-    assert revised_state is not None
-    assert revised_state.mapped_file_limit == disclosed_limit
-    # The compiler reads the report disposition from the pinned commit and
-    # nowhere else, so this is the fact that decides what gets built — and it is
-    # the one the user accepted, surviving the chained second write.
-    assert revised_state.architecture_commit is not None
-    assert revised_state.architecture_commit.report_disposition == (
-        "synthesized_overview"
-    )
-    # Accepting settled the requirements rather than restating them: the turn
-    # goes on to the proposal, and the user is never shown a second disclosure.
-    assert revised.proposal_continuation is not None
-    assert (
-        sum(
-            1
-            for message in revised_conversation
-            if isinstance(message.metadata, dict)
-            and message.metadata.get("requirements_summary")
-        )
-        == 1
-    )
-    assert resolve_requirements_state(revised_conversation).latest_summary == disclosure
 
 
 @pytest.mark.integration
@@ -8114,9 +7738,9 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         == "terminal_output"
         for event in first_events
     )
-    # `report_disposition` has no discovery question of its own: the classifier
-    # owns it, so the second turn resolves it from model evidence and moves on.
-    assert not any(
+    # The classifier's medium-confidence inference is not commit-grade evidence
+    # for a topology choice, so the server asks the canonical question.
+    assert any(
         event["event"] == "question"
         and cast(dict[str, object], event["data"]).get("question_id")
         == "report_disposition"
@@ -8126,9 +7750,9 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
     classified_disposition = classified_state.resolved_slots["report_disposition"]
     assert classified_disposition.value == "synthesized_overview"
     assert classified_disposition.source == "model"
+    assert classified_disposition.is_commit_grade is False
     # The third turn carries the user's structured answer while the classifier
-    # keeps replaying its older inference for the same slot; the answer wins and
-    # the slot is never re-asked.
+    # keeps replaying its older inference; the answer wins and is not re-asked.
     assert classification_call_count >= 3
     assert not any(event["event"] == "error" for event in third_events), third_events
     assert not any(
@@ -8603,12 +8227,15 @@ async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish
     assert flow_response.status_code == 200, flow_response.text
     flow_payload = flow_response.json()
     assert flow_payload["name"] == "Dokumentsammanfattning till PDF"
-    assert apply_payload["steps_created"] == 3
-    assert len(flow_payload["steps"]) == 3
+    assert apply_payload["steps_created"] == 4
+    assert len(flow_payload["steps"]) == 4
     assert flow_payload["steps"][0]["input_type"] == "document"
-    assert flow_payload["steps"][0]["output_type"] == "json"
-    assert flow_payload["steps"][1]["output_type"] == "text"
-    assert flow_payload["steps"][-1]["output_type"] == "pdf"
+    assert [step["output_type"] for step in flow_payload["steps"]] == [
+        "json",
+        "json",
+        "text",
+        "pdf",
+    ]
 
     publish_response = await client.post(
         f"/api/v1/flows/{flow_id}/publish/",

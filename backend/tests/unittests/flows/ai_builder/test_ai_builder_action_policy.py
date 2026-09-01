@@ -32,7 +32,10 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
     StepTriple,
 )
-from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
+from eneo.flows.ai_builder.planning_state_builder import (
+    apply_policy_defaults_from_resolved_slots,
+    merge_llm_resolved_slots,
+)
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
@@ -573,6 +576,31 @@ def test_policy_does_not_ask_the_purpose_when_editing_an_existing_flow() -> None
     assert policy.allowed_ask_question_targets == ()
 
 
+def test_policy_does_not_introduce_report_layout_discovery_in_edit_mode() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        is_edit_mode=True,
+    )
+
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert policy.allowed_ask_question_targets == ()
+
+
 def test_policy_refuses_removed_json_to_text_architecture() -> None:
     state = PlanningState.empty()
     state.resolved_slots["primary_runtime_input"] = _slot(
@@ -795,6 +823,10 @@ def test_policy_does_not_force_policy_default_docx_mode_into_questions() -> None
         source="policy_default",
         confidence="medium",
     )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "synthesized_overview",
+    )
 
     policy = build_planner_action_policy(
         session_state=state,
@@ -854,6 +886,67 @@ def test_policy_asks_selected_report_disposition_for_multi_source_pdf_report() -
 
     assert policy.allowed_action_kinds == ("ask_question",)
     assert policy.allowed_ask_question_targets == ("report_disposition",)
+
+
+def test_policy_asks_unresolved_report_disposition_before_architecture_commit() -> None:
+    state = _state_with_resolved_slots("primary_runtime_input")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope",
+        "multiple_documents_case",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("report_disposition",)
+
+
+def test_policy_default_multi_source_scope_still_requires_report_disposition() -> None:
+    state = _state_with_resolved_slots("primary_runtime_input")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    apply_policy_defaults_from_resolved_slots(state, freeform_text="")
+
+    assert state.resolved_slots["document_material_scope"].source == "policy_default"
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("report_disposition",)
+
+
+def test_resolved_disposition_commits_with_policy_default_multi_source_scope() -> None:
+    state = _state_with_resolved_slots("primary_runtime_input")
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    apply_policy_defaults_from_resolved_slots(state, freeform_text="")
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition",
+        "synthesized_overview",
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+    )
+    draft = derive_architecture_commit_draft(state)
+
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert draft is not None
+    assert draft.report_disposition == "synthesized_overview"
 
 
 def test_policy_refuses_a_required_pdf_template() -> None:

@@ -1796,21 +1796,37 @@ class TestSendMessageToolCall:
                                 "slot_name": "report_disposition",
                                 "value": "synthesized_overview",
                                 "confidence": "high",
-                                "reason": "The user wants to compare uploaded documents.",
+                                "reason": "The user explicitly requests one combined overview.",
                                 "evidence": [
                                     {
                                         "source_id": source_id,
-                                        "quote": "jämföra dem",
+                                        "quote": (
+                                            "en samlad översikt utan källspecifika "
+                                            "avsnitt"
+                                        ),
                                     }
                                 ],
                                 "evidence_level": "explicit",
                             },
                         ],
+                        "file_roles": [],
+                        "checkpoint_updates": [],
+                        "form_intake": None,
+                        "named_result_evidence": None,
+                        "example_output_constraints": None,
+                        "schema_direction": None,
+                        "secondary_obligations": [],
+                        "assumptions": [],
                         "contradictions": [],
                     }
                 )
             )
 
+        message = (
+            "Jag vill ladda upp ett eller flera PDF-dokument, jämföra dem och "
+            "skapa en DOCX-rapport med en samlad översikt utan källspecifika "
+            "avsnitt."
+        )
         with patch("eneo.flows.ai_builder.ai_builder_service.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(side_effect=classification_response)
             events = await _collect_events(
@@ -1818,14 +1834,8 @@ class TestSendMessageToolCall:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot(
-                        "Jag vill ladda upp ett eller flera PDF-dokument, jämföra dem och skapa "
-                        "en DOCX-rapport."
-                    ),
-                    message=(
-                        "Jag vill ladda upp ett eller flera PDF-dokument, jämföra dem och skapa "
-                        "en DOCX-rapport."
-                    ),
+                    request_snapshot=_test_request_snapshot(message),
+                    message=message,
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
                     max_input_tokens=128_000,
                     max_output_tokens=16_384,
@@ -2435,6 +2445,11 @@ class TestSendMessageStructuredQuestion:
                         },
                         "ui_language": "sv",
                     },
+                ),
+                _requirement_answer_message(
+                    question_id="report_disposition",
+                    value="synthesized_overview",
+                    content="En samlad översikt utan källspecifika avsnitt",
                 ),
             ],
         )

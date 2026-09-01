@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     derive_aggregation_intent_from_slots,
-    report_disposition_is_relevant,
+    report_disposition_is_relevant_for_state,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import derive_output_mode
 from eneo.flows.ai_builder.ai_builder_result_contract import derive_result_contract
@@ -145,18 +145,27 @@ def derive_architecture_commit_draft(
 def architecture_required_slot_names(state: PlanningState) -> frozenset[str]:
     """Slots a created flow's architecture must have before it can commit.
 
-    The purpose is architectural for exactly one shape: an audio flow whose
-    terminal output is text either delivers the transcript itself or a written
-    result derived from it, and those are different topologies. Everywhere
-    else the purpose shapes content, not structure.
+    Audio-to-text purpose distinguishes a transcript from a derived written
+    result. Relevant report disposition distinguishes per-source sections from
+    an overview or both. Those choices select different topologies; other
+    resolved shapes do not make the slots architectural. Shape relevance uses
+    raw resolved values so policy defaults and classifier evidence can expose
+    the requirement; action policy separately requires commit-grade evidence
+    for the disposition before admitting an architecture commit.
     """
 
+    required = CORE_ARCHITECTURAL_SLOTS
     if (
         _input_type_from_state(state) is FlowInputType.AUDIO
         and _output_type_from_state(state) is FlowOutputType.TEXT
     ):
-        return CORE_ARCHITECTURAL_SLOTS | {"post_processing_goal"}
-    return CORE_ARCHITECTURAL_SLOTS
+        required = required | {"post_processing_goal"}
+    if report_disposition_is_relevant_for_state(
+        state,
+        unresolved_values_are_relevant=False,
+    ):
+        required = required | {"report_disposition"}
+    return required
 
 
 def architecture_commit_hints_are_supported(
@@ -374,13 +383,8 @@ def _primary_pattern_id(
 
 def _report_disposition_from_state(state: PlanningState) -> ReportDisposition | None:
     value = state.commit_grade_slot_value("report_disposition")
-    if not report_disposition_is_relevant(
-        primary_runtime_input=state.commit_grade_slot_value("primary_runtime_input"),
-        terminal_output=state.commit_grade_slot_value("terminal_output"),
-        document_material_scope=state.commit_grade_slot_value(
-            "document_material_scope"
-        ),
-        docx_output_mode=state.commit_grade_slot_value("docx_output_mode"),
+    if not report_disposition_is_relevant_for_state(
+        state,
         unresolved_values_are_relevant=False,
     ):
         return None

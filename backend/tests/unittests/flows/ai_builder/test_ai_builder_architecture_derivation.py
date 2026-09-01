@@ -306,6 +306,74 @@ def test_purpose_is_architecturally_required_for_an_audio_text_flow() -> None:
 
 
 @pytest.mark.parametrize(
+    ("terminal_output", "document_material_scope", "docx_output_mode"),
+    [
+        ("pdf_document", "multiple_documents_case", None),
+        ("pdf_document", "flexible_document_case", None),
+        ("docx_document", "multiple_documents_case", "generated_docx"),
+        ("docx_document", "flexible_document_case", "generated_docx"),
+    ],
+)
+def test_report_disposition_is_required_for_multi_source_generated_reports(
+    terminal_output: str,
+    document_material_scope: str,
+    docx_output_mode: str | None,
+) -> None:
+    slots = {
+        "primary_runtime_input": "documents",
+        "terminal_output": terminal_output,
+        "document_material_scope": document_material_scope,
+    }
+    if docx_output_mode is not None:
+        slots["docx_output_mode"] = docx_output_mode
+    state = _state_with_slots(**slots)
+
+    assert architecture_required_slot_names(state) == frozenset(
+        {"primary_runtime_input", "terminal_output", "report_disposition"}
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+        "docx_output_mode",
+    ),
+    [
+        ("documents", "pdf_document", "single_document_case", None),
+        (
+            "documents",
+            "docx_document",
+            "multiple_documents_case",
+            "template_fill_docx",
+        ),
+        ("audio", "pdf_document", "multiple_documents_case", None),
+        ("documents", "structured_text", "multiple_documents_case", None),
+        ("documents", "pdf_document", None, None),
+    ],
+)
+def test_report_disposition_is_not_required_outside_its_complete_report_shape(
+    primary_runtime_input: str,
+    terminal_output: str,
+    document_material_scope: str | None,
+    docx_output_mode: str | None,
+) -> None:
+    slots = {
+        "primary_runtime_input": primary_runtime_input,
+        "terminal_output": terminal_output,
+    }
+    if document_material_scope is not None:
+        slots["document_material_scope"] = document_material_scope
+    if docx_output_mode is not None:
+        slots["docx_output_mode"] = docx_output_mode
+
+    assert architecture_required_slot_names(_state_with_slots(**slots)) == frozenset(
+        {"primary_runtime_input", "terminal_output"}
+    )
+
+
+@pytest.mark.parametrize(
     ("primary_runtime_input", "terminal_output"),
     [("audio", "structured_json"), ("audio", "pdf_document"), ("documents", "text")],
 )

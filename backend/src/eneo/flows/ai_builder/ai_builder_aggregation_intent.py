@@ -53,6 +53,31 @@ def report_disposition_is_relevant(
     )
 
 
+def report_disposition_is_relevant_for_state(
+    state: PlanningState,
+    *,
+    unresolved_values_are_relevant: bool,
+) -> bool:
+    """Whether the state's raw architecture shape needs report disposition.
+
+    Relevance deliberately reads resolved values before commit-grade filtering.
+    Callers that admit an architecture must separately require commit-grade
+    evidence for the disposition itself.
+    """
+
+    def value(slot_name: str) -> str | None:
+        slot = state.resolved_slots.get(slot_name)
+        return slot.value if slot is not None else None
+
+    return report_disposition_is_relevant(
+        primary_runtime_input=value("primary_runtime_input"),
+        terminal_output=value("terminal_output"),
+        document_material_scope=value("document_material_scope"),
+        docx_output_mode=value("docx_output_mode"),
+        unresolved_values_are_relevant=unresolved_values_are_relevant,
+    )
+
+
 def derive_aggregation_intent_from_slots(
     state: PlanningState,
     *,
