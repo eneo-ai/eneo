@@ -690,7 +690,12 @@ def _bundle(
         "case_contract_sha256": receipts.canonical_sha256(case_contract),
         "repetition": repetition,
         "live_execution_provenance": _provenance(revision=revision, model=model),
-        "observation": {"observation_status": status},
+        "observation": {
+            "observation_status": status,
+            "case_id": case_id,
+            "repetition": repetition,
+            "case_contract_sha256": receipts.canonical_sha256(case_contract),
+        },
         "journey": journey,
         "proposal_telemetry_diagnostics": {
             "proposal_turns": [
@@ -718,7 +723,7 @@ def _write_bundles(
     revision: str = "DEV-abc",
     planned: int | None = None,
     manifest: bool = True,
-    expected: list[dict[str, Any]] | None = None,
+    expected: list[Any] | None = None,
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     for index, bundle in enumerate(bundles):
@@ -997,6 +1002,38 @@ def test_token_baseline_refuses_bundles_that_are_not_the_manifest_run(
     root = _write_bundles(tmp_path / scenario, bundles, expected=expected)
 
     with pytest.raises(module.ReceiptError, match=expected_message):
+        module.token_baseline_report(root)
+
+
+def test_a_bundle_sealed_for_another_case_is_refused(tmp_path: Path) -> None:
+    """The seal, not the label, is what a receipt scores; the two must agree."""
+
+    module = _compare_module()
+    bundle = _bundle(status="completed", case_id="a")
+    bundle["observation"]["case_id"] = "sealed-other-case"
+    root = _write_bundles(tmp_path / "suite", [bundle])
+    with pytest.raises(module.ReceiptError, match="sealed observation's case_id"):
+        module.token_baseline_report(root)
+
+
+def test_a_malformed_planned_slot_refuses_instead_of_shrinking_the_population(
+    tmp_path: Path,
+) -> None:
+    module = _compare_module()
+    planned = _bundle(status="completed", case_id="a")
+    root = _write_bundles(
+        tmp_path / "suite",
+        [planned],
+        expected=[
+            {
+                "case_id": "a",
+                "repetition": 1,
+                "case_contract_sha256": planned["case_contract_sha256"],
+            },
+            "corrupt",
+        ],
+    )
+    with pytest.raises(module.ReceiptError, match=r"expected_observations\[1\]"):
         module.token_baseline_report(root)
 
 

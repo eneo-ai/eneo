@@ -1164,13 +1164,17 @@ def _read_manifest(suite_dir: Path) -> _SuiteManifest:
         cast(dict[str, Any], build).get("app_version"),
         where=f"{where}: build.app_version",
     )
+    expected_observations: list[dict[str, Any]] = []
+    for position, item in enumerate(cast(list[Any], expected)):
+        if not isinstance(item, dict):
+            # A planned slot that cannot be read still counts as planned; dropping
+            # it would shrink the denominator and let a partial root pass as whole.
+            raise ReceiptError(
+                f"{where}: expected_observations[{position}] is not an object."
+            )
+        expected_observations.append(dict(cast(dict[str, Any], item)))
     return _SuiteManifest(
-        identity=dict(identity),
-        expected_observations=[
-            dict(cast(dict[str, Any], item))
-            for item in cast(list[Any], expected)
-            if isinstance(item, dict)
-        ],
+        identity=dict(identity), expected_observations=expected_observations
     )
 
 
@@ -1271,14 +1275,13 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
             observation.get("observation_status"), where=f"{where}: observation_status"
         )
         status_counts[status] += 1
-        case_identity = bundle.get("case_identity")
+        # The sealed observation is the membership row; the identity owner
+        # has just proved it agrees with the bundle's labels.
         slots.append(
             {
-                "case_id": (
-                    case_identity.get("id") if isinstance(case_identity, dict) else None
-                ),
-                "repetition": bundle.get("repetition"),
-                "case_contract_sha256": bundle.get("case_contract_sha256"),
+                "case_id": observation.get("case_id"),
+                "repetition": observation.get("repetition"),
+                "case_contract_sha256": observation.get("case_contract_sha256"),
                 "bundle_file": path.name,
                 "bundle_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             }

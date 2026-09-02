@@ -1546,6 +1546,24 @@ def require_bundle_identity(
             f"{model.get('requested_id')!r}, but the run declares "
             f"{declared_model.get('requested_id')!r}."
         )
+    # The sealed observation is the row a receipt scores; its slot identity
+    # must be the slot the bundle is labelled with, or a bundle sealed for one
+    # case could be filed under another.
+    sealed = _mapping(bundle.get("observation"), where=where, key="observation")
+    case_identity = _mapping(
+        bundle.get("case_identity"), where=where, key="case_identity"
+    )
+    labelled = {
+        "case_id": case_identity.get("id"),
+        "repetition": bundle.get("repetition"),
+        "case_contract_sha256": bundle.get("case_contract_sha256"),
+    }
+    for field, value in labelled.items():
+        if sealed.get(field) != value:
+            raise ReceiptError(
+                f"{where}: the sealed observation's {field} is "
+                f"{sealed.get(field)!r}, not the bundle's {value!r}."
+            )
 
 
 def failure_summary_from_events(event_summary: Mapping[str, Any]) -> JsonObject:
