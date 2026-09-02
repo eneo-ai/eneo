@@ -691,7 +691,7 @@
   const defaultOpenChapter = $derived.by(() => {
     if (!activeStep) return null;
     const intent = $newStepOpenIntent;
-    if (intent && intent.order === activeStep.step_order) return "task";
+    if (intent && intent.stepId === activeStep.id) return "task";
     return getDefaultOpenStepChapter({
       step: activeStep,
       hasInputError: currentStepIssues.length > 0,
@@ -702,16 +702,17 @@
   let technicalRequestOpen = $state(0);
   let focusInstructionPending = $state(false);
   // A step the user just added lands with its name selected, so typing renames
-  // it at once. Guarded by step id: revisiting the step later must not steal focus.
+  // it at once. One handoff per creation token: the temp→real id reconciliation
+  // after the first save and later visits to the step must not steal focus.
   let nameInputEl = $state<HTMLInputElement | null>(null);
-  let namedNewStepId = $state<string | null>(null);
+  let handledNewStepToken = $state<string | null>(null);
   $effect(() => {
     const intent = $newStepOpenIntent;
     const el = nameInputEl;
     const step = activeStep;
-    if (!intent || !step || !el || intent.order !== step.step_order) return;
-    if (untrack(() => namedNewStepId) === step.id) return;
-    namedNewStepId = step.id ?? null;
+    if (!intent || !step || !el || intent.stepId !== step.id) return;
+    if (untrack(() => handledNewStepToken) === intent.token) return;
+    handledNewStepToken = intent.token;
     el.focus();
     el.select();
   });

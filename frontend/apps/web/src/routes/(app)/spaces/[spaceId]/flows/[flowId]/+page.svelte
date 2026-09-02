@@ -151,18 +151,27 @@
   }
 
   const {
-    state: { resource, update, activeStepId, isPublished, saveStatus, validationErrors }
+    state: {
+      resource,
+      update,
+      activeStepId,
+      stepNavigationRevision,
+      isPublished,
+      saveStatus,
+      validationErrors
+    }
   } = flowEditor;
   const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
   const activeProcessingStep = $derived(
     $update.steps.find((step) => step.id === $activeStepId) ?? null
   );
-  // Each selected step starts at its header; the previous step's scroll offset
-  // must not carry over. jsdom has no element scrollTo, hence optional.
+  // Each step the user moves to starts at its header; the previous step's
+  // scroll offset must not carry over. Keyed on the navigation revision, not the
+  // id, so a new step getting its real id after the first save stays put.
   let stepEditorScrollEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
-    void $activeStepId;
-    stepEditorScrollEl?.scrollTo?.({ top: 0 });
+    void $stepNavigationRevision;
+    stepEditorScrollEl?.scrollTo({ top: 0 });
   });
 
   async function selectProcessingStep(stepId: string | null) {

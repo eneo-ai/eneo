@@ -116,7 +116,11 @@ function createFlowEditor(data: FlowEditorInitData) {
             (s: FlowStep) => s.step_order === activeStep.step_order
           );
           if (realStep?.id) {
-            activeStepId.set(realStep.id);
+            // Re-pointed once the editor state carries the real step (see the
+            // subscription below): pointing at it before then renders one
+            // frame without an active step, which unmounts the step editor
+            // and drops the user's focus mid-rename.
+            pendingActiveStepId = { tempId: currentActiveId, realId: realStep.id };
           }
         }
       }
@@ -152,10 +156,35 @@ function createFlowEditor(data: FlowEditorInitData) {
   const activeStepId = writable<string | null>(null);
   const validationErrors = writable<Map<string, string[]>>(new Map());
   const saveStatus = writable<"saved" | "saving" | "unsaved">("saved");
-  // Which editor chapter a freshly-created step should open by default. Keyed by
-  // step_order so it survives the temp→real id reconciliation. Template steps
-  // land on the AI work section; blank steps land on "what".
-  const newStepOpenIntent = writable<{ order: number } | null>(null);
+  // The step the user just created: the editor opens its task chapter and hands
+  // it over once (name focused and selected). `token` is unique per creation so
+  // consumers act once; `stepId` follows the temp→real id reconciliation so the
+  // intent keeps pointing at the same step. Template steps land on the AI work
+  // section; blank steps land on "what".
+  const newStepOpenIntent = writable<{ token: string; stepId: string } | null>(null);
+  // Advances on every user-driven step selection, never on the temp→real id
+  // reconciliation after a save, so views that react to "the user moved to a
+  // step" (scroll resets) stay quiet while a step merely gets its real id.
+  const stepNavigationRevision = writable(0);
+  function navigateToStep(stepId: string | null): void {
+    pendingActiveStepId = null;
+    activeStepId.set(stepId);
+    stepNavigationRevision.update((revision) => revision + 1);
+  }
+  // The temp→real id swap of the active step after its first save. Applied in
+  // the same synchronous state update that brings the real step in, so the
+  // active step never goes missing for a render.
+  let pendingActiveStepId: { tempId: string; realId: string } | null = null;
+  const unsubscribeActiveStepReconciliation = editor.state.update.subscribe(($update) => {
+    const pending = pendingActiveStepId;
+    if (!pending || get(activeStepId) !== pending.tempId) return;
+    if (!($update.steps ?? []).some((step: FlowStep) => step.id === pending.realId)) return;
+    pendingActiveStepId = null;
+    activeStepId.set(pending.realId);
+    newStepOpenIntent.update((intent) =>
+      intent && intent.stepId === pending.tempId ? { ...intent, stepId: pending.realId } : intent
+    );
+  });
 
   const isPublished = derived(editor.state.resource, ($resource) => {
     return $resource.published_version != null;
@@ -399,7 +428,7 @@ function createFlowEditor(data: FlowEditorInitData) {
   function selectStep(stepId: string): void {
     const currentSteps = get(editor.state.update).steps ?? [];
     if (currentSteps.some((step) => step.id === stepId)) {
-      activeStepId.set(stepId);
+      navigateToStep(stepId);
     }
   }
 
@@ -408,7 +437,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
     const firstStepId = get(editor.state.update).steps?.[0]?.id;
     if (firstStepId) {
-      activeStepId.set(firstStepId);
+      navigateToStep(firstStepId);
     }
   }
 
@@ -435,7 +464,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
     await applyStepsWithSafeOrderRemap(nextSteps);
     const fallbackStepId = nextSteps[Math.min(index, nextSteps.length - 1)]?.id ?? null;
-    activeStepId.set(fallbackStepId);
+    navigateToStep(fallbackStepId);
   }
 
   async function moveStepAtIndex(index: number, direction: -1 | 1): Promise<void> {
@@ -573,8 +602,8 @@ function createFlowEditor(data: FlowEditorInitData) {
       ...u,
       steps: [...(u.steps ?? []), newStep as FlowStep]
     }));
-    newStepOpenIntent.set({ order: stepCount + 1 });
-    activeStepId.set(tempId);
+    newStepOpenIntent.set({ token: tempId, stepId: tempId });
+    navigateToStep(tempId);
 
     try {
       const assistant = await data.eneo.flows.assistants.create({
@@ -694,7 +723,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     // Later steps move down one order, so their `step_N` references (bindings
     // and prompts) must follow them; the remap also owns the auto-save.
     await applyStepsWithSafeOrderRemap(updatedSteps);
-    activeStepId.set(tempId);
+    navigateToStep(tempId);
 
     try {
       const assistant = await data.eneo.flows.assistants.create({
@@ -935,6 +964,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     assistantSaveManager.destroy();
     unsubscribe();
     unsubscribeValidation();
+    unsubscribeActiveStepReconciliation();
   }
 
   function setResource(value: Flow): void {
@@ -949,6 +979,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       ...editor.state,
       activeStepId: readonly(activeStepId),
       newStepOpenIntent: readonly(newStepOpenIntent),
+      stepNavigationRevision: readonly(stepNavigationRevision),
       validationErrors,
       saveStatus: unifiedSaveStatus,
       isPublished

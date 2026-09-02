@@ -1067,13 +1067,57 @@ describe("FlowEditor save flushing", () => {
         ...resource,
         steps: [persistedStep, tempStep]
       }));
+      const revisionBeforeSelect = get(editor.state.stepNavigationRevision);
       editor.selectStep("_temp_new");
       expect(get(editor.state.activeStepId)).toBe("_temp_new");
+      expect(get(editor.state.stepNavigationRevision)).toBe(revisionBeforeSelect + 1);
 
       await editor.flushFlowSaves();
 
       expect(flowUpdate).toHaveBeenCalledTimes(1);
       expect(get(editor.state.activeStepId)).toBe("step-real-2");
+      // Getting the real id is not a navigation: views keyed on the revision
+      // (editor scroll reset) must not react to it.
+      expect(get(editor.state.stepNavigationRevision)).toBe(revisionBeforeSelect + 1);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("hands a created step over once: the intent keeps its token and follows the real id", async () => {
+    const flowUpdate = vi.fn(async ({ flow, update }) => ({
+      ...(flow as Flow),
+      ...(update as Partial<Flow>),
+      steps: [
+        makeStep(1),
+        makeStep(2, {
+          id: "step-real-2",
+          assistant_id: "assistant-2",
+          input_source: "previous_step"
+        })
+      ]
+    }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({
+        flowUpdate,
+        assistantCreate: vi.fn(async () => ({ id: "assistant-2" }))
+      })
+    });
+    try {
+      const revisionBeforeAdd = get(editor.state.stepNavigationRevision);
+      const tempId = await editor.addStep();
+      expect(tempId).toMatch(/^_temp_/);
+      expect(get(editor.state.newStepOpenIntent)).toEqual({ token: tempId, stepId: tempId });
+      expect(get(editor.state.stepNavigationRevision)).toBe(revisionBeforeAdd + 1);
+
+      await editor.flushFlowSaves();
+
+      expect(get(editor.state.activeStepId)).toBe("step-real-2");
+      // Same creation, same token: the name handoff already happened and must
+      // not repeat, while the intent keeps identifying the step by its real id.
+      expect(get(editor.state.newStepOpenIntent)).toEqual({ token: tempId, stepId: "step-real-2" });
+      expect(get(editor.state.stepNavigationRevision)).toBe(revisionBeforeAdd + 1);
     } finally {
       editor.destroy();
     }

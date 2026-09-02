@@ -165,11 +165,12 @@
       : null
   );
   // The selected step stays in view: a step added at the end of a long list is
-  // otherwise selected off-screen. jsdom has no scrollIntoView, hence optional.
+  // otherwise selected off-screen. "nearest" leaves a visible row where it is,
+  // so the remount after the temp→real id reconciliation moves nothing.
   let rowEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
     if (!isActive || !rowEl) return;
-    rowEl.scrollIntoView?.({
+    rowEl.scrollIntoView({
       block: "nearest",
       behavior: prefersReducedMotion() ? "auto" : "smooth"
     });
