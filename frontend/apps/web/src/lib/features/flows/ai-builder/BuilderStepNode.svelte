@@ -98,7 +98,7 @@
     </div>
   </div>
   <span
-    class="text-secondary inline-flex max-w-[9.375rem] shrink-0 items-center truncate text-[0.71875rem] font-medium max-lg:max-w-[5.5rem] max-sm:hidden"
+    class="text-secondary inline-flex max-w-[14rem] shrink-0 items-center truncate text-[0.71875rem] font-medium max-lg:max-w-[5.5rem] max-sm:hidden"
     title={modelLabel}
   >
     {modelLabel}
