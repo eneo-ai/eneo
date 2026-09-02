@@ -288,11 +288,13 @@ _PASSED_CAPACITY_PREFLIGHT: dict[str, Any] = {
         "observation_count": 20,
     },
     "runtime_slots_required": 1,
+    "flow_deletion_required": True,
     "space_id": _MEASUREMENT_SPACE_ID,
     "request_capacity": {
         "key_id": "00000000-0000-0000-0000-000000000030",
         "scope_type": "space",
         "scope_id": _MEASUREMENT_SPACE_ID,
+        "permission": "admin",
         "limit_source": "explicit",
         "limit": 20_000,
         "current_count": 2,

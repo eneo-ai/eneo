@@ -10796,6 +10796,7 @@ export interface components {
      *       "key_id": "00000000-0000-0000-0000-000000000030",
      *       "limit": 20000,
      *       "limit_source": "explicit",
+     *       "permission": "write",
      *       "remaining": 19588,
      *       "scope_id": "00000000-0000-0000-0000-000000000020",
      *       "scope_type": "space",
@@ -10830,6 +10831,8 @@ export interface components {
        * @enum {string}
        */
       limit_source: "unlimited" | "explicit" | "scope_default";
+      /** @description Method level the key may use: read, write or admin. */
+      permission: components["schemas"]["ApiKeyPermission"];
       /**
        * Remaining
        * @description `limit` minus `current_count`, never negative. Null only when unlimited. A snapshot, not a reservation.

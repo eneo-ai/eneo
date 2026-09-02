@@ -15,7 +15,7 @@ from eneo.authentication.api_key_router_helpers import (
     error_responses,
     raise_api_key_http_error,
 )
-from eneo.authentication.auth_models import ApiKeyScopeType
+from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.users.user import UserInDB
@@ -51,6 +51,7 @@ class ApiKeyCapacityPublic(BaseModel):
                 "key_id": "00000000-0000-0000-0000-000000000030",
                 "scope_type": "space",
                 "scope_id": "00000000-0000-0000-0000-000000000020",
+                "permission": "write",
                 "limit_source": "explicit",
                 "limit": 20000,
                 "window_seconds": 3600,
@@ -69,6 +70,9 @@ class ApiKeyCapacityPublic(BaseModel):
         description=(
             "Scoped resource the key is bound to. Null for a tenant-scoped key."
         )
+    )
+    permission: ApiKeyPermission = Field(
+        description="Method level the key may use: read, write or admin."
     )
     limit_source: ApiKeyRateLimitSource = Field(
         description=(
@@ -153,6 +157,7 @@ async def get_api_key_capacity(
         key_id=capacity.key_id,
         scope_type=ApiKeyScopeType(capacity.scope_type).value,
         scope_id=capacity.scope_id,
+        permission=key.permission,
         limit_source=capacity.limit_source,
         window_seconds=capacity.window_seconds,
         fail_open=capacity.fail_open,

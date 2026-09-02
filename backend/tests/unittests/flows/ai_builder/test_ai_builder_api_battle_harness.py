@@ -65,6 +65,7 @@ def _allow_measurement_preflight(
                 "key_id": "00000000-0000-0000-0000-000000000030",
                 "scope_type": "space",
                 "scope_id": kwargs["space_id"],
+                "permission": "admin",
                 "limit_source": "unlimited",
                 "limit": None,
                 "current_count": None,
@@ -88,6 +89,7 @@ def _allow_measurement_preflight(
                 cases=kwargs["cases"],
                 max_concurrency=kwargs["max_concurrency"],
             ),
+            flow_deletion_required=any(case.apply_plan for case in kwargs["cases"]),
         ),
     )
 
@@ -8650,6 +8652,7 @@ def _passing_capacity_inputs(harness: ModuleType) -> dict[str, Any]:
             "key_id": "00000000-0000-0000-0000-000000000030",
             "scope_type": "space",
             "scope_id": _SPACE_ID,
+            "permission": "admin",
             "limit_source": "explicit",
             "limit": 20000,
             "current_count": 10,
@@ -8673,6 +8676,7 @@ def _passing_capacity_inputs(harness: ModuleType) -> dict[str, Any]:
         },
         "space_id": _SPACE_ID,
         "runtime_slots_required": 1,
+        "flow_deletion_required": True,
     }
 
 
@@ -8701,6 +8705,10 @@ def test_capacity_preflight_passes_only_on_a_sufficient_idle_measurement_target(
             "measurement_key_scope_mismatch",
         ),
         ({"request_capacity_fail_open": True}, "rate_limit_policy_fail_open"),
+        (
+            {"request_capacity_permission": "write"},
+            "measurement_key_cannot_delete_flows",
+        ),
         (
             {
                 "request_capacity_current_count": 19_500,
@@ -8750,6 +8758,7 @@ def test_capacity_preflight_accepts_an_unlimited_key_under_a_fail_open_policy() 
         "key_id": "00000000-0000-0000-0000-000000000030",
         "scope_type": "space",
         "scope_id": _SPACE_ID,
+        "permission": "admin",
         "limit_source": "unlimited",
         "limit": None,
         "current_count": None,
@@ -8800,6 +8809,7 @@ def test_capacity_refusal_makes_no_clean_space_or_fixture_calls(
                 "key_id": "00000000-0000-0000-0000-000000000030",
                 "scope_type": "space",
                 "scope_id": _SPACE_ID,
+                "permission": "admin",
                 "limit_source": "unlimited",
                 "limit": None,
                 "current_count": None,
@@ -9689,3 +9699,16 @@ def test_a_builder_fault_keeps_its_product_outcome_and_class(tmp_path: Path) -> 
     assert result["failure_class"] == "builder_semantic"
     observation = harness.observation_from_row(result, where="builder fault")
     assert harness.observation_is_replacement_eligible(observation) is False
+
+
+def test_harness_refuses_to_run_against_a_foreign_eneo_checkout(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A shared virtualenv resolving `eneo` elsewhere would seal the wrong build."""
+
+    import eneo
+
+    harness = _battle_harness()
+    monkeypatch.setattr(eneo, "__file__", "/elsewhere/backend/src/eneo/__init__.py")
+    with raises(RuntimeError, match="outside"):
+        harness._local_app_version()

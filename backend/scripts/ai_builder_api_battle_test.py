@@ -128,8 +128,16 @@ def _ensure_backend_src_importable() -> None:
 
 
 def _local_app_version() -> str:
+    import eneo
     from eneo.main.config import get_settings
 
+    # A shared virtualenv can resolve `eneo` to another checkout; the harness
+    # would then seal a version it did not run. Refuse before any observation.
+    backend_src = Path(__file__).resolve().parents[1] / "src"
+    if not Path(eneo.__file__).resolve().is_relative_to(backend_src):
+        raise RuntimeError(
+            f"harness imports eneo from {eneo.__file__}, outside {backend_src}."
+        )
     return get_settings().app_version
 
 
@@ -2209,6 +2217,7 @@ def _capacity_preflight(
         demand=demand,
         space_id=space_id,
         runtime_slots_required=slots_required,
+        flow_deletion_required=any(case.apply_plan for case in cases),
     )
     endpoint_failures = [
         failure for failure in (runtime_failure, request_failure) if failure is not None

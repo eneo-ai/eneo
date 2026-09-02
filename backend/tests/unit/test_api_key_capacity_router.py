@@ -13,6 +13,7 @@ from eneo.authentication.api_key_capacity_router import (
 )
 from eneo.authentication.api_key_rate_limiter import ApiKeyRateCapacity
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.auth_models import ApiKeyPermission
 
 
 def _container(*, user: object, snapshot: object) -> MagicMock:
@@ -30,7 +31,7 @@ def _container(*, user: object, snapshot: object) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_capacity_describes_the_calling_key() -> None:
-    key = SimpleNamespace(id=uuid4())
+    key = SimpleNamespace(id=uuid4(), permission=ApiKeyPermission.ADMIN)
     space_id = uuid4()
     snapshot = ApiKeyRateCapacity(
         key_id=key.id,
@@ -49,6 +50,7 @@ async def test_capacity_describes_the_calling_key() -> None:
 
     assert response.key_id == key.id
     assert response.scope_id == space_id
+    assert response.permission == ApiKeyPermission.ADMIN
     assert (response.limit, response.current_count, response.remaining) == (
         20000,
         412,
@@ -91,6 +93,7 @@ def test_unlimited_capacity_carries_no_counter_fields() -> None:
         key_id=uuid4(),
         scope_type="space",
         scope_id=uuid4(),
+        permission=ApiKeyPermission.WRITE,
         limit_source="unlimited",
         window_seconds=3600,
         fail_open=False,
@@ -114,6 +117,7 @@ def test_unlimited_capacity_rejects_a_counter() -> None:
             key_id=uuid4(),
             scope_type="space",
             scope_id=uuid4(),
+            permission=ApiKeyPermission.WRITE,
             limit_source="unlimited",
             window_seconds=3600,
             fail_open=False,
@@ -129,6 +133,7 @@ def test_limited_capacity_requires_every_counter_field() -> None:
             key_id=uuid4(),
             scope_type="space",
             scope_id=uuid4(),
+            permission=ApiKeyPermission.WRITE,
             limit_source="scope_default",
             window_seconds=3600,
             fail_open=False,

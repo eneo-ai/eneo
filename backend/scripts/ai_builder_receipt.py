@@ -898,11 +898,13 @@ def capacity_preflight_verdict(
     demand: Mapping[str, object],
     space_id: str,
     runtime_slots_required: int,
+    flow_deletion_required: bool,
 ) -> JsonObject:
     """Decide whether the complete acquisition may start. Refuses by default.
 
     Every branch names its refusal, so a receipt reader can tell an exhausted
-    budget from a misdirected key from an unreachable endpoint.
+    budget from a misdirected key from an unreachable endpoint. Provider-free
+    by design: nothing here spends a model call.
     """
     refusals: list[str] = []
     if runtime_slots_required < 0:
@@ -971,6 +973,14 @@ def capacity_preflight_verdict(
             refusals.append("measurement_key_not_space_scoped")
         elif scope_id != space_id:
             refusals.append("measurement_key_scope_mismatch")
+        # Applied Flows are deleted after each observation and the space must
+        # be empty before the next; DELETE needs an admin key. A write key
+        # leaked three Flows on 2026-09-02 and failed every apply case.
+        if (
+            flow_deletion_required
+            and _capacity_str(request_capacity, "permission") != "admin"
+        ):
+            refusals.append("measurement_key_cannot_delete_flows")
         limit_source = _capacity_str(request_capacity, "limit_source")
         if limit_source == "unlimited":
             # An unlimited key never consults the rate-limit store, so a
@@ -1039,6 +1049,7 @@ def capacity_preflight_verdict(
         "refusals": refusals,
         "demand": dict(demand),
         "runtime_slots_required": runtime_slots_required,
+        "flow_deletion_required": flow_deletion_required,
         "space_id": space_id,
         "request_capacity": dict(request_capacity) if request_capacity else None,
         "runtime_capacity": dict(runtime_capacity) if runtime_capacity else None,
@@ -1077,6 +1088,11 @@ def require_passed_capacity_preflight(
         raise ReceiptError(
             f"{where}: capacity_preflight.runtime_slots_required is missing."
         )
+    flow_deletion_required = capacity_preflight.get("flow_deletion_required")
+    if not isinstance(flow_deletion_required, bool):
+        raise ReceiptError(
+            f"{where}: capacity_preflight.flow_deletion_required is missing."
+        )
     request_capacity = capacity_preflight.get("request_capacity")
     runtime_capacity = capacity_preflight.get("runtime_capacity")
     rederived = capacity_preflight_verdict(
@@ -1093,6 +1109,7 @@ def require_passed_capacity_preflight(
         demand=demand,
         space_id=space_id,
         runtime_slots_required=slots_required,
+        flow_deletion_required=flow_deletion_required,
     )
     refusals = cast(list[str], rederived["refusals"])
     if refusals:
