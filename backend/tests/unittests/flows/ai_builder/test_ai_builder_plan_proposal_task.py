@@ -716,7 +716,7 @@ def test_plan_proposal_prompt_omits_raw_slots_and_provenance() -> None:
         resource_catalog=_empty_catalog(),
     )
 
-    assert "terminal_output" not in prompt
+    assert prompt.count("- terminal_output: structured_json") == 1
     assert "runtime_metadata_fields" not in prompt
     assert "policy default assumption" not in prompt
 
@@ -811,7 +811,7 @@ def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
     )
 
     assert "Result contract:" in prompt
-    assert "- post_processing_goal: action_followup" not in prompt
+    assert prompt.count("- post_processing_goal: action_followup") == 1
     assert "- Decisions" in prompt
     assert "- Owners" in prompt
     assert (
@@ -830,7 +830,7 @@ def test_plan_proposal_prompt_renders_machine_readable_result_contract() -> None
     )
 
     assert "Result contract:" in prompt
-    assert "- terminal_output: structured_json" not in prompt
+    assert prompt.count("- terminal_output: structured_json") == 1
     assert "Use the requested schema or fields as the output contract" in prompt
     assert "Use null or unspecified placeholders for missing source values" in prompt
     assert "Brief summary" not in prompt

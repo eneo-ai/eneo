@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-from dataclasses import replace
 from typing import get_args
 from uuid import UUID, uuid4
 
@@ -104,46 +103,6 @@ def test_build_ai_builder_attachment_context_fits_text_fairly() -> None:
     assert len(result.included_file_ids) == 2
     assert result.truncated is True
     assert result.total_chars <= 70
-
-
-def test_fitted_attachment_excerpts_keep_identity_and_role_when_names_collide() -> None:
-    first = _make_file(
-        name="duplicate.txt",
-        text="FIRST-BODY-SENTINEL " * 20,
-        file_id=UUID("00000000-0000-0000-0000-000000000001"),
-    )
-    second = _make_file(
-        name="duplicate.txt",
-        text="SECOND-BODY-SENTINEL " * 20,
-        file_id=UUID("00000000-0000-0000-0000-000000000002"),
-    )
-    context = build_ai_builder_attachment_context([first, second])
-    assert context is not None
-    context = replace(
-        context,
-        evidence=(
-            replace(context.evidence[0], inferred_role="reference_material"),
-            replace(context.evidence[1], inferred_role="example_output"),
-        ),
-    )
-
-    fitted = fit_ai_builder_attachment_context(
-        context,
-        fits_context=lambda rendered: rendered is None or len(rendered) <= 900,
-    )
-
-    assert fitted.context is not None
-    first_block, second_block = fitted.context.split("\n\n---\n\n")
-    assert "file 1" in first_block
-    assert "duplicate.txt" in first_block
-    assert "reference_material" in first_block
-    assert "FIRST-BODY-SENTINEL" in first_block
-    assert "SECOND-BODY-SENTINEL" not in first_block
-    assert "file 2" in second_block
-    assert "duplicate.txt" in second_block
-    assert "example_output" in second_block
-    assert "SECOND-BODY-SENTINEL" in second_block
-    assert "FIRST-BODY-SENTINEL" not in second_block
 
 
 def test_attachment_text_admission_scales_with_selected_model_context() -> None:

@@ -51,6 +51,8 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnLifecycle,
     BuilderTurnState,
     ConversationMessage,
+    FlowBuilderProposal,
+    FlowBuilderProposalContent,
     SessionStatus,
     TargetKind,
 )
@@ -2217,26 +2219,42 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
 
 
 def test_proposal_request_replays_corrections_after_canonical_folding() -> None:
-    state = _document_architecture_state()
-    state.resolved_slots["terminal_output"] = ResolvedSlot(
-        name="terminal_output",
-        value="structured_json",
-        source="structured_answer",
-        confidence="high",
-    )
-    state.output_schema_evidence = build_schema_evidence(
-        json_schema={
-            "type": "object",
-            "properties": {"canonical-new-value-sentinel": {"type": "string"}},
-        },
-        source="declared_schema",
-        confidence="high",
-        evidence=(),
-    )
     conversation = [
-        ConversationMessage(role="user", content="old-value-sentinel"),
-        ConversationMessage(role="user", content="later-correction-sentinel"),
+        ConversationMessage(
+            message_id="old-terminal-answer",
+            role="user",
+            content="First return a PDF document.",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_values": ["pdf_document"],
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="corrected-terminal-answer",
+            role="user",
+            content="Actually return structured JSON.",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_values": ["structured_json"],
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="empty-goal-answer",
+            role="user",
+            content="",
+            metadata={
+                "question_answer": {
+                    "question_id": "post_processing_goal",
+                    "selected_values": ["stop_after_primary_operation"],
+                }
+            },
+        ),
     ]
+    state = build_planning_state_from_conversation(conversation)
 
     prepared = build_proposal_prepared(
         requirements_state=RequirementsState(),
@@ -2259,19 +2277,21 @@ def test_proposal_request_replays_corrections_after_canonical_folding() -> None:
         max_output_tokens=4_096,
         budget_policy=_budget_policy(),
         attachment_file_count=0,
-        current_turn_start=1,
+        current_turn_start=2,
     )
 
     system_prompt = prepared.llm_messages[0]["content"]
     assert isinstance(system_prompt, str)
-    assert "canonical-new-value-sentinel" in system_prompt
-    assert "old-value-sentinel" not in system_prompt
-    assert "later-correction-sentinel" not in system_prompt
+    assert system_prompt.count("- terminal_output: structured_json") == 1
+    assert (
+        system_prompt.count("- post_processing_goal: stop_after_primary_operation") == 1
+    )
+    assert "- terminal_output: pdf_document" not in system_prompt
     assert [
         message["content"]
         for message in prepared.llm_messages[1:]
-        if message["role"] == "user"
-    ] == ["old-value-sentinel", "later-correction-sentinel"]
+        if message["role"] == "user" and message["content"]
+    ] == ["First return a PDF document.", "Actually return structured JSON."]
 
 
 def test_create_proposal_request_assigns_state_facts_to_one_wire_channel() -> None:
@@ -2388,19 +2408,19 @@ def test_create_proposal_request_assigns_state_facts_to_one_wire_channel() -> No
     catalog = build_ai_builder_resource_catalog(
         available_models=[
             {
-                "id": "model-owner",
-                "ref": "model-owner",
+                "id": "model-ref-owner-sentinel",
+                "ref": "model-ref-owner-sentinel",
                 "name": "Model owner",
-                "display_name": "Model display",
+                "display_name": "model-ref-owner-sentinel",
                 "provider": "test",
             }
         ],
         available_kbs=[
             {
-                "id": "kb-owner",
-                "ref": "kb-owner",
+                "id": "kb-ref-id-sentinel",
+                "ref": "kb-ref-id-sentinel",
                 "name": "KB owner",
-                "display_name": "KB display",
+                "display_name": "kb-ref-id-sentinel",
                 "description": "kb-description-owner-sentinel",
             }
         ],
@@ -2447,7 +2467,7 @@ def test_create_proposal_request_assigns_state_facts_to_one_wire_channel() -> No
         "tool": json.dumps(prepared.proposal_tool_schema, ensure_ascii=False),
         "replay": json.dumps(prepared.llm_messages[1:], ensure_ascii=False),
     }
-    expected_owners = {
+    semantic_fact_owners = {
         "runtime-field-owner-sentinel": "system",
         "attachment-name-owner-sentinel.txt": "system",
         "attachment-body-owner-sentinel": "system",
@@ -2460,13 +2480,16 @@ def test_create_proposal_request_assigns_state_facts_to_one_wire_channel() -> No
         "kb-description-owner-sentinel": "system",
         "replay-owner-sentinel": "replay",
     }
-    for sentinel, owner in expected_owners.items():
-        assert channels[owner].count(sentinel) == 1
-        assert all(
-            sentinel not in content
-            for channel, content in channels.items()
-            if channel != owner
-        )
+    for sentinel, owner in semantic_fact_owners.items():
+        for channel, content in channels.items():
+            assert content.count(sentinel) == (1 if channel == owner else 0)
+    contract_identity_channels = {
+        "model.model-ref-owner-sentinel": {"system", "tool"},
+        "knowledge.kb-ref-id-sentinel": {"system", "tool"},
+    }
+    for sentinel, expected in contract_identity_channels.items():
+        for channel, content in channels.items():
+            assert (sentinel in content) is (channel in expected)
 
 
 def test_edit_proposal_request_assigns_each_dynamic_fact_to_one_channel() -> None:
@@ -2504,34 +2527,40 @@ def test_edit_proposal_request_assigns_each_dynamic_fact_to_one_channel() -> Non
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[], available_kbs=[], prior_bindings=()
         ),
-        flow=MagicMock(steps=[]),
+        flow=MagicMock(steps=[SimpleNamespace(step_order=1)]),
         assistant_snapshots=None,
         plan_edit_context=ResolvedAIBuilderEditContext(
             request=AIBuilderPlanEditContext(
                 scope="step",
                 plan_id=plan_id,
-                target_plan_step_ref="step_target",
+                target_plan_step_ref="existing_step_1",
             ),
             scope="step",
-            target_plan_step_ref="step_target",
+            target_plan_step_ref="existing_step_1",
             plan_id=plan_id,
         ),
-        prior_plan_for_revision=cast(
-            Any,
-            SimpleNamespace(
-                spec=FlowDraftSpecCore(
-                    flow_name="Existing plan",
-                    steps=[
-                        StepSpec(
-                            plan_step_ref="step_target",
-                            name="Selected step",
-                            assistant_spec=AssistantSpec(instructions="Existing work."),
-                            input_source=InputSource.FLOW_INPUT,
-                            input_type=InputType.TEXT,
-                            output_mode=OutputMode.PASS_THROUGH,
-                            output_type=OutputType.TEXT,
-                        )
-                    ],
+        prior_plan_for_revision=BuilderPlan(
+            id=plan_id,
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(
+                    spec=FlowDraftSpecCore(
+                        flow_name="Existing plan",
+                        steps=[
+                            StepSpec(
+                                plan_step_ref="existing_step_1",
+                                name="Selected step",
+                                assistant_spec=AssistantSpec(
+                                    instructions="Existing work."
+                                ),
+                                input_source=InputSource.FLOW_INPUT,
+                                input_type=InputType.TEXT,
+                                output_mode=OutputMode.PASS_THROUGH,
+                                output_type=OutputType.TEXT,
+                            )
+                        ],
+                    )
                 )
             ),
         ),
@@ -2551,20 +2580,134 @@ def test_edit_proposal_request_assigns_each_dynamic_fact_to_one_channel() -> Non
         for message in prepared.llm_messages[1:]
         if message["role"] == "user"
     )
-    for sentinel in (
-        "role-owner-sentinel.pdf",
-        "existing-flow-sentinel",
-        "attachment-content-sentinel",
-        str(plan_id),
-    ):
-        assert system_prompt.count(sentinel) == 1
-        assert sentinel not in tool_schema
-        assert sentinel not in replay
+    channels = {
+        "system": system_prompt,
+        "tool": tool_schema,
+        "replay": replay,
+    }
+    semantic_fact_owners = {
+        "role-owner-sentinel.pdf": "system",
+        "existing-flow-sentinel": "system",
+        "attachment-content-sentinel": "system",
+        str(plan_id): "system",
+        "edit-replay-sentinel": "replay",
+    }
+    for sentinel, owner in semantic_fact_owners.items():
+        for channel, content in channels.items():
+            assert content.count(sentinel) == (1 if channel == owner else 0)
+    contract_identity_channels = {
+        "existing_step_1": {"system", "tool"},
+    }
+    for sentinel, expected in contract_identity_channels.items():
+        for channel, content in channels.items():
+            assert (sentinel in content) is (channel in expected)
     assert replay == "edit-replay-sentinel"
     assert system_prompt.count("Scope: one selected step.") == 1
-    assert "step_target (Selected step)" in system_prompt
-    assert "edit-replay-sentinel" not in system_prompt
-    assert "edit-replay-sentinel" not in tool_schema
+    assert "existing_step_1 (Selected step)" in system_prompt
+
+
+def test_proposal_request_keeps_duplicate_attachment_names_attributed_when_fitted() -> (
+    None
+):
+    model_name = "gpt-4o-mini"
+    first_body = "FIRST-BODY-SENTINEL " * 200
+    second_body = "SECOND-BODY-SENTINEL " * 200
+    first = _make_file(first_body, name="duplicate.txt")
+    second = _make_file(second_body, name="duplicate.txt")
+    attachment_context = build_ai_builder_attachment_context([first, second])
+    assert attachment_context is not None
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=first.id,
+            filename=first.name,
+            file_type=first.file_type,
+            mimetype=first.mimetype,
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="reference_material",
+            source="structured_answer",
+            confidence="high",
+        ),
+        FileRoleEvidence(
+            file_id=second.id,
+            filename=second.name,
+            file_type=second.file_type,
+            mimetype=second.mimetype,
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="structured_answer",
+            confidence="high",
+        ),
+    ]
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=64,
+        minimum_conversation_budget_tokens=128,
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None,
+        available_kbs=None,
+    )
+    current_turn = ConversationMessage(
+        role="user",
+        content="Build the flow from both attached files.",
+    )
+    common = {
+        "requirements_state": RequirementsState(),
+        "ui_language": "en",
+        "slot_classification_metadata": None,
+        "conversation": [current_turn],
+        "planning_state": state,
+        "flow_context": None,
+        "is_edit_mode": False,
+        "resource_catalog": catalog,
+        "flow": None,
+        "assistant_snapshots": None,
+        "plan_edit_context": None,
+        "prior_plan_for_revision": None,
+        "litellm_model": model_name,
+        "max_output_tokens": 1_024,
+        "budget_policy": policy,
+        "attachment_file_count": 2,
+        "current_turn_start": 0,
+    }
+    baseline = build_proposal_prepared(
+        **common,
+        attachment_context=None,
+        max_input_tokens=100_000,
+    )
+    baseline_tool = cast(dict[str, Any], baseline.proposal_tool_schema)
+    tight_context_window = (
+        count_message_tokens(baseline.llm_messages, model_name)
+        + count_tool_tokens([baseline_tool], model_name)
+        + 1_024
+        + policy.conversation_safety_buffer_tokens
+        + 300
+    )
+
+    prepared = build_proposal_prepared(
+        **common,
+        attachment_context=attachment_context,
+        max_input_tokens=tight_context_window,
+    )
+
+    system_prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(system_prompt, str)
+    attachment_section = system_prompt.split("Uploaded files:\n", maxsplit=1)[1]
+    first_block, second_block = attachment_section.split("\n\n---\n\n")
+    assert "file 1" in first_block
+    assert "duplicate.txt" in first_block
+    assert "reference_material" in first_block
+    assert "FIRST-BODY-SENTINEL" in first_block
+    assert "SECOND-BODY-SENTINEL" not in first_block
+    assert "file 2" in second_block
+    assert "duplicate.txt" in second_block
+    assert "example_output" in second_block
+    assert "SECOND-BODY-SENTINEL" in second_block
+    assert "FIRST-BODY-SENTINEL" not in second_block
+    assert first_body.strip() not in system_prompt
+    assert second_body.strip() not in system_prompt
 
 
 def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> None:

@@ -30,8 +30,9 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     render_resource_reference_block,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
-    ResultObligation,
+    ResultContract,
     derive_result_contract,
+    render_result_contract_prompt_block,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
     ConfirmedRuntimeInputRequirement,
@@ -97,21 +98,13 @@ class AuthoringExampleGuidance:
 
 
 @dataclass(frozen=True, slots=True)
-class AuthoringResultContract:
-    secondary_obligations: tuple[ResultObligation, ...] = ()
-    required_sections: tuple[str, ...] = ()
-    result_policies: tuple[str, ...] = ()
-    required_output_fields: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class AuthoringBrief:
     runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = ()
     attachments: tuple[AuthoringAttachment, ...] = ()
     input_schema: AuthoringSchema | None = None
     output_schema: AuthoringSchema | None = None
     example_output: AuthoringExampleGuidance | None = None
-    result_contract: AuthoringResultContract | None = None
+    result_contract: ResultContract | None = None
     named_results: ProposalObligationProjection | None = None
     requested_output_sections: tuple[str, ...] = ()
     resources: AIBuilderResourceReferenceMaterial | None = None
@@ -186,19 +179,7 @@ def project_authoring_brief(
             if constraints is not None
             else None
         ),
-        result_contract=(
-            AuthoringResultContract(
-                secondary_obligations=result_contract.secondary_obligations,
-                required_sections=result_contract.required_sections,
-                result_policies=result_contract.result_policies,
-                required_output_fields=tuple(
-                    requirement.canonical_name
-                    for requirement in result_contract.required_output_fields
-                ),
-            )
-            if result_contract is not None
-            else None
-        ),
+        result_contract=result_contract,
         named_results=named_result_projection(
             planning_state,
             is_edit_mode=is_edit_mode,
@@ -368,7 +349,7 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
         if obligation_projection is not None and obligation_projection.keys
         else None
     )
-    result_contract_block = _render_result_contract(brief.result_contract)
+    result_contract_block = render_result_contract_prompt_block(brief.result_contract)
     lines = [
         "You are drafting an Eneo Flow plan.",
         "",
@@ -537,31 +518,6 @@ def _schema_evidence_block(schema: AuthoringSchema | None) -> str | None:
     )
 
 
-def _render_result_contract(contract: AuthoringResultContract | None) -> str | None:
-    if contract is None:
-        return None
-    lines: list[str] = []
-    if contract.secondary_obligations:
-        lines.append("- secondary_obligations:")
-        lines.extend(
-            f"  - {obligation}" for obligation in contract.secondary_obligations
-        )
-    if contract.required_sections:
-        lines.append("- required_sections:")
-        lines.extend(f"  - {section}" for section in contract.required_sections)
-    if contract.required_output_fields:
-        lines.append("- required_output_fields:")
-        lines.extend(f"  - {name}" for name in contract.required_output_fields)
-        lines.append(
-            "- A human-readable outcome for this goal needs a structured extraction "
-            "step declaring these fields, feeding the final writing step."
-        )
-    if contract.result_policies:
-        lines.append("- result_policies:")
-        lines.extend(f"  - {policy}" for policy in contract.result_policies)
-    return "\n".join(lines) if lines else None
-
-
 def _example_output_evidence_block(
     constraints: AuthoringExampleGuidance | None,
 ) -> str | None:
@@ -604,7 +560,6 @@ __all__ = [
     "AuthoringAttachment",
     "AuthoringExampleGuidance",
     "AuthoringExampleStyle",
-    "AuthoringResultContract",
     "AuthoringSchema",
     "build_authoring_brief",
     "project_authoring_brief",
