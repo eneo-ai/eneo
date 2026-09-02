@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.files.text import TEXT_EXTRACTION_WARNINGS
 from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
@@ -81,8 +82,19 @@ def test_parse_runtime_steps_accepts_strict_per_source_identity_contract() -> No
                 item_properties={
                     "source_label": {"type": "string"},
                     "source_file_id": {"type": "string"},
+                    "extraction_warnings": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                        },
+                    },
                 },
-                required=["source_label", "source_file_id"],
+                required=[
+                    "source_label",
+                    "source_file_id",
+                    "extraction_warnings",
+                ],
             )
         )
     )
@@ -94,25 +106,98 @@ def test_parse_runtime_steps_accepts_strict_per_source_identity_contract() -> No
     ("item_properties", "required"),
     [
         pytest.param(
-            {"source_file_id": {"type": "string"}},
-            ["source_label", "source_file_id"],
+            {
+                "source_file_id": {"type": "string"},
+                "extraction_warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                    },
+                },
+            },
+            ["source_label", "source_file_id", "extraction_warnings"],
             id="missing-declaration",
         ),
         pytest.param(
             {
                 "source_label": {"type": "string"},
                 "source_file_id": {"type": "string"},
+                "extraction_warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                    },
+                },
             },
-            ["source_label"],
+            ["source_label", "extraction_warnings"],
             id="omitted-from-required",
         ),
         pytest.param(
             {
                 "source_label": {"type": "string"},
                 "source_file_id": {"type": "integer"},
+                "extraction_warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                    },
+                },
+            },
+            ["source_label", "source_file_id", "extraction_warnings"],
+            id="wrong-type",
+        ),
+        pytest.param(
+            {
+                "source_label": {"type": "string"},
+                "source_file_id": {"type": "string"},
             },
             ["source_label", "source_file_id"],
-            id="wrong-type",
+            id="missing-extraction-warnings",
+        ),
+        pytest.param(
+            {
+                "source_label": {"type": "string"},
+                "source_file_id": {"type": "string"},
+                "extraction_warnings": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            ["source_label", "source_file_id", "extraction_warnings"],
+            id="missing-extraction-warning-enum",
+        ),
+        pytest.param(
+            {
+                "source_label": {"type": "string"},
+                "source_file_id": {"type": "string"},
+                "extraction_warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [*sorted(TEXT_EXTRACTION_WARNINGS), "authored_warning"],
+                    },
+                },
+            },
+            ["source_label", "source_file_id", "extraction_warnings"],
+            id="widened-extraction-warning-enum",
+        ),
+        pytest.param(
+            {
+                "source_label": {"type": "string"},
+                "source_file_id": {"type": "string"},
+                "extraction_warnings": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["authored_warning"],
+                    },
+                },
+            },
+            ["source_label", "source_file_id", "extraction_warnings"],
+            id="changed-extraction-warning-enum",
         ),
     ],
 )
@@ -132,7 +217,7 @@ def test_parse_runtime_steps_rejects_invalid_per_source_identity_contract(
     assert str(exc_info.value) == (
         "Step 1 (Extract source facts): Per-source steps require output_contract "
         "documents[] items to declare source_label and source_file_id as required "
-        "string properties."
+        "string properties and extraction_warnings as a required array of strings."
     )
     assert exc_info.value.context == {
         "step_order": 1,

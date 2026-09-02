@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
 
+from eneo.files.text import TEXT_EXTRACTION_WARNINGS
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     normalize_discovery_text,
 )
@@ -24,7 +25,11 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
+from eneo.flows.source_identity import (
+    RUNTIME_MANAGED_SOURCE_FIELDS,
+    RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD,
+    RUNTIME_SOURCE_IDENTITY_FIELDS,
+)
 from eneo.json_types import JsonObject
 from eneo.main.logging import get_logger
 
@@ -203,13 +208,51 @@ def complete_structured_source_reader_fields(
     )
 
 
-def runtime_owned_source_identity_field_names(
+def complete_runtime_source_output_contract(
+    output_contract: dict[str, Any] | None,
+    *,
+    runtime_input_execution_mode: RuntimeInputExecutionMode,
+) -> dict[str, Any] | None:
+    if runtime_input_execution_mode != "per_source" or output_contract is None:
+        return output_contract
+    completed = deepcopy(output_contract)
+    properties = completed.get("properties")
+    if not isinstance(properties, dict):
+        return completed
+    typed_properties = cast(dict[str, Any], properties)
+    documents_schema = typed_properties.get("documents")
+    if not isinstance(documents_schema, dict):
+        return completed
+    typed_documents_schema = cast(dict[str, Any], documents_schema)
+    document_items = typed_documents_schema.get("items")
+    if not isinstance(document_items, dict):
+        return completed
+    typed_document_items = cast(dict[str, Any], document_items)
+    item_properties = typed_document_items.get("properties")
+    if not isinstance(item_properties, dict):
+        return completed
+    typed_item_properties = cast(dict[str, Any], item_properties)
+    warning_schema = typed_item_properties.get(RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD)
+    if not isinstance(warning_schema, dict):
+        return completed
+    typed_warning_schema = cast(dict[str, Any], warning_schema)
+    warning_items = typed_warning_schema.get("items")
+    if isinstance(warning_items, dict):
+        typed_warning_items = cast(dict[str, Any], warning_items)
+        if typed_warning_items.get("type") == "string":
+            typed_warning_items["enum"] = sorted(TEXT_EXTRACTION_WARNINGS)
+    return completed
+
+
+def runtime_managed_source_field_names(
     *,
     runtime_input_execution_mode: RuntimeInputExecutionMode,
     previous_item_map_enabled: bool,
 ) -> frozenset[str]:
-    if runtime_input_execution_mode == "per_source" or previous_item_map_enabled:
-        return frozenset({"source_label", "source_file_id"})
+    if runtime_input_execution_mode == "per_source":
+        return RUNTIME_MANAGED_SOURCE_FIELDS
+    if previous_item_map_enabled:
+        return RUNTIME_SOURCE_IDENTITY_FIELDS
     return frozenset()
 
 
@@ -513,8 +556,40 @@ def _with_source_identity_contract(
                     )
                 continue
             item_fields.append(item)
+        if runtime_input_execution_mode == "per_source":
+            item_fields = _with_runtime_extraction_warnings_field(item_fields)
         updated_fields.append(field.model_copy(update={"item_fields": item_fields}))
     return updated_fields
+
+
+def _with_runtime_extraction_warnings_field(
+    fields: list[StructuredFieldDraft],
+) -> list[StructuredFieldDraft]:
+    fields = [
+        field
+        for field in fields
+        if field.name != RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
+    ]
+    insert_index = next(
+        (
+            index + 1
+            for index, field in enumerate(fields)
+            if field.name == "source_file_id"
+        ),
+        1 if fields and fields[0].name == "source_label" else 0,
+    )
+    extraction_warnings = StructuredFieldDraft(
+        name=RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD,
+        field_type="array",
+        description=(
+            "Runtime-provided extraction quality warning codes for this source."
+        ),
+    )
+    return [
+        *fields[:insert_index],
+        extraction_warnings,
+        *fields[insert_index:],
+    ]
 
 
 def _add_runtime_source_file_id_field(

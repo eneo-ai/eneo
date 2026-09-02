@@ -23,7 +23,8 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 )
 from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
-    runtime_owned_source_identity_field_names,
+    complete_runtime_source_output_contract,
+    runtime_managed_source_field_names,
 )
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
@@ -109,7 +110,10 @@ def compile_new_step_draft(
         step_index=len(prior_steps),
     )
     input_source = require_resolved_input_source(step_draft)
-    output_contract = compile_output_contract(step_draft.output_fields)
+    output_contract = complete_runtime_source_output_contract(
+        compile_output_contract(step_draft.output_fields),
+        runtime_input_execution_mode=step_draft.runtime_input_execution_mode,
+    )
     input_config = compile_runtime_input_overrides(
         step_draft,
         previous_item_map_max_items=_previous_runtime_max_files(prior_steps),
@@ -551,7 +555,7 @@ def compile_assistant_instructions(
             if assistant_output_fields is not None
             else step_draft.output_fields
         ),
-        runtime_managed_field_names=runtime_owned_source_identity_field_names(
+        runtime_managed_field_names=runtime_managed_source_field_names(
             runtime_input_execution_mode=step_draft.runtime_input_execution_mode,
             previous_item_map_enabled=step_draft.previous_item_map_enabled,
         ),

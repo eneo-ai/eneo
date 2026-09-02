@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
     allocate_injected_source_field_name,
     complete_structured_source_reader_fields,
+    runtime_managed_source_field_names,
     source_contract_shadow_form_field_names,
     structured_fields_have_document_items,
     structured_fields_have_source_leaf,
@@ -112,6 +113,36 @@ def test_source_reader_completion_does_not_nest_existing_array_container() -> No
         "title",
         "summary",
     ]
+
+
+def test_per_source_reader_completion_adds_runtime_extraction_warnings() -> None:
+    completed = complete_structured_source_reader_fields(
+        (
+            _field(
+                "documents",
+                "array",
+                item_fields=[
+                    _field("source_label"),
+                    _field("source_file_id"),
+                    _field("summary"),
+                ],
+            ),
+        ),
+        required_fields=(),
+        runtime_input_execution_mode="per_source",
+    )
+
+    item_fields = completed[0].item_fields or []
+    extraction_warnings = next(
+        field for field in item_fields if field.name == "extraction_warnings"
+    )
+    assert extraction_warnings.field_type == "array"
+    assert extraction_warnings.item_fields is None
+    assert extraction_warnings.required is True
+    assert runtime_managed_source_field_names(
+        runtime_input_execution_mode="per_source",
+        previous_item_map_enabled=False,
+    ) == frozenset({"source_label", "source_file_id", "extraction_warnings"})
 
 
 def test_source_reader_completion_preserves_names_and_dedupes_by_identity() -> None:

@@ -25,7 +25,10 @@ from eneo.flows.input_binding_contract_rules import (
     item_template_field_names,
     source_ref_bindings,
 )
-from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
+from eneo.flows.source_identity import (
+    RUNTIME_MANAGED_SOURCE_FIELDS,
+    RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD,
+)
 
 COMPOSE_SECTION_TITLE_KEY = "section_title"
 COMPOSE_SECTION_BODY_KEY = "section_body"
@@ -277,7 +280,8 @@ def is_bound_document_report_compose_topology(
                 or section_source.field_name != "documents"
                 or not all(
                     _schema_declares_direct_compose_scalar(field_schema)
-                    for field_schema in item_properties.values()
+                    for field_name, field_schema in item_properties.items()
+                    if field_name not in RUNTIME_MANAGED_SOURCE_FIELDS
                 )
             ):
                 return False
@@ -369,6 +373,7 @@ def _compose_section_item_template(
 ) -> str:
     if not _CANONICAL_SECTION_FIELDS.issubset(item_properties):
         return _compose_source_record_item_template(
+            ui_language,
             item_properties=item_properties,
             section_label_by_key=section_label_by_key,
         )
@@ -396,6 +401,7 @@ def _compose_section_item_template(
 
 
 def _compose_source_record_item_template(
+    ui_language: str | None,
     *,
     item_properties: Mapping[str, object],
     section_label_by_key: Mapping[str, str],
@@ -407,6 +413,11 @@ def _compose_source_record_item_template(
         for field_name in content_fields
     ]
     parts = [f"## {{{COMPOSE_SOURCE_LABEL_KEY}}}"]
+    if RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD in item_properties:
+        warning_label = (
+            "Extraction warnings" if ui_language == "en" else "Extraktionsvarningar"
+        )
+        parts.append(f"{warning_label}: {{{RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD}}}")
     if field_lines:
         parts.append("\n\n".join(field_lines))
     return "\n\n".join(parts)
@@ -418,7 +429,7 @@ def _source_record_content_field_names(
     return tuple(
         field_name
         for field_name in item_properties
-        if field_name not in RUNTIME_SOURCE_IDENTITY_FIELDS
+        if field_name not in RUNTIME_MANAGED_SOURCE_FIELDS
     )
 
 
@@ -429,12 +440,13 @@ def _required_section_template_field_names(
         return _CANONICAL_SECTION_FIELDS
     if COMPOSE_SOURCE_LABEL_KEY not in item_properties:
         return frozenset()
-    return frozenset(
-        {
-            COMPOSE_SOURCE_LABEL_KEY,
-            *_source_record_content_field_names(item_properties),
-        }
-    )
+    required_fields = {
+        COMPOSE_SOURCE_LABEL_KEY,
+        *_source_record_content_field_names(item_properties),
+    }
+    if RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD in item_properties:
+        required_fields.add(RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD)
+    return frozenset(required_fields)
 
 
 def _schema_declares_direct_compose_scalar(schema: object) -> bool:

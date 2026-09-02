@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from typing import Any, cast
 from uuid import UUID
 
+from eneo.files.text import TextExtractionWarning, parse_text_extraction_warning
 from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
@@ -47,7 +48,11 @@ from eneo.flows.runtime.step_handlers.mapped_outputs import (
     mapped_admission_payload,
     mapped_output_diagnostics,
 )
-from eneo.flows.source_identity import without_runtime_source_identity_json_fields
+from eneo.flows.source_identity import (
+    RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD,
+    has_required_runtime_managed_source_fields,
+    without_runtime_managed_source_json_fields,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 logger = logging.getLogger(__name__)
@@ -112,6 +117,16 @@ async def execute_per_source_reader(
         raise TypedIOValidationException(
             "Per-source document readers require a JSON output contract shaped "
             "as exactly one top-level documents[] array.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    if not has_required_runtime_managed_source_fields(
+        step.output_contract,
+        "documents",
+    ):
+        raise TypedIOValidationException(
+            "Per-source document readers require output_contract documents[] "
+            "items to declare source_label and source_file_id as required string "
+            "properties and extraction_warnings as a required array of strings.",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
         )
     if not file_ids:
@@ -390,7 +405,7 @@ def _documents_item_schema(
 def _source_local_output_contract(
     published_contract: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    projected = without_runtime_source_identity_json_fields(published_contract)
+    projected = without_runtime_managed_source_json_fields(published_contract)
     assert projected is not None
     properties = projected.get("properties")
     assert isinstance(properties, Mapping)
@@ -465,7 +480,34 @@ def _source_document_items(call: PerSourceReaderCall) -> dict[str, Any]:
     item = dict(call.document)
     item["source_label"] = call.source_label
     item["source_file_id"] = str(call.file_id)
+    item[RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD] = _source_extraction_warnings(call)
     return item
+
+
+def _source_extraction_warnings(
+    call: PerSourceReaderCall,
+) -> list[TextExtractionWarning]:
+    file_metadata = _first_runtime_file_metadata(call.output.runtime_input_metadata)
+    raw_warnings = (
+        file_metadata.get(RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD)
+        if file_metadata is not None
+        else None
+    )
+    if not isinstance(raw_warnings, list):
+        raise TypedIOValidationException(
+            f"Step output for source {call.source_number} has invalid extraction warnings.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    warnings: list[TextExtractionWarning] = []
+    for warning in cast(list[object], raw_warnings):
+        parsed_warning = parse_text_extraction_warning(warning)
+        if parsed_warning is None:
+            raise TypedIOValidationException(
+                f"Step output for source {call.source_number} has invalid extraction warnings.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        warnings.append(parsed_warning)
+    return warnings
 
 
 def _raw_source_label(
@@ -537,17 +579,11 @@ def _per_source_runtime_metadata(
         )
         is not None
     ]
-    source_headers = [
-        header
-        for call in per_source_calls
-        for header in _runtime_source_headers(call.output.runtime_input_metadata)
-    ]
     return {
         "text": _per_source_input_text_summary(per_source_calls),
         "file_ids": [str(call.file_id) for call in per_source_calls],
         "files_count": len(per_source_calls),
         "files": files,
-        "source_headers": source_headers,
         "total_file_size": sum(
             metadata["size"]
             for metadata in files
@@ -565,21 +601,6 @@ def _per_source_runtime_metadata(
             _per_source_call_metadata(call) for call in per_source_calls
         ],
     }
-
-
-def _runtime_source_headers(
-    runtime_input_metadata: dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    if not isinstance(runtime_input_metadata, dict):
-        return []
-    headers = runtime_input_metadata.get("source_headers")
-    if not isinstance(headers, list):
-        return []
-    return [
-        cast(dict[str, Any], header)
-        for header in cast(list[object], headers)
-        if isinstance(header, dict)
-    ]
 
 
 def _runtime_text_length(runtime_input_metadata: dict[str, Any] | None) -> int:

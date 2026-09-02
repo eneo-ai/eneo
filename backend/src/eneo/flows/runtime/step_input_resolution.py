@@ -16,7 +16,10 @@ from typing import (
 )
 from uuid import UUID
 
-from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING, TextExtractor
+from eneo.files.text import (
+    TextExtractionWarning,
+    TextExtractor,
+)
 from eneo.flows.domain.flow import FlowRun, FlowStepResult
 from eneo.flows.domain.runtime import (
     RunExecutionState,
@@ -60,6 +63,7 @@ from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeRequest,
     resolve_transcribe_and_attach_audio_input,
 )
+from eneo.flows.source_identity import RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
@@ -188,6 +192,7 @@ async def resolve_step_input(
     described_files: list[FileInfo] | None = None
     runtime_input_config = build_runtime_input_config(step.input_config)
     runtime_input_text = ""
+    runtime_extraction_warnings: list[tuple[TextExtractionWarning, ...]] | None = None
     runtime_file_edges: tuple[FlowResolvedInputEdge, ...] = ()
     requested_ids = list(requested_file_ids) if runtime_input_config.enabled else []
 
@@ -255,7 +260,11 @@ async def resolve_step_input(
                 state=state,
                 deps=deps,
             )
-            runtime_input_text, file_text_diagnostics = _extract_text_from_files(
+            (
+                runtime_input_text,
+                file_text_diagnostics,
+                runtime_extraction_warnings,
+            ) = _extract_text_from_files(
                 files,
                 step_order=step.step_order,
                 logger=deps.logger,
@@ -271,6 +280,7 @@ async def resolve_step_input(
             input_format=runtime_input_config.input_format,
             files=resolved_files,
             capture_mode="runtime_input",
+            extraction_warnings=runtime_extraction_warnings,
         )
         runtime_file_edges = _runtime_file_edges(resolved_files)
 
@@ -1117,9 +1127,14 @@ def _extract_text_from_files(
     *,
     step_order: int,
     logger: Any,
-) -> tuple[str, list[StepDiagnostic]]:
+) -> tuple[
+    str,
+    list[StepDiagnostic],
+    list[tuple[TextExtractionWarning, ...]],
+]:
     extracted: list[str] = []
     diagnostics: list[StepDiagnostic] = []
+    extraction_warnings_by_file: list[tuple[TextExtractionWarning, ...]] = []
     for source_number, file in enumerate(files, start=1):
         text_value = getattr(file, "text", None)
         if not isinstance(text_value, str) or not text_value.strip():
@@ -1128,8 +1143,10 @@ def _extract_text_from_files(
                     file=file,
                     source_number=source_number,
                     text=RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
+                    extraction_warnings=(),
                 )
             )
+            extraction_warnings_by_file.append(())
             diagnostics.append(
                 _runtime_source_empty_text_diagnostic(
                     step_order=step_order,
@@ -1147,14 +1164,20 @@ def _extract_text_from_files(
                     _runtime_source_file_name(file),
                 )
             continue
+        extraction_warnings = _runtime_source_extraction_warnings(
+            file=file,
+            text=text_value,
+        )
+        extraction_warnings_by_file.append(extraction_warnings)
         extracted.append(
             _format_runtime_source_text(
                 file=file,
                 source_number=source_number,
                 text=text_value.strip(),
+                extraction_warnings=extraction_warnings,
             )
         )
-        for warning in _runtime_source_extraction_warnings(file=file, text=text_value):
+        for warning in extraction_warnings:
             diagnostics.append(
                 _runtime_source_extraction_warning_diagnostic(
                     step_order=step_order,
@@ -1173,13 +1196,15 @@ def _extract_text_from_files(
                     _runtime_source_file_name(file),
                     warning,
                 )
-    return "\n\n".join(extracted), diagnostics
+    return "\n\n".join(extracted), diagnostics, extraction_warnings_by_file
 
 
-def _runtime_source_extraction_warnings(*, file: Any, text: str) -> list[str]:
+def _runtime_source_extraction_warnings(
+    *, file: Any, text: str
+) -> tuple[TextExtractionWarning, ...]:
     if getattr(file, "mimetype", None) != "application/pdf":
-        return []
-    return list(TextExtractor.pdf_text_quality_warnings(text))
+        return ()
+    return TextExtractor.pdf_text_quality_warnings(text)
 
 
 def _runtime_source_extraction_warning_diagnostic(
@@ -1187,7 +1212,7 @@ def _runtime_source_extraction_warning_diagnostic(
     step_order: int,
     source_number: int,
     file: Any,
-    warning: str,
+    warning: TextExtractionWarning,
 ) -> StepDiagnostic:
     source_label = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
         source_number=source_number
@@ -1196,13 +1221,12 @@ def _runtime_source_extraction_warning_diagnostic(
     source_description = (
         f"{source_label} ({file_name})" if file_name is not None else source_label
     )
-    if warning == PDF_TEXT_LIKELY_REVERSED_WARNING:
-        reason = "extracted PDF text looks reversed or garbled"
-    else:
-        reason = f"extracted text quality warning: {warning}"
     return StepDiagnostic(
         code=warning,
-        message=f"Step {step_order}: {reason} for {source_description}.",
+        message=(
+            f"Step {step_order}: extracted PDF text looks reversed or garbled "
+            f"for {source_description}."
+        ),
     )
 
 
@@ -1228,13 +1252,24 @@ def _runtime_source_empty_text_diagnostic(
     )
 
 
-def _format_runtime_source_text(*, file: Any, source_number: int, text: str) -> str:
+def _format_runtime_source_text(
+    *,
+    file: Any,
+    source_number: int,
+    text: str,
+    extraction_warnings: Sequence[TextExtractionWarning],
+) -> str:
     header_lines = [
         RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(source_number=source_number)
     ]
     file_name = _runtime_source_file_name(file)
     if file_name is not None:
         header_lines.append(f"{RUNTIME_INPUT_SOURCE_FILE_NAME_KEY}: {file_name}")
+    if extraction_warnings:
+        header_lines.append(
+            f"{RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD}: "
+            f"{json.dumps(list(extraction_warnings))}"
+        )
     header = "\n".join(header_lines)
     return f"{header}\n\n{text}"
 
@@ -1254,8 +1289,15 @@ def _build_runtime_input_metadata(
     input_format: str,
     files: list[Any],
     capture_mode: str,
+    extraction_warnings: Sequence[Sequence[TextExtractionWarning]] | None = None,
 ) -> dict[str, Any]:
-    file_metadata = [_build_runtime_file_metadata(file) for file in files]
+    warnings_by_file = (
+        [() for _ in files] if extraction_warnings is None else extraction_warnings
+    )
+    file_metadata = [
+        _build_runtime_file_metadata(file, extraction_warnings=warnings)
+        for file, warnings in zip(files, warnings_by_file, strict=True)
+    ]
     return {
         "text": text,
         "file_ids": [str(file_id) for file_id in requested_ids],
@@ -1265,8 +1307,12 @@ def _build_runtime_input_metadata(
             _build_runtime_source_header_metadata(
                 file=file,
                 source_number=source_number,
+                extraction_warnings=warnings,
             )
-            for source_number, file in enumerate(files, start=1)
+            for source_number, (file, warnings) in enumerate(
+                zip(files, warnings_by_file, strict=True),
+                start=1,
+            )
         ],
         "total_file_size": sum(
             metadata["size"]
@@ -1283,17 +1329,13 @@ def _build_runtime_source_header_metadata(
     *,
     file: Any,
     source_number: int,
+    extraction_warnings: Sequence[TextExtractionWarning],
 ) -> dict[str, Any]:
     file_name = _runtime_source_file_name(file)
     source_marker = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
         source_number=source_number
     )
     text_value = getattr(file, "text", None)
-    extraction_warnings = (
-        _runtime_source_extraction_warnings(file=file, text=text_value)
-        if isinstance(text_value, str)
-        else []
-    )
     return {
         "source_number": source_number,
         "source_label": file_name or source_marker,
@@ -1303,11 +1345,15 @@ def _build_runtime_source_header_metadata(
         "has_file_name": file_name is not None,
         "has_text": isinstance(text_value, str) and text_value.strip() != "",
         "text_length": len(text_value) if isinstance(text_value, str) else None,
-        "extraction_warnings": extraction_warnings,
+        RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD: list(extraction_warnings),
     }
 
 
-def _build_runtime_file_metadata(file: Any) -> dict[str, Any]:
+def _build_runtime_file_metadata(
+    file: Any,
+    *,
+    extraction_warnings: Sequence[TextExtractionWarning],
+) -> dict[str, Any]:
     raw_file_type = getattr(file, "file_type", None)
     if isinstance(raw_file_type, Enum):
         file_type = raw_file_type.value
@@ -1317,11 +1363,6 @@ def _build_runtime_file_metadata(file: Any) -> dict[str, Any]:
         file_type = None
     text_value = getattr(file, "text", None)
     transcription_value = getattr(file, "transcription", None)
-    extraction_warnings = (
-        _runtime_source_extraction_warnings(file=file, text=text_value)
-        if isinstance(text_value, str)
-        else []
-    )
     return {
         "id": str(getattr(file, "id")),
         "name": getattr(file, "name", None),
@@ -1334,7 +1375,7 @@ def _build_runtime_file_metadata(file: Any) -> dict[str, Any]:
         "has_transcription": (
             isinstance(transcription_value, str) and transcription_value.strip() != ""
         ),
-        "extraction_warnings": extraction_warnings,
+        RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD: list(extraction_warnings),
     }
 
 

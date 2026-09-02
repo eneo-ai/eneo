@@ -30,7 +30,11 @@ from eneo.completion_models.infrastructure.context_builder import (
 )
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
-from eneo.files.text import PDF_TEXT_LIKELY_REVERSED_WARNING
+from eneo.files.text import (
+    PDF_TEXT_LIKELY_REVERSED_WARNING,
+    TEXT_EXTRACTION_WARNINGS,
+    TextExtractor,
+)
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_step_input_bindings,
     derive_input_contract,
@@ -67,6 +71,7 @@ from eneo.flows.runtime.step_execution_runtime import json_mode_cache_key
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
+    _build_runtime_input_metadata,
 )
 from eneo.flows.runtime.step_input_validation import validate_input_contract
 from eneo.main.exceptions import (
@@ -76,6 +81,10 @@ from eneo.main.exceptions import (
     TypedIOValidationException,
 )
 from eneo.object_content.content import ObjectContentUnavailableError
+
+_LIKELY_REVERSED_PDF_TEXT = (
+    "[PAGE 1]\n" + "hco tta ted ned mos dem llit relle aks rah nak etni " * 4
+)
 
 
 def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
@@ -1161,10 +1170,9 @@ async def test_resolve_step_input_document_warns_when_pdf_text_looks_reversed(
         user=user,
         input_payload={},
     )
-    reversed_words = "hco tta ted ned mos dem llit relle aks rah nak etni "
     fake_file = SimpleNamespace(
         id=file_id,
-        text=f"[PAGE 1]\n{reversed_words * 4}",
+        text=_LIKELY_REVERSED_PDF_TEXT,
         name="reversed.pdf",
         checksum="checksum-1",
         size=128,
@@ -1197,7 +1205,27 @@ async def test_resolve_step_input_document_warns_when_pdf_text_looks_reversed(
     assert resolved.runtime_input_metadata["source_headers"][0][
         "extraction_warnings"
     ] == [PDF_TEXT_LIKELY_REVERSED_WARNING]
+    assert resolved.text == (
+        "[SOURCE 1]\n"
+        "file_name: reversed.pdf\n"
+        f'extraction_warnings: ["{PDF_TEXT_LIKELY_REVERSED_WARNING}"]\n\n'
+        f"{_LIKELY_REVERSED_PDF_TEXT.strip()}"
+    )
     assert "flow_executor.runtime_input_source_extraction_warning" in caplog.text
+
+
+def test_runtime_input_metadata_rejects_explicit_warning_cardinality_mismatch() -> None:
+    file_id = uuid4()
+
+    with pytest.raises(ValueError):
+        _build_runtime_input_metadata(
+            text="Source text",
+            requested_ids=[file_id],
+            input_format="document",
+            files=[_runtime_file(file_id=file_id, text="Source text")],
+            capture_mode="runtime_input",
+            extraction_warnings=[],
+        )
 
 
 @pytest.mark.asyncio
@@ -2318,6 +2346,7 @@ async def test_file_input_uses_extracted_file_text(user):
 @pytest.mark.asyncio
 async def test_per_source_reader_executes_one_model_call_per_file_and_sets_identity(
     user,
+    monkeypatch,
 ):
     executor, _, flow_run_repo, _ = _build_executor(user)
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
@@ -2327,7 +2356,7 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     second_file_id = uuid4()
     first_file = SimpleNamespace(
         id=first_file_id,
-        text="Alpha document text",
+        text=_LIKELY_REVERSED_PDF_TEXT,
         name="alpha.pdf",
         checksum="checksum-a",
         size=100,
@@ -2346,6 +2375,12 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         transcription=None,
     )
     files_by_id = {first_file_id: first_file, second_file_id: second_file}
+    pdf_text_quality_warnings = MagicMock(wraps=TextExtractor.pdf_text_quality_warnings)
+    monkeypatch.setattr(
+        TextExtractor,
+        "pdf_text_quality_warnings",
+        pdf_text_quality_warnings,
+    )
 
     async def get_files_by_id(*, file_ids, **_kwargs):
         return [files_by_id[file_id] for file_id in file_ids]
@@ -2388,9 +2423,21 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
                     "properties": {
                         "source_label": {"type": "string"},
                         "source_file_id": {"type": "string"},
+                        "extraction_warnings": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                            },
+                        },
                         "title": {"type": "string"},
                     },
-                    "required": ["source_label", "source_file_id", "title"],
+                    "required": [
+                        "source_label",
+                        "source_file_id",
+                        "extraction_warnings",
+                        "title",
+                    ],
                     "additionalProperties": False,
                 },
             }
@@ -2475,25 +2522,32 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         )
         == 1
     )
-    assert any("Alpha document text" in question for question in questions)
+    warning_line = f'extraction_warnings: ["{PDF_TEXT_LIKELY_REVERSED_WARNING}"]'
+    assert warning_line in questions[0]
+    assert warning_line not in questions[1]
+    assert _LIKELY_REVERSED_PDF_TEXT.strip() in questions[0]
     assert any("Beta document text" in question for question in questions)
     assert not any("source_label" in question for question in questions)
     assert not any("source_file_id" in question for question in questions)
     assert not any(
-        "Alpha document text" in question and "Beta document text" in question
+        _LIKELY_REVERSED_PDF_TEXT.strip() in question
+        and "Beta document text" in question
         for question in questions
     )
+    assert pdf_text_quality_warnings.call_count == 2
     assert output.structured_output == {
         "documents": [
             {
                 "title": "Alpha",
                 "source_label": "alpha.pdf",
                 "source_file_id": str(first_file_id),
+                "extraction_warnings": [PDF_TEXT_LIKELY_REVERSED_WARNING],
             },
             {
                 "title": "Beta",
                 "source_label": "alpha.pdf (2)",
                 "source_file_id": str(second_file_id),
+                "extraction_warnings": [],
             },
         ]
     }
@@ -2503,7 +2557,18 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         str(first_file_id),
         str(second_file_id),
     ]
+    assert "source_headers" not in output.runtime_input_metadata
     assert len(output.runtime_input_metadata["per_source_calls"]) == 2
+    assert [
+        (call["source_number"], call["file_id"])
+        for call in output.runtime_input_metadata["per_source_calls"]
+    ] == [(1, str(first_file_id)), (2, str(second_file_id))]
+    extraction_diagnostics = [
+        diagnostic
+        for diagnostic in output.diagnostics
+        if diagnostic.code == PDF_TEXT_LIKELY_REVERSED_WARNING
+    ]
+    assert len(extraction_diagnostics) == 1
 
 
 @pytest.mark.asyncio
@@ -2550,9 +2615,21 @@ async def test_per_source_reader_applies_aggregate_minimum_after_three_calls(use
                     "properties": {
                         "source_label": {"type": "string"},
                         "source_file_id": {"type": "string"},
+                        "extraction_warnings": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                            },
+                        },
                         "title": {"type": "string"},
                     },
-                    "required": ["source_label", "source_file_id", "title"],
+                    "required": [
+                        "source_label",
+                        "source_file_id",
+                        "extraction_warnings",
+                        "title",
+                    ],
                     "additionalProperties": False,
                 },
             }
@@ -2633,8 +2710,24 @@ async def test_per_source_reader_rejects_not_exactly_one_document_per_source(
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"title": {"type": "string"}},
-                        "required": ["title"],
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                            "title": {"type": "string"},
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "title",
+                        ],
                         "additionalProperties": False,
                     },
                 }
@@ -2732,8 +2825,24 @@ async def test_per_source_reader_reuses_json_capability_rejection_across_calls(u
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"title": {"type": "string"}},
-                        "required": ["title"],
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                            "title": {"type": "string"},
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "title",
+                        ],
                         "additionalProperties": False,
                     },
                 }
@@ -2874,7 +2983,30 @@ async def test_per_source_reader_rejects_textless_file_before_provider_dispatch(
         output_type="json",
         output_contract={
             "type": "object",
-            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                        ],
+                    },
+                }
+            },
             "required": ["documents"],
         },
         input_config={
@@ -2907,7 +3039,30 @@ async def test_per_source_reader_rejects_zero_sources_before_provider_dispatch(u
         output_type="json",
         output_contract={
             "type": "object",
-            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                        ],
+                    },
+                }
+            },
             "required": ["documents"],
         },
         input_config={
@@ -2958,6 +3113,143 @@ async def test_per_source_reader_validates_contract_before_zero_sources(user):
         await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assistant.preview_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_missing_extraction_warnings_before_preview(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    file_id = uuid4()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor.file_service.get_files_by_ids.return_value = [
+        _runtime_file(file_id=file_id, text="Source text")
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "title": {"type": "string"},
+                        },
+                        "required": ["source_label", "source_file_id", "title"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert "extraction_warnings" in str(exc_info.value)
+    assistant.preview_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "warning_items",
+    [
+        pytest.param({"type": "string"}, id="missing-enum"),
+        pytest.param(
+            {
+                "type": "string",
+                "enum": [PDF_TEXT_LIKELY_REVERSED_WARNING, "authored_warning"],
+            },
+            id="widened-enum",
+        ),
+        pytest.param(
+            {"type": "string", "enum": ["authored_warning"]},
+            id="changed-enum",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_open_extraction_warning_enum_before_preview(
+    user,
+    warning_items,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    file_id = uuid4()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor.file_service.get_files_by_ids.return_value = [
+        _runtime_file(file_id=file_id, text="Source text")
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": warning_items,
+                            },
+                            "title": {"type": "string"},
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "title",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert "extraction_warnings" in str(exc_info.value)
     assistant.preview_response_context.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
 
@@ -3033,7 +3325,8 @@ async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identi
     assistant = _mock_assistant_for_execute_step(
         response_text=(
             '{"source_sections":[{"section_title":"Human title",'
-            '"section_body":"Finished section text"}]}'
+            '"section_body":"Finished section text",'
+            '"extraction_warnings":["authored_warning"]}]}'
         )
     )
     executor._load_assistant = AsyncMock(return_value=assistant)
@@ -3087,12 +3380,17 @@ async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identi
                         "properties": {
                             "section_title": {"type": "string"},
                             "section_body": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
                             "source_label": {"type": "string"},
                             "source_file_id": {"type": "string"},
                         },
                         "required": [
                             "section_title",
                             "section_body",
+                            "extraction_warnings",
                             "source_label",
                             "source_file_id",
                         ],
@@ -3115,6 +3413,7 @@ async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identi
             {
                 "section_title": "Human title",
                 "section_body": "Finished section text",
+                "extraction_warnings": ["authored_warning"],
                 "source_label": "source-a.pdf",
                 "source_file_id": "file-a",
             }

@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any, Protocol, TypeVar, cast
 
+from eneo.files.text import TEXT_EXTRACTION_WARNINGS
+
 _DraftFieldT = TypeVar("_DraftFieldT", bound="RuntimeSourceIdentityDraftField")
 
 
@@ -25,7 +27,14 @@ class RuntimeSourceIdentityDraftField(Protocol):
     ) -> _DraftFieldT: ...
 
 
+RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD = "extraction_warnings"
 RUNTIME_SOURCE_IDENTITY_FIELDS = frozenset({"source_label", "source_file_id"})
+RUNTIME_MANAGED_SOURCE_FIELDS = frozenset(
+    {
+        *RUNTIME_SOURCE_IDENTITY_FIELDS,
+        RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD,
+    }
+)
 
 
 def without_runtime_source_identity_draft_fields(
@@ -48,6 +57,26 @@ def without_runtime_source_identity_draft_fields(
 def without_runtime_source_identity_json_fields(
     contract: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    return _without_runtime_source_json_fields(
+        contract,
+        field_names=RUNTIME_SOURCE_IDENTITY_FIELDS,
+    )
+
+
+def without_runtime_managed_source_json_fields(
+    contract: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    return _without_runtime_source_json_fields(
+        contract,
+        field_names=RUNTIME_MANAGED_SOURCE_FIELDS,
+    )
+
+
+def _without_runtime_source_json_fields(
+    contract: dict[str, Any] | None,
+    *,
+    field_names: frozenset[str],
+) -> dict[str, Any] | None:
     if contract is None:
         return None
     projected_contract = deepcopy(contract)
@@ -63,8 +92,9 @@ def without_runtime_source_identity_json_fields(
             continue
         item_schema = array_schema.get("items")
         if isinstance(item_schema, dict):
-            _remove_identity_fields_from_object_schema(
-                cast(dict[str, Any], item_schema)
+            _remove_runtime_source_fields_from_object_schema(
+                cast(dict[str, Any], item_schema),
+                field_names=field_names,
             )
     return projected_contract
 
@@ -109,6 +139,38 @@ def has_required_runtime_source_identity_fields(
     return True
 
 
+def has_required_runtime_managed_source_fields(
+    contract: dict[str, Any] | None,
+    array_key: str,
+) -> bool:
+    if not has_required_runtime_source_identity_fields(contract, array_key):
+        return False
+    item_schema = _array_item_object_schema(contract, array_key)
+    assert item_schema is not None
+    properties = cast(Mapping[str, Any], item_schema["properties"])
+    required = cast(list[object], item_schema["required"])
+    warning_schema = properties.get(RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD)
+    if (
+        not isinstance(warning_schema, Mapping)
+        or cast(Mapping[str, Any], warning_schema).get("type") != "array"
+        or RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD not in required
+    ):
+        return False
+    item_type = cast(Mapping[str, Any], warning_schema).get("items")
+    if not isinstance(item_type, Mapping):
+        return False
+    typed_item_type = cast(Mapping[str, Any], item_type)
+    enum_values = typed_item_type.get("enum")
+    if typed_item_type.get("type") != "string" or not isinstance(enum_values, list):
+        return False
+    typed_enum_values = cast(list[object], enum_values)
+    if not all(isinstance(value, str) for value in typed_enum_values):
+        return False
+    return sorted(cast(list[str], typed_enum_values)) == sorted(
+        TEXT_EXTRACTION_WARNINGS
+    )
+
+
 def _array_item_object_schema(
     contract: dict[str, Any] | None,
     array_key: str,
@@ -134,16 +196,20 @@ def _array_item_object_schema(
     return dict(typed_item_schema)
 
 
-def _remove_identity_fields_from_object_schema(schema: dict[str, Any]) -> None:
+def _remove_runtime_source_fields_from_object_schema(
+    schema: dict[str, Any],
+    *,
+    field_names: frozenset[str],
+) -> None:
     properties = schema.get("properties")
     if isinstance(properties, dict):
         typed_properties = cast(dict[str, Any], properties)
-        for field_name in RUNTIME_SOURCE_IDENTITY_FIELDS:
+        for field_name in field_names:
             typed_properties.pop(field_name, None)
     required = schema.get("required")
     if isinstance(required, list):
         schema["required"] = [
             field_name
             for field_name in cast(list[object], required)
-            if field_name not in RUNTIME_SOURCE_IDENTITY_FIELDS
+            if field_name not in field_names
         ]

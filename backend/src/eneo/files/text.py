@@ -2,7 +2,7 @@ import logging
 import zipfile
 from enum import Enum
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 import magic
 import pdfplumber
@@ -113,7 +113,13 @@ class TextMimeTypes(MimeTypesBase):
 # Text Processing
 # =============================================================================
 
-PDF_TEXT_LIKELY_REVERSED_WARNING: Final = "pdf_text_likely_reversed"
+TextExtractionWarning = Literal["pdf_text_likely_reversed"]
+PDF_TEXT_LIKELY_REVERSED_WARNING: Final[TextExtractionWarning] = (
+    "pdf_text_likely_reversed"
+)
+TEXT_EXTRACTION_WARNINGS: Final[frozenset[TextExtractionWarning]] = frozenset(
+    {PDF_TEXT_LIKELY_REVERSED_WARNING}
+)
 _PDF_TEXT_MIN_TOKENS_FOR_REVERSAL_WARNING: Final = 40
 _PDF_TEXT_MIN_REVERSED_COMMON_TOKENS: Final = 5
 _PDF_TEXT_MIN_VERTICAL_LETTER_RUN: Final = 8
@@ -136,6 +142,12 @@ _PDF_TEXT_COMMON_WORDS: Final = frozenset(
 _PDF_TEXT_REVERSED_COMMON_WORDS: Final = frozenset(
     word[::-1] for word in _PDF_TEXT_COMMON_WORDS
 )
+
+
+def parse_text_extraction_warning(value: object) -> TextExtractionWarning | None:
+    if isinstance(value, str) and value in TEXT_EXTRACTION_WARNINGS:
+        return value
+    return None
 
 
 class TextSanitizer:
@@ -200,7 +212,7 @@ class TextExtractor:
         return "\n".join(lines)
 
     @classmethod
-    def pdf_text_quality_warnings(cls, text: str) -> tuple[str, ...]:
+    def pdf_text_quality_warnings(cls, text: str) -> tuple[TextExtractionWarning, ...]:
         if cls._looks_likely_reversed_pdf_text(text):
             return (PDF_TEXT_LIKELY_REVERSED_WARNING,)
         return ()

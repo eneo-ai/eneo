@@ -5,8 +5,10 @@ from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID, uuid4
 
+import jsonschema
 import pytest
 
+from eneo.files.text import TEXT_EXTRACTION_WARNINGS
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -34,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_critic_invariants import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import compile_output_contract
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
@@ -4893,6 +4896,7 @@ def test_document_reader_contract_canonicalizes_items_and_source_scope() -> None
     assert list(item_properties) == [
         "source_label",
         "source_file_id",
+        "extraction_warnings",
         "title",
         "date",
         "author",
@@ -6585,7 +6589,13 @@ def test_report_disposition_both_composes_typed_reader_without_section_map() -> 
         "verified",
         "source_label",
         "source_file_id",
+        "extraction_warnings",
         "source_material",
+    }
+    assert reader_properties["extraction_warnings"]["type"] == "array"
+    assert reader_properties["extraction_warnings"]["items"] == {
+        "type": "string",
+        "enum": sorted(TEXT_EXTRACTION_WARNINGS),
     }
     assert all(
         not step.input_config or "item_map" not in step.input_config
@@ -6619,6 +6629,7 @@ def test_report_disposition_both_composes_typed_reader_without_section_map() -> 
                 "field_path": "documents",
                 "item_template": (
                     "## {source_label}\n\n"
+                    "Extraktionsvarningar: {extraction_warnings}\n\n"
                     "Title: {title}\n\n"
                     "Document type: {document_type}\n\n"
                     "Category: {category}\n\n"
@@ -6653,6 +6664,35 @@ def test_report_disposition_both_composes_typed_reader_without_section_map() -> 
         step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
     )
     assert validate_spec(compiled).valid
+
+
+def test_per_item_authored_extraction_warnings_array_stays_open() -> None:
+    contract = compile_output_contract(
+        [
+            StructuredFieldDraft(
+                name="source_sections",
+                field_type="array",
+                description="One section per source.",
+                item_fields=[
+                    StructuredFieldDraft(
+                        name="extraction_warnings",
+                        field_type="array",
+                        description="Warnings authored by the model.",
+                    )
+                ],
+            )
+        ]
+    )
+
+    assert contract is not None
+    warning_items = contract["properties"]["source_sections"]["items"]["properties"][
+        "extraction_warnings"
+    ]["items"]
+    assert warning_items == {"type": "string"}
+    jsonschema.validate(
+        {"source_sections": [{"extraction_warnings": ["authored_warning"]}]},
+        contract,
+    )
 
 
 @pytest.mark.parametrize(
@@ -7010,11 +7050,13 @@ def test_bare_localized_document_array_gets_source_identity_contract() -> None:
     assert list(documents_schema["items"]["properties"]) == [
         "source_label",
         "source_file_id",
+        "extraction_warnings",
         "source_material",
     ]
     assert documents_schema["items"]["required"] == [
         "source_label",
         "source_file_id",
+        "extraction_warnings",
         "source_material",
     ]
     reader_instructions = reader_step.assistant_spec.instructions

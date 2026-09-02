@@ -60,6 +60,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from eneo.flows.source_identity import RUNTIME_MANAGED_SOURCE_FIELDS
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -843,8 +844,14 @@ def _reader_satisfies_direct_compose_contract(
     if source_array.field_type != "array":
         return False
     item_fields = tuple(source_array.item_fields or ())
-    if not item_fields or not all(
-        field.field_type in DIRECT_COMPOSE_SCALAR_FIELD_TYPES for field in item_fields
+    content_fields = tuple(
+        field
+        for field in item_fields
+        if field.name not in RUNTIME_MANAGED_SOURCE_FIELDS
+    )
+    if not content_fields or not all(
+        field.field_type in DIRECT_COMPOSE_SCALAR_FIELD_TYPES
+        for field in content_fields
     ):
         return False
     summary_requirements = tuple(
