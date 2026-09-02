@@ -24,6 +24,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_capture import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
 from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CorrectableFailure,
+    ProposalReady,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -71,17 +75,13 @@ async def test_process_edit_arguments_accepts_ordered_submission() -> None:
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.assumptions == [
-        "The existing input stays text."
-    ]
-    assert (
-        result.compiled_proposal.content.plan_rationale == "Rename the analysis step."
-    )
-    assert result.compiled_proposal.content.spec.steps[0].name == "Analyze case text"
-    assert result.compiled_proposal.content.edit is not None
-    assert result.compiled_proposal.content.edit.base_flow_revision == 7
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.assumptions == ["The existing input stays text."]
+    assert result.compiled.content.plan_rationale == "Rename the analysis step."
+    assert result.compiled.content.spec.steps[0].name == "Analyze case text"
+    assert result.compiled.content.edit is not None
+    assert result.compiled.content.edit.base_flow_revision == 7
 
 
 @pytest.mark.asyncio
@@ -118,10 +118,10 @@ async def test_process_edit_arguments_persists_resolved_saved_step_scope() -> No
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.edit is not None
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
     assert (
-        result.compiled_proposal.content.edit.scoped_target_existing_step_ref
+        result.compiled.content.edit.scoped_target_existing_step_ref
         == "existing_step_1"
     )
 
@@ -154,9 +154,9 @@ async def test_process_edit_arguments_classifies_whole_flow_input_change_as_modi
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.edit is not None
-    changes = result.compiled_proposal.content.edit.diff.step_changes
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    changes = result.compiled.content.edit.diff.step_changes
     assert [(change.step_ref, change.kind) for change in changes] == [
         ("existing_step_1", "unchanged"),
         ("existing_step_2", "modified"),
@@ -202,9 +202,9 @@ async def test_process_edit_arguments_keeps_identity_entries_unchanged() -> None
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.edit is not None
-    changes = result.compiled_proposal.content.edit.diff.step_changes
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    changes = result.compiled.content.edit.diff.step_changes
     assert [(change.step_ref, change.kind) for change in changes] == [
         ("existing_step_1", "modified"),
         ("existing_step_2", "unchanged"),
@@ -230,8 +230,8 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
             ],
         },
     )
-    assert initial.compiled_proposal is not None
-    prior_spec = initial.compiled_proposal.content.spec
+    assert isinstance(initial, ProposalReady)
+    prior_spec = initial.compiled.content.spec
     target = prior_spec.steps[1]
     context_request = AIBuilderPlanEditContext(
         scope="step",
@@ -267,19 +267,18 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.edit is not None
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
     assert (
-        result.compiled_proposal.content.edit.scoped_target_plan_step_ref
-        == target.plan_step_ref
+        result.compiled.content.edit.scoped_target_plan_step_ref == target.plan_step_ref
     )
     assert (
-        result.compiled_proposal.content.spec.steps[1].assistant_spec.instructions
+        result.compiled.content.spec.steps[1].assistant_spec.instructions
         == "Write a concise report with clear conclusions."
     )
 
-    replacement_spec = result.compiled_proposal.content.spec
+    replacement_spec = result.compiled.content.spec
     replacement_target = replacement_spec.steps[1]
     replacement_context_request = AIBuilderPlanEditContext(
         scope="step",
@@ -316,12 +315,10 @@ async def test_process_edit_arguments_refines_selected_added_plan_step() -> None
         },
     )
 
-    assert second_result.failure_kind is None
-    assert second_result.compiled_proposal is not None
+    assert isinstance(second_result, ProposalReady)
+    assert isinstance(second_result, ProposalReady)
     assert (
-        second_result.compiled_proposal.content.spec.steps[
-            1
-        ].assistant_spec.instructions
+        second_result.compiled.content.spec.steps[1].assistant_spec.instructions
         == "Write a concise report with clear conclusions and limitations."
     )
 
@@ -368,9 +365,8 @@ async def test_process_edit_arguments_rejects_model_authored_downstream_wiring()
         },
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "quality"
-    assert result.feedback is not None
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "quality"
     assert "existing_step_2" in result.feedback
     assert "selected step" in result.feedback
 
@@ -394,8 +390,8 @@ async def test_process_edit_arguments_attributes_and_captures_model_parse_failur
 
     result = await _process(flow=flow, arguments=arguments)
 
-    assert result.failure_kind == "parse"
-    assert result.failure_codes == frozenset({"proposal_parse_model"})
+    assert result.kind == "parse"
+    assert result.codes == frozenset({"proposal_parse_model"})
     captures = list(tmp_path.glob("rejected-proposal-*.json"))
     assert len(captures) == 1
 
@@ -441,11 +437,9 @@ async def test_english_edit_compiles_input_reference_hint_in_english() -> None:
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    instructions = result.compiled_proposal.content.spec.steps[
-        1
-    ].assistant_spec.instructions
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    instructions = result.compiled.content.spec.steps[1].assistant_spec.instructions
     assert "Pay particular attention to these structured source fields:" in instructions
     assert (
         "Beakta särskilt följande strukturerade fält i underlaget:" not in instructions
@@ -492,10 +486,9 @@ async def test_edit_rejects_invalid_typed_source_ref_without_text_fallback() -> 
         },
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset({"invalid_source_refs"})
-    assert result.feedback is not None
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"invalid_source_refs"})
     assert "label must not contain templates" in result.feedback
     assert "{{ invalid }}" in result.feedback
 
@@ -537,9 +530,9 @@ async def test_edit_inserting_non_writer_between_body_writer_and_renderer_is_adv
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    edit = result.compiled_proposal.content.edit
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    edit = result.compiled.content.edit
     assert edit is not None
     assert any(
         advisory.code == "document_renderer_must_immediately_follow_body_writer"
@@ -582,13 +575,11 @@ async def test_edit_preserving_body_writer_renderer_adjacency_has_no_topology_ad
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    edit = result.compiled_proposal.content.edit
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    edit = result.compiled.content.edit
     assert edit is not None
-    assert result.compiled_proposal.content.spec.document_body_writer_step_refs == (
-        "step_a",
-    )
+    assert result.compiled.content.spec.document_body_writer_step_refs == ("step_a",)
     assert not any(
         advisory.code == "document_renderer_must_immediately_follow_body_writer"
         for advisory in edit.advisories
@@ -625,9 +616,9 @@ async def test_edit_reports_step_local_citation_capability_advisory() -> None:
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    edit = result.compiled_proposal.content.edit
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    edit = result.compiled.content.edit
     assert edit is not None
     assert [
         (advisory.code, advisory.severity, advisory.message, advisory.field)
@@ -698,17 +689,15 @@ async def test_edit_enforces_template_preparation_stage_limit() -> None:
 
     accepted = await _process(flow=flow, arguments=arguments_with_stage_count(5))
 
-    assert accepted.failure_kind is None
-    assert accepted.compiled_proposal is not None
-    assert len(accepted.compiled_proposal.content.spec.steps) == 7
+    assert isinstance(accepted, ProposalReady)
+    assert isinstance(accepted, ProposalReady)
+    assert len(accepted.compiled.content.spec.steps) == 7
 
     rejected = await _process(flow=flow, arguments=arguments_with_stage_count(6))
 
-    assert rejected.compiled_proposal is None
-    assert rejected.failure_kind == "validation"
-    assert rejected.failure_codes == frozenset(
-        {"template_preparation_stage_limit_exceeded"}
-    )
+    assert isinstance(rejected, CorrectableFailure)
+    assert rejected.kind == "validation"
+    assert rejected.codes == frozenset({"template_preparation_stage_limit_exceeded"})
 
 
 @pytest.mark.asyncio
@@ -737,10 +726,9 @@ async def test_edit_removing_required_source_reader_field_is_rejected() -> None:
         },
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert "source_reader_required_fields_must_be_captured" in result.failure_codes
-    assert result.feedback is not None
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert "source_reader_required_fields_must_be_captured" in result.codes
     assert "summary" in result.feedback
 
 
@@ -767,8 +755,8 @@ async def test_edit_preserving_required_source_reader_field_is_accepted() -> Non
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
 
 
 @pytest.mark.asyncio
@@ -792,10 +780,9 @@ async def test_edit_removing_terminal_schema_source_leaf_is_rejected() -> None:
         },
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert "source_reader_required_fields_must_be_captured" in result.failure_codes
-    assert result.feedback is not None
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert "source_reader_required_fields_must_be_captured" in result.codes
     assert "source_case_id" in result.feedback
 
 
@@ -817,8 +804,8 @@ async def test_edit_preserving_terminal_schema_source_leaf_is_accepted() -> None
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
 
 
 @pytest.mark.asyncio
@@ -842,9 +829,9 @@ async def test_edit_removing_compare_aggregation_target_is_rejected() -> None:
         },
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert "multi_document_compare_requires_all_previous_steps" in result.failure_codes
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert "multi_document_compare_requires_all_previous_steps" in result.codes
 
 
 @pytest.mark.asyncio
@@ -868,9 +855,9 @@ async def test_edit_preserving_compare_aggregation_target_is_accepted() -> None:
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.aggregation_intent == "compare"
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.aggregation_intent == "compare"
 
 
 @pytest.mark.asyncio
@@ -892,8 +879,8 @@ async def test_edit_preserving_targeted_compare_source_refs_is_accepted() -> Non
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
 
 
 @pytest.mark.asyncio
@@ -915,8 +902,7 @@ async def test_ordered_submission_rejects_omitted_existing_step() -> None:
         },
     )
 
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
+    assert result.kind == "validation"
     assert "existing_step_2" in result.feedback
     assert "removed_existing_step_refs" in result.feedback
 
@@ -944,8 +930,7 @@ async def test_ordered_submission_rejects_step_preserved_and_removed() -> None:
         },
     )
 
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
+    assert result.kind == "validation"
     assert "existing_step_2" in result.feedback
     assert "both steps and removed_existing_step_refs" in result.feedback
 
@@ -972,8 +957,7 @@ async def test_ordered_submission_rejects_unknown_ref_before_omitted_add() -> No
         },
     )
 
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
+    assert result.kind == "validation"
     assert "existing_step_99" in result.feedback
 
 
@@ -1006,8 +990,7 @@ async def test_ordered_submission_reports_unknown_resource_refs() -> None:
         ),
     )
 
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
+    assert result.kind == "validation"
     assert "model.missing" in result.feedback
 
 
@@ -1031,8 +1014,7 @@ async def test_ordered_submission_rejects_unknown_flow_input_key() -> None:
         },
     )
 
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
+    assert result.kind == "validation"
     assert "unknown flow_input key" in result.feedback
 
 
@@ -1088,13 +1070,13 @@ async def test_ordered_form_fields_preserve_on_omission() -> None:
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.spec.form_fields == [
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.spec.form_fields == [
         FormFieldSpec(name="case_id", type="text", label="Case ID", required=True),
         FormFieldSpec(name="context", type="text", label="Context", required=False),
     ]
-    assert result.compiled_proposal.content.edit is not None
-    assert result.compiled_proposal.content.edit.diff.form_changes == []
+    assert result.compiled.content.edit is not None
+    assert result.compiled.content.edit.diff.form_changes == []
 
 
 @pytest.mark.asyncio
@@ -1139,18 +1121,18 @@ async def test_ordered_form_fields_diff_complete_state() -> None:
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.edit is not None
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
     assert [
         (change.kind, change.field_name)
-        for change in result.compiled_proposal.content.edit.diff.form_changes
+        for change in result.compiled.content.edit.diff.form_changes
     ] == [
         ("modified", "case_id"),
         ("added", "review_date"),
         ("removed", "legacy_context"),
     ]
-    assert result.compiled_proposal.content.spec.form_fields is not None
-    assert result.compiled_proposal.content.spec.form_fields[1].options == [
+    assert result.compiled.content.spec.form_fields is not None
+    assert result.compiled.content.spec.form_fields[1].options == [
         "Today",
         "Later",
     ]
@@ -1206,9 +1188,9 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.edit is not None
-    edit = result.compiled_proposal.content.edit
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    edit = result.compiled.content.edit
     assert [
         (change.kind, change.step_ref, change.step_name)
         for change in edit.diff.step_changes
@@ -1258,9 +1240,9 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    edit = result.compiled_proposal.content.edit
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    edit = result.compiled.content.edit
     assert edit is not None
     assert [
         (change.kind, change.step_ref, change.step_name)
@@ -1270,7 +1252,7 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
         ("added", None, "Review source"),
         ("unchanged", "existing_step_2", "Use source"),
     ]
-    reordered_consumer = result.compiled_proposal.content.spec.steps[2]
+    reordered_consumer = result.compiled.content.spec.steps[2]
     assert reordered_consumer.input_bindings == {"question": "{{ step_a.output.text }}"}
     assert reordered_consumer.output_config == {"template": "{{ step_a.output.text }}"}
 
@@ -1300,10 +1282,10 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
         },
     )
 
-    assert first_result.failure_kind is None
-    assert first_result.compiled_proposal is not None
+    assert isinstance(first_result, ProposalReady)
+    assert isinstance(first_result, ProposalReady)
     assert (
-        first_result.compiled_proposal.content.spec.steps[0].input_source
+        first_result.compiled.content.spec.steps[0].input_source
         == InputSource.FLOW_INPUT
     )
 
@@ -1324,10 +1306,10 @@ async def test_ordered_add_step_derives_omitted_input_source_through_pipeline() 
         },
     )
 
-    assert later_result.failure_kind is None
-    assert later_result.compiled_proposal is not None
+    assert isinstance(later_result, ProposalReady)
+    assert isinstance(later_result, ProposalReady)
     assert (
-        later_result.compiled_proposal.content.spec.steps[1].input_source
+        later_result.compiled.content.spec.steps[1].input_source
         == InputSource.PREVIOUS_STEP
     )
 
@@ -1357,9 +1339,9 @@ async def test_ordered_add_first_document_step_derives_runtime_input_config() ->
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    step = result.compiled_proposal.content.spec.steps[0]
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    step = result.compiled.content.spec.steps[0]
     assert step.input_source == InputSource.FLOW_INPUT
     assert step.input_type == InputType.DOCUMENT
     assert step.input_config is not None
@@ -1388,9 +1370,9 @@ async def test_ordered_add_later_document_step_compiles_to_text_input() -> None:
         },
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    step = result.compiled_proposal.content.spec.steps[1]
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    step = result.compiled.content.spec.steps[1]
     assert step.input_source == InputSource.PREVIOUS_STEP
     assert step.input_type == InputType.TEXT
     assert step.input_config is None
@@ -1464,9 +1446,9 @@ async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only
         ),
     )
 
-    assert result.failure_kind is None
-    assert result.compiled_proposal is not None
-    edit = result.compiled_proposal.content.edit
+    assert isinstance(result, ProposalReady)
+    assert isinstance(result, ProposalReady)
+    edit = result.compiled.content.edit
     assert edit is not None
     assert [(change.kind, change.step_ref) for change in edit.diff.step_changes] == [
         ("unchanged", "existing_step_1")
@@ -1477,12 +1459,12 @@ async def test_ordered_edit_noop_round_trip_from_snapshot_reports_unchanged_only
     assert edit.diff.metadata_changes == []
     assert edit.diff.flow_property_changes == {}
 
-    spec_step = result.compiled_proposal.content.spec.steps[0]
+    spec_step = result.compiled.content.spec.steps[0]
     assert spec_step.assistant_spec.instructions == "Extract case data."
     assert spec_step.assistant_spec.model_ref == "model.gpt"
     assert spec_step.assistant_spec.knowledge_refs == ["knowledge.policy"]
     assert spec_step.input_config == flow.steps[0].input_config
-    assert result.compiled_proposal.content.spec.form_fields == [
+    assert result.compiled.content.spec.form_fields == [
         FormFieldSpec(
             name="case_id",
             type="text",
@@ -1520,9 +1502,9 @@ async def test_ordered_edit_confidence_needs_review_for_many_changes() -> None:
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.edit is not None
-    assert result.compiled_proposal.content.edit.confidence == "needs_review"
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    assert result.compiled.content.edit.confidence == "needs_review"
 
 
 @pytest.mark.asyncio
@@ -1546,15 +1528,15 @@ async def test_ordered_form_field_shadow_declaration_is_dropped_with_advisory() 
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.spec.form_fields is None
-    assert result.compiled_proposal.content.edit is not None
-    assert result.compiled_proposal.content.edit.diff.form_changes == []
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.spec.form_fields is None
+    assert result.compiled.content.edit is not None
+    assert result.compiled.content.edit.diff.form_changes == []
     assert any(
         advisory.code == "form_field_shadows_primary_input"
         and advisory.field == "form_fields"
         and advisory.field_provenance == "model_proposed"
-        for advisory in result.compiled_proposal.content.edit.advisories
+        for advisory in result.compiled.content.edit.advisories
     )
 
 
@@ -1594,8 +1576,8 @@ async def test_confirmed_edit_field_options_survive_server_owned_projection() ->
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.spec.form_fields == [
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.spec.form_fields == [
         FormFieldSpec(
             name="priority",
             type="select",
@@ -1634,8 +1616,8 @@ async def test_confirmed_edit_field_survives_when_model_omits_form_fields() -> N
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.spec.form_fields == [
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.spec.form_fields == [
         FormFieldSpec(
             name="priority",
             type="select",
@@ -1672,9 +1654,9 @@ async def test_confirmed_edit_shadow_field_is_rejected_explicitly() -> None:
         },
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset({"confirmed_form_field_incompatible"})
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"confirmed_form_field_incompatible"})
 
 
 @pytest.mark.asyncio
@@ -1718,16 +1700,16 @@ async def test_ordered_step_shadow_reference_is_filtered_with_advisory() -> None
         },
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.spec.steps[1].input_bindings == {
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.spec.steps[1].input_bindings == {
         "question": "case_id: {{ flow_input.case_id }}",
         "source_refs": [{"step_ref": "step_a", "output": "structured"}],
     }
-    assert result.compiled_proposal.content.edit is not None
+    assert result.compiled.content.edit is not None
     assert any(
         advisory.code == "form_field_shadows_primary_input"
         and advisory.field == "form_fields"
-        for advisory in result.compiled_proposal.content.edit.advisories
+        for advisory in result.compiled.content.edit.advisories
     )
 
 
@@ -1748,8 +1730,8 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
         },
     )
 
-    assert result.compiled_proposal is not None
-    steps = result.compiled_proposal.content.spec.steps
+    assert isinstance(result, ProposalReady)
+    steps = result.compiled.content.spec.steps
     assert [
         (step.input_source, step.input_type, step.output_type, step.output_mode)
         for step in steps
@@ -1776,13 +1758,13 @@ async def test_ordered_audio_repair_inserts_transcript_and_rewires_consumer() ->
     assert runtime_input["enabled"] is True
     assert runtime_input["input_format"] == "audio"
     assert runtime_input["required"] is True
-    assert result.compiled_proposal.content.edit is not None
+    assert result.compiled.content.edit is not None
     assert any(
         change.kind == "added" and change.step_name == "Transkribera ljud"
-        for change in result.compiled_proposal.content.edit.diff.step_changes
+        for change in result.compiled.content.edit.diff.step_changes
     )
-    assert result.compiled_proposal.content.edit.warnings
-    assert result.compiled_proposal.content.edit.confidence == "needs_review"
+    assert result.compiled.content.edit.warnings
+    assert result.compiled.content.edit.confidence == "needs_review"
 
 
 @pytest.mark.asyncio
@@ -1811,8 +1793,8 @@ async def test_ordered_audio_repair_clears_stale_runtime_input_config() -> None:
         },
     )
 
-    assert result.compiled_proposal is not None
-    steps = result.compiled_proposal.content.spec.steps
+    assert isinstance(result, ProposalReady)
+    steps = result.compiled.content.spec.steps
     assert steps[1].existing_step_ref == "existing_step_1"
     assert steps[1].input_source == InputSource.PREVIOUS_STEP
     assert steps[1].input_type == InputType.TEXT
@@ -1854,17 +1836,14 @@ async def test_ordered_audio_repair_does_not_duplicate_existing_transcript() -> 
         },
     )
 
-    assert result.compiled_proposal is not None
+    assert isinstance(result, ProposalReady)
     transcript_steps = [
         step
-        for step in result.compiled_proposal.content.spec.steps
+        for step in result.compiled.content.spec.steps
         if step.name == "Transkribera ljud"
     ]
     assert len(transcript_steps) == 1
-    assert (
-        result.compiled_proposal.content.spec.steps[1].existing_step_ref
-        == "existing_step_1"
-    )
+    assert result.compiled.content.spec.steps[1].existing_step_ref == "existing_step_1"
 
 
 @pytest.mark.asyncio
@@ -1909,8 +1888,8 @@ async def test_added_edit_step_uses_server_requested_primary_runtime_input() -> 
         },
     )
 
-    assert result.compiled_proposal is not None
-    steps = result.compiled_proposal.content.spec.steps
+    assert isinstance(result, ProposalReady)
+    steps = result.compiled.content.spec.steps
     assert steps[0].input_source == InputSource.FLOW_INPUT
     assert steps[0].input_type == InputType.AUDIO
     assert steps[0].output_mode == OutputMode.TRANSCRIBE_ONLY

@@ -1665,11 +1665,11 @@ def test_the_compiled_postcondition_fails_closed_on_a_dropped_name() -> None:
     )
     assert "missing_location:documents" in failure.value.log_context["reason"]
 
-    from eneo.flows.ai_builder.ai_builder_create_proposal import (
-        _retryable_architecture_failure_code,
+    from eneo.flows.ai_builder.ai_builder_architecture_errors import (
+        model_correctable_architecture_failure_code,
     )
 
-    assert _retryable_architecture_failure_code(failure.value) is None
+    assert model_correctable_architecture_failure_code(failure.value) is None
 
 
 def test_an_earlier_step_may_declare_an_attested_name() -> None:

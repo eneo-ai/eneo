@@ -32,7 +32,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     build_create_contextual_quality_feedback,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
-    ToolProcessingResult,
+    CorrectableFailure,
+    PreparationOutcome,
+    ProposalReady,
+    TerminalFailure,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableModelResource,
@@ -83,7 +86,7 @@ async def process_create_intent_arguments(
     requested_output_sections: RequestedOutputSections = (
         EMPTY_REQUESTED_OUTPUT_SECTIONS
     ),
-) -> ToolProcessingResult:
+) -> PreparationOutcome:
     return await _process_create_intent_arguments(
         turn=turn,
         conversation=conversation,
@@ -228,11 +231,9 @@ async def test_create_terminal_uses_committed_architecture_despite_negated_file_
         planning_state=state,
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.validation.valid
-    assert (
-        result.compiled_proposal.content.spec.steps[-1].output_type is OutputType.TEXT
-    )
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.validation.valid
+    assert result.compiled.content.spec.steps[-1].output_type is OutputType.TEXT
 
 
 @pytest.mark.asyncio
@@ -318,9 +319,8 @@ async def test_outline_processing_reports_unknown_resource_from_compiled_spec() 
         resource_catalog=catalog,
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert result.feedback is not None
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
     assert "Unknown model reference 'missing-fast-model'" in result.feedback
     assert "step 'step_a'.assistant_spec.model_ref" in result.feedback
     assert "model.gpt-5-4-nano" in result.feedback
@@ -347,9 +347,9 @@ async def test_create_compile_disambiguates_duplicate_step_names() -> None:
         available_kb_refs=None,
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.validation.valid
-    assert [step.name for step in result.compiled_proposal.content.spec.steps] == [
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.validation.valid
+    assert [step.name for step in result.compiled.content.spec.steps] == [
         "Förbered PDF-innehåll",
         "Förbered PDF-innehåll (2)",
     ]
@@ -403,8 +403,8 @@ async def test_outline_validation_failure_preserves_citation_family() -> None:
             ),
         )
 
-    assert result.compiled_proposal is not None
-    assert [error.code for error in result.compiled_proposal.validation.errors] == [
+    assert isinstance(result, ProposalReady)
+    assert [error.code for error in result.compiled.validation.errors] == [
         "citation_mode_unsupported"
     ]
 
@@ -447,12 +447,9 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
         planning_state=state,
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset(
-        {"assembly_source_file_first_step_requires_json"}
-    )
-    assert result.feedback is not None
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"assembly_source_file_first_step_requires_json"})
     assert "first semantic step" in result.feedback
 
     corrected = await process_create_intent_arguments(
@@ -487,9 +484,9 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
         planning_state=state,
     )
 
-    assert corrected.failure_kind is None
-    assert corrected.compiled_proposal is not None
-    assert corrected.compiled_proposal.validation.valid
+    assert isinstance(corrected, ProposalReady)
+    assert isinstance(corrected, ProposalReady)
+    assert corrected.compiled.validation.valid
 
 
 @pytest.mark.parametrize(
@@ -526,20 +523,6 @@ async def test_process_create_intent_arguments_only_returns_retryable_architectu
         "compile_create_intent_to_spec",
         side_effect=error,
     ):
-        if not retryable:
-            with pytest.raises(AIBuilderArchitectureError) as exc_info:
-                await _process_create_intent_arguments(
-                    turn=_make_turn(),
-                    conversation=[],
-                    arguments=arguments,
-                    tool_call_id="call-architecture-classification",
-                    available_model_refs=None,
-                    available_kb_refs=None,
-                )
-
-            assert exc_info.value is error
-            return
-
         result = await _process_create_intent_arguments(
             turn=_make_turn(),
             conversation=[],
@@ -549,10 +532,18 @@ async def test_process_create_intent_arguments_only_returns_retryable_architectu
             available_kb_refs=None,
         )
 
-    assert result.compiled_proposal is None
+    if not retryable:
+        # No model call can repair the assembler's own invariants: the
+        # producer ends the turn with the typed architecture error.
+        assert isinstance(result, TerminalFailure)
+        assert result.kind == "architecture"
+        assert result.code == "architecture_materialization_failed"
+        assert result.codes == frozenset({failure_code})
+        return
+    assert isinstance(result, CorrectableFailure)
     assert result.feedback == error.detail
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset({failure_code})
+    assert result.kind == "validation"
+    assert result.codes == frozenset({failure_code})
 
 
 @pytest.mark.asyncio
@@ -573,33 +564,33 @@ async def test_corrupt_report_context_fails_closed_without_model_repair() -> Non
         )
     )
 
-    with pytest.raises(AIBuilderArchitectureError) as exc_info:
-        await process_create_intent_arguments(
-            turn=_make_turn(),
-            conversation=[
-                ConversationMessage(
-                    role="user",
-                    content="Build a PDF report from the supplied text.",
-                )
+    result = await process_create_intent_arguments(
+        turn=_make_turn(),
+        conversation=[
+            ConversationMessage(
+                role="user",
+                content="Build a PDF report from the supplied text.",
+            )
+        ],
+        arguments={
+            "flow_name": "Corrupt report context",
+            "plan_rationale": "Write and render the report.",
+            "steps": [
+                {
+                    "name": "Write report",
+                    "instructions": "Write the report from the supplied text.",
+                }
             ],
-            arguments={
-                "flow_name": "Corrupt report context",
-                "plan_rationale": "Write and render the report.",
-                "steps": [
-                    {
-                        "name": "Write report",
-                        "instructions": "Write the report from the supplied text.",
-                    }
-                ],
-            },
-            tool_call_id="call-corrupt-report-context",
-            available_model_refs=None,
-            available_kb_refs=None,
-            planning_state=state,
-        )
+        },
+        tool_call_id="call-corrupt-report-context",
+        available_model_refs=None,
+        available_kb_refs=None,
+        planning_state=state,
+    )
 
-    assert exc_info.value.log_context["failure_code"] == (
-        "assembly_document_report_compose_topology_missing"
+    assert isinstance(result, TerminalFailure)
+    assert result.codes == frozenset(
+        {"assembly_document_report_compose_topology_missing"}
     )
 
 
@@ -647,8 +638,8 @@ async def test_report_citations_degrade_to_one_user_visible_warning() -> None:
         planning_state=state,
     )
 
-    assert result.compiled_proposal is not None
-    compiled = result.compiled_proposal
+    assert isinstance(result, ProposalReady)
+    compiled = result.compiled
     assert all(
         step.output_config != {"citation_mode": "inline_inref_sidecar"}
         for step in compiled.content.spec.steps
@@ -751,8 +742,8 @@ async def test_combined_report_models_surface_warning_on_stored_plan() -> None:
         planning_state=state,
     )
 
-    assert result.compiled_proposal is not None
-    compiled = result.compiled_proposal
+    assert isinstance(result, ProposalReady)
+    compiled = result.compiled
     assert compiled.content.spec.steps[1].assistant_spec.model_ref == "model.body"
     warnings = [
         warning
@@ -866,8 +857,8 @@ async def test_outline_audio_to_docx_returns_compiled_proposal() -> None:
         planning_state=state,
     )
 
-    assert result.compiled_proposal is not None
-    spec = result.compiled_proposal.content.spec
+    assert isinstance(result, ProposalReady)
+    spec = result.compiled.content.spec
     assert [field.name for field in spec.form_fields or ()] == [
         "arendenummer",
         "handlaggare",
@@ -935,8 +926,8 @@ async def test_outline_processing_uses_confirmed_planning_state_field() -> None:
         planning_state=state,
     )
 
-    assert result.compiled_proposal is not None
-    spec = result.compiled_proposal.content.spec
+    assert isinstance(result, ProposalReady)
+    spec = result.compiled.content.spec
     assert spec.form_fields is not None
     assert [field.name for field in spec.form_fields] == ["malgrupp"]
     assert spec.steps[0].input_bindings is not None
@@ -981,8 +972,8 @@ async def test_unstructured_field_text_does_not_create_hidden_server_contract() 
         planning_state=state,
     )
 
-    assert result.compiled_proposal is not None
-    assert result.compiled_proposal.content.spec.form_fields is None
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.spec.form_fields is None
 
 
 @pytest.mark.asyncio
@@ -1022,8 +1013,8 @@ async def test_confirmed_create_field_preserves_options_and_provenance() -> None
         planning_state=state,
     )
 
-    assert result.compiled_proposal is not None
-    fields = result.compiled_proposal.content.spec.form_fields
+    assert isinstance(result, ProposalReady)
+    fields = result.compiled.content.spec.form_fields
     assert fields is not None
     assert fields[0].model_dump(exclude_none=True) == {
         "name": "priority",
@@ -1032,9 +1023,9 @@ async def test_confirmed_create_field_preserves_options_and_provenance() -> None
         "required": True,
         "options": ["Low", "High"],
     }
-    assert result.compiled_proposal.content.lint_warnings == []
+    assert result.compiled.content.lint_warnings == []
     assert state.input_fields[0].value.provenance == "user_confirmed"
-    stored_proposal = build_flow_builder_proposal(result.compiled_proposal)
+    stored_proposal = build_flow_builder_proposal(result.compiled)
     assert stored_proposal.content.spec.form_fields == fields
 
 
@@ -1078,9 +1069,9 @@ async def test_confirmed_create_shadow_field_is_rejected_explicitly() -> None:
         planning_state=state,
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset({"confirmed_form_field_incompatible"})
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"confirmed_form_field_incompatible"})
 
 
 @pytest.mark.asyncio
@@ -1128,10 +1119,9 @@ async def test_confirmed_source_output_collision_is_model_repairable() -> None:
         ),
     )
 
-    assert result.compiled_proposal is None
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset(
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert result.codes == frozenset(
         {"confirmed_runtime_input_source_output_collision"}
     )
-    assert result.feedback is not None
     assert "case_id" in result.feedback

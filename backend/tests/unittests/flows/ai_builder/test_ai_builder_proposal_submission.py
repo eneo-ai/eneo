@@ -59,7 +59,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
-    ForcedToolRetryOutcome,
+    ForcedToolContinuation,
     build_self_correction_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_submission import (
@@ -71,8 +71,11 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
+    CorrectableFailure,
+    ProposalAnswer,
+    ProposalCompleted,
     ProposalMessageGroup,
-    ToolProcessingResult,
+    ProposalReady,
     ToolRetryConfig,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -606,15 +609,15 @@ async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair()
         planning_state=_committed_text_planning_state(),
     )
     process_outline = AsyncMock(
-        return_value=ToolProcessingResult(
+        return_value=CorrectableFailure(
             feedback="uses_previous_fields is backend-owned wiring.",
-            failure_kind="validation",
-            failure_codes=frozenset({"assembly_explicit_refs_not_supported"}),
+            kind="validation",
+            codes=frozenset({"assembly_explicit_refs_not_supported"}),
         )
     )
 
     async def _repair_events(request):
-        assert request.failure_codes == frozenset(
+        assert request.failure.codes == frozenset(
             {"assembly_explicit_refs_not_supported"}
         )
         yield build_status_event(AIBuilderStatus.REPAIRING)
@@ -775,7 +778,7 @@ async def test_create_propose_flow_terminal_answer_is_committed_not_just_streame
         tool_call_id="call-create-user-message",
     )
     process_outline = AsyncMock(
-        return_value=ToolProcessingResult(terminal_answer="I need one more detail.")
+        return_value=ProposalAnswer(answer="I need one more detail.")
     )
 
     with (
@@ -819,9 +822,7 @@ async def test_create_propose_flow_plural_events_emit_in_order() -> None:
         _plan_stream_event(),
     )
     expected_wire_events = _wire_events(expected_events)
-    process_outline = AsyncMock(
-        return_value=ToolProcessingResult(events=expected_events)
-    )
+    process_outline = AsyncMock(return_value=ProposalCompleted(events=expected_events))
 
     with (
         patch(
@@ -853,10 +854,8 @@ async def test_edit_propose_flow_plural_events_emit_in_order() -> None:
         _plan_stream_event(),
     )
     expected_wire_events = _wire_events(expected_events)
-    process_edit = AsyncMock(
-        return_value=ToolProcessingResult(compiled_proposal=compiled)
-    )
-    finalize = AsyncMock(return_value=ToolProcessingResult(events=expected_events))
+    process_edit = AsyncMock(return_value=ProposalReady(compiled=compiled))
+    finalize = AsyncMock(return_value=ProposalCompleted(events=expected_events))
 
     with (
         patch(
@@ -893,7 +892,7 @@ async def test_a_repaired_terminal_answer_is_committed_like_the_first_one() -> N
         usage=_make_usage(prompt_tokens=40, completion_tokens=8, total_tokens=48),
     )
     process_outline = AsyncMock(
-        return_value=ToolProcessingResult(terminal_answer="Redigera hela planen.")
+        return_value=ProposalAnswer(answer="Redigera hela planen.")
     )
     retry_config = submission._proposal_retry_config(
         target_kind=TargetKind.CREATE,
@@ -939,12 +938,8 @@ async def test_create_propose_flow_finalization_uses_default_assistant_content()
 ):
     submission = _make_submission()
     compiled = _compiled_outline_proposal()
-    finalize = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
-    )
-    process_outline = AsyncMock(
-        return_value=ToolProcessingResult(compiled_proposal=compiled)
-    )
+    finalize = AsyncMock(return_value=ProposalCompleted(events=(_plan_stream_event(),)))
+    process_outline = AsyncMock(return_value=ProposalReady(compiled=compiled))
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,
         {
@@ -1008,9 +1003,9 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
         planning_state=_committed_text_planning_state(),
     )
     process_outline = AsyncMock(
-        return_value=ToolProcessingResult(
+        return_value=CorrectableFailure(
             feedback="Invalid propose_flow arguments: bad shape",
-            failure_kind="parse",
+            kind="parse",
         )
     )
 
@@ -1051,12 +1046,8 @@ async def test_proposal_retry_config_finalizes_create_compiled_proposal_with_inv
 ):
     submission = _make_submission()
     compiled = _compiled_outline_proposal()
-    process_outline = AsyncMock(
-        return_value=ToolProcessingResult(compiled_proposal=compiled)
-    )
-    finalize = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
-    )
+    process_outline = AsyncMock(return_value=ProposalReady(compiled=compiled))
+    finalize = AsyncMock(return_value=ProposalCompleted(events=(_plan_stream_event(),)))
     tracker = ProposalTurnTelemetry(
         request_id="req-outline-retry-finalize",
         model="openai/gpt-5.4",
@@ -1142,7 +1133,9 @@ async def test_create_admission_rehomes_field_shaped_step_before_compilation() -
     )
     schema = build_propose_flow_tool_schema(resource_catalog=resource_catalog)
     process_create = AsyncMock(
-        return_value=ToolProcessingResult(feedback="Continue with normal validation.")
+        return_value=CorrectableFailure(
+            feedback="Continue with normal validation.", kind="validation"
+        )
     )
     arguments = {
         "flow_name": "Neighbour consultation summary",
@@ -1292,7 +1285,7 @@ async def test_initial_parse_failures_capture_identical_arguments_per_session(
 
     assert repair.call_count == 2
     assert all(
-        call.args[0].failure_codes == frozenset({"proposal_parse_json"})
+        call.args[0].failure.codes == frozenset({"proposal_parse_json"})
         for call in repair.call_args_list
     )
     captures = sorted(tmp_path.glob("malformed-proposal-*.txt"))
@@ -1351,7 +1344,7 @@ async def test_edit_propose_flow_parse_failure_records_proposal_repair_reason() 
 async def test_edit_propose_flow_does_not_run_create_prerequisites() -> None:
     submission = _make_submission()
     process_edit = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
+        return_value=ProposalCompleted(events=(_plan_stream_event(),))
     )
     tool_call = _make_tool_call(
         PROPOSE_FLOW_TOOL_NAME,
@@ -1405,7 +1398,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     assert "valid propose_flow tool call" in config.forced_tool_prompt
 
     process_edit = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
+        return_value=ProposalCompleted(events=(_plan_stream_event(),))
     )
     invocation = _make_retry_invocation(
         flow=flow,
@@ -1471,12 +1464,8 @@ async def test_edit_propose_flow_retry_preserves_description_advisory_without_co
     litellm_client.acompletion = AsyncMock(
         return_value=_make_response_with_text("New generated description")
     )
-    process_edit = AsyncMock(
-        return_value=ToolProcessingResult(compiled_proposal=original)
-    )
-    finalize = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
-    )
+    process_edit = AsyncMock(return_value=ProposalReady(compiled=original))
+    finalize = AsyncMock(return_value=ProposalCompleted(events=(_plan_stream_event(),)))
 
     with (
         patch(
@@ -1529,12 +1518,8 @@ async def test_edit_propose_flow_preserves_description_advisory_without_completi
     litellm_client.acompletion = AsyncMock(
         return_value=_make_response_with_text("New generated description")
     )
-    process_edit = AsyncMock(
-        return_value=ToolProcessingResult(compiled_proposal=original)
-    )
-    finalize = AsyncMock(
-        return_value=ToolProcessingResult(events=(_plan_stream_event(),))
-    )
+    process_edit = AsyncMock(return_value=ProposalReady(compiled=original))
+    finalize = AsyncMock(return_value=ProposalCompleted(events=(_plan_stream_event(),)))
 
     with (
         patch(
@@ -1586,10 +1571,15 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
     with patch(
         "eneo.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
-            return_value=ForcedToolRetryOutcome(events=(_plan_stream_event(),))
+            return_value=ForcedToolContinuation(
+                ProposalCompleted(events=(_plan_stream_event(),))
+            )
         ),
     ) as retry_forced_tool:
-        result = await submission._retry_forced_proposal_after_text(
+        (
+            continuation,
+            _retry_config,
+        ) = await submission._retry_forced_proposal_after_text(
             ctx=ctx,
             correction_message_groups=_message_groups(
                 [{"role": "system", "content": "Prompt"}]
@@ -1597,8 +1587,8 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
             assistant_text="Här är planen.",
         )
 
-    assert result is not None
-    assert [event.event for event in result] == ["plan"]
+    assert isinstance(continuation.outcome, ProposalCompleted)
+    assert [event.event for event in continuation.outcome.events] == ["plan"]
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_kind == TargetKind.CREATE
     assert request.ctx is ctx
@@ -1631,10 +1621,15 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
     with patch(
         "eneo.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
         new=AsyncMock(
-            return_value=ForcedToolRetryOutcome(events=(_plan_stream_event(),))
+            return_value=ForcedToolContinuation(
+                ProposalCompleted(events=(_plan_stream_event(),))
+            )
         ),
     ) as retry_forced_tool:
-        result = await submission._retry_forced_proposal_after_text(
+        (
+            continuation,
+            _retry_config,
+        ) = await submission._retry_forced_proposal_after_text(
             ctx=ctx,
             correction_message_groups=_message_groups(
                 [{"role": "system", "content": "Prompt"}]
@@ -1642,8 +1637,8 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
             assistant_text="Här är planen.",
         )
 
-    assert result is not None
-    assert [event.event for event in result] == ["plan"]
+    assert isinstance(continuation.outcome, ProposalCompleted)
+    assert [event.event for event in continuation.outcome.events] == ["plan"]
     request = retry_forced_tool.await_args.args[0]
     assert request.retry_config.target_kind == TargetKind.EDIT
     assert request.ctx is ctx
@@ -1686,5 +1681,5 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
 
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]
-    assert "OrderedEditProposal" in request.error_message
+    assert "OrderedEditProposal" in request.failure.feedback
     assert request.retry_config.target_kind == TargetKind.EDIT

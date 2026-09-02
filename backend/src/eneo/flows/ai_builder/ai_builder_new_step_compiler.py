@@ -891,7 +891,13 @@ def _validate_source_ref_candidates(
         except InputBindingContractError as exc:
             raise AIBuilderArchitectureError(
                 public_code="architecture_materialization_failed",
-                detail=f"Typed source reference {payload!r} is invalid: {exc}",
+                detail=(
+                    f"Typed source reference {payload!r} is invalid: {exc}. The "
+                    "backend owns typed source references in create mode: correct "
+                    "each malformed output_fields[].name to a plain ASCII JSON key "
+                    "without template syntax and do not add edit-only "
+                    "source-reference fields."
+                ),
                 log_context={
                     "failure_code": "invalid_source_refs",
                     "source_ref": repr(payload),

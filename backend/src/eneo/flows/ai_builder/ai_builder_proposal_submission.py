@@ -62,18 +62,20 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolAfterTextRequest,
+    ForcedToolContinuation,
     ProposalSelfCorrectionRequest,
     build_proposal_self_correction_request,
     run_forced_tool_retry_after_text,
     run_tool_self_correction,
+    terminal_failure_event,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_PARSE_JSON_FAILURE_CODE,
     PROPOSAL_PARSE_SCHEMA_FAILURE_CODE,
     ProposalAttemptFailureKind,
+    ProposalFailureKind,
     ProposalRepairReason,
     ProposalTurnTelemetry,
-    ToolProcessingFailureKind,
     log_proposal_failed_turn,
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
@@ -81,10 +83,15 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
+    CorrectableFailure,
+    ProposalAnswer,
     ProposalCallBudgetExhausted,
+    ProposalCompleted,
     ProposalMessageGroup,
+    ProposalReady,
     ProposalTurnContext,
-    ToolProcessingResult,
+    SubmissionOutcome,
+    TerminalFailure,
     ToolRetryConfig,
     ToolRetryInvocation,
 )
@@ -166,7 +173,6 @@ class ProposalSubmissionOwner:
         repo: AIBuilderRepository,
         litellm_client: Any,
         self_correction_temperature: float,
-        self_correction_bumped_temperature: float,
         forced_proposal_temperature: float,
         quality_retry_warning_codes: frozenset[str],
         compiled_proposal_finalizer: CompiledProposalFinalizer | None = None,
@@ -174,7 +180,6 @@ class ProposalSubmissionOwner:
         self.repo = repo
         self.litellm_client = litellm_client
         self.self_correction_temperature = self_correction_temperature
-        self.self_correction_bumped_temperature = self_correction_bumped_temperature
         self.forced_proposal_temperature = forced_proposal_temperature
         self._compiled_proposal_finalizer = (
             compiled_proposal_finalizer
@@ -345,32 +350,53 @@ class ProposalSubmissionOwner:
                 if yielded:
                     return
 
-        forced_events = await self._retry_forced_proposal_after_text(
+        continuation, retry_config = await self._retry_forced_proposal_after_text(
             ctx=ctx,
             correction_message_groups=message_groups,
             assistant_text=message.content or "",
         )
-        if forced_events is not None:
-            for event in forced_events:
+        forced = continuation.outcome
+        if isinstance(forced, ProposalCompleted):
+            for event in forced.events:
                 yield event
             return
-
+        if (
+            isinstance(forced, CorrectableFailure)
+            and continuation.tool_call is not None
+        ):
+            async for event in self._run_proposal_self_correction(
+                ctx=ctx,
+                failure=forced,
+                tool_call=continuation.tool_call,
+                retry_config=retry_config,
+            ):
+                yield event
+            return
+        terminal = (
+            forced
+            if isinstance(forced, TerminalFailure)
+            else TerminalFailure(
+                kind="missing_submission_tool",
+                message=(
+                    "The AI planner did not return a valid flow proposal. "
+                    "Please try again or use a more capable model."
+                ),
+                code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
+                phase=AIBuilderErrorPhase.PROPOSAL,
+            )
+        )
         log_proposal_failed_turn(
             usage_tracker=usage_tracker,
             session_id=turn.session_id,
             branch="forced_tool_retry_missing_submission",
-            final_failure_kind="missing_submission_tool",
-            final_error_code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING.value,
-        )
-        yield build_ai_builder_error_event(
-            message=(
-                "The AI planner did not return a valid flow proposal. "
-                "Please try again or use a more capable model."
+            final_failure_kind=(
+                "provider_truncation"
+                if terminal.kind == "provider_truncation"
+                else "missing_submission_tool"
             ),
-            code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
-            phase=AIBuilderErrorPhase.PROPOSAL,
-            request_id=request_id,
+            final_error_code=terminal.code.value,
         )
+        yield terminal_failure_event(terminal, request_id=request_id)
 
     def _proposal_retry_config(
         self,
@@ -388,7 +414,7 @@ class ProposalSubmissionOwner:
     ) -> ToolRetryConfig:
         async def _process_tool_invocation(
             invocation: ToolRetryInvocation,
-        ) -> ToolProcessingResult:
+        ) -> SubmissionOutcome:
             return await self._process_submission_invocation(
                 invocation=invocation,
                 target_kind=target_kind,
@@ -428,7 +454,7 @@ class ProposalSubmissionOwner:
         compile_context: "CreateCompileContext | None",
         obligation_projection: "ProposalObligationProjection | None" = None,
         metadata_tool_call: RuntimeToolCall | None = None,
-    ) -> ToolProcessingResult:
+    ) -> SubmissionOutcome:
         def record_admission_normalizer_hit(
             family: AdmissionNormalizerFamily,
         ) -> None:
@@ -457,10 +483,10 @@ class ProposalSubmissionOwner:
                 session_id=str(invocation.turn.session_id),
                 issues=[str(error)],
             )
-            return ToolProcessingResult(
+            return CorrectableFailure(
                 feedback=f"Invalid propose_flow arguments: {error}",
-                failure_kind="parse",
-                failure_codes=frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE}),
+                kind="parse",
+                codes=frozenset({PROPOSAL_PARSE_SCHEMA_FAILURE_CODE}),
             )
         if admitted_arguments is not invocation.arguments:
             invocation = replace(invocation, arguments=admitted_arguments)
@@ -502,20 +528,20 @@ class ProposalSubmissionOwner:
                 prior_spec_for_revision=prior_spec_for_revision,
                 compile_context=compile_context,
             )
-        if result.terminal_answer is not None:
+        if isinstance(result, ProposalAnswer):
             return await self._persist_invocation_answer(
                 invocation=invocation,
-                answer=result.terminal_answer,
+                answer=result.answer,
                 usage_tracker=usage_tracker,
                 planning_state=planning_state,
             )
-        if result.compiled_proposal is None:
+        if not isinstance(result, ProposalReady):
             return result
         return await self._finalize_invocation_proposal(
             invocation=invocation,
             tool_name=PROPOSE_FLOW_TOOL_NAME,
             target_kind=target_kind,
-            compiled=result.compiled_proposal,
+            compiled=result.compiled,
             request_id=request_id,
             usage_tracker=usage_tracker,
             metadata_tool_call=metadata_tool_call,
@@ -530,7 +556,7 @@ class ProposalSubmissionOwner:
         answer: str,
         usage_tracker: ProposalTurnTelemetry | None,
         planning_state: PlanningState,
-    ) -> ToolProcessingResult:
+    ) -> ProposalCompleted:
         """Commit a turn that answers the user instead of proposing a plan.
 
         Both the first attempt and every repair reach this seam, so an answer
@@ -553,7 +579,7 @@ class ProposalSubmissionOwner:
             planning_state=planning_state,
             flow=invocation.flow,
         )
-        return ToolProcessingResult(events=answered)
+        return ProposalCompleted(events=answered)
 
     async def _finalize_invocation_proposal(
         self,
@@ -567,7 +593,7 @@ class ProposalSubmissionOwner:
         metadata_tool_call: RuntimeToolCall | None,
         planning_state: PlanningState,
         compile_context: "CreateCompileContext | None",
-    ) -> ToolProcessingResult:
+    ) -> SubmissionOutcome:
         return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
             CompiledProposalFinalizationRequest(
                 turn=invocation.turn,
@@ -594,21 +620,16 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        error_message: str,
+        failure: CorrectableFailure,
         tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
-        reason: ProposalRepairReason,
-        failure_codes: frozenset[str] = frozenset(),
     ) -> ProposalSelfCorrectionRequest:
         return build_proposal_self_correction_request(
             ctx=ctx,
-            error_message=error_message,
+            failure=failure,
             tool_call=tool_call,
             retry_config=retry_config,
-            failure_codes=failure_codes,
-            initial_failure_kind=_repair_failure_kind(reason),
             self_correction_temperature=self.self_correction_temperature,
-            self_correction_bumped_temperature=self.self_correction_bumped_temperature,
             forced_proposal_temperature=self.forced_proposal_temperature,
             repair_completion=make_usage_tracked_proposal_completion(
                 litellm_client=self.litellm_client,
@@ -649,26 +670,22 @@ class ProposalSubmissionOwner:
         self,
         *,
         ctx: ProposalTurnContext,
-        error_message: str,
+        failure: CorrectableFailure,
         tool_call: RuntimeToolCall,
         retry_config: ToolRetryConfig,
-        reason: ProposalRepairReason,
-        failure_codes: frozenset[str] = frozenset(),
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         self._record_failed_proposal_attempt_repair(
             usage_tracker=ctx.usage_tracker,
             request_id=ctx.request_id,
-            reason=reason,
-            failure_codes=failure_codes,
+            reason=proposal_repair_reason_from_tool_failure(failure.kind),
+            failure_codes=failure.codes,
         )
         async for event in run_tool_self_correction(
             self._build_self_correction_request(
                 ctx=ctx,
-                error_message=error_message,
+                failure=failure,
                 tool_call=tool_call,
                 retry_config=retry_config,
-                reason=reason,
-                failure_codes=failure_codes,
             )
         ):
             yield event
@@ -762,11 +779,13 @@ class ProposalSubmissionOwner:
             )
             async for event in self._run_proposal_self_correction(
                 ctx=ctx,
-                error_message=f"Invalid propose_flow arguments: {error}",
+                failure=CorrectableFailure(
+                    feedback=f"Invalid propose_flow arguments: {error}",
+                    kind="parse",
+                    codes=frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE}),
+                ),
                 tool_call=tool_call,
                 retry_config=retry_config,
-                reason="parse",
-                failure_codes=frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE}),
             ):
                 yield event
             return
@@ -794,26 +813,19 @@ class ProposalSubmissionOwner:
                 compile_context=ctx.compile_context,
                 metadata_tool_call=tool_call,
             )
-            if not result.events:
-                proposal_repair_reason = proposal_repair_reason_from_tool_failure(
-                    result.failure_kind
-                )
-                fallback_feedback = (
-                    "Invalid propose_flow draft."
-                    if is_create
-                    else "Invalid propose_flow arguments."
-                )
+            if isinstance(result, CorrectableFailure):
                 async for event in self._run_proposal_self_correction(
                     ctx=ctx,
-                    error_message=result.feedback or fallback_feedback,
+                    failure=result,
                     tool_call=tool_call,
                     retry_config=retry_config,
-                    reason=proposal_repair_reason,
-                    failure_codes=result.failure_codes,
                 ):
                     yield event
                 return
-
+            if isinstance(result, TerminalFailure):
+                self._record_terminal_first_attempt(ctx=ctx, failure=result)
+                yield terminal_failure_event(result, request_id=ctx.request_id)
+                return
             for event in result.events:
                 yield event
         except AIBuilderBadRequestException:
@@ -850,13 +862,28 @@ class ProposalSubmissionOwner:
             )
             raise AIBuilderProviderOutcomeUnknownException() from error
 
+    def _record_terminal_first_attempt(
+        self, *, ctx: ProposalTurnContext, failure: TerminalFailure
+    ) -> None:
+        record_proposal_first_attempt(
+            ctx.usage_tracker,
+            request_id=ctx.request_id,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            success=False,
+            failure_kind=_first_attempt_failure_kind(failure.kind),
+        )
+        if ctx.usage_tracker is not None:
+            ctx.usage_tracker.record_attempt_failure(
+                failure_kind=failure.kind, failure_codes=failure.codes
+            )
+
     async def _retry_forced_proposal_after_text(
         self,
         *,
         ctx: ProposalTurnContext,
         correction_message_groups: tuple[ProposalMessageGroup, ...],
         assistant_text: str,
-    ) -> tuple[AIBuilderStreamEvent, ...] | None:
+    ) -> tuple[ForcedToolContinuation, ToolRetryConfig]:
         self._record_failed_proposal_attempt_repair(
             usage_tracker=ctx.usage_tracker,
             request_id=ctx.request_id,
@@ -890,7 +917,7 @@ class ProposalSubmissionOwner:
                 truncation_error_phase=AIBuilderErrorPhase.PROPOSAL,
             )
         )
-        return outcome.events
+        return outcome, retry_config
 
 
 def _initial_submission_invocation(
@@ -932,14 +959,12 @@ def _record_proposal_repair_invocation(
     )
 
 
-def _repair_failure_kind(
-    reason: ProposalRepairReason,
-) -> ToolProcessingFailureKind:
-    if reason == "parse":
-        return "parse"
-    if reason == "quality":
-        return "quality"
-    return "validation"
+def _first_attempt_failure_kind(
+    kind: ProposalAttemptFailureKind,
+) -> ProposalFailureKind | None:
+    if kind == "provider_error" or kind == "provider_truncation":
+        return None
+    return kind
 
 
 def _attempt_failure_kind(

@@ -1,21 +1,24 @@
+"""One proposal turn's repair loop, bounded by the turn's call budget.
+
+The initial call, every repair and one forced-tool continuation share
+`MAX_PROPOSAL_PROVIDER_CALLS`. A `CorrectableFailure` buys one more call while
+budget remains; a `TerminalFailure` ends the turn with its typed error; text
+without a tool call gets exactly one forced-tool continuation and then a
+typed terminal failure. Every repair request carries the latest failed payload
+once, never a history of failed payloads, so the prompt does not grow per
+attempt. Producers decide the variant; nothing here inspects failure codes.
+"""
+
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator, Sequence
-from dataclasses import dataclass, replace
-from hashlib import sha256
+from dataclasses import dataclass
 from typing import Any
 
-from eneo.flows.ai_builder.ai_builder_architecture_errors import (
-    AIBuilderArchitectureError,
-    build_proposal_architecture_error_event,
-    record_proposal_architecture_failure,
-)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
     provider_safe_tool_call_id,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -28,10 +31,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStatus,
     AIBuilderStreamEvent,
 )
-from eneo.flows.ai_builder.ai_builder_events import (
-    build_status_event,
-    build_text_event,
-)
+from eneo.flows.ai_builder.ai_builder_events import build_status_event
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionToolCall,
 )
@@ -43,20 +43,23 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalAttemptFailureKind,
     ProposalFailedTurnBranch,
     ProposalTerminalFailureKind,
-    ProposalTurnTelemetry,
     ToolProcessingFailureKind,
     assistant_metadata_with_usage,
     log_proposal_failed_turn,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    CorrectableFailure,
     LLMMessageParam,
     ProposalCallBudgetExhausted,
+    ProposalCompleted,
     ProposalCompletionFn,
     ProposalMessageGroup,
     ProposalTurnContext,
+    SubmissionOutcome,
+    TerminalFailure,
     ToolRetryConfig,
     ToolRetryInvocation,
-    append_protected_repair_group,
+    replace_repair_group,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
@@ -69,53 +72,15 @@ logger = get_logger(__name__)
 _MAX_PUBLIC_FAILURE_CODES = 3
 
 
-def looks_like_information_request(text: str) -> bool:
-    lowered = text.casefold()
-    if "?" not in text or len(text.strip()) >= 240:
-        return False
-    action_keywords = (
-        "proposal",
-        "förslag",
-        "plan",
-        "steg",
-        "steps",
-        "flow",
-        "bygg",
-        "skapa",
-        "lägg till",
-        "ändra",
-        "ta bort",
-        "build",
-        "create",
-        "add",
-        "remove",
-        "modify",
-        "make",
-    )
-    return not any(keyword in lowered for keyword in action_keywords)
-
-
-@dataclass(frozen=True, slots=True)
-class ForcedToolRetryOutcome:
-    events: tuple[AIBuilderStreamEvent, ...] | None = None
-    feedback: str | None = None
-    failure_kind: ToolProcessingFailureKind | None = None
-    failure_codes: frozenset[str] = frozenset()
-    failure_fingerprint: str | None = None
-
-
 @dataclass(frozen=True, slots=True)
 class ProposalSelfCorrectionRequest:
     ctx: ProposalTurnContext
-    error_message: str
+    failure: CorrectableFailure
     tool_call: RuntimeToolCall
     self_correction_temperature: float
-    self_correction_bumped_temperature: float
+    forced_proposal_temperature: float
     repair_completion: ProposalCompletionFn
     retry_config: ToolRetryConfig
-    forced_proposal_temperature: float
-    initial_failure_kind: ToolProcessingFailureKind
-    failure_codes: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,80 +95,57 @@ class ForcedToolAfterTextRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class _ProposalRepairRetryState:
-    previous_failure_fingerprint: str
-    last_failure_kind: ToolProcessingFailureKind
-    last_failure_codes: frozenset[str]
-    text_feedback_retry_available: bool = True
-    retry_count: int = 0
+class ForcedToolContinuation:
+    """What one forced-tool continuation produced, with the call it came from."""
 
-    @classmethod
-    def initial(
-        cls,
-        *,
-        failure_fingerprint: str,
-        failure_kind: ToolProcessingFailureKind,
-        failure_codes: frozenset[str],
-    ) -> "_ProposalRepairRetryState":
-        return cls(
-            previous_failure_fingerprint=failure_fingerprint,
-            last_failure_kind=failure_kind,
-            last_failure_codes=failure_codes,
-        )
+    outcome: SubmissionOutcome
+    tool_call: LLMCompletionToolCall | None = None
 
-    @property
-    def use_bumped_temperature(self) -> bool:
-        return self.retry_count >= 1
 
-    @property
-    def next_retry_count(self) -> int:
-        return self.retry_count + 1
+@dataclass(frozen=True, slots=True)
+class _RepairCallResult:
+    outcome: SubmissionOutcome
+    tool_call: LLMCompletionToolCall | None
+    assistant_text: str | None
 
-    def progressing_fingerprint(
-        self,
-        *,
-        failure_fingerprint: str | None,
-        calls_remaining: int,
-    ) -> str | None:
-        if (
-            failure_fingerprint is None
-            or failure_fingerprint == self.previous_failure_fingerprint
-            or calls_remaining == 0
-        ):
-            return None
-        return failure_fingerprint
 
-    def progressing_text_fingerprint(
-        self,
-        *,
-        failure_fingerprint: str | None,
-        calls_remaining: int,
-    ) -> str | None:
-        if not self.text_feedback_retry_available:
-            return None
-        return self.progressing_fingerprint(
-            failure_fingerprint=failure_fingerprint,
-            calls_remaining=calls_remaining,
-        )
+def missing_tool_call_failure() -> TerminalFailure:
+    """The model answered without the proposal tool after being told to use it."""
 
-    def record_progress(
-        self,
-        *,
-        failure_fingerprint: str,
-        failure_kind: ToolProcessingFailureKind,
-        failure_codes: frozenset[str],
-        consume_text_feedback: bool = False,
-    ) -> "_ProposalRepairRetryState":
-        return replace(
-            self,
-            previous_failure_fingerprint=failure_fingerprint,
-            last_failure_kind=failure_kind,
-            last_failure_codes=failure_codes,
-            text_feedback_retry_available=(
-                False if consume_text_feedback else self.text_feedback_retry_available
-            ),
-            retry_count=self.retry_count + 1,
-        )
+    return TerminalFailure(
+        kind="missing_submission_tool",
+        message=(
+            "The AI planner did not return a flow proposal. Try again, or use a "
+            "more capable model if the same error repeats."
+        ),
+        code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
+        phase=AIBuilderErrorPhase.SELF_CORRECTION,
+    )
+
+
+def provider_truncation_failure(*, phase: AIBuilderErrorPhase) -> TerminalFailure:
+    return TerminalFailure(
+        kind="provider_truncation",
+        message=(
+            "The AI planner output was cut off before it returned a complete "
+            "flow proposal. Try again with a shorter request or a model with "
+            "a larger output limit."
+        ),
+        code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
+        phase=phase,
+    )
+
+
+def terminal_failure_event(
+    failure: TerminalFailure, *, request_id: str | None
+) -> AIBuilderErrorEvent:
+    return build_ai_builder_error_event(
+        message=failure.message,
+        code=failure.code,
+        phase=failure.phase,
+        request_id=request_id,
+        details=failure.details,
+    )
 
 
 def _record_attempt_failure(
@@ -275,29 +217,21 @@ def _log_self_correction_validation_failed_turn(
     )
 
 
-def _provider_truncation_error_event(
-    *,
-    ctx: ProposalTurnContext,
-    phase: AIBuilderErrorPhase,
-) -> AIBuilderErrorEvent:
-    if ctx.usage_tracker is not None:
-        log_proposal_failed_turn(
-            usage_tracker=ctx.usage_tracker,
-            session_id=ctx.session_id,
+def _log_terminal_failure(ctx: ProposalTurnContext, failure: TerminalFailure) -> None:
+    if failure.kind == "provider_truncation":
+        _log_self_correction_failed_turn(
+            ctx=ctx,
             branch="provider_truncation",
             final_failure_kind="provider_truncation",
-            final_error_code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG.value,
+            final_error_code=failure.code,
         )
-    return build_ai_builder_error_event(
-        message=(
-            "The AI planner output was cut off before it returned a complete "
-            "flow proposal. Try again with a shorter request or a model with "
-            "a larger output limit."
-        ),
-        code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
-        phase=phase,
-        request_id=ctx.request_id,
-    )
+    elif failure.kind == "missing_submission_tool":
+        _log_self_correction_failed_turn(
+            ctx=ctx,
+            branch="self_correction_missing_tool_response",
+            final_failure_kind="missing_submission_tool",
+            final_error_code=failure.code,
+        )
 
 
 def build_self_correction_error_event(
@@ -330,7 +264,6 @@ def _self_correction_error_details(
 ) -> dict[str, JsonScalar] | None:
     if not failure_codes:
         return None
-
     sorted_codes = sorted(failure_codes)
     public_codes = sorted_codes[:_MAX_PUBLIC_FAILURE_CODES]
     detail_key = (
@@ -382,54 +315,6 @@ def _self_correction_user_message(
     )
 
 
-def _proposal_failure_fingerprint(
-    candidate: object,
-    *,
-    failure_kind: ToolProcessingFailureKind,
-    failure_codes: frozenset[str],
-) -> str:
-    if isinstance(candidate, str):
-        try:
-            parsed_candidate = json.loads(candidate)
-        except json.JSONDecodeError:
-            parsed_candidate = candidate
-        candidate_value: object = parsed_candidate
-    else:
-        candidate_value = candidate
-    fingerprint_payload = json.dumps(
-        {
-            "candidate": candidate_value,
-            "failure_codes": sorted(failure_codes),
-            "failure_kind": failure_kind,
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-    return sha256(fingerprint_payload.encode()).hexdigest()
-
-
-async def _classify_processed_repair_attempt(
-    *,
-    retry_config: ToolRetryConfig,
-    invocation: ToolRetryInvocation,
-) -> ForcedToolRetryOutcome:
-    tool_result = await retry_config.process_tool_invocation(invocation)
-    if tool_result.events:
-        return ForcedToolRetryOutcome(events=tool_result.events)
-    failure_kind = tool_result.failure_kind or "validation"
-    return ForcedToolRetryOutcome(
-        feedback=tool_result.feedback,
-        failure_kind=failure_kind,
-        failure_codes=tool_result.failure_codes,
-        failure_fingerprint=_proposal_failure_fingerprint(
-            invocation.arguments,
-            failure_kind=failure_kind,
-            failure_codes=tool_result.failure_codes,
-        ),
-    )
-
-
 def _build_tool_retry_invocation(
     *,
     ctx: ProposalTurnContext,
@@ -437,6 +322,13 @@ def _build_tool_retry_invocation(
     assistant_content: str,
     tool_call_id: str,
 ) -> ToolRetryInvocation:
+    assistant_metadata = ctx.assistant_metadata
+    if ctx.usage_tracker is not None:
+        assistant_metadata = assistant_metadata_with_usage(
+            conversation=ctx.conversation,
+            base_metadata=ctx.assistant_metadata,
+            usage_tracker=ctx.usage_tracker,
+        )
     return ToolRetryInvocation(
         turn=ctx.turn,
         conversation=ctx.conversation,
@@ -448,11 +340,7 @@ def _build_tool_retry_invocation(
         available_kb_refs=ctx.available_kb_refs,
         resource_catalog=ctx.resource_catalog,
         flow=ctx.flow,
-        assistant_metadata=assistant_metadata_with_usage(
-            conversation=ctx.conversation,
-            base_metadata=ctx.assistant_metadata,
-            usage_tracker=ctx.usage_tracker,
-        ),
+        assistant_metadata=assistant_metadata,
     )
 
 
@@ -529,158 +417,60 @@ def _text_retry_group_messages(
     )
 
 
-def _build_retry_feedback(
-    *,
-    target_kind: TargetKind,
-    feedback: str,
-    failure_codes: frozenset[str] = frozenset(),
-    retry_count: int = 1,
-) -> str:
-    suffix = (
-        "Keep valid parts and fix only the listed issues. Return one complete "
-        f"{PROPOSE_FLOW_TOOL_NAME} call."
+def repair_feedback(failure: CorrectableFailure) -> str:
+    """The whole correction brief: the producer's feedback plus one instruction."""
+
+    return (
+        f"{failure.feedback}\nKeep valid parts and fix only the listed issues. "
+        f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call."
     )
-    if target_kind == TargetKind.EDIT and "invalid_source_refs" in failure_codes:
-        suffix = (
-            "Keep source references typed through uses_previous_fields or "
-            "uses_previous_outputs. Labels must be plain text without template "
-            "expressions; do not replace typed references with a free-text question. "
-            "Keep valid parts and return one complete "
-            f"{PROPOSE_FLOW_TOOL_NAME} call."
-        )
-    elif target_kind == TargetKind.CREATE:
-        intent_rules = [
-            "Every steps[] item must be one complete semantic intent step with at least name and instructions.",
-        ]
-        if "json_output_no_contract" in failure_codes:
-            intent_rules.append(
-                "For every JSON semantic step that feeds later steps, set output_fields with named fields that match the step's extracted data."
-            )
-        if "invalid_source_refs" in failure_codes:
-            intent_rules.append(
-                "The backend owns typed source references in create mode. Correct each malformed output_fields[].name to a plain ASCII JSON key without template syntax; do not add edit-only source-reference fields."
-            )
-        suffix = (
-            " ".join(intent_rules)
-            + " Keep valid semantic parts and fix only the listed issues. "
-            f"Return one complete {PROPOSE_FLOW_TOOL_NAME} call."
-        )
-    if retry_count <= 0:
-        # retry_count=0 is the initial correction before any repair result exists.
-        preamble = "VALIDATION FAILED"
-    elif retry_count >= 2:
-        preamble = (
-            "FINAL CORRECTION ATTEMPT — earlier repairs have failed. "
-            "Before responding, identify the exact field or rule named in the failure below "
-            "and fix only that. Do not rewrite unrelated parts"
-        )
-    else:
-        preamble = "CORRECTION STILL INVALID"
-    return f"{preamble}: {feedback}\n{suffix}"
 
 
 def build_proposal_self_correction_request(
     *,
     ctx: ProposalTurnContext,
-    error_message: str,
+    failure: CorrectableFailure,
     tool_call: RuntimeToolCall,
     retry_config: ToolRetryConfig,
     self_correction_temperature: float,
-    self_correction_bumped_temperature: float,
     forced_proposal_temperature: float,
     repair_completion: ProposalCompletionFn,
-    initial_failure_kind: ToolProcessingFailureKind,
-    failure_codes: frozenset[str] = frozenset(),
 ) -> ProposalSelfCorrectionRequest:
     return ProposalSelfCorrectionRequest(
         ctx=ctx,
-        error_message=error_message,
+        failure=failure,
         tool_call=tool_call,
         self_correction_temperature=self_correction_temperature,
-        self_correction_bumped_temperature=self_correction_bumped_temperature,
+        forced_proposal_temperature=forced_proposal_temperature,
         repair_completion=repair_completion,
         retry_config=retry_config,
-        forced_proposal_temperature=forced_proposal_temperature,
-        initial_failure_kind=initial_failure_kind,
-        failure_codes=failure_codes,
     )
 
 
 async def run_tool_self_correction(
     request: ProposalSelfCorrectionRequest,
 ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
-    try:
-        async for event in _request_self_correction_events(request):
-            yield event
-    except AIBuilderArchitectureError as error:
-        for event in _architecture_error_events(
-            error=error,
-            usage_tracker=request.ctx.usage_tracker,
-            request_id=request.ctx.request_id,
-            tool_name=PROPOSE_FLOW_TOOL_NAME,
-        ):
-            yield event
+    """Spend the remaining call budget on repairs of one correctable failure."""
 
-
-def _architecture_error_events(
-    *,
-    error: AIBuilderArchitectureError,
-    usage_tracker: ProposalTurnTelemetry | None,
-    request_id: str | None,
-    tool_name: str,
-) -> tuple[AIBuilderStreamEvent, ...]:
-    record_proposal_architecture_failure(
-        usage_tracker,
-        request_id=request_id,
-        tool_name=tool_name,
-    )
-    return (
-        build_proposal_architecture_error_event(
-            error,
-            request_id=request_id,
-            tool_name=tool_name,
-        ),
-    )
-
-
-async def _request_self_correction_events(
-    request: ProposalSelfCorrectionRequest,
-) -> AsyncGenerator[AIBuilderStreamEvent, None]:
     ctx = request.ctx
-    retry_config = request.retry_config
     yield build_status_event(AIBuilderStatus.REPAIRING)
-    correction_message_groups = append_protected_repair_group(
-        ctx.message_groups,
-        _tool_retry_group_messages(
-            tool_call=request.tool_call,
-            tool_feedback=_build_retry_feedback(
-                target_kind=retry_config.target_kind,
-                feedback=request.error_message,
-                failure_codes=request.failure_codes,
-                retry_count=0,
-            ),
-        ),
-    )
-
-    retry_state = _ProposalRepairRetryState.initial(
-        failure_fingerprint=_proposal_failure_fingerprint(
-            request.tool_call.function.arguments,
-            failure_kind=request.initial_failure_kind,
-            failure_codes=request.failure_codes,
-        ),
-        failure_kind=request.initial_failure_kind,
-        failure_codes=request.failure_codes,
-    )
+    failure = request.failure
+    tool_call: RuntimeToolCall | LLMCompletionToolCall = request.tool_call
+    assistant_text: str | None = None
     while True:
+        message_groups = replace_repair_group(
+            ctx.message_groups,
+            _tool_retry_group_messages(
+                tool_call=tool_call,
+                tool_feedback=repair_feedback(failure),
+                assistant_content=assistant_text,
+            ),
+        )
         try:
             response = await request.repair_completion(
                 ctx.completion_request(
-                    message_groups=correction_message_groups,
-                    temperature=(
-                        request.self_correction_bumped_temperature
-                        if retry_state.use_bumped_temperature
-                        else request.self_correction_temperature
-                    ),
+                    message_groups=message_groups,
+                    temperature=request.self_correction_temperature,
                     counts_as_repair=True,
                 )
             )
@@ -688,12 +478,12 @@ async def _request_self_correction_events(
             _log_self_correction_validation_failed_turn(
                 ctx=ctx,
                 branch="self_correction_invalid_tool_result",
-                failure_kind=retry_state.last_failure_kind,
+                failure_kind=failure.kind,
             )
             yield build_self_correction_error_event(
-                feedback=None,
-                failure_kind=retry_state.last_failure_kind,
-                failure_codes=retry_state.last_failure_codes,
+                feedback=failure.feedback,
+                failure_kind=failure.kind,
+                failure_codes=failure.codes,
                 request_id=ctx.request_id,
             )
             return
@@ -716,281 +506,150 @@ async def _request_self_correction_events(
                 request_id=ctx.request_id,
             )
             return
-
-        if not response.choices:
-            _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-            _log_self_correction_failed_turn(
-                ctx=ctx,
-                branch="self_correction_empty_completion_choices",
-                final_failure_kind="invalid_repair_response",
-                final_error_code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
-            )
-            yield build_ai_builder_error_event(
-                message="The AI planner failed to return a valid repair. Please try again.",
-                code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
-                phase=AIBuilderErrorPhase.SELF_CORRECTION,
-                request_id=ctx.request_id,
-            )
+        result = await _repair_call_result(
+            response,
+            ctx=ctx,
+            retry_config=request.retry_config,
+            forced_proposal_temperature=request.forced_proposal_temperature,
+            repair_completion=request.repair_completion,
+            message_groups=message_groups,
+        )
+        outcome = result.outcome
+        if isinstance(outcome, ProposalCompleted):
+            for event in outcome.events:
+                yield event
             return
-
-        choice = response.choices[0]
-        if choice.finish_reason == "length":
-            _record_attempt_failure(ctx, failure_kind="provider_truncation")
-            yield _provider_truncation_error_event(
-                ctx=ctx,
-                phase=AIBuilderErrorPhase.SELF_CORRECTION,
-            )
+        if isinstance(outcome, TerminalFailure):
+            _log_terminal_failure(ctx, outcome)
+            yield terminal_failure_event(outcome, request_id=ctx.request_id)
             return
-
-        message = choice.message
-        assistant_text = _safe_assistant_text(message.content)
-
-        if _sole_proposal_tool_call(message.tool_calls) is not None:
-            retry_feedback: (
-                tuple[
-                    LLMCompletionToolCall,
-                    str,
-                    str,
-                    ToolProcessingFailureKind,
-                    frozenset[str],
-                ]
-                | None
-            ) = None
-            for correction_tool_call in message.tool_calls:
-                if correction_tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
-                    continue
-                try:
-                    arguments = parse_tool_call_arguments(
-                        correction_tool_call.function.arguments
-                    )
-                except ToolArgumentParseError as error:
-                    capture_malformed_proposal_arguments(
-                        correction_tool_call.function.arguments,
-                        session_id=str(ctx.session_id),
-                        error_message=str(error),
-                    )
-                    failure_kind: ToolProcessingFailureKind = "parse"
-                    failure_codes = frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE})
-                    failure_fingerprint = _proposal_failure_fingerprint(
-                        correction_tool_call.function.arguments,
-                        failure_kind=failure_kind,
-                        failure_codes=failure_codes,
-                    )
-                    _record_attempt_failure(
-                        ctx,
-                        failure_kind=failure_kind,
-                        failure_codes=failure_codes,
-                    )
-                    progressing_fingerprint = retry_state.progressing_fingerprint(
-                        failure_fingerprint=failure_fingerprint,
-                        calls_remaining=ctx.proposal_call_budget.calls_remaining,
-                    )
-                    if progressing_fingerprint is not None:
-                        retry_feedback = (
-                            correction_tool_call,
-                            _build_retry_feedback(
-                                target_kind=retry_config.target_kind,
-                                feedback=_invalid_tool_arguments_message(error),
-                                failure_codes=frozenset(),
-                                retry_count=retry_state.next_retry_count,
-                            ),
-                            progressing_fingerprint,
-                            failure_kind,
-                            failure_codes,
-                        )
-                        break
-                    _log_self_correction_validation_failed_turn(
-                        ctx=ctx,
-                        branch="self_correction_malformed_tool_arguments",
-                        failure_kind="parse",
-                    )
-                    yield build_self_correction_error_event(
-                        feedback=_invalid_tool_arguments_message(error),
-                        failure_kind="parse",
-                        request_id=ctx.request_id,
-                    )
-                    return
-
-                repair_outcome = await _classify_processed_repair_attempt(
-                    retry_config=retry_config,
-                    invocation=_build_tool_retry_invocation(
-                        ctx=ctx,
-                        arguments=arguments,
-                        assistant_content=assistant_text
-                        or "Här är mitt korrigerade förslag:",
-                        tool_call_id=correction_tool_call.id,
-                    ),
-                )
-                if repair_outcome.events is None:
-                    failure_kind = repair_outcome.failure_kind or "validation"
-                    failure_fingerprint = repair_outcome.failure_fingerprint
-                    _record_attempt_failure(
-                        ctx,
-                        failure_kind=failure_kind,
-                        failure_codes=repair_outcome.failure_codes,
-                    )
-                    progressing_fingerprint = retry_state.progressing_fingerprint(
-                        failure_fingerprint=failure_fingerprint,
-                        calls_remaining=ctx.proposal_call_budget.calls_remaining,
-                    )
-                    if progressing_fingerprint is not None:
-                        retry_feedback = (
-                            correction_tool_call,
-                            _build_retry_feedback(
-                                target_kind=retry_config.target_kind,
-                                feedback=repair_outcome.feedback
-                                or "Invalid tool payload.",
-                                failure_codes=repair_outcome.failure_codes,
-                                retry_count=retry_state.next_retry_count,
-                            ),
-                            progressing_fingerprint,
-                            failure_kind,
-                            repair_outcome.failure_codes,
-                        )
-                        break
-                    _log_self_correction_validation_failed_turn(
-                        ctx=ctx,
-                        branch="self_correction_invalid_tool_result",
-                        failure_kind=repair_outcome.failure_kind,
-                    )
-                    yield build_self_correction_error_event(
-                        feedback=repair_outcome.feedback,
-                        failure_kind=repair_outcome.failure_kind,
-                        failure_codes=repair_outcome.failure_codes,
-                        request_id=ctx.request_id,
-                    )
-                    return
-
-                for event in repair_outcome.events:
-                    yield event
-                return
-
-            if retry_feedback is not None:
-                (
-                    correction_tool_call,
-                    feedback,
-                    failure_fingerprint,
-                    failure_kind,
-                    failure_codes,
-                ) = retry_feedback
-                retry_state = retry_state.record_progress(
-                    failure_fingerprint=failure_fingerprint,
-                    failure_kind=failure_kind,
-                    failure_codes=failure_codes,
-                )
-                correction_message_groups = append_protected_repair_group(
-                    correction_message_groups,
-                    _tool_retry_group_messages(
-                        tool_call=correction_tool_call,
-                        assistant_content=assistant_text,
-                        tool_feedback=feedback,
-                    ),
-                )
-                continue
-        elif message.tool_calls:
-            _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-
-        if assistant_text:
-            _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-            if looks_like_information_request(assistant_text):
-                yield build_text_event(assistant_text)
-                return
-            forced_outcome = await run_forced_tool_retry_after_text(
-                ForcedToolAfterTextRequest(
-                    ctx=ctx,
-                    correction_message_groups=correction_message_groups,
-                    assistant_text=assistant_text,
-                    retry_config=retry_config,
-                    forced_proposal_temperature=request.forced_proposal_temperature,
-                    repair_completion=request.repair_completion,
-                )
-            )
-            if forced_outcome.events is not None:
-                for event in forced_outcome.events:
-                    yield event
-                return
-
-            forced_failure_kind = forced_outcome.failure_kind or "validation"
-            progressing_text_fingerprint = retry_state.progressing_text_fingerprint(
-                failure_fingerprint=forced_outcome.failure_fingerprint,
-                calls_remaining=ctx.proposal_call_budget.calls_remaining,
-            )
-            if (
-                forced_outcome.feedback is not None
-                and progressing_text_fingerprint is not None
-            ):
-                text_retry_feedback = _build_retry_feedback(
-                    target_kind=retry_config.target_kind,
-                    feedback=forced_outcome.feedback,
-                    retry_count=retry_state.next_retry_count,
-                )
-                retry_state = retry_state.record_progress(
-                    failure_fingerprint=progressing_text_fingerprint,
-                    failure_kind=forced_failure_kind,
-                    failure_codes=forced_outcome.failure_codes,
-                    consume_text_feedback=True,
-                )
-                correction_message_groups = append_protected_repair_group(
-                    correction_message_groups,
-                    _text_retry_group_messages(
-                        assistant_content=assistant_text,
-                        feedback=text_retry_feedback,
-                    ),
-                )
-                continue
-
-            logger.warning(
-                "Self-correction bailed to conversational text after forced retry",
-                extra={
-                    "failure_kind": forced_failure_kind,
-                    "failure_codes_count": len(forced_outcome.failure_codes),
-                    "assistant_text_present": True,
-                    "assistant_text_length": len(assistant_text),
-                },
-            )
+        if result.tool_call is None or ctx.proposal_call_budget.calls_remaining == 0:
             _log_self_correction_validation_failed_turn(
                 ctx=ctx,
-                branch="self_correction_text_forced_retry_failed",
-                failure_kind=forced_failure_kind,
+                branch="self_correction_invalid_tool_result",
+                failure_kind=outcome.kind,
             )
             yield build_self_correction_error_event(
-                feedback=forced_outcome.feedback,
-                failure_kind=forced_failure_kind,
-                failure_codes=forced_outcome.failure_codes,
+                feedback=outcome.feedback,
+                failure_kind=outcome.kind,
+                failure_codes=outcome.codes,
                 request_id=ctx.request_id,
             )
             return
+        failure = outcome
+        tool_call = result.tool_call
+        assistant_text = result.assistant_text
 
-        _log_self_correction_failed_turn(
+
+async def _repair_call_result(
+    response: Any,
+    *,
+    ctx: ProposalTurnContext,
+    retry_config: ToolRetryConfig,
+    forced_proposal_temperature: float,
+    repair_completion: ProposalCompletionFn,
+    message_groups: tuple[ProposalMessageGroup, ...],
+) -> _RepairCallResult:
+    """Classify one repair completion; text without a tool gets one forced call."""
+
+    if not response.choices:
+        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
+        return _RepairCallResult(missing_tool_call_failure(), None, None)
+    choice = response.choices[0]
+    if choice.finish_reason == "length":
+        _record_attempt_failure(ctx, failure_kind="provider_truncation")
+        return _RepairCallResult(
+            provider_truncation_failure(phase=AIBuilderErrorPhase.SELF_CORRECTION),
+            None,
+            None,
+        )
+    message = choice.message
+    assistant_text = _safe_assistant_text(message.content)
+    tool_call = _sole_proposal_tool_call(message.tool_calls)
+    if tool_call is not None:
+        outcome = await _process_tool_call(
+            tool_call,
             ctx=ctx,
-            branch="self_correction_missing_tool_response",
-            final_failure_kind="invalid_repair_response",
-            final_error_code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
+            retry_config=retry_config,
+            assistant_content=assistant_text or "Här är mitt korrigerade förslag:",
         )
-        yield build_ai_builder_error_event(
-            message="The AI planner failed. Please try again.",
-            code=AIBuilderErrorCode.PLANNER_INVALID_REPAIR_RESPONSE,
-            phase=AIBuilderErrorPhase.SELF_CORRECTION,
-            request_id=ctx.request_id,
+        return _RepairCallResult(outcome, tool_call, assistant_text)
+    _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
+    if not assistant_text:
+        return _RepairCallResult(missing_tool_call_failure(), None, None)
+    continuation = await _execute_forced_tool_retry(
+        ForcedToolAfterTextRequest(
+            ctx=ctx,
+            correction_message_groups=message_groups,
+            assistant_text=assistant_text,
+            retry_config=retry_config,
+            forced_proposal_temperature=forced_proposal_temperature,
+            repair_completion=repair_completion,
         )
-        return
+    )
+    if isinstance(continuation.outcome, TerminalFailure):
+        _log_self_correction_validation_failed_turn(
+            ctx=ctx,
+            branch="self_correction_text_forced_retry_failed",
+            failure_kind=None,
+        )
+    return _RepairCallResult(
+        continuation.outcome, continuation.tool_call, assistant_text
+    )
+
+
+async def _process_tool_call(
+    tool_call: LLMCompletionToolCall,
+    *,
+    ctx: ProposalTurnContext,
+    retry_config: ToolRetryConfig,
+    assistant_content: str,
+) -> SubmissionOutcome:
+    try:
+        arguments = parse_tool_call_arguments(tool_call.function.arguments)
+    except ToolArgumentParseError as error:
+        capture_malformed_proposal_arguments(
+            tool_call.function.arguments,
+            session_id=str(ctx.session_id),
+            error_message=str(error),
+        )
+        failure_codes = frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE})
+        _record_attempt_failure(ctx, failure_kind="parse", failure_codes=failure_codes)
+        return CorrectableFailure(
+            feedback=_invalid_tool_arguments_message(error),
+            kind="parse",
+            codes=failure_codes,
+        )
+    outcome = await retry_config.process_tool_invocation(
+        _build_tool_retry_invocation(
+            ctx=ctx,
+            arguments=arguments,
+            assistant_content=assistant_content,
+            tool_call_id=tool_call.id,
+        )
+    )
+    if isinstance(outcome, CorrectableFailure):
+        _record_attempt_failure(
+            ctx, failure_kind=outcome.kind, failure_codes=outcome.codes
+        )
+    elif isinstance(outcome, TerminalFailure):
+        _record_attempt_failure(
+            ctx, failure_kind=outcome.kind, failure_codes=outcome.codes
+        )
+    return outcome
 
 
 async def _execute_forced_tool_retry(
     request: ForcedToolAfterTextRequest,
-) -> ForcedToolRetryOutcome:
+) -> ForcedToolContinuation:
     ctx = request.ctx
-    if looks_like_information_request(request.assistant_text):
-        return ForcedToolRetryOutcome()
-
-    forced_message_groups = append_protected_repair_group(
+    forced_message_groups = replace_repair_group(
         request.correction_message_groups,
         _text_retry_group_messages(
             assistant_content=request.assistant_text,
             feedback=request.retry_config.forced_tool_prompt,
         ),
     )
-
     try:
         response = await request.repair_completion(
             ctx.completion_request(
@@ -1000,7 +659,7 @@ async def _execute_forced_tool_retry(
             )
         )
     except ProposalCallBudgetExhausted:
-        return ForcedToolRetryOutcome(failure_kind="validation")
+        return ForcedToolContinuation(missing_tool_call_failure())
     except AIBuilderBadRequestException:
         raise
     except Exception as error:
@@ -1011,111 +670,58 @@ async def _execute_forced_tool_retry(
             exc_info=error,
             extra={"request_id": ctx.request_id},
         )
-        return ForcedToolRetryOutcome()
-
+        return ForcedToolContinuation(missing_tool_call_failure())
     if not response.choices:
         _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-        return ForcedToolRetryOutcome()
-
+        return ForcedToolContinuation(missing_tool_call_failure())
     choice = response.choices[0]
     if choice.finish_reason == "length":
         _record_attempt_failure(ctx, failure_kind="provider_truncation")
-        return ForcedToolRetryOutcome(
-            events=(
-                _provider_truncation_error_event(
-                    ctx=ctx,
-                    phase=request.truncation_error_phase,
-                ),
-            )
+        return ForcedToolContinuation(
+            provider_truncation_failure(phase=request.truncation_error_phase)
         )
-
-    message = choice.message
-    if not message.tool_calls:
-        _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-        return ForcedToolRetryOutcome()
-
-    tool_call = _sole_proposal_tool_call(message.tool_calls)
+    tool_call = _sole_proposal_tool_call(choice.message.tool_calls)
     if tool_call is None:
         _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-        return ForcedToolRetryOutcome()
-    try:
-        arguments = parse_tool_call_arguments(tool_call.function.arguments)
-    except ToolArgumentParseError as error:
-        capture_malformed_proposal_arguments(
-            tool_call.function.arguments,
-            session_id=str(ctx.session_id),
-            error_message=str(error),
-        )
-        failure_codes = frozenset({PROPOSAL_PARSE_JSON_FAILURE_CODE})
-        _record_attempt_failure(
-            ctx,
-            failure_kind="parse",
-            failure_codes=failure_codes,
-        )
-        logger.warning("Forced proposal retry returned invalid payload: %s", error)
-        return ForcedToolRetryOutcome(
-            feedback=_invalid_tool_arguments_message(error),
-            failure_kind="parse",
-            failure_codes=failure_codes,
-            failure_fingerprint=_proposal_failure_fingerprint(
-                tool_call.function.arguments,
-                failure_kind="parse",
-                failure_codes=failure_codes,
-            ),
-        )
-
-    repair_outcome = await _classify_processed_repair_attempt(
+        return ForcedToolContinuation(missing_tool_call_failure())
+    outcome = await _process_tool_call(
+        tool_call,
+        ctx=ctx,
         retry_config=request.retry_config,
-        invocation=_build_tool_retry_invocation(
-            ctx=ctx,
-            arguments=arguments,
-            assistant_content=request.assistant_text,
-            tool_call_id=tool_call.id,
-        ),
+        assistant_content=request.assistant_text,
     )
-    if repair_outcome.events is None:
-        _record_attempt_failure(
-            ctx,
-            failure_kind=repair_outcome.failure_kind or "validation",
-            failure_codes=repair_outcome.failure_codes,
-        )
+    if isinstance(outcome, CorrectableFailure):
         logger.warning(
             "Forced tool retry returned an invalid result",
             extra={
-                "failure_kind": repair_outcome.failure_kind or "unknown",
-                "failure_codes_count": len(repair_outcome.failure_codes),
-                "feedback_present": bool(repair_outcome.feedback),
-                "feedback_length": len(repair_outcome.feedback or ""),
+                "failure_kind": outcome.kind,
+                "failure_codes_count": len(outcome.codes),
+                "feedback_length": len(outcome.feedback),
             },
         )
-
-    return repair_outcome
+    return ForcedToolContinuation(outcome, tool_call)
 
 
 async def run_forced_tool_retry_after_text(
     request: ForcedToolAfterTextRequest,
-) -> ForcedToolRetryOutcome:
-    try:
-        return await _execute_forced_tool_retry(request)
-    except AIBuilderArchitectureError as error:
-        return ForcedToolRetryOutcome(
-            events=_architecture_error_events(
-                error=error,
-                usage_tracker=request.ctx.usage_tracker,
-                request_id=request.ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-            )
-        )
+) -> ForcedToolContinuation:
+    """One forced-tool continuation after a text-only initial response."""
+
+    return await _execute_forced_tool_retry(request)
 
 
 def _sole_proposal_tool_call(
     tool_calls: Sequence[LLMCompletionToolCall] | None,
 ) -> LLMCompletionToolCall | None:
-    if tool_calls is None or len(tool_calls) != 1:
+    if not tool_calls or len(tool_calls) != 1:
         return None
     tool_call = tool_calls[0]
-    return tool_call if tool_call.function.name == PROPOSE_FLOW_TOOL_NAME else None
+    if tool_call.function.name != PROPOSE_FLOW_TOOL_NAME:
+        return None
+    return tool_call
 
 
 def _safe_assistant_text(value: Any) -> str | None:
-    return value if isinstance(value, str) and value.strip() else None
+    if isinstance(value, str) and value.strip():
+        return value
+    return None

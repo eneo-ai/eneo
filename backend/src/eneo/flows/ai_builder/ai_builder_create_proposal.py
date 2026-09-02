@@ -4,6 +4,8 @@ from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
+    model_correctable_architecture_failure_code,
+    terminal_architecture_failure,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
@@ -41,7 +43,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    ToolProcessingResult,
+    CorrectableFailure,
+    PreparationOutcome,
+    ProposalAnswer,
+    ProposalReady,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -61,33 +66,6 @@ PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT = (
     "Now call propose_flow with one complete semantic flow intent. "
     "Do not answer with prose."
 )
-_NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES = frozenset(
-    {
-        "checkpoint_transcript_producer_missing",
-        "assembly_unsupported_architecture_hints",
-        "assembly_document_report_compose_topology_missing",
-        "flow_input_schema_composite_bindings_unsupported",
-        "flow_input_schema_target_missing",
-        # Admission verified the model's attested result contract, so a
-        # compiled-postcondition breach is a server defect. No model can repair
-        # a server bug, and asking one to try would spend the turn's budget
-        # hiding it.
-        "attested_result_contract_broken",
-        # The assembly invariants assert on fields the assembler itself wrote
-        # (PlannedStep construction, underlag channels, step ordering), and the
-        # projection error rejects source refs the server synthesized. In create
-        # mode the model authors neither, so a failure here is a server defect:
-        # its feedback names nothing the model can edit, and the sealed receipts
-        # show retries burning the whole call budget without ever repairing one.
-        "assembly_plan_invariant_failed",
-        "invalid_structured_underlag_projection",
-        "section_writer_structured_source_ambiguous",
-        "terminal_output_type_mismatch",
-        "template_attachment_selection_invalid",
-        "template_attachment_unreadable",
-        "template_placeholder_unresolved",
-    }
-)
 
 
 async def process_create_intent_arguments(
@@ -103,7 +81,7 @@ async def process_create_intent_arguments(
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
     obligation_projection: ProposalObligationProjection | None = None,
-) -> ToolProcessingResult:
+) -> PreparationOutcome:
     try:
         intent = parse_create_flow_intent_arguments(
             arguments,
@@ -128,32 +106,32 @@ async def process_create_intent_arguments(
             session_id=str(turn.session_id),
             issues=list(error.issues),
         )
-        return ToolProcessingResult(
+        return CorrectableFailure(
             feedback=f"Invalid propose_flow arguments: {error}",
-            failure_kind="parse",
-            failure_codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
+            kind="parse",
+            codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
         )
     except AIBuilderArchitectureError as error:
-        failure_code = _retryable_architecture_failure_code(error)
-        if failure_code is not None:
-            logger.info(
-                "ai_builder_create_intent_architecture_rejected "
-                "session_id=%s tool_call_id=%s failure_code=%s",
-                turn.session_id,
-                tool_call_id,
-                failure_code,
-            )
-            capture_rejected_proposal_arguments(
-                arguments,
-                session_id=str(turn.session_id),
-                issues=[failure_code, error.detail],
-            )
-            return ToolProcessingResult(
-                feedback=error.detail,
-                failure_kind="validation",
-                failure_codes=frozenset({failure_code}),
-            )
-        raise
+        failure_code = model_correctable_architecture_failure_code(error)
+        if failure_code is None:
+            return terminal_architecture_failure(error)
+        logger.info(
+            "ai_builder_create_intent_architecture_rejected "
+            "session_id=%s tool_call_id=%s failure_code=%s",
+            turn.session_id,
+            tool_call_id,
+            failure_code,
+        )
+        capture_rejected_proposal_arguments(
+            arguments,
+            session_id=str(turn.session_id),
+            issues=[failure_code, error.detail],
+        )
+        return CorrectableFailure(
+            feedback=error.detail,
+            kind="validation",
+            codes=frozenset({failure_code}),
+        )
 
     return await _process_create_spec(
         turn=turn,
@@ -197,7 +175,7 @@ async def _process_create_spec(
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     field_diagnostics: list[LintWarning] | None = None,
     ui_language: str | None = None,
-) -> ToolProcessingResult:
+) -> PreparationOutcome:
     prepared = prepare_compiled_spec_for_session(
         spec=spec,
         target_kind=TargetKind.CREATE,
@@ -213,10 +191,10 @@ async def _process_create_spec(
                 "Prepared create spec validation failed: %s",
                 [error.message for error in prepared.validation.errors],
             )
-        return ToolProcessingResult(
+        return CorrectableFailure(
             feedback=prepared.failure_feedback,
-            failure_kind="validation",
-            failure_codes=frozenset(error.code for error in prepared.validation.errors)
+            kind="validation",
+            codes=frozenset(error.code for error in prepared.validation.errors)
             if prepared.validation is not None
             else frozenset(),
         )
@@ -253,14 +231,13 @@ async def _process_create_spec(
             # compiled content and no repair can reach this bar. The user gets
             # one answer naming the scope that can carry the change instead of
             # three more provider calls that fail the same way.
-            return ToolProcessingResult(
-                terminal_answer=scoped_revision_out_of_reach_message(
-                    ui_language=ui_language
-                )
+            return ProposalAnswer(
+                answer=scoped_revision_out_of_reach_message(ui_language=ui_language)
             )
-        return ToolProcessingResult(
-            feedback=format_create_intent_quality_feedback(scoped_rejection.feedback),
-            failure_kind="quality",
+        return CorrectableFailure(
+            feedback=format_create_intent_quality_feedback(scoped_rejection.feedback)
+            or scoped_rejection.feedback,
+            kind="quality",
         )
 
     # Diagnostics travel on validation: the storage boundary is the sole
@@ -269,8 +246,8 @@ async def _process_create_spec(
     # runtime field, after the provider was already paid.
     if field_diagnostics:
         validation.warnings.extend(field_diagnostics)
-    return ToolProcessingResult(
-        compiled_proposal=CompiledProposal(
+    return ProposalReady(
+        compiled=CompiledProposal(
             content=FlowBuilderProposalContent(
                 spec=spec,
                 assumptions=intent.assumptions,
@@ -285,14 +262,3 @@ async def _process_create_spec(
             aggregation_intent=aggregation_intent,
         ),
     )
-
-
-def _retryable_architecture_failure_code(
-    error: AIBuilderArchitectureError,
-) -> str | None:
-    value = error.log_context.get("failure_code")
-    if not isinstance(value, str) or not value:
-        return None
-    if value in _NON_MODEL_REPAIRABLE_ARCHITECTURE_FAILURE_CODES:
-        return None
-    return value

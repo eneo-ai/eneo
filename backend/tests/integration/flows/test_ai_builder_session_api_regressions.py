@@ -6886,7 +6886,6 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
             repo=repo,
             litellm_client=litellm_client,
             self_correction_temperature=0.2,
-            self_correction_bumped_temperature=0.5,
             forced_proposal_temperature=0.3,
             quality_retry_warning_codes=frozenset(),
         )

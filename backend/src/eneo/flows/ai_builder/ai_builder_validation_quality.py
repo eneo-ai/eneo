@@ -53,8 +53,9 @@ def lint_json_output_without_contract(
                 step_ref=step.plan_step_ref,
                 code="json_output_no_contract",
                 message=(
-                    "Step has output_type 'json' but no output_contract. "
-                    "Adding one enables structured variable access for downstream steps."
+                    "Step has output_type 'json' but no output_contract. Set "
+                    "output_fields with named fields that match the step's "
+                    "extracted data so later steps can read them."
                 ),
                 severity=LintSeverity.INFO,
             )

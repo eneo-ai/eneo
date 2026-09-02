@@ -100,11 +100,11 @@ def _tool_processing_failure_kinds_from_source() -> set[str]:
                 function_name = func.attr
             else:
                 function_name = None
-            if function_name != "ToolProcessingResult":
+            if function_name not in {"CorrectableFailure", "TerminalFailure"}:
                 continue
             for keyword in node.keywords:
                 if (
-                    keyword.arg == "failure_kind"
+                    keyword.arg == "kind"
                     and isinstance(keyword.value, ast.Constant)
                     and isinstance(keyword.value.value, str)
                 ):

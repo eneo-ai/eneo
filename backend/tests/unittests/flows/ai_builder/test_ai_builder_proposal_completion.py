@@ -55,10 +55,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCallBudget,
     ProposalMessageGroup,
-    append_protected_repair_group,
     fit_proposal_request_budget,
     flatten_proposal_message_groups,
     forced_tool_choice,
+    replace_repair_group,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest as ProposalCompletionRequestContract,
@@ -1482,14 +1482,14 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
         protected=True,
     )
     initial_groups = (system_group, current_turn_group)
-    first_repair_groups = append_protected_repair_group(
+    first_repair_groups = replace_repair_group(
         initial_groups,
         (
             {"role": "assistant", "content": "first invalid repair"},
             {"role": "user", "content": "first feedback"},
         ),
     )
-    second_repair_groups = append_protected_repair_group(
+    second_repair_groups = replace_repair_group(
         first_repair_groups,
         (
             {"role": "assistant", "content": "oversized second invalid repair"},

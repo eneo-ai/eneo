@@ -33,7 +33,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    ToolProcessingResult,
+    CorrectableFailure,
+    ProposalCompleted,
+    SubmissionOutcome,
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -90,7 +92,7 @@ class CompiledProposalFinalizer:
     async def finalize_compiled_proposal(
         self,
         request: CompiledProposalFinalizationRequest,
-    ) -> ToolProcessingResult:
+    ) -> SubmissionOutcome:
         metadata_built = False
         assistant_metadata = request.assistant_metadata
 
@@ -145,14 +147,13 @@ class CompiledProposalFinalizer:
             flow=request.flow,
             planning_state=request.planning_state,
         )
-        return ToolProcessingResult(
+        return ProposalCompleted(
             events=(
                 build_plan_event(
                     plan_id=stored_plan.plan.id,
                     proposal=stored_plan.proposal.content,
                 ),
-            ),
-            new_planning_state_version=stored_plan.new_planning_state_version,
+            )
         )
 
     def _create_quality_result(
@@ -160,7 +161,7 @@ class CompiledProposalFinalizer:
         *,
         request: CompiledProposalFinalizationRequest,
         compiled: CompiledProposal,
-    ) -> ToolProcessingResult | None:
+    ) -> CorrectableFailure | None:
         if not compiled.validation.valid:
             logger.info(
                 "Compiled create spec validation failed: %s",
@@ -191,12 +192,11 @@ class CompiledProposalFinalizer:
                 )
                 if feedback
             )
-            return ToolProcessingResult(
-                feedback=format_create_intent_quality_feedback(combined_feedback),
-                failure_kind="validation",
-                failure_codes=frozenset(
-                    error.code for error in compiled.validation.errors
-                ),
+            return CorrectableFailure(
+                feedback=format_create_intent_quality_feedback(combined_feedback)
+                or combined_feedback,
+                kind="validation",
+                codes=frozenset(error.code for error in compiled.validation.errors),
             )
 
         quality_feedback = format_quality_feedback(
@@ -248,10 +248,10 @@ class CompiledProposalFinalizer:
             session_id=str(request.session_id),
             failure_codes=sorted(quality_failure_codes),
         )
-        return ToolProcessingResult(
+        return CorrectableFailure(
             feedback=combined_quality_feedback,
-            failure_kind="quality",
-            failure_codes=quality_failure_codes,
+            kind="quality",
+            codes=quality_failure_codes,
         )
 
     def _edit_quality_result(
@@ -259,7 +259,7 @@ class CompiledProposalFinalizer:
         *,
         request: CompiledProposalFinalizationRequest,
         compiled: CompiledProposal,
-    ) -> ToolProcessingResult | None:
+    ) -> CorrectableFailure | None:
         quality_feedback = format_quality_feedback(
             compiled.validation,
             quality_retry_warning_codes=self._quality_retry_warning_codes,
@@ -297,8 +297,8 @@ class CompiledProposalFinalizer:
             ",".join(warning.code for warning in compiled.validation.warnings) or "-",
             combined_quality_feedback[:1200],
         )
-        return ToolProcessingResult(
+        return CorrectableFailure(
             feedback=combined_quality_feedback,
-            failure_kind="quality",
-            failure_codes=quality_failure_codes,
+            kind="quality",
+            codes=quality_failure_codes,
         )

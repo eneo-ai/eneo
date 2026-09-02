@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -22,6 +22,8 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderErrorPhase,
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_request_budget_exhausted_error,
 )
@@ -33,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    ProposalAttemptFailureKind,
     ProposalTurnTelemetry,
     ToolProcessingFailureKind,
 )
@@ -203,16 +206,19 @@ def group_proposal_messages(
     return tuple(groups)
 
 
-def append_protected_repair_group(
+def replace_repair_group(
     groups: tuple[ProposalMessageGroup, ...],
     messages: tuple[LLMMessageParam, ...],
 ) -> tuple[ProposalMessageGroup, ...]:
-    optional_prior_repairs = tuple(
-        replace(group, protected=False) if group.kind == "repair" else group
-        for group in groups
-    )
+    """Keep exactly one repair group: the latest failed payload and its feedback.
+
+    Earlier failed payloads never return to the prompt, so a repair request
+    does not grow per attempt (2,674 to 6,751 prompt tokens over three repairs
+    was observed when they accumulated).
+    """
+
     return (
-        *optional_prior_repairs,
+        *(group for group in groups if group.kind != "repair"),
         ProposalMessageGroup(messages=messages, kind="repair", protected=True),
     )
 
@@ -317,16 +323,65 @@ class CompiledProposal:
 
 
 @dataclass(frozen=True)
-class ToolProcessingResult:
-    events: tuple[AIBuilderStreamEvent, ...] = ()
-    compiled_proposal: CompiledProposal | None = None
-    # A completed answer with no plan. The submission owner persists it like an
-    # accepted proposal, so it is never a turn the conversation forgets.
-    terminal_answer: str | None = None
-    feedback: str | None = None
-    failure_kind: ToolProcessingFailureKind | None = None
-    failure_codes: frozenset[str] = frozenset()
-    new_planning_state_version: int | None = None
+class ProposalReady:
+    """A compiled candidate that finalization still has to persist."""
+
+    compiled: CompiledProposal
+
+
+@dataclass(frozen=True)
+class ProposalAnswer:
+    """A completed answer with no plan.
+
+    The submission owner persists it like an accepted proposal, so it is never
+    a turn the conversation forgets.
+    """
+
+    answer: str
+
+
+@dataclass(frozen=True)
+class CorrectableFailure:
+    """The model can fix this with one more call; the feedback is the whole brief.
+
+    Producers write feedback that stands on its own: the failure, the exact
+    path, and the correction. No consumer adds recipes or inspects `codes` to
+    decide whether to retry.
+    """
+
+    feedback: str
+    kind: ToolProcessingFailureKind
+    codes: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class TerminalFailure:
+    """No further model call can help; the turn ends with this typed error.
+
+    A server defect, a precondition the request cannot meet, or something only
+    the user can change. The producer states the public error's facts; the loop
+    owner renders the event with the request identity.
+    """
+
+    kind: ProposalAttemptFailureKind
+    message: str
+    code: AIBuilderErrorCode
+    phase: AIBuilderErrorPhase
+    details: Mapping[str, object] | None = None
+    codes: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class ProposalCompleted:
+    """The turn is durably committed; these are the events the client sees."""
+
+    events: tuple[AIBuilderStreamEvent, ...]
+
+
+PreparationOutcome: TypeAlias = (
+    ProposalReady | ProposalAnswer | CorrectableFailure | TerminalFailure
+)
+SubmissionOutcome: TypeAlias = ProposalCompleted | CorrectableFailure | TerminalFailure
 
 
 @dataclass(frozen=True)
@@ -349,7 +404,7 @@ class ToolRetryConfig:
     target_kind: TargetKind
     forced_tool_prompt: str
     process_tool_invocation: Callable[
-        [ToolRetryInvocation], Awaitable[ToolProcessingResult]
+        [ToolRetryInvocation], Awaitable[SubmissionOutcome]
     ]
 
 

@@ -36,6 +36,8 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
+    CorrectableFailure,
+    ProposalCompleted,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -267,7 +269,7 @@ async def test_finalization_passes_the_compile_context_to_quality() -> None:
             _make_request(compile_context=compile_context)
         )
 
-    assert result.events
+    assert isinstance(result, ProposalCompleted)
     quality_context = build_quality.call_args.kwargs["compile_context"]
     assert quality_context is compile_context
     assert quality_context.aggregation_intent == "compare"
@@ -347,9 +349,9 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
             )
         )
 
-    assert result.events == ()
-    assert result.failure_kind == "quality"
-    assert result.failure_codes == frozenset({"json_output_no_contract"})
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "quality"
+    assert result.codes == frozenset({"json_output_no_contract"})
     assert tracker.proposal_first_attempt_success is None
     store_plan.assert_not_awaited()
 
@@ -379,8 +381,8 @@ async def test_finalize_compiled_proposal_preserves_citation_validation_family()
             )
         )
 
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset({"citation_mode_unsupported"})
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"citation_mode_unsupported"})
     store_plan.assert_not_awaited()
 
 
@@ -439,9 +441,9 @@ async def test_unindexed_array_reference_cannot_reach_plan_persistence() -> None
             _make_request(compiled=compiled)
         )
 
-    assert result.events == ()
-    assert result.failure_kind == "validation"
-    assert result.failure_codes == frozenset({"unknown_output_contract_field"})
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "validation"
+    assert result.codes == frozenset({"unknown_output_contract_field"})
     store_plan.assert_not_awaited()
 
 
@@ -476,13 +478,9 @@ async def test_finalize_compiled_proposal_preserves_contextual_quality_issue_cod
             )
         )
 
-    assert result.events == ()
-    assert result.failure_kind == "quality"
-    assert (
-        "final_text_step_must_reference_relevant_structured_outputs"
-        in result.failure_codes
-    )
-    assert result.feedback is not None
+    assert isinstance(result, CorrectableFailure)
+    assert result.kind == "quality"
+    assert "final_text_step_must_reference_relevant_structured_outputs" in result.codes
     assert "Quality issues" in result.feedback
     store_plan.assert_not_awaited()
 
@@ -579,7 +577,7 @@ async def test_finalize_compiler_lowered_report_needs_no_planner_repair(
             )
         )
 
-    assert result.feedback is None
+    assert isinstance(result, ProposalCompleted)
     assert [event.event for event in result.events] == ["plan"]
     store_plan.assert_awaited_once()
 
@@ -645,7 +643,7 @@ async def test_finalize_single_composer_text_report_needs_no_planner_repair() ->
             _make_request(compiled=compiled, compile_context=compile_context)
         )
 
-    assert result.feedback is None
+    assert isinstance(result, ProposalCompleted)
     assert [event.event for event in result.events] == ["plan"]
     store_plan.assert_awaited_once()
 
@@ -732,7 +730,7 @@ async def test_edit_of_single_composer_report_needs_no_planner_repair() -> None:
             )
         )
 
-    assert result.feedback is None
+    assert isinstance(result, ProposalCompleted)
     store_plan.assert_awaited_once()
 
 
@@ -850,7 +848,7 @@ async def test_finalize_compiled_proposal_keeps_compiled_edit_without_descriptio
             )
         )
 
-    assert result.events
+    assert isinstance(result, ProposalCompleted)
     captured = captured_compiled[0]
     assert captured.content.spec.flow_description == original_spec.flow_description
     captured_edit = captured.content.edit

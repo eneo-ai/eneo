@@ -6,6 +6,8 @@ from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
+    model_correctable_architecture_failure_code,
+    terminal_architecture_failure,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
@@ -19,6 +21,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderErrorPhase,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
     validate_scoped_edit_proposal,
@@ -37,7 +43,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
-    ToolProcessingResult,
+    CorrectableFailure,
+    PreparationOutcome,
+    ProposalReady,
+    TerminalFailure,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -75,11 +84,14 @@ async def process_edit_arguments(
     plan_edit_context: ResolvedAIBuilderEditContext | None = None,
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
-) -> ToolProcessingResult:
+) -> PreparationOutcome:
     if flow is None:
-        return ToolProcessingResult(
-            feedback="propose_flow requires an existing flow context.",
-            failure_kind="validation",
+        # A precondition of the edit session, not something the model wrote.
+        return TerminalFailure(
+            kind="validation",
+            message="propose_flow requires an existing flow context.",
+            code=AIBuilderErrorCode.EDIT_SESSION_FLOW_REQUIRED,
+            phase=AIBuilderErrorPhase.PROPOSAL,
         )
 
     model_arguments: dict[str, Any] = dict(arguments)
@@ -108,20 +120,17 @@ async def process_edit_arguments(
             session_id=str(turn.session_id),
             issues=[str(exc)],
         )
-        return ToolProcessingResult(
+        return CorrectableFailure(
             feedback=f"Invalid propose_flow arguments: {exc}",
-            failure_kind="parse",
-            failure_codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
+            kind="parse",
+            codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
         )
     scoped_proposal_feedback = validate_scoped_edit_proposal(
         context=plan_edit_context,
         proposal=proposal,
     )
     if scoped_proposal_feedback is not None:
-        return ToolProcessingResult(
-            feedback=scoped_proposal_feedback,
-            failure_kind="quality",
-        )
+        return CorrectableFailure(feedback=scoped_proposal_feedback, kind="quality")
     ui_language = compile_context.ui_language if compile_context is not None else None
     try:
         edit_result = compile_edit_proposal(
@@ -151,20 +160,17 @@ async def process_edit_arguments(
             ),
         )
     except BadRequestException as exc:
-        return ToolProcessingResult(
-            feedback=_format_edit_compilation_request_error(exc),
-            failure_kind="validation",
+        return CorrectableFailure(
+            feedback=_format_edit_compilation_request_error(exc), kind="validation"
         )
     except AIBuilderArchitectureError as exc:
-        failure_code = exc.log_context.get("failure_code")
-        return ToolProcessingResult(
+        failure_code = model_correctable_architecture_failure_code(exc)
+        if failure_code is None:
+            return terminal_architecture_failure(exc)
+        return CorrectableFailure(
             feedback=exc.detail,
-            failure_kind="validation",
-            failure_codes=(
-                frozenset({failure_code})
-                if isinstance(failure_code, str)
-                else frozenset()
-            ),
+            kind="validation",
+            codes=frozenset({failure_code}),
         )
     except AssistantSnapshotResourceUnavailableError as exc:
         logger.warning(
@@ -172,13 +178,16 @@ async def process_edit_arguments(
             "an unavailable %s resource",
             exc.kind,
         )
-        return ToolProcessingResult(
-            feedback=(
+        # Only the user can re-select the resource; another model call cannot.
+        return TerminalFailure(
+            kind="validation",
+            message=(
                 "A resource used by the existing flow is no longer available. "
-                "Re-select the affected model or knowledge base "
-                "and try again."
+                "Re-select the affected model or knowledge base and try again."
             ),
-            failure_kind="validation",
+            code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE,
+            phase=AIBuilderErrorPhase.PROPOSAL,
+            details={"resource_kind": str(exc.kind)},
         )
 
     compiled_spec = edit_result.spec
@@ -196,22 +205,19 @@ async def process_edit_arguments(
         ui_language=ui_language,
     )
     if prepared.failure_feedback is not None:
-        return ToolProcessingResult(
-            feedback=prepared.failure_feedback,
-            failure_kind="validation",
-        )
+        return CorrectableFailure(feedback=prepared.failure_feedback, kind="validation")
     assert prepared.spec is not None
     assert prepared.validation is not None
     compiled_spec = prepared.spec
     validation = prepared.validation
     if validation.errors:
         error_messages = [err.message for err in validation.errors]
-        return ToolProcessingResult(
+        return CorrectableFailure(
             feedback=(
                 "Compiled edit spec validation failed: " + "; ".join(error_messages)
             ),
-            failure_kind="validation",
-            failure_codes=frozenset(error.code for error in validation.errors),
+            kind="validation",
+            codes=frozenset(error.code for error in validation.errors),
         )
 
     topology_policy = evaluate_edit_topology_policy(
@@ -223,10 +229,10 @@ async def process_edit_arguments(
         compile_context=compile_context,
     )
     if topology_policy.rejection_feedback is not None:
-        return ToolProcessingResult(
+        return CorrectableFailure(
             feedback=topology_policy.rejection_feedback,
-            failure_kind="validation",
-            failure_codes=topology_policy.failure_codes,
+            kind="validation",
+            codes=topology_policy.failure_codes,
         )
     edit_approval = edit_result.approval.model_copy(
         update={
@@ -267,13 +273,10 @@ async def process_edit_arguments(
             turn.session_id,
             target_step_ref,
         )
-        return ToolProcessingResult(
-            feedback=scoped_rejection.feedback,
-            failure_kind="quality",
-        )
+        return CorrectableFailure(feedback=scoped_rejection.feedback, kind="quality")
 
-    return ToolProcessingResult(
-        compiled_proposal=CompiledProposal(
+    return ProposalReady(
+        compiled=CompiledProposal(
             content=FlowBuilderProposalContent(
                 spec=compiled_spec,
                 assumptions=proposal.assumptions,

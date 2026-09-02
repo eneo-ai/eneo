@@ -4,9 +4,7 @@ import pytest
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
-)
-from eneo.flows.ai_builder.ai_builder_create_proposal import (
-    _retryable_architecture_failure_code,
+    model_correctable_architecture_failure_code,
 )
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     apply_template_attachment_contract,
@@ -152,7 +150,7 @@ def test_contract_refuses_template_without_successful_byte_inspection() -> None:
     assert exc_info.value.log_context["failure_code"] == (
         "template_attachment_unreadable"
     )
-    assert _retryable_architecture_failure_code(exc_info.value) is None
+    assert model_correctable_architecture_failure_code(exc_info.value) is None
 
 
 def test_contract_requires_audio_and_accepts_runtime_injected_transcription_bindings() -> (

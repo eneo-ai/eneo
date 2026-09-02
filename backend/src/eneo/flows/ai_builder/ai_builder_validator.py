@@ -167,7 +167,12 @@ def _validate_source_refs_unique(
             result.add_error(
                 step_ref=step.plan_step_ref,
                 code="invalid_source_refs",
-                message=str(exc),
+                message=(
+                    f"{exc} Keep source references typed through "
+                    "uses_previous_fields or uses_previous_outputs; labels are "
+                    "plain text without template expressions, and a typed "
+                    "reference is never replaced by a free-text question."
+                ),
             )
             continue
         for expression in duplicate_expressions:
