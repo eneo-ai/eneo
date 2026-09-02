@@ -22,6 +22,7 @@
   import { summaryTerm } from "./aiBuilderSummaryText";
   import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
   import type { StructuredInputFieldAnswer } from "./structuredQuestionAnswer";
+  import { reopenQuestionRequest } from "./structuredQuestionAnswer";
   import type { AIBuilderSavedFlowStepScope, ChatMessage, RequirementsSummary } from "./protocol";
   import {
     delegatedQuestionAnswer,
@@ -409,6 +410,20 @@
     service.closeConversation();
   }
 
+  /** An assumption has no answer to edit: the server is asked to reopen its
+   *  question, pinned to the disclosure the user is looking at. */
+  function handleReopenAssumption(questionId: string) {
+    const version = latestSummary?.requirements_version;
+    if (!version) return;
+    editingQuestionId = null;
+    void service.sendMessage(
+      "",
+      reopenQuestionRequest(questionId, version),
+      undefined,
+      activeEditContext
+    );
+  }
+
   function handleRequirementsConfirm() {
     void service.confirmRequirements(activeEditContext);
   }
@@ -684,6 +699,7 @@
             );
           }}
           oneditanswer={handleEditAnswer}
+          onreopenassumption={handleReopenAssumption}
         />
       {:else if screen === "build" && generationFailedWithoutPlan}
         <!-- A failed generation keeps its one existing failure/retry surface. -->

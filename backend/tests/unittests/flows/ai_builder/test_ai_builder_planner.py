@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationNamedResultEvidenceMetadata,
+    requirements_summary_to_metadata,
     slot_classification_metadata_from_attempt,
 )
 from eneo.flows.ai_builder.ai_builder_create_compiler import (
@@ -1453,6 +1454,60 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
     assert isinstance(prepared.server_decision, AskCanonicalQuestion)
     assert not hasattr(prepared, "llm_messages")
     compute_budget.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prepare_reopen_command_dispatches_canonical_question_without_classifying() -> (
+    None
+):
+    planner = _make_planner()
+    state = _document_architecture_state()
+    state.resolved_slots["document_material_scope"] = ResolvedSlot(
+        name="document_material_scope",
+        value="flexible_document_case",
+        source="policy_default",
+        confidence="medium",
+        evidence=["policy_default:document_material_scope=flexible_document_case"],
+    )
+    disclosure = build_requirements_disclosure(state, ui_language="en")
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content=disclosure.summary,
+            metadata=requirements_summary_to_metadata(disclosure),
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "reopen_question": {
+                    "question_id": "document_material_scope",
+                    "requirements_version": disclosure.requirements_version,
+                }
+            },
+        ),
+    ]
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
+        "build_discovery_runtime_result",
+        new_callable=AsyncMock,
+        return_value=_runtime_result(_discovery_analysis(), state),
+    ) as build_runtime:
+        prepared = await _prepare_planner_request_for_test(
+            planner,
+            conversation=conversation,
+            completion_model_route=_route(),
+            persisted_planning_state=state,
+        )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert prepared.server_decision == AskCanonicalQuestion(
+        slot_name="document_material_scope",
+        allow_focused_classification=False,
+    )
+    assert build_runtime.await_args.kwargs["allow_classification"] is False
+    planner.litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio

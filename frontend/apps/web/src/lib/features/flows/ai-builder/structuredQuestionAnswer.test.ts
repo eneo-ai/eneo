@@ -6,10 +6,19 @@ import {
   buildStructuredQuestionSelection,
   getStructuredQuestionOptionKey,
   toggleStructuredQuestionOption,
-  type StructuredQuestion
+  type StructuredQuestion,
+  reopenQuestionRequest
 } from "./structuredQuestionAnswer";
 
 describe("structured question answer helpers", () => {
+  it("builds a reopen request pinned to the disclosure the user saw", () => {
+    expect(reopenQuestionRequest("document_material_scope", "a".repeat(64))).toEqual({
+      kind: "reopen_question",
+      question_id: "document_material_scope",
+      requirements_version: "a".repeat(64)
+    });
+  });
+
   const schemaDirectionQuestion: StructuredQuestion = {
     question_id: "schema_direction",
     question: "How should the schemas be used?",

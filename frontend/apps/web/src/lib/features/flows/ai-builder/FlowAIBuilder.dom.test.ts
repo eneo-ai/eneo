@@ -748,6 +748,108 @@ describe("FlowAIBuilder discovery screens", () => {
     });
   });
 
+  it("shows an assumption as a row and reopens its question on the server", async () => {
+    const assumed = {
+      ...SUMMARY,
+      assumption_rows: [
+        {
+          question_id: "document_material_scope",
+          slot_name: "document_material_scope",
+          value: "flexible_document_case",
+          topic: "Dokumentomfång",
+          label: "Ett eller flera dokument per körning"
+        }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Här är min tolkning.", { requirements_summary: assumed })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    // The row lives under the collapsed assumptions heading; opening it shows
+    // the topic and Eneo's default with one action to change it.
+    await fireEvent.click(await screen.findByRole("button", { name: /Antaganden \(1\)/ }));
+    expect(await screen.findByText("Ett eller flera dokument per körning")).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_assumption_change_aria({
+          topic: "Dokumentomfång",
+          label: "Ett eller flera dokument per körning"
+        })
+      })
+    );
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      message: "",
+      question_answer: {
+        kind: "reopen_question",
+        question_id: "document_material_scope",
+        requirements_version: REQUIREMENTS_VERSION
+      }
+    });
+  });
+
+  it("shows a confirmed card's assumptions as rows without a reopen action", async () => {
+    const assumed = {
+      ...SUMMARY,
+      assumption_rows: [
+        {
+          question_id: "document_material_scope",
+          slot_name: "document_material_scope",
+          value: "flexible_document_case",
+          topic: "Dokumentomfång",
+          label: "Ett eller flera dokument per körning"
+        }
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          status: "awaiting_approval",
+          latest_plan_id: PLAN_ID,
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Här är min tolkning.", { requirements_summary: assumed }),
+            userMessage("u2", "", {
+              requirements_confirmation: {
+                requirements_confirmed: true,
+                requirements_version: REQUIREMENTS_VERSION
+              }
+            })
+          ]
+        })
+      ]
+    });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    // Revisiting the confirmed card from the review phase still lists what Eneo
+    // assumed, but like every other row it is a record now: changes go through
+    // a change request.
+    await fireEvent.click(
+      await screen.findByRole("button", { name: new RegExp(m.ai_builder_rail_understanding()) })
+    );
+    await fireEvent.click(await screen.findByRole("button", { name: /Antaganden \(1\)/ }));
+    expect(await screen.findByText("Ett eller flera dokument per körning")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: m.ai_builder_assumption_change_aria({
+          topic: "Dokumentomfång",
+          label: "Ett eller flera dokument per körning"
+        })
+      })
+    ).toBeNull();
+  });
+
   it("preselects Eneo's recommendation and can hand the question back", async () => {
     const recommended = question("output_format", "Hur ska resultatet levereras?", [
       { id: "pdf", label: "Som PDF" },

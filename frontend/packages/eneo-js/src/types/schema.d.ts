@@ -12586,6 +12586,29 @@ export interface components {
      * @enum {string}
      */
     AssistantType: "assistant" | "default-assistant";
+    /**
+     * AssumptionRowPayload
+     * @description One requirement Eneo settled without the user answering it.
+     *
+     *     `topic` is the slot's summary label and `label` the option's own label,
+     *     so the card can say "Topic: Label" without knowing the catalog;
+     *     `question_id` names the canonical question a reopen sends the user back
+     *     to, and is the slot. A row carries no provenance on purpose: accepting
+     *     the card must re-render the same record, so how the value was read is
+     *     not part of what the user signs.
+     */
+    AssumptionRowPayload: {
+      /** Label */
+      label: string;
+      /** Question Id */
+      question_id: string;
+      /** Slot Name */
+      slot_name: string;
+      /** Topic */
+      topic: string;
+      /** Value */
+      value: string;
+    };
     /** AttachmentLimits */
     AttachmentLimits: {
       /** Ai Builder Max Count */
@@ -27622,6 +27645,18 @@ export interface components {
       /** Default Effort */
       default_effort: string | null;
     };
+    /** ReopenQuestionRequest */
+    ReopenQuestionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "reopen_question";
+      /** Question Id */
+      question_id: string;
+      /** Requirements Version */
+      requirements_version: string;
+    };
     /**
      * ReportClientErrorRequest
      * @description One client-observed Builder failure, in the UI's own error identity.
@@ -27681,6 +27716,8 @@ export interface components {
      * @description A disclosure the user can confirm, named by the hash of its content.
      */
     RequirementsSummaryPayload: {
+      /** Assumption Rows */
+      assumption_rows?: components["schemas"]["AssumptionRowPayload"][];
       /** Assumptions */
       assumptions?: string[];
       /** Input Description */
@@ -28547,6 +28584,7 @@ export interface components {
             | components["schemas"]["StructuredQuestionAnswerRequest"]
             | components["schemas"]["DelegatedQuestionAnswerRequest"]
             | components["schemas"]["RequirementsConfirmationMetadata"]
+            | components["schemas"]["ReopenQuestionRequest"]
             | components["schemas"]["NamedContentFieldsEditRequest"]
           )
         | null;

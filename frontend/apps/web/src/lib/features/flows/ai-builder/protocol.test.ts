@@ -207,6 +207,26 @@ describe("AI Builder stream protocol", () => {
     ]);
   });
 
+  it("preserves reopenable assumption rows on the requirements summary", () => {
+    const rawEvent = validEvents.find((event) => event.event === "requirements_summary");
+    if (!rawEvent) throw new Error("Requirements summary fixture is missing.");
+    const row = {
+      question_id: "document_material_scope",
+      slot_name: "document_material_scope",
+      value: "flexible_document_case",
+      topic: "Dokumentomfång",
+      label: "Ett eller flera dokument per körning"
+    };
+    const data = JSON.parse((rawEvent as { data: string }).data) as Record<string, unknown>;
+    const withRows = { ...rawEvent, data: JSON.stringify({ ...data, assumption_rows: [row] }) };
+
+    const parsed = parseAIBuilderStreamEvent(withRows);
+
+    expect(parsed.event).toBe("requirements_summary");
+    if (parsed.event !== "requirements_summary") return;
+    expect(parsed.data.assumption_rows).toEqual([row]);
+  });
+
   it("preserves the unsupported PDF template error as a typed Builder error", () => {
     const rawEvent: AIBuilderStreamEvent = {
       event: "error",

@@ -193,6 +193,32 @@ class ResolvedRequirementPayload(BaseModel):
     selected_value: str
 
 
+class AssumptionRowPayload(BaseModel):
+    """One requirement Eneo settled without the user answering it.
+
+    `topic` is the slot's summary label and `label` the option's own label,
+    so the card can say "Topic: Label" without knowing the catalog;
+    `question_id` names the canonical question a reopen sends the user back
+    to, and is the slot. A row carries no provenance on purpose: accepting
+    the card must re-render the same record, so how the value was read is
+    not part of what the user signs.
+    """
+
+    question_id: str
+    slot_name: str
+    value: str
+    topic: str
+    label: str
+
+    @model_validator(mode="after")
+    def _row_is_its_question(self) -> "AssumptionRowPayload":
+        if self.question_id != self.slot_name:
+            raise ValueError("an assumption row reopens the question of its own slot")
+        if self.question_id not in KNOWN_REQUIREMENT_SLOT_NAMES:
+            raise ValueError("assumption row must name a known requirement slot")
+        return self
+
+
 def _named_content_fields_are_empty(
     value: list["NamedContentFieldPayload"],
 ) -> bool:
@@ -259,6 +285,10 @@ class RequirementsDisclosureContent(BaseModel):
     input_description: str = Field(min_length=1)
     output_description: str = Field(min_length=1)
     assumptions: list[str] = Field(default_factory=list)
+    assumption_rows: list[AssumptionRowPayload] = Field(
+        default_factory=list[AssumptionRowPayload],
+        max_length=len(KNOWN_REQUIREMENT_SLOT_NAMES),
+    )
     manual_setup_notes: list[str] = Field(default_factory=list)
     resolved_requirements: list[ResolvedRequirementPayload] = Field(
         default_factory=_empty_resolved_requirements,
@@ -303,6 +333,16 @@ class RequirementsDisclosureContent(BaseModel):
             seen.add(requirement.requirement_id)
             unique.append(requirement)
         return unique
+
+    @field_validator("assumption_rows", mode="after")
+    @classmethod
+    def _one_assumption_per_slot(
+        cls,
+        rows: list[AssumptionRowPayload],
+    ) -> list[AssumptionRowPayload]:
+        if len({row.slot_name for row in rows}) != len(rows):
+            raise ValueError("assumption rows require one row per slot")
+        return rows
 
 
 def _runtime_input_fields_are_empty(
@@ -504,6 +544,7 @@ __all__ = [
     "AIBuilderTextEventData",
     "AIBuilderTextEvent",
     "AIBuilderUsageEvent",
+    "AssumptionRowPayload",
     "KeyDecisionPayload",
     "NamedContentFieldPayload",
     "ResolvedRequirementPayload",

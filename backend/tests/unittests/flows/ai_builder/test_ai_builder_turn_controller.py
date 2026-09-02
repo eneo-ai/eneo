@@ -78,6 +78,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.question_catalog import (
     RUNTIME_METADATA_FIELD_PURPOSES,
+    render_summary_label,
 )
 
 
@@ -794,9 +795,19 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
         "Skapa DOCX (ett resultat per underlag)",
     }
     assert {
-        "Metadata vid körning: Inga extra fält",
-        "Syfte med bearbetningen: Strukturera materialet",
-    } <= set(payload.assumptions)
+        (row.question_id, row.topic, row.label) for row in payload.assumption_rows
+    } >= {("post_processing_goal", "Syfte med bearbetningen", "Strukturera materialet")}
+    assert {
+        (row.question_id, row.value, row.topic, row.label)
+        for row in payload.assumption_rows
+    } >= {
+        (
+            "runtime_metadata_fields",
+            "no_extra_metadata",
+            render_summary_label("runtime_metadata_fields", "sv"),
+            "Inga extra fält",
+        )
+    }
     assert (
         "Planen ska följa kraven och underlaget i konversationen."
         not in payload.assumptions
@@ -1678,9 +1689,9 @@ def test_server_confirmation_uses_model_evidence_level_for_summary_bucket() -> N
     assert "Slutresultat: Strukturerat textresultat" not in (
         decision.payload.assumptions
     )
-    assert "Syfte med bearbetningen: Sammanfatta eller ge överblick" in (
-        decision.payload.assumptions
-    )
+    assert ("post_processing_goal", "Sammanfatta eller ge överblick") in {
+        (row.question_id, row.label) for row in decision.payload.assumption_rows
+    }
 
 
 def test_server_confirmation_includes_discovery_assumptions() -> None:

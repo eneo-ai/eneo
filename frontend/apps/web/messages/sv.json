@@ -4311,6 +4311,8 @@
   "ai_builder_approve_create": "Godkänn och skapa",
   "ai_builder_approving": "Godkänner...",
   "ai_builder_assumptions": "Antaganden",
+  "ai_builder_assumption_change": "Ändra",
+  "ai_builder_assumption_change_aria": "{topic}: {label}. Ändra antagandet.",
   "ai_builder_attachment_drop_hint": "PDF, DOCX, JSON, text och andra referensfiler som stöds",
   "ai_builder_attachment_only_message": "Använd det bifogade referensmaterialet för att hjälpa till att bygga flödet.",
   "ai_builder_badge_modified": "ÄNDRAD",

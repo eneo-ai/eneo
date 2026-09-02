@@ -41,11 +41,13 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
+    build_question_event,
     build_requirements_summary_event,
     build_status_event,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_question_state import (
+    pending_user_requirement_question,
     question_ordinal_in_session,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
@@ -191,7 +193,19 @@ async def _dispatch_question(
 ) -> ServerDecisionDispatchResult:
     question_id = decision.slot_name
     runtime = request.focused_classification_runtime
-    if runtime is not None:
+    pending = pending_user_requirement_question(request.conversation)
+    if (
+        not decision.allow_focused_classification
+        and pending is not None
+        and canonical_question_id(pending.question_id)
+        == canonical_question_id(question_id)
+    ):
+        return ServerDecisionDispatchResult(
+            action_kind="ask_question",
+            events=(build_question_event(pending),),
+            new_planning_state_version=request.turn.base_planning_state_version,
+        )
+    if runtime is not None and decision.allow_focused_classification:
         try:
             focused = await classify_question_slot_once(
                 slot_name=question_id,
