@@ -521,6 +521,124 @@ async def test_resolve_step_input_compose_source_refs_render_item_template_witho
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("warnings", "expected_section"),
+    [
+        (
+            [],
+            "## FULLTEXT01.pdf\n\nSammanfattning: Klar text.",
+        ),
+        (
+            ["pdf_text_likely_reversed"],
+            "## FULLTEXT01.pdf\n\n"
+            'Extraktionsvarningar: ["pdf_text_likely_reversed"]\n\n'
+            "Sammanfattning: Klar text.",
+        ),
+    ],
+)
+async def test_resolve_step_input_item_template_drops_lines_whose_values_are_empty(
+    user, warnings, expected_section
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="source records",
+            structured={
+                "documents": [
+                    {
+                        "source_label": "FULLTEXT01.pdf",
+                        "source_file_id": str(uuid4()),
+                        "extraction_warnings": warnings,
+                        "sammanfattning": "Klar text.",
+                        "diarienummer": None,
+                    }
+                ]
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "documents",
+                    "item_template": (
+                        "## {source_label}\n\n"
+                        "Extraktionsvarningar: {extraction_warnings}\n\n"
+                        "Sammanfattning: {sammanfattning}\n\n"
+                        "Diarienummer: {diarienummer}"
+                    ),
+                }
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == expected_section
+    assert "[]" not in resolved.text
+    assert "Diarienummer" not in resolved.text
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_item_template_keeps_json_lists_and_whitespace(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="records",
+            structured={"records": [{"title": "Rad", "tags": ["A, B", "C"]}]},
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "records",
+                    "item_template": "## {title}\n\n\n\nTaggar: {tags}",
+                }
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == '## Rad\n\n\n\nTaggar: ["A, B", "C"]'
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_compose_source_refs_serialize_typed_values(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)

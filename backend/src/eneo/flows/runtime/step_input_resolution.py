@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
@@ -1032,14 +1032,50 @@ def _render_source_ref_value(
                 code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
             )
         item = cast(dict[str, Any], item_value)
-        rendered = item_template
-        for field_name in field_names:
-            rendered = rendered.replace(
-                "{" + field_name + "}",
-                _source_ref_value_to_text(item.get(field_name)),
-            )
-        rendered_items.append(rendered.strip())
+        rendered_items.append(_render_item_template(item_template, item, field_names))
     return "\n\n".join(item for item in rendered_items if item)
+
+
+def _render_item_template(
+    item_template: str,
+    item: Mapping[str, Any],
+    field_names: Sequence[str],
+) -> str:
+    """Substitute one record into the template, line by line.
+
+    A line exists to show its placeholders. When every placeholder on it
+    renders empty (a missing value, an empty string or an empty list), the
+    line is dropped together with the blank line that separated it, so a
+    label never dangles; lines without placeholders and every other line of
+    the template are kept exactly as written.
+    """
+
+    rendered_lines: list[str] = []
+    drop_next_blank = False
+    for line in item_template.split("\n"):
+        if drop_next_blank and not line.strip():
+            drop_next_blank = False
+            continue
+        drop_next_blank = False
+        names_on_line = [name for name in field_names if "{" + name + "}" in line]
+        rendered_line = line
+        any_present = False
+        for field_name in names_on_line:
+            value = item.get(field_name)
+            rendered_value = (
+                ""
+                if value is None or value == "" or value == []
+                else _source_ref_value_to_text(value)
+            )
+            any_present = any_present or bool(rendered_value)
+            rendered_line = rendered_line.replace(
+                "{" + field_name + "}", rendered_value
+            )
+        if names_on_line and not any_present:
+            drop_next_blank = True
+            continue
+        rendered_lines.append(rendered_line)
+    return "\n".join(rendered_lines).strip()
 
 
 def _source_ref_value_to_text(value: Any) -> str:
