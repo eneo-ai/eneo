@@ -2382,6 +2382,7 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         "properties": {
             "documents": {
                 "type": "array",
+                "description": "One record per uploaded source.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -2397,6 +2398,9 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
         "required": ["documents"],
         "additionalProperties": False,
     }
+    published_contract_json = json.dumps(
+        output_contract, ensure_ascii=False, separators=(",", ":")
+    )
     step = _runtime_step(
         input_type="document",
         output_type="json",
@@ -2441,6 +2445,29 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     attempt_input = activation["attempt_input"]
     assert attempt_input.execution_inputs is not None
     assert [item.question for item in attempt_input.execution_inputs] == questions
+    schema_marker = "Follow this JSON Schema exactly:\n"
+    provider_contracts = [
+        json.loads(item.effective_prompt.rsplit(schema_marker, maxsplit=1)[-1])
+        for item in attempt_input.execution_inputs
+    ]
+    assert provider_contracts[0] == provider_contracts[1]
+    for provider_contract in provider_contracts:
+        documents_contract = provider_contract["properties"]["documents"]
+        assert documents_contract["minItems"] == 1
+        assert documents_contract["maxItems"] == 1
+        assert documents_contract["description"] == (
+            "Exactly one document object for the current uploaded source. Runtime "
+            "combines one object from each uploaded source."
+        )
+        assert set(documents_contract["items"]["properties"]) == {"title"}
+    assert (
+        json.dumps(output_contract, ensure_ascii=False, separators=(",", ":"))
+        == published_contract_json
+    )
+    assert (
+        json.dumps(step.output_contract, ensure_ascii=False, separators=(",", ":"))
+        == published_contract_json
+    )
     assert attempt_input.completion_configuration is not None
     assert (
         attempt_input.model_dump_json(exclude_none=True).count(
@@ -2479,6 +2506,86 @@ async def test_per_source_reader_executes_one_model_call_per_file_and_sets_ident
     assert len(output.runtime_input_metadata["per_source_calls"]) == 2
 
 
+@pytest.mark.asyncio
+async def test_per_source_reader_applies_aggregate_minimum_after_three_calls(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=4
+    )
+    file_ids = [uuid4(), uuid4(), uuid4()]
+    files_by_id = {
+        file_id: _runtime_file(
+            file_id=file_id,
+            text=f"Source {index} text",
+            name=f"source-{index}.pdf",
+        )
+        for index, file_id in enumerate(file_ids, start=1)
+    }
+
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=file_ids)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                completion=json.dumps({"documents": [{"title": f"Source {index}"}]}),
+                total_token_count=3,
+            )
+            for index in range(1, 4)
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    output_contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "description": "One record per uploaded source.",
+                "minItems": 3,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_label": {"type": "string"},
+                        "source_file_id": {"type": "string"},
+                        "title": {"type": "string"},
+                    },
+                    "required": ["source_label", "source_file_id", "title"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract=output_contract,
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 3,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert assistant.get_response.await_count == 3
+    assert output_contract["properties"]["documents"]["minItems"] == 3
+    assert [item["title"] for item in output.structured_output["documents"]] == [
+        "Source 1",
+        "Source 2",
+        "Source 3",
+    ]
+
+
 @pytest.mark.parametrize("document_count", [0, 2])
 @pytest.mark.asyncio
 async def test_per_source_reader_rejects_not_exactly_one_document_per_source(
@@ -2486,15 +2593,31 @@ async def test_per_source_reader_rejects_not_exactly_one_document_per_source(
     document_count,
 ):
     executor, _, flow_run_repo, _ = _build_executor(user)
-    file_id = uuid4()
-    executor.file_service.get_files_by_ids.return_value = [
-        _runtime_file(
-            file_id=file_id,
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    files_by_id = {
+        first_file_id: _runtime_file(
+            file_id=first_file_id,
             text="Contract source text",
             name="contract-source.pdf",
-        )
-    ]
-    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+        ),
+        second_file_id: _runtime_file(
+            file_id=second_file_id,
+            text="Unreached source text",
+            name="unreached-source.pdf",
+        ),
+    }
+
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
     documents = [{"title": f"Record {index}"} for index in range(document_count)]
     assistant = _mock_assistant_for_execute_step(
         response_text=json.dumps({"documents": documents})
@@ -2524,7 +2647,7 @@ async def test_per_source_reader_rejects_not_exactly_one_document_per_source(
                 "enabled": True,
                 "input_format": "document",
                 "execution_mode": "per_source",
-                "max_files": 1,
+                "max_files": 2,
             }
         },
     )
@@ -2538,6 +2661,7 @@ async def test_per_source_reader_rejects_not_exactly_one_document_per_source(
         "Step 1: per-source reader source 1 (contract-source.pdf) returned "
         f"{document_count} documents; expected exactly one."
     )
+    assistant.get_response.assert_awaited_once()
 
 
 @pytest.mark.asyncio

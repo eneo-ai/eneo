@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, cast
 from uuid import UUID
@@ -56,6 +57,10 @@ logger = logging.getLogger(__name__)
 PER_SOURCE_READER_CONCURRENCY = 1
 PER_SOURCE_METADATA_PREVIEW_CHARS = 2000
 PER_SOURCE_SOURCE_LABEL_MAX_CHARS = 120
+PER_SOURCE_PROVIDER_DOCUMENTS_DESCRIPTION = (
+    "Exactly one document object for the current uploaded source. Runtime combines "
+    "one object from each uploaded source."
+)
 
 
 @dataclass(frozen=True)
@@ -114,18 +119,18 @@ async def execute_per_source_reader(
             f"Step {step.step_order}: per-source reader received no source files.",
             code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
         )
-    per_call_step = replace(
-        step,
-        output_contract=without_runtime_source_identity_json_fields(
-            step.output_contract
-        ),
+    per_call_output_contract = _source_local_output_contract(step.output_contract)
+    per_call_step = replace(step, output_contract=per_call_output_contract)
+    provider_prompt_step = replace(
+        per_call_step,
+        output_contract=_provider_prompt_output_contract(per_call_output_contract),
     )
     estimates: list[int] = []
     native_json_fallback_possible = False
     prepared_sources: list[tuple[UUID, PreparedAssistantStep]] = []
     for file_id in file_ids:
         preview_step = await preview_assistant_step(
-            step=per_call_step,
+            step=provider_prompt_step,
             run=run,
             state=state,
             version_metadata=version_metadata,
@@ -135,7 +140,7 @@ async def execute_per_source_reader(
         prepared_sources.append((file_id, preview_step))
         estimates.append(
             await preview_step_execution_context(
-                step=per_call_step,
+                step=provider_prompt_step,
                 state=state,
                 prepared=preview_step.prepared,
                 deps=preview_step.deps,
@@ -144,7 +149,7 @@ async def execute_per_source_reader(
         if len(estimates) == 1:
             # The response-format plan is loop-invariant for this step.
             native_json_fallback_possible = resolve_json_response_format_plan(
-                step=per_call_step,
+                step=provider_prompt_step,
                 assistant=preview_step.prepared.assistant,
                 state=state,
             ).fallback_call_possible
@@ -380,6 +385,42 @@ def _documents_item_schema(
     if typed_item_schema.get("type") != "object":
         return None
     return dict(typed_item_schema)
+
+
+def _source_local_output_contract(
+    published_contract: dict[str, Any] | None,
+) -> dict[str, Any]:
+    projected = without_runtime_source_identity_json_fields(published_contract)
+    assert projected is not None
+    properties = projected.get("properties")
+    assert isinstance(properties, Mapping)
+    typed_properties = dict(cast(Mapping[str, Any], properties))
+    documents = typed_properties["documents"]
+    assert isinstance(documents, Mapping)
+    typed_documents = dict(cast(Mapping[str, Any], documents))
+    typed_documents.pop("minItems", None)
+    typed_documents.pop("maxItems", None)
+    typed_properties["documents"] = typed_documents
+    projected["properties"] = typed_properties
+    return projected
+
+
+def _provider_prompt_output_contract(
+    source_local_contract: dict[str, Any],
+) -> dict[str, Any]:
+    projected = deepcopy(source_local_contract)
+    properties = projected.get("properties")
+    assert isinstance(properties, Mapping)
+    typed_properties = dict(cast(Mapping[str, Any], properties))
+    documents = typed_properties["documents"]
+    assert isinstance(documents, Mapping)
+    typed_documents = dict(cast(Mapping[str, Any], documents))
+    typed_documents["description"] = PER_SOURCE_PROVIDER_DOCUMENTS_DESCRIPTION
+    typed_documents["minItems"] = 1
+    typed_documents["maxItems"] = 1
+    typed_properties["documents"] = typed_documents
+    projected["properties"] = typed_properties
+    return projected
 
 
 def _extract_per_source_document(
