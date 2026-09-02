@@ -45,7 +45,10 @@
   </Page.Header>
 
   <Page.Main>
-    <div class="flex flex-1 flex-col overflow-hidden">
+    <!-- The Builder surface runs edge to edge: it takes back the page's left
+         padding, and only the vertical overflow is clipped so nothing cuts the
+         panel short on the left. -->
+    <div class="-ml-6 flex flex-1 flex-col overflow-y-clip">
       <FlowAIBuilder
         targetKind="create"
         statusInPageHeader

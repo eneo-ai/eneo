@@ -218,7 +218,7 @@
         (message, index) => index > latestSummaryMessageIndex && message.role === "user"
       )
   );
-  // "Uppdaterad — bekräfta igen": an earlier version of the requirements was
+  // "Uppdaterad. Bekräfta igen.": an earlier version of the requirements was
   // confirmed and this newer version replaced it, so the old confirmation
   // cannot carry over.
   const summaryIsStale = $derived.by(() => {
@@ -581,7 +581,7 @@
 {:else}
   <div
     bind:this={builderRootEl}
-    class="bg-secondary @container/builder flex min-h-0 w-full flex-1 flex-col sm:-ml-6 sm:w-[calc(100%+1.5rem)]"
+    class="bg-secondary @container/builder flex min-h-0 w-full flex-1 flex-col"
   >
     <p class="sr-only" role="status" aria-live="polite" data-builder-announcer>
       {screenAnnouncementText}
