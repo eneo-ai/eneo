@@ -190,6 +190,7 @@ def compile_create_intent_to_spec(
     if isinstance(assembly_spec, CreateAssemblyRejection):
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
+            repair_disposition=assembly_spec.repair_disposition,
             detail=assembly_spec.feedback,
             log_context={
                 "failure_code": assembly_spec.failure_code,
@@ -255,6 +256,7 @@ def compile_create_intent_to_spec(
                 if transcript_producer_missing:
                     raise AIBuilderArchitectureError(
                         public_code="architecture_materialization_failed",
+                        repair_disposition="user_action",
                         detail=(
                             "A transcript review checkpoint was requested, but the "
                             "committed architecture compiles no transcription step "
@@ -268,6 +270,7 @@ def compile_create_intent_to_spec(
                     )
                 raise AIBuilderArchitectureError(
                     public_code="architecture_materialization_failed",
+                    repair_disposition="model_correctable",
                     detail=(
                         "The compiled Flow cannot place every requested review checkpoint "
                         "on its typed output producer. Add the missing semantic result "
@@ -282,6 +285,7 @@ def compile_create_intent_to_spec(
         if template_preparation_stage_limit_exceeded(compiled_spec):
             raise AIBuilderArchitectureError(
                 public_code="architecture_materialization_failed",
+                repair_disposition="model_correctable",
                 detail=(
                     "DOCX template-fill flows support at most "
                     f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation "
@@ -398,6 +402,7 @@ def _spec_satisfying_attested_contract(
     )
     raise AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
+        repair_disposition="server_defect",
         detail=(f"The compiled Flow broke the attested result contract: {detail}."),
         log_context={
             "failure_code": "attested_result_contract_broken",
@@ -465,6 +470,7 @@ def _apply_flow_input_schema(
     if target_index is None:
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
+            repair_disposition="server_defect",
             detail="The resolved JSON input schema has no Flow-input JSON consumer.",
             log_context={"failure_code": "flow_input_schema_target_missing"},
         )
@@ -474,6 +480,7 @@ def _apply_flow_input_schema(
     if target_step.input_bindings not in (None, raw_json_binding):
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
+            repair_disposition="user_action",
             detail=(
                 "The resolved JSON input schema cannot be combined with "
                 "additional Flow-input bindings."
@@ -558,6 +565,7 @@ def _raise_flow_input_schema_form_conflict(
 ) -> None:
     raise AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
+        repair_disposition="user_action",
         detail=(
             "The resolved JSON input schema conflicts with a confirmed "
             "runtime form field."
@@ -650,6 +658,7 @@ def _reject_or_diagnose_field_drops(
     if confirmed_names:
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
+            repair_disposition="user_action",
             detail="Confirmed runtime fields are incompatible with the selected input contract.",
             log_context={
                 "failure_code": "confirmed_form_field_incompatible",

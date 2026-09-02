@@ -75,9 +75,10 @@ ProposalFailedTurnBranch = Literal[
     "empty_completion_choices",
     "provider_truncation",
     "forced_tool_retry_missing_submission",
+    "forced_tool_retry_completion_error",
+    "forced_tool_retry_invalid_tool_result",
     "self_correction_completion_error",
     "self_correction_invalid_tool_result",
-    "self_correction_text_forced_retry_failed",
     "self_correction_missing_tool_response",
 ]
 ProposalTerminalFailureKind = Literal[
@@ -85,6 +86,7 @@ ProposalTerminalFailureKind = Literal[
     "internal_error",
     "missing_submission_tool",
     "provider_truncation",
+    "architecture",
     "invalid_repair_response",
     "invalid_repair_payload",
     "invalid_repair_plan",

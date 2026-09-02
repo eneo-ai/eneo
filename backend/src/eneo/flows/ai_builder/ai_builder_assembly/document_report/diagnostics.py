@@ -50,6 +50,7 @@ def _raise_document_report_compose_topology_missing(
 ) -> NoReturn:
     raise AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
+        repair_disposition="server_defect",
         detail=DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK,
         log_context={
             "failure_code": "assembly_document_report_compose_topology_missing",

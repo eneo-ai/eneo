@@ -106,6 +106,7 @@ def _enforce_terminal_output_alignment(
     if target_kind == TargetKind.CREATE:
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
+            repair_disposition="server_defect",
             detail=(
                 "The create compiler produced a terminal output type that does "
                 "not match the committed architecture."

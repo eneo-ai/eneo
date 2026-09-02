@@ -616,6 +616,56 @@ def test_unplaced_ambiguity_lists_only_the_first_ten_candidate_paths() -> None:
     assert "events_00[].timestamp" in message
     assert "events_10[].timestamp" not in message
     assert "showing 10 of 12" in message
+    assert message.endswith(
+        "declare it exactly once at one of those paths and remove every other "
+        "occurrence"
+    )
+
+
+def test_nested_and_top_level_copies_of_an_unplaced_name_get_the_declare_once_instruction() -> (
+    None
+):
+    """Captured rejection shape: `ansvarig` under `beslut[]` and at the top level.
+
+    Repair prompts that only listed the candidates left the model moving the
+    field between the two places across the whole call budget.
+    """
+
+    state = _state()
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="ansvarig",
+            placement=UnplacedNamedResultPlacement(),
+            confidence="high",
+            evidence=["quote:user_message:user-1:ansvarig"],
+        )
+    ]
+    projection = named_result_projection(state)
+    assert projection is not None
+    terminal_fields = (
+        AttestedResultField(
+            name="beslut",
+            field_type="array",
+            children=(
+                AttestedResultField(name="text", field_type="string"),
+                AttestedResultField(name="ansvarig", field_type="string"),
+                AttestedResultField(name="deadline", field_type="string"),
+            ),
+        ),
+        AttestedResultField(name="ansvarig", field_type="string"),
+    )
+
+    violations = attested_result_contract_violations(
+        terminal_fields,
+        projection=projection,
+    )
+
+    assert [violation.kind for violation in violations] == ["ambiguous_placement"]
+    assert set(violations[0].candidate_paths) == {"ansvarig", "beslut[].ansvarig"}
+    message = attested_violation_message(violations[0])
+    assert "`ansvarig`" in message
+    assert "`beslut[].ansvarig`" in message
+    assert message.endswith("remove every other occurrence")
 
 
 def test_nested_canonicalization_moves_complete_attested_groups_in_place() -> None:
@@ -1664,12 +1714,7 @@ def test_the_compiled_postcondition_fails_closed_on_a_dropped_name() -> None:
         "attested_result_contract_broken"
     )
     assert "missing_location:documents" in failure.value.log_context["reason"]
-
-    from eneo.flows.ai_builder.ai_builder_architecture_errors import (
-        model_correctable_architecture_failure_code,
-    )
-
-    assert model_correctable_architecture_failure_code(failure.value) is None
+    assert failure.value.repair_disposition == "server_defect"
 
 
 def test_an_earlier_step_may_declare_an_attested_name() -> None:

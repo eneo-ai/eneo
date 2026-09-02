@@ -1674,6 +1674,7 @@ def enforce_architecture_critic_invariants(
     issue_ids = ",".join(issue.id for issue in architecture_issues)
     raise AIBuilderArchitectureError(
         public_code="architecture_critic_invariant_failed",
+        repair_disposition="server_defect",
         detail=f"Architecture critic invariants failed: {issue_ids}",
         log_context={
             "critic_issue_ids": issue_ids,

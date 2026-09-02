@@ -20,9 +20,6 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
-from eneo.flows.ai_builder.ai_builder_architecture_errors import (
-    AIBuilderArchitectureError,
-)
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
@@ -59,7 +56,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizer,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
-    ForcedToolContinuation,
     build_self_correction_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_submission import (
@@ -649,49 +645,6 @@ async def test_create_propose_flow_retryable_assembly_rejection_invokes_repair()
 
 
 @pytest.mark.asyncio
-async def test_edit_propose_flow_architecture_error_is_not_translated_to_create_error() -> (
-    None
-):
-    submission = _make_submission()
-    tool_call = _make_tool_call(
-        PROPOSE_FLOW_TOOL_NAME,
-        {"plan_rationale": "Edit", "steps": []},
-        tool_call_id="call-edit-architecture",
-    )
-    ctx = _make_context(
-        flow=SimpleNamespace(id=uuid4(), steps=[]),
-        request_id="req-edit-architecture",
-    )
-    process_edit = AsyncMock(
-        side_effect=AIBuilderArchitectureError(
-            public_code="architecture_materialization_failed",
-            detail="edit should not translate this",
-            log_context={"surface": "edit"},
-        )
-    )
-
-    with (
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission."
-            "run_tool_self_correction"
-        ) as repair,
-        patch(
-            "eneo.flows.ai_builder.ai_builder_proposal_submission.process_edit_arguments",
-            new=process_edit,
-        ),
-        pytest.raises(AIBuilderArchitectureError),
-    ):
-        dispatched = submission.dispatch_submission_tool_call(
-            ctx=ctx, tool_call=tool_call
-        )
-        assert dispatched is not None
-        _ = [event async for event in dispatched]
-
-    repair.assert_not_called()
-    process_edit.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_create_propose_flow_re_raises_planning_state_payload_too_large() -> None:
     submission = _make_submission()
     tool_call = _make_tool_call(
@@ -1034,7 +987,6 @@ async def test_create_propose_flow_retry_does_not_preserve_failed_attempt_step_c
     retry_config = repair.call_args.args[0].retry_config
     assert isinstance(retry_config, ToolRetryConfig)
     assert set(ToolRetryConfig.__dataclass_fields__) == {
-        "target_kind",
         "forced_tool_prompt",
         "process_tool_invocation",
     }
@@ -1319,7 +1271,7 @@ async def test_edit_propose_flow_parse_failure_records_proposal_repair_reason() 
     )
 
     async def _repair_events(_request):
-        yield build_self_correction_error_event(feedback=None, failure_kind=None)
+        yield build_self_correction_error_event(failure_kind=None)
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_proposal_submission.run_tool_self_correction",
@@ -1389,9 +1341,7 @@ async def test_proposal_retry_config_carries_edit_invocation_context() -> None:
     )
 
     assert isinstance(config, ToolRetryConfig)
-    assert config.target_kind == TargetKind.EDIT
     assert set(ToolRetryConfig.__dataclass_fields__) == {
-        "target_kind",
         "forced_tool_prompt",
         "process_tool_invocation",
     }
@@ -1570,11 +1520,7 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
-        new=AsyncMock(
-            return_value=ForcedToolContinuation(
-                ProposalCompleted(events=(_plan_stream_event(),))
-            )
-        ),
+        new=AsyncMock(return_value=ProposalCompleted(events=(_plan_stream_event(),))),
     ) as retry_forced_tool:
         (
             continuation,
@@ -1587,12 +1533,11 @@ async def test__retry_forced_proposal_after_text_uses_create_target_for_create_m
             assistant_text="Här är planen.",
         )
 
-    assert isinstance(continuation.outcome, ProposalCompleted)
-    assert [event.event for event in continuation.outcome.events] == ["plan"]
+    assert isinstance(continuation, ProposalCompleted)
+    assert [event.event for event in continuation.events] == ["plan"]
     request = retry_forced_tool.await_args.args[0]
-    assert request.retry_config.target_kind == TargetKind.CREATE
     assert request.ctx is ctx
-    assert request.truncation_error_phase == AIBuilderErrorPhase.PROPOSAL
+    assert request.error_phase == AIBuilderErrorPhase.PROPOSAL
     assert "Now call propose_flow" in request.retry_config.forced_tool_prompt
 
 
@@ -1620,11 +1565,7 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_proposal_submission.run_forced_tool_retry_after_text",
-        new=AsyncMock(
-            return_value=ForcedToolContinuation(
-                ProposalCompleted(events=(_plan_stream_event(),))
-            )
-        ),
+        new=AsyncMock(return_value=ProposalCompleted(events=(_plan_stream_event(),))),
     ) as retry_forced_tool:
         (
             continuation,
@@ -1637,10 +1578,9 @@ async def test__retry_forced_proposal_after_text_uses_edit_target_for_edit_mode(
             assistant_text="Här är planen.",
         )
 
-    assert isinstance(continuation.outcome, ProposalCompleted)
-    assert [event.event for event in continuation.outcome.events] == ["plan"]
+    assert isinstance(continuation, ProposalCompleted)
+    assert [event.event for event in continuation.events] == ["plan"]
     request = retry_forced_tool.await_args.args[0]
-    assert request.retry_config.target_kind == TargetKind.EDIT
     assert request.ctx is ctx
     assert "propose_flow" in request.retry_config.forced_tool_prompt
 
@@ -1682,4 +1622,3 @@ async def test_edit_propose_flow_parse_failure_triggers_self_correction() -> Non
     assert events == [{"event": "status", "data": '{"status":"repairing"}'}]
     request = repair.call_args.args[0]
     assert "OrderedEditProposal" in request.failure.feedback
-    assert request.retry_config.target_kind == TargetKind.EDIT

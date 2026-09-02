@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CorrectableFailure,
     ProposalReady,
+    TerminalFailure,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
@@ -1654,8 +1655,8 @@ async def test_confirmed_edit_shadow_field_is_rejected_explicitly() -> None:
         },
     )
 
-    assert isinstance(result, CorrectableFailure)
-    assert result.kind == "validation"
+    assert isinstance(result, TerminalFailure)
+    assert result.kind == "architecture"
     assert result.codes == frozenset({"confirmed_form_field_incompatible"})
 
 

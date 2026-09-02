@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
-    build_proposal_architecture_error_event,
-    record_proposal_architecture_failure,
+    architecture_failure_outcome,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RuntimeToolCall,
@@ -63,8 +62,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolAfterTextRequest,
     ForcedToolContinuation,
+    ForcedToolRepair,
     ProposalSelfCorrectionRequest,
     build_proposal_self_correction_request,
+    log_terminal_failure,
     run_forced_tool_retry_after_text,
     run_tool_self_correction,
     terminal_failure_event,
@@ -355,48 +356,21 @@ class ProposalSubmissionOwner:
             correction_message_groups=message_groups,
             assistant_text=message.content or "",
         )
-        forced = continuation.outcome
-        if isinstance(forced, ProposalCompleted):
-            for event in forced.events:
+        if isinstance(continuation, ProposalCompleted):
+            for event in continuation.events:
                 yield event
             return
-        if (
-            isinstance(forced, CorrectableFailure)
-            and continuation.tool_call is not None
-        ):
+        if isinstance(continuation, ForcedToolRepair):
             async for event in self._run_proposal_self_correction(
                 ctx=ctx,
-                failure=forced,
+                failure=continuation.failure,
                 tool_call=continuation.tool_call,
                 retry_config=retry_config,
             ):
                 yield event
             return
-        terminal = (
-            forced
-            if isinstance(forced, TerminalFailure)
-            else TerminalFailure(
-                kind="missing_submission_tool",
-                message=(
-                    "The AI planner did not return a valid flow proposal. "
-                    "Please try again or use a more capable model."
-                ),
-                code=AIBuilderErrorCode.PROPOSAL_TOOL_MISSING,
-                phase=AIBuilderErrorPhase.PROPOSAL,
-            )
-        )
-        log_proposal_failed_turn(
-            usage_tracker=usage_tracker,
-            session_id=turn.session_id,
-            branch="forced_tool_retry_missing_submission",
-            final_failure_kind=(
-                "provider_truncation"
-                if terminal.kind == "provider_truncation"
-                else "missing_submission_tool"
-            ),
-            final_error_code=terminal.code.value,
-        )
-        yield terminal_failure_event(terminal, request_id=request_id)
+        log_terminal_failure(ctx, continuation, forced=True)
+        yield terminal_failure_event(continuation, request_id=request_id)
 
     def _proposal_retry_config(
         self,
@@ -430,7 +404,6 @@ class ProposalSubmissionOwner:
             )
 
         return ToolRetryConfig(
-            target_kind=target_kind,
             forced_tool_prompt=(
                 PROPOSE_FLOW_CREATE_FORCED_TOOL_PROMPT
                 if target_kind == TargetKind.CREATE
@@ -492,13 +465,16 @@ class ProposalSubmissionOwner:
             invocation = replace(invocation, arguments=admitted_arguments)
         if target_kind == TargetKind.CREATE:
             if planning_state.architecture_commit is None:
-                raise AIBuilderArchitectureError(
-                    public_code="architecture_materialization_failed",
-                    detail="Create proposal requires a committed architecture.",
-                    log_context={
-                        "failure_code": "architecture_commit_missing",
-                        "reason": "architecture_commit_missing",
-                    },
+                return architecture_failure_outcome(
+                    AIBuilderArchitectureError(
+                        public_code="architecture_materialization_failed",
+                        repair_disposition="server_defect",
+                        detail="Create proposal requires a committed architecture.",
+                        log_context={
+                            "failure_code": "architecture_commit_missing",
+                            "reason": "architecture_commit_missing",
+                        },
+                    )
                 )
             result = await process_create_intent_arguments(
                 turn=invocation.turn,
@@ -830,22 +806,6 @@ class ProposalSubmissionOwner:
                 yield event
         except AIBuilderBadRequestException:
             raise
-        except AIBuilderArchitectureError as error:
-            if not is_create:
-                raise
-            # Create proposal architecture failures are user-visible proposal
-            # errors; edit keeps propagating the same exception by design.
-            record_proposal_architecture_failure(
-                ctx.usage_tracker,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-            )
-            yield build_proposal_architecture_error_event(
-                error,
-                request_id=ctx.request_id,
-                tool_name=PROPOSE_FLOW_TOOL_NAME,
-            )
-            return
         except PlanningStatePayloadTooLargeError:
             raise
         except Exception as error:
@@ -914,7 +874,7 @@ class ProposalSubmissionOwner:
                     call_kind="forced_tool_continuation",
                     before_provider_call=ctx.before_provider_call,
                 ),
-                truncation_error_phase=AIBuilderErrorPhase.PROPOSAL,
+                error_phase=AIBuilderErrorPhase.PROPOSAL,
             )
         )
         return outcome, retry_config

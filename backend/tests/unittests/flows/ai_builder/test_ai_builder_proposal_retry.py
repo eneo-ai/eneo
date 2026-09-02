@@ -20,9 +20,6 @@ from eneo.flows.ai_builder import (
 from eneo.flows.ai_builder import (
     ai_builder_proposal_telemetry as proposal_telemetry_module,
 )
-from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
@@ -34,8 +31,8 @@ from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
 from eneo.flows.ai_builder.ai_builder_events import encode_ai_builder_stream_event
 from eneo.flows.ai_builder.ai_builder_proposal_retry import (
     ForcedToolAfterTextRequest,
+    ForcedToolRepair,
     ProposalSelfCorrectionRequest,
-    build_tool_retry_messages,
     missing_tool_call_failure,
     run_forced_tool_retry_after_text,
     run_tool_self_correction,
@@ -255,7 +252,6 @@ def _make_self_correction_request(
         forced_proposal_temperature=0.1,
         repair_completion=_budgeted(repair_completion, ctx),
         retry_config=ToolRetryConfig(
-            target_kind=target_kind,
             forced_tool_prompt=forced_tool_prompt,
             process_tool_invocation=process_tool_invocation,
         ),
@@ -294,7 +290,6 @@ def _make_forced_tool_after_text_request(
         ),
         assistant_text=assistant_text,
         retry_config=ToolRetryConfig(
-            target_kind=target_kind,
             forced_tool_prompt=forced_tool_prompt,
             process_tool_invocation=process_tool_invocation,
         ),
@@ -327,30 +322,6 @@ def _process_sequence(
 
 def test_proposal_call_budget_is_four_calls_per_turn() -> None:
     assert MAX_PROPOSAL_PROVIDER_CALLS == 4
-
-
-def test_build_tool_retry_messages_appends_one_tool_call_and_feedback() -> None:
-    messages = build_tool_retry_messages(
-        llm_messages=[{"role": "user", "content": "go"}],
-        tool_call=_original_tool_call(),
-        tool_feedback="fix it",
-        assistant_content="draft",
-    )
-    assert [message["role"] for message in messages] == ["user", "assistant", "tool"]
-    assert messages[2]["content"] == "fix it"
-    assert messages[1]["tool_calls"][0]["id"] == messages[2]["tool_call_id"]
-
-
-def test_build_tool_retry_messages_normalizes_oversized_tool_call_ids() -> None:
-    tool_call = SimpleNamespace(
-        id="x" * (PROVIDER_TOOL_CALL_ID_MAX_LENGTH + 20),
-        function=SimpleNamespace(name=PROPOSE_FLOW_TOOL_NAME, arguments="{}"),
-    )
-    messages = build_tool_retry_messages(
-        llm_messages=[], tool_call=tool_call, tool_feedback="fix"
-    )
-    assert len(messages[0]["tool_calls"][0]["id"]) <= PROVIDER_TOOL_CALL_ID_MAX_LENGTH
-    assert messages[0]["tool_calls"][0]["id"] == messages[1]["tool_call_id"]
 
 
 def test_replace_repair_group_keeps_only_the_latest_failed_payload() -> None:
@@ -630,7 +601,10 @@ async def test_text_only_twice_is_a_terminal_missing_tool_failure() -> None:
     assert json.loads(events[-1]["data"])["code"] == "proposal_tool_missing"
     assert "text" not in [event["event"] for event in events]
     failed = _failed_turn_payloads(records)
-    assert failed and failed[-1]["final_failure_kind"] == "missing_submission_tool"
+    assert [record["final_failure_kind"] for record in failed] == [
+        "missing_submission_tool"
+    ]
+    assert failed[0]["branch"] == "forced_tool_retry_missing_submission"
 
 
 @pytest.mark.asyncio
@@ -770,8 +744,8 @@ async def test_forced_tool_retry_after_text_returns_the_call_it_came_from() -> N
         )
     )
 
-    assert isinstance(continuation.outcome, CorrectableFailure)
-    assert continuation.tool_call is not None
+    assert isinstance(continuation, ForcedToolRepair)
+    assert continuation.failure.feedback == "forced bad"
     assert continuation.tool_call.id == "forced"
     assert seen == [{"flow_name": "Forced"}]
 
@@ -797,8 +771,8 @@ async def test_forced_tool_retry_without_budget_or_tool_is_terminal() -> None:
         )
     )
 
-    assert no_tool.outcome == missing_tool_call_failure()
-    assert exhausted.outcome == missing_tool_call_failure()
+    assert no_tool == missing_tool_call_failure()
+    assert exhausted == missing_tool_call_failure()
     assert repair.await_count == 1
     assert seen == []
 
@@ -818,9 +792,86 @@ async def test_forced_tool_retry_terminalizes_provider_truncation_in_its_phase()
         )
     )
 
-    assert isinstance(continuation.outcome, TerminalFailure)
-    assert continuation.outcome.code == AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG
-    assert continuation.outcome.phase == AIBuilderErrorPhase.SELF_CORRECTION
+    assert isinstance(continuation, TerminalFailure)
+    assert continuation.code == AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG
+    assert continuation.phase == AIBuilderErrorPhase.SELF_CORRECTION
+
+
+@pytest.mark.asyncio
+async def test_forced_continuation_provider_failure_keeps_its_upstream_identity() -> (
+    None
+):
+    """A transport or provider error is not the model omitting the tool."""
+
+    process, seen = _process_sequence()
+    repair = AsyncMock(
+        side_effect=[_text_response("Först lite text."), RuntimeError("socket reset")]
+    )
+    usage = ProposalTurnTelemetry(
+        request_id="req-upstream", model="openai/gpt-5.4", target_kind=TargetKind.CREATE
+    )
+
+    with _captured_proposal_telemetry() as records:
+        events = await _collect(
+            _make_self_correction_request(
+                repair_completion=repair,
+                process_tool_invocation=process,
+                calls_remaining=3,
+                usage_tracker=usage,
+            )
+        )
+
+    assert repair.await_count == 2
+    assert seen == []
+    assert [event["event"] for event in events] == ["status", "error"]
+    assert json.loads(events[-1]["data"])["code"] == "planner_upstream_error"
+    failed = _failed_turn_payloads(records)
+    assert [record["final_failure_kind"] for record in failed] == ["provider_error"]
+    assert failed[0]["branch"] == "forced_tool_retry_completion_error"
+
+
+@pytest.mark.asyncio
+async def test_forced_continuation_terminal_keeps_its_kind_and_logs_once() -> None:
+    """An architecture terminal from the forced call is reported as that, once."""
+
+    architecture = TerminalFailure(
+        kind="architecture",
+        message="The confirmed requirements cannot be built.",
+        code=AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED,
+        phase=AIBuilderErrorPhase.PROPOSAL,
+        codes=frozenset({"confirmed_form_field_incompatible"}),
+    )
+    process, seen = _process_sequence(architecture)
+    repair = AsyncMock(
+        side_effect=[
+            _text_response("Först lite text."),
+            _tool_response(arguments={"flow_name": "Forced"}, call_id="forced"),
+        ]
+    )
+    usage = ProposalTurnTelemetry(
+        request_id="req-forced-terminal",
+        model="openai/gpt-5.4",
+        target_kind=TargetKind.CREATE,
+    )
+
+    with _captured_proposal_telemetry() as records:
+        events = await _collect(
+            _make_self_correction_request(
+                repair_completion=repair,
+                process_tool_invocation=process,
+                calls_remaining=3,
+                usage_tracker=usage,
+            )
+        )
+
+    assert repair.await_count == 2
+    assert seen == [{"flow_name": "Forced"}]
+    assert [event["event"] for event in events] == ["status", "error"]
+    payload = json.loads(events[-1]["data"])
+    assert payload["code"] == "architecture_materialization_failed"
+    failed = _failed_turn_payloads(records)
+    assert [record["final_failure_kind"] for record in failed] == ["architecture"]
+    assert failed[0]["branch"] == "forced_tool_retry_invalid_tool_result"
 
 
 def test_usage_double_records_the_shapes_the_loop_reports() -> None:

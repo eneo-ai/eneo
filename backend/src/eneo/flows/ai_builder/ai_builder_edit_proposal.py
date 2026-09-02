@@ -6,8 +6,7 @@ from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
-    model_correctable_architecture_failure_code,
-    terminal_architecture_failure,
+    architecture_failure_outcome,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
@@ -164,14 +163,7 @@ async def process_edit_arguments(
             feedback=_format_edit_compilation_request_error(exc), kind="validation"
         )
     except AIBuilderArchitectureError as exc:
-        failure_code = model_correctable_architecture_failure_code(exc)
-        if failure_code is None:
-            return terminal_architecture_failure(exc)
-        return CorrectableFailure(
-            feedback=exc.detail,
-            kind="validation",
-            codes=frozenset({failure_code}),
-        )
+        return architecture_failure_outcome(exc)
     except AssistantSnapshotResourceUnavailableError as exc:
         logger.warning(
             "Edit compilation failed because an assistant snapshot references "

@@ -4,8 +4,7 @@ from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
-    model_correctable_architecture_failure_code,
-    terminal_architecture_failure,
+    architecture_failure_outcome,
 )
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
@@ -112,26 +111,21 @@ async def process_create_intent_arguments(
             codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
         )
     except AIBuilderArchitectureError as error:
-        failure_code = model_correctable_architecture_failure_code(error)
-        if failure_code is None:
-            return terminal_architecture_failure(error)
-        logger.info(
-            "ai_builder_create_intent_architecture_rejected "
-            "session_id=%s tool_call_id=%s failure_code=%s",
-            turn.session_id,
-            tool_call_id,
-            failure_code,
-        )
-        capture_rejected_proposal_arguments(
-            arguments,
-            session_id=str(turn.session_id),
-            issues=[failure_code, error.detail],
-        )
-        return CorrectableFailure(
-            feedback=error.detail,
-            kind="validation",
-            codes=frozenset({failure_code}),
-        )
+        outcome = architecture_failure_outcome(error)
+        if isinstance(outcome, CorrectableFailure):
+            logger.info(
+                "ai_builder_create_intent_architecture_rejected "
+                "session_id=%s tool_call_id=%s failure_code=%s",
+                turn.session_id,
+                tool_call_id,
+                error.failure_code,
+            )
+            capture_rejected_proposal_arguments(
+                arguments,
+                session_id=str(turn.session_id),
+                issues=[*sorted(outcome.codes), error.detail],
+            )
+        return outcome
 
     return await _process_create_spec(
         turn=turn,

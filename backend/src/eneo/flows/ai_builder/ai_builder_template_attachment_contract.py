@@ -7,6 +7,7 @@ from typing import TypeGuard, cast
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
     ArchitectureLogValue,
+    ArchitectureRepairDisposition,
 )
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     missing_structured_output_path,
@@ -98,11 +99,13 @@ def apply_template_attachment_contract(
     if template_step_indexes != [len(spec.steps) - 1]:
         raise _architecture_error(
             failure_code="template_fill_position_invalid",
+            repair_disposition="model_correctable",
             detail="A DOCX template-fill step must be the final Flow step.",
         )
     if not template_attachment_selection_is_valid(selected_template_count):
         raise _architecture_error(
             failure_code="template_attachment_selection_invalid",
+            repair_disposition="user_action",
             detail=(
                 "A template-fill Flow requires exactly one selected DOCX template. "
                 "Select one template attachment and try again."
@@ -112,6 +115,7 @@ def apply_template_attachment_contract(
     if not selected_template_is_readable(placeholders):
         raise _architecture_error(
             failure_code="template_attachment_unreadable",
+            repair_disposition="user_action",
             detail=(
                 "The selected DOCX template could not be inspected safely. "
                 "Attach a valid DOCX file and try again."
@@ -173,6 +177,7 @@ def apply_template_attachment_contract(
     if unresolved:
         raise _architecture_error(
             failure_code="template_placeholder_unresolved",
+            repair_disposition="user_action",
             detail=(
                 "The selected DOCX contains placeholders that cannot be resolved "
                 "safely by this Flow. Use Flow input fields, {{ datum }}, or a "
@@ -235,6 +240,7 @@ def _normalized_unique_placeholders(placeholders: Sequence[str]) -> tuple[str, .
             ):
                 raise _architecture_error(
                     failure_code="template_placeholder_path_invalid",
+                    repair_disposition="user_action",
                     detail=(
                         "The selected DOCX contains a placeholder with an invalid "
                         "variable path. Remove whitespace around dots and empty path "
@@ -427,6 +433,7 @@ def _materialize_nested_template_outputs(
         if len(path) > MAX_COMPILED_STRUCTURED_FIELD_DEPTH:
             raise _architecture_error(
                 failure_code="template_placeholder_depth_exceeded",
+                repair_disposition="user_action",
                 detail=(
                     "The selected DOCX contains a nested placeholder deeper than "
                     "the compiled Flow schema supports."
@@ -436,6 +443,7 @@ def _materialize_nested_template_outputs(
         if len(placeholder) > NAMED_RESULT_FIELD_NAME_MAX_LENGTH:
             raise _architecture_error(
                 failure_code="template_placeholder_materialization_limit_exceeded",
+                repair_disposition="user_action",
                 detail=(
                     "The selected DOCX contains a placeholder path too large to "
                     "materialize safely."
@@ -453,6 +461,7 @@ def _materialize_nested_template_outputs(
                     failure_code=(
                         "template_placeholder_materialization_limit_exceeded"
                     ),
+                    repair_disposition="user_action",
                     detail=(
                         "The selected DOCX requires more server-materialized "
                         "fields than one Flow step can safely prepare."
@@ -722,11 +731,13 @@ def _referenced_step(
 def _architecture_error(
     *,
     failure_code: str,
+    repair_disposition: ArchitectureRepairDisposition,
     detail: str,
     **context: ArchitectureLogValue,
 ) -> AIBuilderArchitectureError:
     return AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
+        repair_disposition=repair_disposition,
         detail=detail,
         log_context={
             "failure_code": failure_code,

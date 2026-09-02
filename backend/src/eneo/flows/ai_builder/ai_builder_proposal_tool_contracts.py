@@ -401,7 +401,6 @@ class ToolRetryInvocation:
 
 @dataclass(frozen=True)
 class ToolRetryConfig:
-    target_kind: TargetKind
     forced_tool_prompt: str
     process_tool_invocation: Callable[
         [ToolRetryInvocation], Awaitable[SubmissionOutcome]

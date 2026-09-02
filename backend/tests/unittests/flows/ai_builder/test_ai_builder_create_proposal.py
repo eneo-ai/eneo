@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, get_args
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -11,6 +11,11 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 )
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
+    ArchitectureRepairDisposition,
+)
+from eneo.flows.ai_builder.ai_builder_assembly.create import (
+    CreateAssemblyRejection,
+    CreateAssemblyRejectionReason,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
@@ -490,33 +495,23 @@ async def test_outline_assembly_rejection_succeeds_after_model_correction() -> N
 
 
 @pytest.mark.parametrize(
-    ("failure_code", "retryable"),
+    ("repair_disposition", "expected_message_fragment"),
     [
-        ("assembly_plan_invariant_failed", False),
-        ("invalid_structured_underlag_projection", False),
-        ("assembly_source_file_first_step_requires_json", True),
+        ("server_defect", "server-side limitation"),
+        ("user_action", "adjust the requirements"),
     ],
 )
 @pytest.mark.asyncio
-async def test_process_create_intent_arguments_only_returns_retryable_architecture_feedback(
-    failure_code: str,
-    retryable: bool,
+async def test_terminal_architecture_dispositions_end_the_turn_with_their_own_message(
+    repair_disposition: ArchitectureRepairDisposition,
+    expected_message_fragment: str,
 ) -> None:
     error = AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
+        repair_disposition=repair_disposition,
         detail="The proposed architecture could not be compiled.",
-        log_context={"failure_code": failure_code},
+        log_context={"failure_code": "assembly_plan_invariant_failed"},
     )
-    arguments = {
-        "flow_name": "Architecture classification",
-        "plan_rationale": "Exercise architecture failure ownership.",
-        "steps": [
-            {
-                "name": "Summarize",
-                "instructions": "Summarize the supplied text.",
-            }
-        ],
-    }
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_create_proposal."
@@ -526,24 +521,72 @@ async def test_process_create_intent_arguments_only_returns_retryable_architectu
         result = await _process_create_intent_arguments(
             turn=_make_turn(),
             conversation=[],
-            arguments=arguments,
+            arguments=_ARCHITECTURE_CLASSIFICATION_ARGUMENTS,
             tool_call_id="call-architecture-classification",
             available_model_refs=None,
             available_kb_refs=None,
         )
 
-    if not retryable:
-        # No model call can repair the assembler's own invariants: the
-        # producer ends the turn with the typed architecture error.
-        assert isinstance(result, TerminalFailure)
-        assert result.kind == "architecture"
-        assert result.code == "architecture_materialization_failed"
-        assert result.codes == frozenset({failure_code})
-        return
+    assert isinstance(result, TerminalFailure)
+    assert result.kind == "architecture"
+    assert result.code == "architecture_materialization_failed"
+    assert result.codes == frozenset({"assembly_plan_invariant_failed"})
+    assert expected_message_fragment in result.message
+
+
+@pytest.mark.asyncio
+async def test_model_correctable_architecture_failure_becomes_repair_feedback() -> None:
+    error = AIBuilderArchitectureError(
+        public_code="architecture_materialization_failed",
+        repair_disposition="model_correctable",
+        detail="The proposed architecture could not be compiled.",
+        log_context={"failure_code": "assembly_source_file_first_step_requires_json"},
+    )
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_create_proposal."
+        "compile_create_intent_to_spec",
+        side_effect=error,
+    ):
+        result = await _process_create_intent_arguments(
+            turn=_make_turn(),
+            conversation=[],
+            arguments=_ARCHITECTURE_CLASSIFICATION_ARGUMENTS,
+            tool_call_id="call-architecture-classification",
+            available_model_refs=None,
+            available_kb_refs=None,
+        )
+
     assert isinstance(result, CorrectableFailure)
     assert result.feedback == error.detail
     assert result.kind == "validation"
-    assert result.codes == frozenset({failure_code})
+    assert result.codes == frozenset({"assembly_source_file_first_step_requires_json"})
+
+
+def test_every_assembly_rejection_reason_declares_who_repairs_it() -> None:
+    """The assembler owns its closed reason vocabulary and, with it, the disposition."""
+
+    for reason in get_args(CreateAssemblyRejectionReason):
+        rejection = CreateAssemblyRejection(reason=reason)
+        assert rejection.repair_disposition in get_args(ArchitectureRepairDisposition)
+    assert CreateAssemblyRejection(
+        reason="plan_invariant_failed"
+    ).repair_disposition == ("server_defect")
+    assert CreateAssemblyRejection(reason="empty_steps").repair_disposition == (
+        "model_correctable"
+    )
+
+
+_ARCHITECTURE_CLASSIFICATION_ARGUMENTS = {
+    "flow_name": "Architecture classification",
+    "plan_rationale": "Exercise architecture failure ownership.",
+    "steps": [
+        {
+            "name": "Summarize",
+            "instructions": "Summarize the supplied text.",
+        }
+    ],
+}
 
 
 @pytest.mark.asyncio
@@ -1069,9 +1112,12 @@ async def test_confirmed_create_shadow_field_is_rejected_explicitly() -> None:
         planning_state=state,
     )
 
-    assert isinstance(result, CorrectableFailure)
-    assert result.kind == "validation"
+    # The offending field is one the user confirmed; no proposal call can change
+    # it, so the turn ends here instead of spending the repair budget.
+    assert isinstance(result, TerminalFailure)
+    assert result.kind == "architecture"
     assert result.codes == frozenset({"confirmed_form_field_incompatible"})
+    assert "adjust the requirements" in result.message
 
 
 @pytest.mark.asyncio

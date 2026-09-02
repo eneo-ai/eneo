@@ -91,15 +91,18 @@ class ForcedToolAfterTextRequest:
     retry_config: ToolRetryConfig
     forced_proposal_temperature: float
     repair_completion: ProposalCompletionFn
-    truncation_error_phase: AIBuilderErrorPhase = AIBuilderErrorPhase.SELF_CORRECTION
+    error_phase: AIBuilderErrorPhase = AIBuilderErrorPhase.SELF_CORRECTION
 
 
 @dataclass(frozen=True, slots=True)
-class ForcedToolContinuation:
-    """What one forced-tool continuation produced, with the call it came from."""
+class ForcedToolRepair:
+    """A forced continuation that returned a correctable payload, with its call."""
 
-    outcome: SubmissionOutcome
-    tool_call: LLMCompletionToolCall | None = None
+    failure: CorrectableFailure
+    tool_call: LLMCompletionToolCall
+
+
+ForcedToolContinuation = ProposalCompleted | TerminalFailure | ForcedToolRepair
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +110,7 @@ class _RepairCallResult:
     outcome: SubmissionOutcome
     tool_call: LLMCompletionToolCall | None
     assistant_text: str | None
+    forced: bool = False
 
 
 def missing_tool_call_failure() -> TerminalFailure:
@@ -132,6 +136,17 @@ def provider_truncation_failure(*, phase: AIBuilderErrorPhase) -> TerminalFailur
             "a larger output limit."
         ),
         code=AIBuilderErrorCode.PLANNER_OUTPUT_TOO_LONG,
+        phase=phase,
+    )
+
+
+def provider_error_failure(*, phase: AIBuilderErrorPhase) -> TerminalFailure:
+    """A provider or transport failure inside a forced continuation keeps its identity."""
+
+    return TerminalFailure(
+        kind="provider_error",
+        message="The AI planner failed. Please try again.",
+        code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
         phase=phase,
     )
 
@@ -217,26 +232,74 @@ def _log_self_correction_validation_failed_turn(
     )
 
 
-def _log_terminal_failure(ctx: ProposalTurnContext, failure: TerminalFailure) -> None:
-    if failure.kind == "provider_truncation":
-        _log_self_correction_failed_turn(
-            ctx=ctx,
-            branch="provider_truncation",
-            final_failure_kind="provider_truncation",
-            final_error_code=failure.code,
-        )
-    elif failure.kind == "missing_submission_tool":
-        _log_self_correction_failed_turn(
-            ctx=ctx,
-            branch="self_correction_missing_tool_response",
-            final_failure_kind="missing_submission_tool",
-            final_error_code=failure.code,
-        )
+def terminal_failure_kind(
+    kind: ProposalAttemptFailureKind,
+) -> ProposalTerminalFailureKind:
+    """The failed-turn record's closed name for a terminal outcome of this kind."""
+
+    match kind:
+        case "parse":
+            return "invalid_repair_payload"
+        case "validation":
+            return "invalid_repair_plan"
+        case "quality":
+            return "repair_quality_failure"
+        case "missing_submission_tool":
+            return "missing_submission_tool"
+        case "architecture":
+            return "architecture"
+        case "provider_error":
+            return "provider_error"
+        case "provider_truncation":
+            return "provider_truncation"
+
+
+def _terminal_failure_branch(
+    kind: ProposalAttemptFailureKind,
+    *,
+    forced: bool,
+) -> ProposalFailedTurnBranch:
+    match kind:
+        case "provider_truncation":
+            return "provider_truncation"
+        case "missing_submission_tool":
+            return (
+                "forced_tool_retry_missing_submission"
+                if forced
+                else "self_correction_missing_tool_response"
+            )
+        case "provider_error":
+            return (
+                "forced_tool_retry_completion_error"
+                if forced
+                else "self_correction_completion_error"
+            )
+        case "parse" | "validation" | "quality" | "architecture":
+            return (
+                "forced_tool_retry_invalid_tool_result"
+                if forced
+                else "self_correction_invalid_tool_result"
+            )
+
+
+def log_terminal_failure(
+    ctx: ProposalTurnContext,
+    failure: TerminalFailure,
+    *,
+    forced: bool,
+) -> None:
+    """The one failed-turn record for a terminal outcome, named by its real kind."""
+
+    _log_self_correction_failed_turn(
+        ctx=ctx,
+        branch=_terminal_failure_branch(failure.kind, forced=forced),
+        final_failure_kind=terminal_failure_kind(failure.kind),
+        final_error_code=failure.code,
+    )
 
 
 def build_self_correction_error_event(
     *,
-    feedback: str | None,
     failure_kind: ToolProcessingFailureKind | None,
     failure_codes: frozenset[str] = frozenset(),
     request_id: str | None = None,
@@ -344,23 +407,6 @@ def _build_tool_retry_invocation(
     )
 
 
-def build_tool_retry_messages(
-    *,
-    llm_messages: list[LLMMessageParam],
-    tool_call: RuntimeToolCall,
-    tool_feedback: str,
-    assistant_content: str | None = None,
-) -> list[LLMMessageParam]:
-    return [
-        *llm_messages,
-        *_tool_retry_group_messages(
-            tool_call=tool_call,
-            tool_feedback=tool_feedback,
-            assistant_content=assistant_content,
-        ),
-    ]
-
-
 def _tool_retry_group_messages(
     *,
     tool_call: RuntimeToolCall,
@@ -389,21 +435,6 @@ def _tool_retry_group_messages(
             "content": tool_feedback,
         },
     )
-
-
-def append_text_retry_feedback_turn(
-    *,
-    llm_messages: list[LLMMessageParam],
-    assistant_content: str,
-    feedback: str,
-) -> list[LLMMessageParam]:
-    return [
-        *llm_messages,
-        *_text_retry_group_messages(
-            assistant_content=assistant_content,
-            feedback=feedback,
-        ),
-    ]
 
 
 def _text_retry_group_messages(
@@ -481,7 +512,6 @@ async def run_tool_self_correction(
                 failure_kind=failure.kind,
             )
             yield build_self_correction_error_event(
-                feedback=failure.feedback,
                 failure_kind=failure.kind,
                 failure_codes=failure.codes,
                 request_id=ctx.request_id,
@@ -520,7 +550,7 @@ async def run_tool_self_correction(
                 yield event
             return
         if isinstance(outcome, TerminalFailure):
-            _log_terminal_failure(ctx, outcome)
+            log_terminal_failure(ctx, outcome, forced=result.forced)
             yield terminal_failure_event(outcome, request_id=ctx.request_id)
             return
         if result.tool_call is None or ctx.proposal_call_budget.calls_remaining == 0:
@@ -530,7 +560,6 @@ async def run_tool_self_correction(
                 failure_kind=outcome.kind,
             )
             yield build_self_correction_error_event(
-                feedback=outcome.feedback,
                 failure_kind=outcome.kind,
                 failure_codes=outcome.codes,
                 request_id=ctx.request_id,
@@ -587,15 +616,11 @@ async def _repair_call_result(
             repair_completion=repair_completion,
         )
     )
-    if isinstance(continuation.outcome, TerminalFailure):
-        _log_self_correction_validation_failed_turn(
-            ctx=ctx,
-            branch="self_correction_text_forced_retry_failed",
-            failure_kind=None,
+    if isinstance(continuation, ForcedToolRepair):
+        return _RepairCallResult(
+            continuation.failure, continuation.tool_call, assistant_text, forced=True
         )
-    return _RepairCallResult(
-        continuation.outcome, continuation.tool_call, assistant_text
-    )
+    return _RepairCallResult(continuation, None, assistant_text, forced=True)
 
 
 async def _process_tool_call(
@@ -659,7 +684,7 @@ async def _execute_forced_tool_retry(
             )
         )
     except ProposalCallBudgetExhausted:
-        return ForcedToolContinuation(missing_tool_call_failure())
+        return missing_tool_call_failure()
     except AIBuilderBadRequestException:
         raise
     except Exception as error:
@@ -670,20 +695,18 @@ async def _execute_forced_tool_retry(
             exc_info=error,
             extra={"request_id": ctx.request_id},
         )
-        return ForcedToolContinuation(missing_tool_call_failure())
+        return provider_error_failure(phase=request.error_phase)
     if not response.choices:
         _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-        return ForcedToolContinuation(missing_tool_call_failure())
+        return missing_tool_call_failure()
     choice = response.choices[0]
     if choice.finish_reason == "length":
         _record_attempt_failure(ctx, failure_kind="provider_truncation")
-        return ForcedToolContinuation(
-            provider_truncation_failure(phase=request.truncation_error_phase)
-        )
+        return provider_truncation_failure(phase=request.error_phase)
     tool_call = _sole_proposal_tool_call(choice.message.tool_calls)
     if tool_call is None:
         _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
-        return ForcedToolContinuation(missing_tool_call_failure())
+        return missing_tool_call_failure()
     outcome = await _process_tool_call(
         tool_call,
         ctx=ctx,
@@ -699,7 +722,8 @@ async def _execute_forced_tool_retry(
                 "feedback_length": len(outcome.feedback),
             },
         )
-    return ForcedToolContinuation(outcome, tool_call)
+        return ForcedToolRepair(outcome, tool_call)
+    return outcome
 
 
 async def run_forced_tool_retry_after_text(

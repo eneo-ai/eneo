@@ -733,6 +733,7 @@ def _derive_structured_projection_contract(
 def _structured_projection_error(detail: str) -> AIBuilderArchitectureError:
     return AIBuilderArchitectureError(
         public_code="architecture_materialization_failed",
+        repair_disposition="server_defect",
         detail=f"Structured Underlag projection is invalid: {detail}",
         log_context={
             "failure_code": "invalid_structured_underlag_projection",
@@ -891,6 +892,7 @@ def _validate_source_ref_candidates(
         except InputBindingContractError as exc:
             raise AIBuilderArchitectureError(
                 public_code="architecture_materialization_failed",
+                repair_disposition="model_correctable",
                 detail=(
                     f"Typed source reference {payload!r} is invalid: {exc}. The "
                     "backend owns typed source references in create mode: correct "

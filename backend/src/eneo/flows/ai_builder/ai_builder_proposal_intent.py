@@ -397,7 +397,8 @@ def attested_violation_message(violation: AttestedContractViolation) -> str:
         return (
             f"the user-named result `{violation.key_name}` has ambiguous placement: "
             f"{candidates} (showing {len(violation.candidate_paths)} of "
-            f"{len(violation.matched_names)})"
+            f"{len(violation.matched_names)}) — declare it exactly once at one of "
+            "those paths and remove every other occurrence"
         )
     location = (
         violation.expected_display_path or ".".join(expected_path)

@@ -184,6 +184,7 @@ def compile_edit_proposal(
     if template_preparation_stage_limit_exceeded(compiled_spec):
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
+            repair_disposition="model_correctable",
             detail=(
                 "DOCX template-fill flows support at most "
                 f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation stages. "
@@ -368,6 +369,7 @@ def _sanitize_shadowed_form_fields(
             if proposal.form_field_provenance.get(field.name) == "user_confirmed":
                 raise AIBuilderArchitectureError(
                     public_code="architecture_materialization_failed",
+                    repair_disposition="user_action",
                     detail=(
                         f"Confirmed runtime field '{field.name}' duplicates the "
                         "flow's primary runtime input."

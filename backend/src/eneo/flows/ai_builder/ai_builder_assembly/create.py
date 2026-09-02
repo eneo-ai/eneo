@@ -10,6 +10,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 )
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
+    ArchitectureRepairDisposition,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
     DOCUMENT_REPORT_COMPOSE_TOPOLOGY_MISSING_FEEDBACK,
@@ -240,6 +241,43 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
 }
 
 
+# Who can repair each rejection: the model rewrote the steps, fields, or refs
+# the reason names; the user confirmed the architecture value it names; or the
+# assembler broke its own invariant.
+_REJECTION_REPAIR_DISPOSITION: dict[
+    CreateAssemblyRejectionReason, ArchitectureRepairDisposition
+] = {
+    "aggregate_requires_text_or_document_output": "model_correctable",
+    "all_previous_step_cannot_use_explicit_refs": "model_correctable",
+    "compare_json_requires_structured_producers": "model_correctable",
+    "confirmed_runtime_input_source_output_collision": "model_correctable",
+    "audio_requires_linear": "model_correctable",
+    "docx_template_form_fields_mismatch": "model_correctable",
+    "docx_template_shape_unsupported": "model_correctable",
+    "document_report_compose_topology_missing": "server_defect",
+    "empty_steps": "model_correctable",
+    "explicit_refs_not_supported": "model_correctable",
+    "form_field_no_legal_target": "model_correctable",
+    "form_field_placement_mismatch": "model_correctable",
+    "form_field_required_semantic_target_missing": "model_correctable",
+    "invalid_template_fill_mode": "model_correctable",
+    "plan_invariant_failed": "server_defect",
+    "pure_audio_transcription_requires_no_reader_fields": "model_correctable",
+    "pure_audio_transcription_shape_unsupported": "model_correctable",
+    "section_writer_structured_source_ambiguous": "server_defect",
+    "source_file_first_step_requires_json": "model_correctable",
+    "step_output_type_mismatch": "model_correctable",
+    "terminal_schema_requires_json_terminal": "model_correctable",
+    "structured_fan_in_exceeds_limit": "model_correctable",
+    "unsupported_aggregation_intent": "user_action",
+    "unsupported_architecture_hints": "user_action",
+    "unsupported_final_output_type": "user_action",
+    "unsupported_output_mode": "model_correctable",
+    "unsupported_runtime_input_type": "user_action",
+    "unsupported_runtime_output_tuple": "user_action",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class CreateAssemblyRejection:
     reason: CreateAssemblyRejectionReason
@@ -255,6 +293,10 @@ class CreateAssemblyRejection:
         }:
             return self.reason
         return f"assembly_{self.reason}"
+
+    @property
+    def repair_disposition(self) -> ArchitectureRepairDisposition:
+        return _REJECTION_REPAIR_DISPOSITION[self.reason]
 
     @property
     def feedback(self) -> str:
@@ -1934,6 +1976,7 @@ def _drop_planned_source_contract_shadow_form_fields(
     if confirmed_names:
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
+            repair_disposition="user_action",
             detail=(
                 "Confirmed runtime fields conflict with fields extracted from the "
                 "source contract. Rename or remove the incompatible fields."
