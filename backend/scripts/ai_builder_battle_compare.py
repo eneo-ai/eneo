@@ -328,8 +328,10 @@ def _identity(summary: dict[str, Any]) -> dict[str, Any]:
 # app version and so differs between every pair of builds — the exact axis
 # this tool exists to compare (verified on the 9d4237a/9216ec6 receipts).
 # The full `evaluator_identity.sha256` differs for the same reason. The
-# environment half of the target is gated separately as `base_url`, which
-# the receipt carries in the clear. `cases_sha256` stays nonfatal only
+# environment is gated by what it changes: the model identity below and the
+# observation-input identity semantics; `base_url` only names the stack, and
+# a candidate and its parent run on two stacks by design, so it is reported
+# and never refused. `cases_sha256` stays nonfatal only
 # because `case_contract_sha256_by_id` compares the corpus per case, so
 # editing one case's expectations does not block comparing the other 121.
 _IDENTITY_FIELDS: tuple[str, ...] = (
@@ -439,8 +441,6 @@ def _incompatible_identity_fields(
             incompatible.append(f"run_context.{field} (missing)")
         elif before != after:
             incompatible.append(f"run_context.{field}")
-    if baseline_summary.get("base_url") != current_summary.get("base_url"):
-        incompatible.append("base_url")
     return incompatible
 
 

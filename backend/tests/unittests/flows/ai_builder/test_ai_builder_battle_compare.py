@@ -465,18 +465,19 @@ def test_changed_run_context_refuses_comparison(tmp_path: Path, field: str) -> N
     assert f"run_context.{field}" in str(excinfo.value)
 
 
-def test_changed_environment_refuses_comparison(tmp_path: Path) -> None:
+def test_two_stacks_compare_when_model_and_input_identity_agree(tmp_path: Path) -> None:
+    # A candidate and its parent run on two stacks by design; the stack address
+    # names nothing the model identity and input identity do not already gate.
     module = _compare_module()
     baseline_path = tmp_path / "base.json"
     payload = _summary([_row("case-a", "plan_first_pass")])
-    payload["base_url"] = "http://staging:8123/api/v1"
+    payload["base_url"] = "http://127.0.0.1:8146/api/v1"
     baseline_path.write_text(json.dumps(payload), encoding="utf-8")
     current = _write(tmp_path, "cur.json", [_row("case-a", "plan_first_pass")])
 
-    with pytest.raises(SystemExit) as excinfo:
-        module.compare(baseline_path, current)
+    report = module.compare(baseline_path, current)
 
-    assert "base_url" in str(excinfo.value)
+    assert _case(report, "case-a")["mechanics_direction"] == "unchanged"
 
 
 def test_harness_change_counts_only_cases_with_unchanged_contracts(
