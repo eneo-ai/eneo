@@ -4226,6 +4226,42 @@ def _optional_request_json(*, config: ApiConfig, path: str) -> JsonObject | None
         raise
 
 
+def _classifier_usage(raw_calls: object) -> JsonObject:
+    """Tokens and calls the classifier spent, summed over every send turn.
+
+    Read from the diagnostics endpoint's `provider_calls`, which lists every
+    provider call whether or not the turn produced a proposal attempt. Absent
+    on receipts acquired before that projection existed.
+    """
+
+    calls = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    if isinstance(raw_calls, list):
+        for raw_call in raw_calls:
+            if not isinstance(raw_call, Mapping):
+                continue
+            if raw_call.get("call_kind") != "slot_classification":
+                continue
+            calls += 1
+            prompt_tokens += _token_count(raw_call.get("prompt_tokens"))
+            completion_tokens += _token_count(raw_call.get("completion_tokens"))
+            total_tokens += _token_count(raw_call.get("total_tokens"))
+    return {
+        "calls": calls,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _token_count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(value, 0)
+
+
 def _journey_with_proposal_economics(
     journey: JsonObject,
     *,
@@ -4287,6 +4323,7 @@ def _journey_with_proposal_economics(
     plan_outcome["attempt_failure_ladder"] = attempt_ladder
     plan_outcome["initial_token_cost"] = initial_token_cost
     plan_outcome["repair_token_cost"] = repair_token_cost
+    enriched["classifier_usage"] = _classifier_usage(diagnostics.get("provider_calls"))
     enriched["plan_outcome"] = plan_outcome
     return enriched
 

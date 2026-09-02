@@ -1715,3 +1715,30 @@ def test_a_proof_whose_outcome_contradicts_its_facts_is_refused(
 
     with pytest.raises(receipts.ReceiptError, match="disagrees with itself"):
         receipts.load_release_receipt(suite_dir)
+
+
+def test_receipt_rows_carry_classifier_spend_only_when_the_journey_recorded_it() -> (
+    None
+):
+    with_usage = _observation("case-a", 1)
+    with_usage["journey"]["classifier_usage"] = {
+        "calls": 2,
+        "prompt_tokens": 16_000,
+        "completion_tokens": 300,
+        "total_tokens": 16_500,
+    }
+    without_usage = _observation("case-b", 1)
+
+    observations = [
+        _RECEIPTS.observation_from_row(row, where=f"row[{index}]")
+        for index, row in enumerate((with_usage, without_usage))
+    ]
+
+    assert (
+        observations[0].classifier_calls,
+        observations[0].classifier_total_tokens,
+    ) == (2, 16_500)
+    assert (
+        observations[1].classifier_calls,
+        observations[1].classifier_total_tokens,
+    ) == (None, None)

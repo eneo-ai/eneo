@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCategory,
     AIBuilderErrorPhase,
+    AIBuilderProviderFailureKind,
     AIBuilderPublicError,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
@@ -45,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
 )
+from eneo.flows.ai_builder.ai_builder_telemetry import ProviderCallKind
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
@@ -290,6 +292,25 @@ class AIBuilderProposalAttemptDiagnostic(BaseModel):
     failure_codes: list[str] = Field(default_factory=list)
 
 
+class AIBuilderProviderCallDiagnostic(BaseModel):
+    """One provider call of a send turn, whichever phase spent it.
+
+    Projected from every assistant message's persisted call records, so a turn
+    that classified and then asked a question shows its classifier cost here
+    even though it produced no proposal attempt.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str
+    call_kind: ProviderCallKind
+    attempt: int
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    provider_failure_kind: AIBuilderProviderFailureKind | None = None
+
+
 class AIBuilderProposalTurnDiagnostic(BaseModel):
     """Per-committed-turn proposal attempt ladder for internal evaluation."""
 
@@ -334,6 +355,9 @@ class AIBuilderProposalTelemetryDiagnosticsResponse(BaseModel):
     architecture: AIBuilderArchitectureDiagnostic | None = None
     proposal_turns: list[AIBuilderProposalTurnDiagnostic] = Field(
         default_factory=lambda: cast(list[AIBuilderProposalTurnDiagnostic], [])
+    )
+    provider_calls: list[AIBuilderProviderCallDiagnostic] = Field(
+        default_factory=lambda: cast(list[AIBuilderProviderCallDiagnostic], [])
     )
 
 

@@ -150,6 +150,10 @@ class Observation:
     model_calls: int | None
     total_tokens: int | None
     elapsed_ms: int | None
+    # Classifier spend, split out of the authoring totals; absent on receipts
+    # acquired before the diagnostics endpoint projected every provider call.
+    classifier_calls: int | None
+    classifier_total_tokens: int | None
     # The row as written. The release gate reads only the typed fields above;
     # the comparator reports on the whole receipt, and giving it the raw row
     # here is what lets it drop its own tolerant loader instead of keeping a
@@ -273,6 +277,12 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
             raise ReceiptError(f"{where}: {key} provider_disposition must be a string.")
         dispositions.append(disposition)
     usage = _mapping(row.get("authoring_usage"), where=where, key="authoring_usage")
+    raw_classifier_usage = journey.get("classifier_usage")
+    classifier_usage = (
+        _mapping(raw_classifier_usage, where=where, key="journey.classifier_usage")
+        if raw_classifier_usage is not None
+        else {}
+    )
     failed_check_names: list[str] = []
     for position, check in enumerate(
         _sequence(row.get("failed_checks"), where=where, key="failed_checks")
@@ -313,6 +323,14 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         ),
         elapsed_ms=_optional_int(
             usage.get("elapsed_ms"), where=where, key="elapsed_ms"
+        ),
+        classifier_calls=_optional_int(
+            classifier_usage.get("calls"), where=where, key="classifier_usage.calls"
+        ),
+        classifier_total_tokens=_optional_int(
+            classifier_usage.get("total_tokens"),
+            where=where,
+            key="classifier_usage.total_tokens",
         ),
         row=row,
     )

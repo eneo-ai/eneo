@@ -903,6 +903,8 @@ def perfect_receipt(receipt: Receipt) -> Receipt:
             provider_dispositions=(),
             model_calls=0,
             total_tokens=0,
+            classifier_calls=0,
+            classifier_total_tokens=0,
             elapsed_ms=0,
             # Feasibility reads typed fields only. Keeping the measured seal
             # avoids manufacturing a second owner for the observation shape.

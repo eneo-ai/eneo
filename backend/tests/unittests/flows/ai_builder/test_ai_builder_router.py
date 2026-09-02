@@ -1236,6 +1236,92 @@ class TestGetSessionEndpoint:
         ]
 
     @pytest.mark.anyio
+    async def test_proposal_telemetry_diagnostics_project_calls_from_every_turn(self):
+        """A turn that only classified and asked a question still shows its cost."""
+
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        session.conversation = [
+            ConversationMessage(
+                message_id="assistant-question",
+                role="assistant",
+                content="Vad ska flödet producera som slutresultat?",
+                metadata={
+                    "planner_telemetry": {
+                        "call_records": [
+                            {
+                                "call_kind": "slot_classification",
+                                "request_id": "req-1",
+                                "attempt": 1,
+                                "token_usage_source": "provider",
+                                "token_usage_estimated": False,
+                                "prompt_tokens": 8_100,
+                                "completion_tokens": 300,
+                                "total_tokens": 8_400,
+                            }
+                        ]
+                    }
+                },
+            ),
+            ConversationMessage(
+                message_id="assistant-plan",
+                role="assistant",
+                content="Plan skapad.",
+                metadata={
+                    "planner_telemetry": {
+                        "proposal_attempts": [
+                            {"attempt": 1, "kind": "initial", "total_tokens": 4_000}
+                        ],
+                        "call_records": [
+                            {
+                                "call_kind": "proposal_initial",
+                                "request_id": "req-2",
+                                "attempt": 1,
+                                "token_usage_source": "provider",
+                                "token_usage_estimated": False,
+                                "total_tokens": 4_000,
+                            }
+                        ],
+                    }
+                },
+            ),
+        ]
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        service.get_planning_state.return_value = PlanningState.empty()
+
+        result = await get_session_proposal_telemetry_diagnostics(
+            request=MagicMock(),
+            session_id=session.id,
+            container=container,
+        )
+
+        dumped = result.model_dump(mode="json")
+        assert [turn["message_id"] for turn in dumped["proposal_turns"]] == [
+            "assistant-plan"
+        ]
+        assert dumped["provider_calls"] == [
+            {
+                "message_id": "assistant-question",
+                "call_kind": "slot_classification",
+                "attempt": 1,
+                "prompt_tokens": 8_100,
+                "completion_tokens": 300,
+                "total_tokens": 8_400,
+                "provider_failure_kind": None,
+            },
+            {
+                "message_id": "assistant-plan",
+                "call_kind": "proposal_initial",
+                "attempt": 1,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": 4_000,
+                "provider_failure_kind": None,
+            },
+        ]
+
+    @pytest.mark.anyio
     async def test_proposal_telemetry_diagnostics_reject_non_creator(self):
         container = _make_container()
         session = _make_session_domain(actor_user_id=uuid4())

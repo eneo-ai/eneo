@@ -9406,3 +9406,69 @@ def test_metadata_only_mismatch_withholds_and_reports_the_real_reason(
     # phantom "topic missing".
     assert checks["key_decision_topic:Syfte"]["passed"] is True
     assert checks["key_decision_answered:Syfte"]["passed"] is False
+
+
+def test_journey_economics_split_out_classifier_spend_from_provider_calls() -> None:
+    harness = _battle_harness()
+    journey = harness._journey_with_proposal_economics(
+        {"outcome_class": "plan_first_pass"},
+        diagnostics={
+            "proposal_turns": [
+                {
+                    "message_id": "assistant-plan",
+                    "attempts": [
+                        {"attempt": 1, "kind": "initial", "total_tokens": 4_000}
+                    ],
+                }
+            ],
+            "provider_calls": [
+                {
+                    "message_id": "assistant-question",
+                    "call_kind": "slot_classification",
+                    "attempt": 1,
+                    "prompt_tokens": 8_100,
+                    "completion_tokens": 300,
+                    "total_tokens": 8_400,
+                },
+                {
+                    "message_id": "assistant-plan",
+                    "call_kind": "slot_classification",
+                    "attempt": 1,
+                    "prompt_tokens": 7_900,
+                    "completion_tokens": None,
+                    "total_tokens": 8_100,
+                },
+                {
+                    "message_id": "assistant-plan",
+                    "call_kind": "proposal_initial",
+                    "attempt": 2,
+                    "total_tokens": 4_000,
+                },
+            ],
+        },
+    )
+
+    assert journey["classifier_usage"] == {
+        "calls": 2,
+        "prompt_tokens": 16_000,
+        "completion_tokens": 300,
+        "total_tokens": 16_500,
+    }
+    assert journey["plan_outcome"]["initial_token_cost"] == 4_000
+
+
+def test_journey_economics_report_zero_classifier_spend_without_provider_calls() -> (
+    None
+):
+    harness = _battle_harness()
+    journey = harness._journey_with_proposal_economics(
+        {"outcome_class": "plan_first_pass"},
+        diagnostics={"proposal_turns": []},
+    )
+
+    assert journey["classifier_usage"] == {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }

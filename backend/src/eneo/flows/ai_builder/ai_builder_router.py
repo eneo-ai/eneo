@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderProposalAttemptDiagnostic,
     AIBuilderProposalTelemetryDiagnosticsResponse,
     AIBuilderProposalTurnDiagnostic,
+    AIBuilderProviderCallDiagnostic,
     AIBuilderTurnLifecycleResponse,
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -107,6 +108,7 @@ from eneo.flows.ai_builder.ai_builder_service import (
     PreparedMessageContext,
 )
 from eneo.flows.ai_builder.ai_builder_telemetry import (
+    planner_call_records_from_metadata,
     summarize_session_telemetry,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import (
@@ -443,6 +445,26 @@ def _classifier_diagnostic_runs(
             )
         )
     return runs
+
+
+def _provider_call_diagnostics(
+    conversation: list[ConversationMessage],
+) -> list[AIBuilderProviderCallDiagnostic]:
+    calls: list[AIBuilderProviderCallDiagnostic] = []
+    for message in conversation:
+        for record in planner_call_records_from_metadata(message.metadata):
+            calls.append(
+                AIBuilderProviderCallDiagnostic(
+                    message_id=message.message_id,
+                    call_kind=record.call_kind,
+                    attempt=record.attempt,
+                    prompt_tokens=record.prompt_tokens,
+                    completion_tokens=record.completion_tokens,
+                    total_tokens=record.total_tokens,
+                    provider_failure_kind=record.provider_failure_kind,
+                )
+            )
+    return calls
 
 
 def _proposal_turn_diagnostics(
@@ -1395,6 +1417,7 @@ async def get_session_proposal_telemetry_diagnostics(
         session_id=session.id,
         architecture=_architecture_diagnostic(planning_state),
         proposal_turns=_proposal_turn_diagnostics(session.conversation),
+        provider_calls=_provider_call_diagnostics(session.conversation),
     )
 
 

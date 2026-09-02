@@ -8,7 +8,9 @@ became part of the durable conversation history the user sees.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     loose_tool_call_name,
@@ -17,12 +19,94 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderProviderFailureKind,
+    AIBuilderProviderStatusClass,
+    AIBuilderProviderTurnState,
+)
+from eneo.flows.ai_builder.ai_builder_token_usage import TokenUsageSource
 from eneo.flows.ai_builder.ai_builder_tool_names import (
     ASK_STRUCTURED_QUESTION_TOOL_NAME,
 )
 
 PLANNER_TELEMETRY_KEY = "planner_telemetry"
 SESSION_TELEMETRY_KEY = "session_telemetry"
+
+
+ProviderCallKind = Literal[
+    "slot_classification",
+    "proposal_initial",
+    "forced_tool_continuation",
+    "proposal_repair",
+]
+
+
+class PlannerCallRecordMetadata(BaseModel):
+    """Persisted shape of one provider call in `planner_telemetry.call_records`.
+
+    Written by `ProposalTurnTelemetry.build_planner_telemetry` and read back by
+    `planner_call_records_from_metadata`, so the diagnostics projection and the
+    measurement harness never scrape the JSON by hand. Every send turn writes
+    these, including turns that only classified and then asked a question, which
+    is what makes classifier cost measurable per session.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    call_kind: ProviderCallKind
+    request_id: str
+    attempt: int = Field(ge=1)
+    token_usage_source: TokenUsageSource
+    token_usage_estimated: bool
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    context_window_tokens: int | None = None
+    model_output_ceiling_tokens: int | None = None
+    target_output_tokens: int | None = None
+    effective_output_tokens: int | None = None
+    fixed_input_tokens: int | None = None
+    safety_buffer_tokens: int | None = None
+    timeout_seconds: float | None = None
+    provider_failure_kind: AIBuilderProviderFailureKind | None = None
+    provider_status_class: AIBuilderProviderStatusClass | None = None
+    provider_turn_state: AIBuilderProviderTurnState | None = None
+
+
+class _PersistedPlannerTelemetry(BaseModel):
+    """Only the part of `planner_telemetry` the call-record reader needs."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    call_records: list[object] = []
+
+
+def planner_call_records_from_metadata(
+    metadata: Mapping[str, object] | None,
+) -> tuple[PlannerCallRecordMetadata, ...]:
+    """The provider calls a persisted assistant message accounts for.
+
+    Reads the shape `build_planner_telemetry` writes. A message without
+    telemetry, or a record an older build wrote in a shape this model no longer
+    accepts, contributes nothing: diagnostics degrade, they never raise on the
+    request path.
+    """
+
+    if metadata is None:
+        return ()
+    try:
+        telemetry = _PersistedPlannerTelemetry.model_validate(
+            metadata.get("planner_telemetry")
+        )
+    except ValidationError:
+        return ()
+    records: list[PlannerCallRecordMetadata] = []
+    for raw_record in telemetry.call_records:
+        try:
+            records.append(PlannerCallRecordMetadata.model_validate(raw_record))
+        except ValidationError:
+            continue
+    return tuple(records)
 
 
 def build_planner_telemetry(

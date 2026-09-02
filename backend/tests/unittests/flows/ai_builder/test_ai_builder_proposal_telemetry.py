@@ -58,6 +58,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     proposal_repair_reason_from_tool_failure,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderRequestBudget
+from eneo.flows.ai_builder.ai_builder_telemetry import (
+    planner_call_records_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.application.flow_authoring_command import FlowAuthoringPreview
@@ -947,3 +950,51 @@ class BadRequestLike(Exception):
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def test_persisted_call_records_read_back_through_the_typed_model() -> None:
+    """The writer and the reader share one shape; a classifier-only turn is visible."""
+
+    telemetry = ProposalTurnTelemetry(
+        request_id="req-classifier-only",
+        model="openai/gpt-5.4-nano",
+        target_kind=TargetKind.CREATE,
+    )
+    call = telemetry.begin_call(call_kind="slot_classification")
+    telemetry.complete_call(
+        call=call, usage=CompletionTokenUsage(9_000, 400, 9_400, source="provider")
+    )
+
+    metadata = {"planner_telemetry": telemetry.build_planner_telemetry()}
+    records = planner_call_records_from_metadata(metadata)
+
+    assert [(r.call_kind, r.attempt, r.total_tokens) for r in records] == [
+        ("slot_classification", 1, 9_400)
+    ]
+    assert records[0].prompt_tokens == 9_000
+    assert records[0].provider_failure_kind is None
+
+
+def test_call_records_an_older_build_wrote_in_another_shape_are_skipped() -> None:
+    metadata = {
+        "planner_telemetry": {
+            "call_records": [
+                {"call_kind": "not_a_kind", "request_id": "r", "attempt": 1},
+                {
+                    "call_kind": "proposal_initial",
+                    "request_id": "r",
+                    "attempt": 2,
+                    "token_usage_source": "provider",
+                    "token_usage_estimated": False,
+                    "total_tokens": 12,
+                },
+                "garbage",
+            ]
+        }
+    }
+
+    records = planner_call_records_from_metadata(metadata)
+
+    assert [(r.call_kind, r.attempt) for r in records] == [("proposal_initial", 2)]
+    assert planner_call_records_from_metadata(None) == ()
+    assert planner_call_records_from_metadata({"planner_telemetry": {}}) == ()

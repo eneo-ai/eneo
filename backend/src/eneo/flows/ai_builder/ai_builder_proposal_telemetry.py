@@ -30,6 +30,8 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderResolvedRequestBudget
 from eneo.flows.ai_builder.ai_builder_telemetry import (
+    PlannerCallRecordMetadata,
+    ProviderCallKind,
     build_assistant_message_metadata,
     build_planner_telemetry,
 )
@@ -91,12 +93,7 @@ ProposalTerminalFailureKind = Literal[
     "repair_quality_failure",
 ]
 ProposalAttemptKind = Literal["initial", "repair"]
-ProposalCallKind = Literal[
-    "slot_classification",
-    "proposal_initial",
-    "forced_tool_continuation",
-    "proposal_repair",
-]
+ProposalCallKind = ProviderCallKind
 ProposalAttemptFailureKind = Literal[
     "parse",
     "validation",
@@ -193,6 +190,40 @@ class ProposalCallRecord:
     provider_failure_kind: AIBuilderProviderFailureKind | None = None
     provider_status_class: AIBuilderProviderStatusClass | None = None
     provider_turn_state: AIBuilderProviderTurnState | None = None
+
+
+def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetadata:
+    budget = record.request_budget
+    return PlannerCallRecordMetadata(
+        call_kind=record.call_kind,
+        request_id=record.request_id,
+        attempt=record.attempt,
+        token_usage_source=record.usage.source,
+        token_usage_estimated=record.usage.estimated,
+        prompt_tokens=record.usage.prompt_tokens,
+        completion_tokens=record.usage.completion_tokens,
+        total_tokens=record.usage.total_tokens,
+        context_window_tokens=(
+            budget.context_window_tokens if budget is not None else None
+        ),
+        model_output_ceiling_tokens=(
+            budget.model_output_ceiling_tokens if budget is not None else None
+        ),
+        target_output_tokens=(
+            budget.target_output_tokens if budget is not None else None
+        ),
+        effective_output_tokens=(
+            budget.resolved_output_tokens if budget is not None else None
+        ),
+        fixed_input_tokens=(budget.fixed_input_tokens if budget is not None else None),
+        safety_buffer_tokens=(
+            budget.safety_buffer_tokens if budget is not None else None
+        ),
+        timeout_seconds=(budget.timeout_seconds if budget is not None else None),
+        provider_failure_kind=record.provider_failure_kind,
+        provider_status_class=record.provider_status_class,
+        provider_turn_state=record.provider_turn_state,
+    )
 
 
 @dataclass
@@ -445,68 +476,7 @@ class ProposalTurnTelemetry:
                 self.admission_normalization_hits
             )
         telemetry["call_records"] = [
-            {
-                "call_kind": record.call_kind,
-                "request_id": record.request_id,
-                "attempt": record.attempt,
-                "token_usage_source": record.usage.source,
-                "token_usage_estimated": record.usage.estimated,
-                **(
-                    {
-                        "context_window_tokens": (
-                            record.request_budget.context_window_tokens
-                        ),
-                        "model_output_ceiling_tokens": (
-                            record.request_budget.model_output_ceiling_tokens
-                        ),
-                        "target_output_tokens": (
-                            record.request_budget.target_output_tokens
-                        ),
-                        "effective_output_tokens": (
-                            record.request_budget.resolved_output_tokens
-                        ),
-                        "fixed_input_tokens": (
-                            record.request_budget.fixed_input_tokens
-                        ),
-                        "safety_buffer_tokens": (
-                            record.request_budget.safety_buffer_tokens
-                        ),
-                        "timeout_seconds": record.request_budget.timeout_seconds,
-                    }
-                    if record.request_budget is not None
-                    else {}
-                ),
-                **(
-                    {"provider_failure_kind": record.provider_failure_kind}
-                    if record.provider_failure_kind is not None
-                    else {}
-                ),
-                **(
-                    {"provider_status_class": record.provider_status_class}
-                    if record.provider_status_class is not None
-                    else {}
-                ),
-                **(
-                    {"provider_turn_state": record.provider_turn_state}
-                    if record.provider_turn_state is not None
-                    else {}
-                ),
-                **(
-                    {"prompt_tokens": record.usage.prompt_tokens}
-                    if record.usage.prompt_tokens is not None
-                    else {}
-                ),
-                **(
-                    {"completion_tokens": record.usage.completion_tokens}
-                    if record.usage.completion_tokens is not None
-                    else {}
-                ),
-                **(
-                    {"total_tokens": record.usage.total_tokens}
-                    if record.usage.total_tokens is not None
-                    else {}
-                ),
-            }
+            _call_record_metadata(record).model_dump(mode="json", exclude_none=True)
             for record in self.call_records
         ]
         return telemetry
