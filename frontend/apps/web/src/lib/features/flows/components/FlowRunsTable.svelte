@@ -620,7 +620,9 @@
                   class="px-2 py-2 text-right align-middle"
                   onclick={(e: MouseEvent) => e.stopPropagation()}
                 >
-                  <div class="inline-flex items-center gap-1">
+                  <!-- Cells keep their text on one line; the action group wraps
+                       instead so a narrow viewport never scrolls the table sideways. -->
+                  <div class="flex flex-wrap items-center justify-end gap-1">
                     <Button
                       variant="outline"
                       size="sm"

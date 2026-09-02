@@ -397,7 +397,9 @@
     <Alert.Description>{m.flow_run_evidence_error()}</Alert.Description>
   </Alert.Root>
 {:else}
-  <div class="flex flex-col gap-4">
+  <!-- The panel renders inside a table cell that keeps its own text on one
+       line; evidence prose and transcripts must wrap. -->
+  <div class="flex flex-col gap-4 whitespace-normal">
     <FlowRunEvidenceSummary
       {runStatus}
       traceId={evidence.debug_export?.run?.trace_id ?? null}

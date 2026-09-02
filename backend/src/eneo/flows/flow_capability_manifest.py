@@ -376,7 +376,8 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
                 "is, using a participant list from a run-time form field. The "
                 "step output is the mapping (structured) plus the transcript "
                 "with names applied (text), and the run always pauses for an "
-                "edit review so a person confirms the mapping."
+                "edit review so a person confirms the mapping, corrects the "
+                "text and re-attributes speakers."
             ),
             (
                 InvariantSpec(
