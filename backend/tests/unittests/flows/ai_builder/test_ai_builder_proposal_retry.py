@@ -798,10 +798,8 @@ async def test_forced_tool_retry_terminalizes_provider_truncation_in_its_phase()
 
 
 @pytest.mark.asyncio
-async def test_forced_continuation_provider_failure_keeps_its_upstream_identity() -> (
-    None
-):
-    """A transport or provider error is not the model omitting the tool."""
+async def test_forced_continuation_local_failure_is_internal_not_missing_tool() -> None:
+    """Provider rejections raise typed; anything else here is a local failure."""
 
     process, seen = _process_sequence()
     repair = AsyncMock(
@@ -826,7 +824,7 @@ async def test_forced_continuation_provider_failure_keeps_its_upstream_identity(
     assert [event["event"] for event in events] == ["status", "error"]
     assert json.loads(events[-1]["data"])["code"] == "planner_upstream_error"
     failed = _failed_turn_payloads(records)
-    assert [record["final_failure_kind"] for record in failed] == ["provider_error"]
+    assert [record["final_failure_kind"] for record in failed] == ["internal_error"]
     assert failed[0]["branch"] == "forced_tool_retry_completion_error"
 
 

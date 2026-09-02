@@ -102,6 +102,7 @@ ProposalAttemptFailureKind = Literal[
     "architecture",
     "provider_error",
     "provider_truncation",
+    "internal_error",
 ]
 ApplyFailurePhase = Literal["prepare_authoring", "apply_authoring"]
 MaterializerProgressStage = Literal[

@@ -241,17 +241,20 @@ _REJECTION_FEEDBACK: dict[CreateAssemblyRejectionReason, str] = {
 }
 
 
-# Who can repair each rejection: the model rewrote the steps, fields, or refs
-# the reason names; the user confirmed the architecture value it names; or the
-# assembler broke its own invariant.
+# Who can repair each rejection. A reason is model-correctable only when its
+# predicate reads the proposed steps, fields, or refs; a predicate over the
+# committed runtime input, aggregation intent, terminal output, terminal schema
+# or server-derived reader fields cannot change within the turn, so it ends the
+# turn as user action (conflicting confirmed requirements) or server defect
+# (a state the architecture gate should have made impossible).
 _REJECTION_REPAIR_DISPOSITION: dict[
     CreateAssemblyRejectionReason, ArchitectureRepairDisposition
 ] = {
-    "aggregate_requires_text_or_document_output": "model_correctable",
+    "aggregate_requires_text_or_document_output": "user_action",
     "all_previous_step_cannot_use_explicit_refs": "model_correctable",
     "compare_json_requires_structured_producers": "model_correctable",
     "confirmed_runtime_input_source_output_collision": "model_correctable",
-    "audio_requires_linear": "model_correctable",
+    "audio_requires_linear": "user_action",
     "docx_template_form_fields_mismatch": "model_correctable",
     "docx_template_shape_unsupported": "model_correctable",
     "document_report_compose_topology_missing": "server_defect",
@@ -260,19 +263,19 @@ _REJECTION_REPAIR_DISPOSITION: dict[
     "form_field_no_legal_target": "model_correctable",
     "form_field_placement_mismatch": "model_correctable",
     "form_field_required_semantic_target_missing": "model_correctable",
-    "invalid_template_fill_mode": "model_correctable",
+    "invalid_template_fill_mode": "server_defect",
     "plan_invariant_failed": "server_defect",
-    "pure_audio_transcription_requires_no_reader_fields": "model_correctable",
+    "pure_audio_transcription_requires_no_reader_fields": "server_defect",
     "pure_audio_transcription_shape_unsupported": "model_correctable",
     "section_writer_structured_source_ambiguous": "server_defect",
     "source_file_first_step_requires_json": "model_correctable",
     "step_output_type_mismatch": "model_correctable",
-    "terminal_schema_requires_json_terminal": "model_correctable",
+    "terminal_schema_requires_json_terminal": "user_action",
     "structured_fan_in_exceeds_limit": "model_correctable",
     "unsupported_aggregation_intent": "user_action",
     "unsupported_architecture_hints": "user_action",
     "unsupported_final_output_type": "user_action",
-    "unsupported_output_mode": "model_correctable",
+    "unsupported_output_mode": "server_defect",
     "unsupported_runtime_input_type": "user_action",
     "unsupported_runtime_output_tuple": "user_action",
 }

@@ -922,7 +922,7 @@ def _record_proposal_repair_invocation(
 def _first_attempt_failure_kind(
     kind: ProposalAttemptFailureKind,
 ) -> ProposalFailureKind | None:
-    if kind == "provider_error" or kind == "provider_truncation":
+    if kind in ("provider_error", "provider_truncation", "internal_error"):
         return None
     return kind
 

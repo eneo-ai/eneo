@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter_ns
 from types import SimpleNamespace
@@ -10,6 +13,7 @@ from uuid import uuid4
 
 import pytest
 
+import eneo.flows.ai_builder.ai_builder_proposal_telemetry as proposal_telemetry_module
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -63,6 +67,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     _forced_submission_response,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
+    PROPOSAL_TELEMETRY_LOG_KEY,
     ProposalTurnTelemetry,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
@@ -187,9 +192,31 @@ def _normalized_message(
     return LLMCompletionMessage(content=content, tool_calls=tool_calls)
 
 
-@pytest.mark.asyncio
-async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
-    authoring_spec = """
+@contextmanager
+def _captured_failed_turns() -> Generator[list[dict[str, object]]]:
+    """Failed-turn telemetry records emitted while the block runs."""
+
+    payloads: list[dict[str, object]] = []
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            payload = getattr(record, PROPOSAL_TELEMETRY_LOG_KEY, None)
+            if isinstance(payload, dict) and payload.get("operation") == "failed_turn":
+                payloads.append({str(key): value for key, value in payload.items()})
+
+    handler = CaptureHandler()
+    telemetry_logger = proposal_telemetry_module.logger
+    old_level = telemetry_logger.level
+    telemetry_logger.setLevel(logging.INFO)
+    telemetry_logger.addHandler(handler)
+    try:
+        yield payloads
+    finally:
+        telemetry_logger.removeHandler(handler)
+        telemetry_logger.setLevel(old_level)
+
+
+_DECISION_REPORT_AUTHORING_SPEC = """
     Create a DOCX decision report from an uploaded audio recording.
 
     # Transcribe and review the recording
@@ -200,72 +227,62 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
     Write the complete report and let the case owner edit it.
     # Finalize the document
     Produce the complete revised document body for delivery.
-    """
-    requested_output_sections = extract_requested_output_sections(authoring_spec)
-    assert not requested_output_sections.high_confidence
+"""
 
-    proposal_call = _make_tool_call(
-        PROPOSE_FLOW_TOOL_NAME,
-        {
-            "flow_name": "Decision report",
-            "flow_description": None,
-            "plan_rationale": "Ground, draft, review, and finalize one report.",
-            "steps": [
-                {
-                    "name": "Analyze stable decision evidence",
-                    "instructions": (
-                        "Extract grounded facts, risks, and recommended actions "
-                        "from the corrected transcript."
-                    ),
-                    "output_fields": [
-                        {
-                            "name": "facts",
-                            "field_type": "string",
-                            "description": "Grounded facts from the source.",
-                            "required": False,
-                        },
-                        {
-                            "name": "risks",
-                            "field_type": "string",
-                            "description": "Grounded risks from the source.",
-                            "required": False,
-                        },
-                        {
-                            "name": "actions",
-                            "field_type": "string",
-                            "description": "Recommended actions grounded in the source.",
-                            "required": False,
-                        },
-                    ],
-                    "model_ref": None,
-                    "knowledge_refs": [],
-                    "citations_requested": False,
-                },
-                {
-                    "name": "Write and review decision report",
-                    "instructions": (
-                        "Write the complete final decision report from the extracted "
-                        "facts, risks, and actions."
-                    ),
-                    "output_fields": None,
-                    "model_ref": None,
-                    "knowledge_refs": [],
-                    "citations_requested": False,
-                },
-            ],
-            "assumptions": [],
-        },
-        tool_call_id="call-complex-authoring-spec",
-    )
-    provider_response = _make_response_with_tool_calls(
-        proposal_call,
-        prompt_tokens=3_200,
-        completion_tokens=1_100,
-        total_tokens=4_300,
-    )
-    submission = _make_submission()
-    assert isinstance(submission, ProposalSubmissionOwner)
-    submission.litellm_client.acompletion = AsyncMock(return_value=provider_response)
+
+def _decision_report_proposal_arguments() -> dict[str, object]:
+    return {
+        "flow_name": "Decision report",
+        "flow_description": None,
+        "plan_rationale": "Ground, draft, review, and finalize one report.",
+        "steps": [
+            {
+                "name": "Analyze stable decision evidence",
+                "instructions": (
+                    "Extract grounded facts, risks, and recommended actions "
+                    "from the corrected transcript."
+                ),
+                "output_fields": [
+                    {
+                        "name": "facts",
+                        "field_type": "string",
+                        "description": "Grounded facts from the source.",
+                        "required": False,
+                    },
+                    {
+                        "name": "risks",
+                        "field_type": "string",
+                        "description": "Grounded risks from the source.",
+                        "required": False,
+                    },
+                    {
+                        "name": "actions",
+                        "field_type": "string",
+                        "description": "Recommended actions grounded in the source.",
+                        "required": False,
+                    },
+                ],
+                "model_ref": None,
+                "knowledge_refs": [],
+                "citations_requested": False,
+            },
+            {
+                "name": "Write and review decision report",
+                "instructions": (
+                    "Write the complete final decision report from the extracted "
+                    "facts, risks, and actions."
+                ),
+                "output_fields": None,
+                "model_ref": None,
+                "knowledge_refs": [],
+                "citations_requested": False,
+            },
+        ],
+        "assumptions": [],
+    }
+
+
+def _decision_report_planning_state() -> PlanningState:
     planning_state = PlanningState.empty()
     planning_state.architecture_commit = finalize_architecture_commit(
         ArchitectureCommitDraft(
@@ -298,15 +315,74 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
             evidence=["quote:user_message:1:Edit the decision report."],
         ),
     ]
+    return planning_state
+
+
+def _decision_report_attempt_kwargs(
+    *,
+    usage_tracker: ProposalTurnTelemetry,
+    request_id: str,
+) -> dict[str, object]:
+    requested_output_sections = extract_requested_output_sections(
+        _DECISION_REPORT_AUTHORING_SPEC
+    )
+    planning_state = _decision_report_planning_state()
     resource_catalog = build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
     )
     turn = _make_context().turn
     route = _route()
+    return dict(
+        turn=turn,
+        conversation=[
+            ConversationMessage(role="user", content=_DECISION_REPORT_AUTHORING_SPEC)
+        ],
+        new_messages_start=1,
+        message_groups=_message_groups([{"role": "system", "content": "Prompt"}]),
+        completion_model_route=route,
+        available_model_refs=None,
+        available_kb_refs=None,
+        resource_catalog=resource_catalog,
+        proposal_tool_schema=build_propose_flow_tool_schema(
+            resource_catalog=resource_catalog
+        ),
+        proposal_request_budget=_proposal_request_budget(8_192),
+        proposal_temperature=0.2,
+        request_id=request_id,
+        usage_tracker=usage_tracker,
+        planning_state=planning_state,
+        compile_context=create_compile_context_from_planning_state(
+            planning_state,
+            ui_language="en",
+            requested_output_sections=requested_output_sections,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
+    authoring_spec = _DECISION_REPORT_AUTHORING_SPEC
+    requested_output_sections = extract_requested_output_sections(authoring_spec)
+    assert not requested_output_sections.high_confidence
+
+    proposal_call = _make_tool_call(
+        PROPOSE_FLOW_TOOL_NAME,
+        _decision_report_proposal_arguments(),
+        tool_call_id="call-complex-authoring-spec",
+    )
+    provider_response = _make_response_with_tool_calls(
+        proposal_call,
+        prompt_tokens=3_200,
+        completion_tokens=1_100,
+        total_tokens=4_300,
+    )
+    submission = _make_submission()
+    assert isinstance(submission, ProposalSubmissionOwner)
+    submission.litellm_client.acompletion = AsyncMock(return_value=provider_response)
     usage_tracker = ProposalTurnTelemetry(
         request_id="req-complex-authoring-spec",
-        model=route.litellm_model,
+        model=_route().litellm_model,
         target_kind=TargetKind.CREATE,
     )
     captured_compiled: list[CompiledProposal] = []
@@ -335,31 +411,10 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
             [
                 event
                 async for event in submission.run_active_submission_attempt(
-                    turn=turn,
-                    conversation=[
-                        ConversationMessage(role="user", content=authoring_spec)
-                    ],
-                    new_messages_start=1,
-                    message_groups=_message_groups(
-                        [{"role": "system", "content": "Prompt"}]
-                    ),
-                    completion_model_route=route,
-                    available_model_refs=None,
-                    available_kb_refs=None,
-                    resource_catalog=resource_catalog,
-                    proposal_tool_schema=build_propose_flow_tool_schema(
-                        resource_catalog=resource_catalog
-                    ),
-                    proposal_request_budget=_proposal_request_budget(8_192),
-                    proposal_temperature=0.2,
-                    request_id="req-complex-authoring-spec",
-                    usage_tracker=usage_tracker,
-                    planning_state=planning_state,
-                    compile_context=create_compile_context_from_planning_state(
-                        planning_state,
-                        ui_language="en",
-                        requested_output_sections=requested_output_sections,
-                    ),
+                    **_decision_report_attempt_kwargs(
+                        usage_tracker=usage_tracker,
+                        request_id="req-complex-authoring-spec",
+                    )
                 )
             ]
         )
@@ -431,6 +486,95 @@ def test_forced_submission_response_accepts_one_active_submission_tool() -> None
     assert response is not None
     assert response.tool_call is tool_call
     assert response.text_content == "Här är planen."
+
+
+@pytest.mark.asyncio
+async def test_initial_text_then_forced_tool_submits_with_exactly_two_calls() -> None:
+    """Prose on the first call gets one forced continuation, never a third call."""
+
+    submission = _make_submission()
+    assert isinstance(submission, ProposalSubmissionOwner)
+    submission.litellm_client.acompletion = AsyncMock(
+        side_effect=[
+            _make_response_with_text("Här är planen i ord."),
+            _make_response_with_tool_calls(
+                _make_tool_call(
+                    PROPOSE_FLOW_TOOL_NAME,
+                    _decision_report_proposal_arguments(),
+                    tool_call_id="call-forced-after-text",
+                )
+            ),
+        ]
+    )
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-text-then-tool",
+        model=_route().litellm_model,
+        target_kind=TargetKind.CREATE,
+    )
+
+    with (
+        patch(
+            "eneo.flows.ai_builder.ai_builder_proposal_finalization."
+            "store_plan_and_update_conversation",
+            new=_store_compiled_plan,
+        ),
+        _captured_failed_turns() as failed,
+    ):
+        events = _wire_events(
+            [
+                event
+                async for event in submission.run_active_submission_attempt(
+                    **_decision_report_attempt_kwargs(
+                        usage_tracker=usage_tracker,
+                        request_id="req-text-then-tool",
+                    )
+                )
+            ]
+        )
+
+    assert [event["event"] for event in events] == ["plan"]
+    assert submission.litellm_client.acompletion.await_count == 2
+    assert failed == []
+
+
+@pytest.mark.asyncio
+async def test_initial_text_twice_ends_typed_after_exactly_two_calls() -> None:
+    """The forced continuation is the only retry: a second prose answer is terminal."""
+
+    submission = _make_submission()
+    assert isinstance(submission, ProposalSubmissionOwner)
+    submission.litellm_client.acompletion = AsyncMock(
+        side_effect=[
+            _make_response_with_text("Vilken modell ska jag använda?"),
+            _make_response_with_text("Jag behöver mer information."),
+        ]
+    )
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-text-twice",
+        model=_route().litellm_model,
+        target_kind=TargetKind.CREATE,
+    )
+
+    with _captured_failed_turns() as failed:
+        events = _wire_events(
+            [
+                event
+                async for event in submission.run_active_submission_attempt(
+                    **_decision_report_attempt_kwargs(
+                        usage_tracker=usage_tracker,
+                        request_id="req-text-twice",
+                    )
+                )
+            ]
+        )
+
+    assert [event["event"] for event in events] == ["error"]
+    assert json.loads(events[0]["data"])["code"] == "proposal_tool_missing"
+    assert submission.litellm_client.acompletion.await_count == 2
+    assert [record["final_failure_kind"] for record in failed] == [
+        "missing_submission_tool"
+    ]
+    assert failed[0]["branch"] == "forced_tool_retry_missing_submission"
 
 
 @pytest.mark.asyncio

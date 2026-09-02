@@ -140,11 +140,11 @@ def provider_truncation_failure(*, phase: AIBuilderErrorPhase) -> TerminalFailur
     )
 
 
-def provider_error_failure(*, phase: AIBuilderErrorPhase) -> TerminalFailure:
-    """A provider or transport failure inside a forced continuation keeps its identity."""
+def internal_error_failure(*, phase: AIBuilderErrorPhase) -> TerminalFailure:
+    """A local completion-processing failure; provider rejections raise typed instead."""
 
     return TerminalFailure(
-        kind="provider_error",
+        kind="internal_error",
         message="The AI planner failed. Please try again.",
         code=AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR,
         phase=phase,
@@ -190,16 +190,6 @@ def _self_correction_error_code(
     return AIBuilderErrorCode.SELF_CORRECTION_INVALID_PLAN
 
 
-def _self_correction_terminal_failure_kind(
-    failure_kind: ToolProcessingFailureKind | None,
-) -> ProposalTerminalFailureKind:
-    if failure_kind == "parse":
-        return "invalid_repair_payload"
-    if failure_kind == "quality":
-        return "repair_quality_failure"
-    return "invalid_repair_plan"
-
-
 def _log_self_correction_failed_turn(
     *,
     ctx: ProposalTurnContext,
@@ -222,12 +212,12 @@ def _log_self_correction_validation_failed_turn(
     *,
     ctx: ProposalTurnContext,
     branch: ProposalFailedTurnBranch,
-    failure_kind: ToolProcessingFailureKind | None,
+    failure_kind: ToolProcessingFailureKind,
 ) -> None:
     _log_self_correction_failed_turn(
         ctx=ctx,
         branch=branch,
-        final_failure_kind=_self_correction_terminal_failure_kind(failure_kind),
+        final_failure_kind=terminal_failure_kind(failure_kind),
         final_error_code=_self_correction_error_code(failure_kind),
     )
 
@@ -252,6 +242,8 @@ def terminal_failure_kind(
             return "provider_error"
         case "provider_truncation":
             return "provider_truncation"
+        case "internal_error":
+            return "internal_error"
 
 
 def _terminal_failure_branch(
@@ -268,7 +260,7 @@ def _terminal_failure_branch(
                 if forced
                 else "self_correction_missing_tool_response"
             )
-        case "provider_error":
+        case "provider_error" | "internal_error":
             return (
                 "forced_tool_retry_completion_error"
                 if forced
@@ -695,7 +687,7 @@ async def _execute_forced_tool_retry(
             exc_info=error,
             extra={"request_id": ctx.request_id},
         )
-        return provider_error_failure(phase=request.error_phase)
+        return internal_error_failure(phase=request.error_phase)
     if not response.choices:
         _record_attempt_failure(ctx, failure_kind="missing_submission_tool")
         return missing_tool_call_failure()
