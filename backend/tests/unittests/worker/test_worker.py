@@ -10,9 +10,10 @@ from arq.worker import Function, create_worker
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
 from eneo.main.config import get_settings
 from eneo.websites.application.crawl_dispatch import CrawlReconciliationResult
+from eneo.worker import arq as worker_arq
 from eneo.worker import routes as worker_routes
 from eneo.worker.arq import CrawlerWorkerSettings, WorkerSettings
-from eneo.worker.worker import _job_id_from_ctx
+from eneo.worker.worker import ARQContext, _job_id_from_ctx
 
 
 def _function_names(functions: list[Callable[..., Any] | Function]) -> set[str]:
@@ -49,6 +50,32 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.job_serializer is general.job_serializer
     assert crawler.job_deserializer is general.job_deserializer
     assert crawler.functions["crawl"].keep_result_s == 0
+
+
+async def test_crawler_startup_cleans_orphans_before_runtime_start(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+
+    def cleanup() -> int:
+        events.append("cleanup")
+        return 2
+
+    async def startup(ctx: ARQContext) -> None:
+        assert ctx == {"worker": "crawler"}
+        events.append("startup")
+
+    monkeypatch.setattr(
+        worker_arq,
+        "cleanup_orphaned_crawl_directories",
+        cleanup,
+    )
+    monkeypatch.setattr(worker_arq.crawler_worker, "startup", startup)
+
+    await worker_arq._crawler_worker_startup({"worker": "crawler"})
+
+    assert events == ["cleanup", "startup"]
+    assert CrawlerWorkerSettings["on_startup"] is worker_arq._crawler_worker_startup
 
 
 async def test_successful_reconciliation_renews_its_health_signal(monkeypatch) -> None:

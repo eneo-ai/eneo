@@ -3,12 +3,14 @@ import hashlib
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock
 from urllib.parse import quote
 
 import pytest
 from aiohttp import web
 
+from eneo.crawler import python_engine
 from eneo.crawler.engine import (
     ConditionalGet,
     CrawlEvent,
@@ -707,7 +709,93 @@ def test_download_filenames_preserve_unicode_and_fit_filesystem_limits() -> None
     )
 
 
-async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
+def test_orphan_cleanup_only_removes_crawler_owned_directories(
+    tmp_path: Path,
+) -> None:
+    orphan = tmp_path / "eneo-crawl-abandoned"
+    orphan.mkdir()
+    (orphan / "download.pdf").write_bytes(b"document bytes")
+
+    upload_staging = tmp_path / "job-staging"
+    upload_staging.mkdir()
+    exports = tmp_path / "exports"
+    exports.mkdir()
+    legacy_file = tmp_path / "tmp12345678"
+    legacy_file.write_text("legacy crawl or unrelated temporary file")
+    prefixed_file = tmp_path / "eneo-crawl-not-a-directory"
+    prefixed_file.write_text("not owned by TemporaryDirectory")
+    prefixed_symlink = tmp_path / "eneo-crawl-not-owned"
+    prefixed_symlink.symlink_to(upload_staging, target_is_directory=True)
+
+    removed = python_engine.cleanup_orphaned_crawl_directories(tmp_path)
+
+    assert removed == 1
+    assert not orphan.exists()
+    assert upload_staging.is_dir()
+    assert exports.is_dir()
+    assert legacy_file.is_file()
+    assert prefixed_file.is_file()
+    assert prefixed_symlink.is_symlink()
+
+
+def test_orphan_cleanup_continues_after_one_workspace_cannot_be_removed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blocked = tmp_path / "eneo-crawl-blocked"
+    blocked.mkdir()
+    recoverable = tmp_path / "eneo-crawl-recoverable"
+    recoverable.mkdir()
+    remove_tree = python_engine.shutil.rmtree
+
+    def fail_for_blocked_workspace(path: Path) -> None:
+        if path == blocked:
+            raise PermissionError("workspace is not writable")
+        remove_tree(path)
+
+    monkeypatch.setattr(python_engine.shutil, "rmtree", fail_for_blocked_workspace)
+
+    removed = python_engine.cleanup_orphaned_crawl_directories(tmp_path)
+
+    assert removed == 1
+    assert blocked.is_dir()
+    assert not recoverable.exists()
+
+
+async def test_downloaded_file_is_removed_after_event_consumer_resumes() -> None:
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=(
+                '<main><a href="/first.pdf">First</a>'
+                '<a href="/second.pdf">Second</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def file_response(_: web.Request) -> web.Response:
+        return web.Response(body=b"document bytes", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/first.pdf", file_response)
+    app.router.add_get("/second.pdf", file_response)
+
+    async with _serve(app) as base_url:
+        downloaded_paths: list[Path] = []
+        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            _request(f"{base_url}/start")
+        ):
+            if isinstance(event, FileDownloaded):
+                assert event.path.read_bytes() == b"document bytes"
+                if downloaded_paths:
+                    assert not downloaded_paths[-1].exists()
+                downloaded_paths.append(event.path)
+
+    assert len(downloaded_paths) == 2
+    assert all(not path.exists() for path in downloaded_paths)
+
+
+async def test_closing_crawl_stream_removes_download_workspace() -> None:
     async def start(_: web.Request) -> web.Response:
         return web.Response(
             text='<main><a href="/guide.pdf">Guide</a></main>',
@@ -722,16 +810,20 @@ async def test_downloaded_file_exists_until_event_consumer_resumes() -> None:
     app.router.add_get("/guide.pdf", guide)
 
     async with _serve(app) as base_url:
-        downloaded_path = None
-        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+        stream = PythonCrawlEngine(allow_private_network=True).crawl(
             _request(f"{base_url}/start")
-        ):
+        )
+        downloaded_path: Path | None = None
+        async for event in stream:
             if isinstance(event, FileDownloaded):
                 downloaded_path = event.path
-                assert event.path.read_bytes() == b"document bytes"
+                break
 
-    assert downloaded_path is not None
-    assert not downloaded_path.exists()
+        assert downloaded_path is not None
+        workspace = downloaded_path.parent
+        assert downloaded_path.is_file()
+        await stream.aclose()
+        assert not workspace.exists()
 
 
 async def test_file_size_limit_applies_to_streams_without_content_length(

@@ -9,15 +9,16 @@ import hashlib
 import ipaddress
 import logging
 import re
+import shutil
 import socket
 import unicodedata
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, gettempdir
 from time import monotonic
 from urllib.parse import unquote, urlsplit
 from urllib.robotparser import RobotFileParser
@@ -63,10 +64,33 @@ _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _MAX_REDIRECTS = 10
 _MAX_FILENAME_BYTES = 200
 _MAX_SUFFIX_BYTES = 16
+_CRAWL_TEMP_PREFIX = "eneo-crawl-"
 
 _process_capacity: asyncio.Semaphore | None = None
 _process_capacity_loop: asyncio.AbstractEventLoop | None = None
 _process_capacity_limit: int | None = None
+
+
+def cleanup_orphaned_crawl_directories(temp_root: Path | None = None) -> int:
+    """Remove abandoned workspaces from a temp root private to this worker."""
+
+    root = temp_root or Path(gettempdir())
+    removed = 0
+    for path in root.glob(f"{_CRAWL_TEMP_PREFIX}*"):
+        try:
+            if path.is_symlink() or not path.is_dir():
+                continue
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            logger.warning(
+                "Abandoned crawler workspace could not be removed",
+                extra={"workspace": path.name, "errno": exc.errno},
+            )
+            continue
+        removed += 1
+    return removed
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,7 +237,7 @@ class PythonCrawlEngine:
     def _capacity(self) -> asyncio.Semaphore:
         return _process_http_capacity(self._global_concurrency)
 
-    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+    async def crawl(self, request: CrawlRequest) -> AsyncGenerator[CrawlEvent, None]:
         seed_url = normalize_url(request.url)
         if seed_url is None:
             raise ValueError(f"Unsupported crawl URL: {request.url}")
@@ -465,7 +489,7 @@ class PythonCrawlEngine:
                 )
 
                 if request.download_files and file_links:
-                    files_dir = TemporaryDirectory(prefix="eneo-crawl-")
+                    files_dir = TemporaryDirectory(prefix=_CRAWL_TEMP_PREFIX)
                     try:
                         async for result in self._download_files(
                             session=session,
@@ -721,7 +745,22 @@ class PythonCrawlEngine:
                 results = [task.result() for task in done]
                 fill_capacity()
                 for result in results:
-                    yield result
+                    try:
+                        yield result
+                    finally:
+                        if isinstance(result, FileDownloaded):
+                            try:
+                                result.path.unlink(missing_ok=True)
+                            except OSError as exc:
+                                logger.warning(
+                                    "Processed crawl file could not be removed; "
+                                    "workspace cleanup will retry",
+                                    extra={
+                                        "workspace": result.path.parent.name,
+                                        "file": result.path.name,
+                                        "errno": exc.errno,
+                                    },
+                                )
         finally:
             for task in pending:
                 task.cancel()

@@ -925,20 +925,25 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             async def _produce_events() -> None:
                 try:
-                    async for event in crawler.crawl(crawl_request):
-                        acknowledgement = (
-                            asyncio.Event()
-                            if isinstance(event, FileDownloaded)
-                            else None
-                        )
-                        event_weight = (
-                            len(event.content.encode("utf-8"))
-                            if isinstance(event, PageCrawled)
-                            else 0
-                        )
-                        await queue.put((event, acknowledgement), weight=event_weight)
-                        if acknowledgement is not None:
-                            await acknowledgement.wait()
+                    async with contextlib.aclosing(
+                        crawler.crawl(crawl_request)
+                    ) as event_stream:
+                        async for event in event_stream:
+                            acknowledgement = (
+                                asyncio.Event()
+                                if isinstance(event, FileDownloaded)
+                                else None
+                            )
+                            event_weight = (
+                                len(event.content.encode("utf-8"))
+                                if isinstance(event, PageCrawled)
+                                else 0
+                            )
+                            await queue.put(
+                                (event, acknowledgement), weight=event_weight
+                            )
+                            if acknowledgement is not None:
+                                await acknowledgement.wait()
                 finally:
                     await queue.close()
 

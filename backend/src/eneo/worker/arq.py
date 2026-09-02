@@ -2,6 +2,7 @@ from eneo.apps.app_runs.api.app_run_worker import worker as app_worker
 from eneo.completion_models.infrastructure.model_cleanup_worker import (
     worker as model_cleanup_worker,
 )
+from eneo.crawler.python_engine import cleanup_orphaned_crawl_directories
 from eneo.data_retention.infrastructure.data_retention_worker import (
     worker as data_retention_worker,
 )
@@ -13,12 +14,15 @@ from eneo.integration.infrastructure.sharepoint_subscription_worker import (
 )
 from eneo.integration.tasks.integration_task import worker as integration_worker
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
+from eneo.main.logging import get_logger
 from eneo.transcription_models.infrastructure.transcription_model_cleanup_worker import (  # noqa: E501
     worker as transcription_model_cleanup_worker,
 )
 from eneo.worker.routes import crawler_worker
 from eneo.worker.routes import worker as sub_worker
-from eneo.worker.worker import Worker
+from eneo.worker.worker import ARQContext, Worker
+
+logger = get_logger(__name__)
 
 worker = Worker()
 worker.include_subworker(sub_worker)
@@ -53,6 +57,15 @@ def _arq_settings(runtime: Worker, *, queue_name: str) -> dict[str, object]:
     }
 
 
+async def _crawler_worker_startup(ctx: ARQContext) -> None:
+    removed = cleanup_orphaned_crawl_directories()
+    await crawler_worker.startup(ctx)
+    logger.info(
+        "Crawler temporary workspace recovery completed",
+        extra={"directories_removed": removed},
+    )
+
+
 # These public names are imported by the ARQ CLI. Dictionaries are deliberate:
 # ARQ only reads attributes defined directly on a settings class, not inherited ones.
 WorkerSettings = _arq_settings(worker, queue_name=DEFAULT_QUEUE_NAME)
@@ -60,3 +73,4 @@ CrawlerWorkerSettings = _arq_settings(
     crawler_worker,
     queue_name=CRAWLER_QUEUE_NAME,
 )
+CrawlerWorkerSettings["on_startup"] = _crawler_worker_startup

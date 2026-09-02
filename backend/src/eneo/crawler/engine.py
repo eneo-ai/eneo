@@ -6,7 +6,7 @@ contract event-based lets the worker persist pages incrementally instead of
 requiring every engine to build a complete spool before ingestion starts.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
@@ -92,6 +92,8 @@ class PageUnchanged:
 
 @dataclass(frozen=True, slots=True)
 class FileDownloaded:
+    """Downloaded file borrowed until the crawl stream advances or closes."""
+
     url: str
     filename: str
     path: Path
@@ -134,4 +136,4 @@ CrawlEvent = (
 class CrawlEngine(Protocol):
     """Execution-only crawler interface implemented by every backend."""
 
-    def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]: ...
+    def crawl(self, request: CrawlRequest) -> AsyncGenerator[CrawlEvent, None]: ...

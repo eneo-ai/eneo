@@ -52,6 +52,7 @@ from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.crawl_service import CrawlService
 from eneo.websites.domain.website import UpdateInterval, Website
 from eneo.worker import crawl_tasks as crawl_tasks_module
+from eneo.worker.crawl import CrawlLeaseLostError
 from eneo.worker.crawl_tasks import crawl_task
 
 pytestmark = pytest.mark.integration
@@ -166,6 +167,42 @@ class _UsefulFilePartialCrawlEngine:
             files_downloaded=2,
             files_failed=1,
         )
+
+
+class _CloseTrackingCrawlStream:
+    def __init__(self, request: CrawlRequest, path: Path) -> None:
+        self._request = request
+        self._path = path
+        self._yielded = False
+        self._never_finishes = asyncio.Event()
+        self.closed = False
+
+    def __aiter__(self) -> "_CloseTrackingCrawlStream":
+        return self
+
+    async def __anext__(self) -> CrawlEvent:
+        if not self._yielded:
+            self._yielded = True
+            return FileDownloaded(
+                url=f"{self._request.url}/{self._path.name}",
+                filename=self._path.name,
+                path=self._path,
+            )
+        await self._never_finishes.wait()
+        raise StopAsyncIteration
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _CloseTrackingCrawlEngine:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self.stream: _CloseTrackingCrawlStream | None = None
+
+    def crawl(self, request: CrawlRequest) -> _CloseTrackingCrawlStream:
+        self.stream = _CloseTrackingCrawlStream(request, self._path)
+        return self.stream
 
 
 class _FailureDominatedPageLimitedCrawlEngine:
@@ -1244,6 +1281,44 @@ async def test_published_files_are_not_reduced_by_unrelated_download_failures(
         assert persisted.consecutive_failures == 0
         assert persisted.next_retry_at is None
         assert persisted.last_crawled_at is not None
+
+
+async def test_worker_closes_crawl_stream_when_file_processing_aborts(
+    db_session,
+    admin_user,
+    tmp_path: Path,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Aborted file processing",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+
+    downloaded_path = tmp_path / "download.pdf"
+    downloaded_path.write_bytes(b"document bytes")
+    engine = _CloseTrackingCrawlEngine(downloaded_path)
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(engine))
+    container.text_extractor.override(
+        providers.Object(
+            SimpleNamespace(extract=Mock(side_effect=CrawlLeaseLostError("lease lost")))
+        )
+    )
+
+    with pytest.raises(CrawlLeaseLostError, match="lease lost"):
+        await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert engine.stream is not None
+    assert engine.stream.closed is True
 
 
 async def test_worker_audits_failure_as_the_initiating_user(

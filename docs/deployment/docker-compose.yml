@@ -206,9 +206,10 @@ services:
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP
     env_file:
       - env_backend.env
+    # Startup recovery requires /tmp to remain private to this crawler container.
+    # eneo_temp_files contains upload and export staging, so do not mount it here.
     volumes:
       - eneo_backend_data:/app/data
-      - eneo_temp_files:/tmp
     networks:
       - proxy_tier
       - data_net
