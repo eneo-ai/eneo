@@ -47,14 +47,17 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
+    AbsentSlotClassificationOutcome,
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedSlot,
+    ExplicitlyUncertainSlotClassificationOutcome,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
+    SlotClassificationDiagnostic,
     SlotClassificationInput,
-    SlotClassificationResult,
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
@@ -69,6 +72,9 @@ from eneo.flows.ai_builder.planning_state_builder import (
     CLASSIFIER_REBUILD_INPUT_CLASSES,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 _AI_BUILDER_SRC = (
     Path(__file__).resolve().parents[4] / "src" / "eneo" / "flows" / "ai_builder"
@@ -606,7 +612,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
         "structured_io_contract": "extract_or_compute_fields",
         "runtime_metadata_fields": "detailed_runtime_metadata",
     }
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         slots=tuple(
             ClassifiedSlot(
                 slot_name=slot_name,
@@ -637,7 +643,6 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
             ),
         ),
         secondary_obligations=("risks", "actions"),
-        contradictions=("No contradiction.",),
     )
     named_result_evidence_snapshot = (
         SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
@@ -709,7 +714,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
 
 def test_slot_classification_round_trips_checkpoint_update_with_cited_source() -> None:
     quote = "Let a reviewer approve the structured result before delivery."
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         checkpoint_updates=(
             ClassifiedCheckpointUpdate(
                 evidence_level="explicit",
@@ -760,7 +765,7 @@ def test_slot_classification_rejects_duplicate_checkpoint_producer() -> None:
         slot_classification_metadata_from_attempt(
             SlotClassificationAttempt(
                 outcome="resolved",
-                result=SlotClassificationResult(
+                result=slot_classification_result(
                     checkpoint_updates=(checkpoint, checkpoint)
                 ),
             ),
@@ -781,7 +786,7 @@ def test_checkpoint_update_metadata_requires_user_owned_evidence() -> None:
         return slot_classification_metadata_from_attempt(
             SlotClassificationAttempt(
                 outcome="resolved",
-                result=SlotClassificationResult(
+                result=slot_classification_result(
                     checkpoint_updates=(
                         ClassifiedCheckpointUpdate(
                             evidence_level="explicit",
@@ -849,7 +854,7 @@ def test_classifier_metadata_preserves_supplier_owned_identifiers() -> None:
     classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(),
+            result=slot_classification_result(),
         ),
         prompt_hash="a" * 64,
         classification_input=SlotClassificationInput(
@@ -879,7 +884,7 @@ def test_classifier_rebuild_classes_all_have_canonical_retention_rules() -> None
 def test_classifier_metadata_rejects_attachment_only_terminal_output() -> None:
     file_id = uuid4()
     source_id = f"uploaded_file:{file_id}"
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         slots=(
             ClassifiedSlot(
                 slot_name="terminal_output",
@@ -913,29 +918,27 @@ def test_classifier_metadata_rejects_attachment_only_terminal_output() -> None:
 
 
 def test_classifier_retention_identities_follow_replay_confidence_rules() -> None:
-    result = SlotClassificationResult(
-        slots=(
-            ClassifiedSlot(
-                slot_name="terminal_output",
+    result = slot_classification_result(
+        slot_outcomes={
+            "terminal_output": ResolvedSlotClassificationOutcome(
                 value="structured_text",
                 confidence="low",
                 reason="not effective",
                 evidence=(_classified_evidence("weak output guess"),),
+                evidence_level="inferred",
             ),
-            ClassifiedSlot(
-                slot_name="primary_runtime_input",
-                value="unknown",
-                confidence="low",
-                reason="explicit clearing result",
-                evidence=(),
+            "primary_runtime_input": ExplicitlyUncertainSlotClassificationOutcome(
+                quote=_classified_evidence("I have not decided the input yet")
             ),
-        ),
-        contradictions=("another diagnostic note",),
+        },
     )
     classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
-        classification_input=_classification_input("weak output guess"),
+        classification_input=_classification_input(
+            "weak output guess",
+            "I have not decided the input yet",
+        ),
         model="openai/gpt-test",
         provider="openai",
     )
@@ -944,6 +947,34 @@ def test_classifier_retention_identities_follow_replay_confidence_rules() -> Non
     assert classification.effective_retention_identities() == frozenset(
         {("slot", "primary_runtime_input")}
     )
+
+
+def test_persisted_explicit_uncertainty_requires_user_owned_evidence() -> None:
+    file_id = uuid4()
+    source_id = f"uploaded_file:{file_id}"
+    metadata = {
+        **_persisted_classification_header(),
+        "source_inventory": [
+            {
+                "source_id": source_id,
+                "kind": "uploaded_file",
+                "source_sha256": "b" * 64,
+                "file_id": str(file_id),
+                "coverage": "fully_seen",
+            }
+        ],
+        "slot_outcomes": {
+            "primary_runtime_input": {
+                "outcome": "explicitly_uncertain",
+                "evidence": {
+                    "source_id": source_id,
+                    "quote": "The file does not specify the runtime input.",
+                },
+            }
+        },
+    }
+
+    assert slot_classification_from_metadata({"slot_classification": metadata}) is None
 
 
 def test_example_output_constraints_round_trip_with_replay_sources() -> None:
@@ -974,7 +1005,7 @@ def test_example_output_constraints_round_trip_with_replay_sources() -> None:
             ),
         ],
     )
-    result = SlotClassificationResult(example_output_constraints=constraints)
+    result = slot_classification_result(example_output_constraints=constraints)
     classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=result),
         prompt_hash="a" * 64,
@@ -1237,7 +1268,7 @@ def test_slot_classification_metadata_rejects_missing_evidence() -> None:
 
 
 def test_slot_classification_writer_bounds_reason_text() -> None:
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         slots=(
             ClassifiedSlot(
                 slot_name="terminal_output",
@@ -1264,31 +1295,29 @@ def test_slot_classification_writer_bounds_reason_text() -> None:
     }
 
 
-def test_slot_classification_writer_filters_invalid_and_keeps_low_diagnostic() -> None:
-    result = SlotClassificationResult(
-        slots=(
-            ClassifiedSlot(
-                slot_name="terminal_output",
+def test_slot_classification_writer_persists_total_outcomes_and_diagnostics() -> None:
+    result = slot_classification_result(
+        slot_outcomes={
+            "terminal_output": ResolvedSlotClassificationOutcome(
                 value="structured_text",
                 confidence="high",
                 reason="valid",
                 evidence=(_classified_evidence("valid quote"),),
+                evidence_level="inferred",
             ),
-            ClassifiedSlot(
+            "runtime_metadata_fields": AbsentSlotClassificationOutcome(),
+            "primary_runtime_input": AbsentSlotClassificationOutcome(),
+        },
+        diagnostics=(
+            SlotClassificationDiagnostic(
+                code="slot_outcome_malformed",
                 slot_name="runtime_metadata_fields",
-                value="not_a_runtime_metadata_value",
-                confidence="high",
-                reason="invalid",
-                evidence=(_classified_evidence("invalid quote"),),
             ),
-            ClassifiedSlot(
+            SlotClassificationDiagnostic(
+                code="slot_outcome_omitted",
                 slot_name="primary_runtime_input",
-                value="unknown",
-                confidence="low",
-                reason="retained for negative calibration",
-                evidence=(_classified_evidence("uncertain quote"),),
             ),
-        )
+        ),
     )
     classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=result),
@@ -1303,30 +1332,23 @@ def test_slot_classification_writer_filters_invalid_and_keeps_low_diagnostic() -
     )
 
     assert classification is not None
-    assert [slot.slot_name for slot in classification.slots] == [
-        "terminal_output",
-        "primary_runtime_input",
+    assert [slot.slot_name for slot in classification.slots] == ["terminal_output"]
+    assert classification.slot_outcomes["primary_runtime_input"].outcome == "absent"
+    assert [item.code for item in classification.diagnostics] == [
+        "slot_outcome_malformed",
+        "slot_outcome_omitted",
     ]
 
 
-def test_slot_classification_writer_keeps_first_duplicate_slot() -> None:
-    result = SlotClassificationResult(
-        slots=(
-            ClassifiedSlot(
+def test_slot_classification_writer_persists_refused_duplicate() -> None:
+    result = slot_classification_result(
+        slot_outcomes={"terminal_output": AbsentSlotClassificationOutcome()},
+        diagnostics=(
+            SlotClassificationDiagnostic(
+                code="slot_outcome_duplicate",
                 slot_name="terminal_output",
-                value="structured_text",
-                confidence="high",
-                reason="first valid slot",
-                evidence=(_classified_evidence("first quote"),),
             ),
-            ClassifiedSlot(
-                slot_name="terminal_output",
-                value="structured_json",
-                confidence="high",
-                reason="duplicate valid slot",
-                evidence=(_classified_evidence("second quote"),),
-            ),
-        )
+        ),
     )
     classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=result),
@@ -1337,9 +1359,9 @@ def test_slot_classification_writer_keeps_first_duplicate_slot() -> None:
     )
 
     assert classification is not None
-    assert [(slot.slot_name, slot.value) for slot in classification.slots] == [
-        ("terminal_output", "structured_text")
-    ]
+    assert classification.slots == []
+    assert classification.slot_outcomes["terminal_output"].outcome == "absent"
+    assert classification.diagnostics[0].code == "slot_outcome_duplicate"
 
 
 def test_slot_classification_model_rejects_duplicate_slots() -> None:

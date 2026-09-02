@@ -38,7 +38,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedSlot,
     SlotClassificationAttempt,
     SlotClassificationInput,
-    SlotClassificationResult,
     SlotClassificationSource,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
@@ -52,10 +51,13 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 
 def _terminal_output_slot_metadata(value: str = "pdf_document") -> dict[str, object]:
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         slots=(
             ClassifiedSlot(
                 slot_name="terminal_output",

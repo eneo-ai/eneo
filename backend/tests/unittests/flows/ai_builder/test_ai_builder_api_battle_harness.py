@@ -1061,9 +1061,9 @@ def _classifier_diagnostics() -> dict[str, object]:
                         "coverage": "fully_seen",
                     },
                 ],
-                "slots": [
-                    {
-                        "slot_name": "report_disposition",
+                "slot_outcomes": {
+                    "report_disposition": {
+                        "outcome": "resolved",
                         "value": "both",
                         "confidence": "high",
                         "reason": "explicit source sections and overview",
@@ -1075,7 +1075,8 @@ def _classifier_diagnostics() -> dict[str, object]:
                         ],
                         "evidence_level": "explicit",
                     }
-                ],
+                },
+                "diagnostics": [],
                 "file_roles": [
                     {
                         "file_id": "file-1",
@@ -1093,8 +1094,6 @@ def _classifier_diagnostics() -> dict[str, object]:
                 ],
                 "secondary_obligations": [],
                 "form_intake": None,
-                "assumptions": ["Source labels remain visible."],
-                "contradictions": [],
             }
         ],
     }
@@ -1562,12 +1561,18 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
         "forbidden_assumption_topics": ["invented default"],
     }
 
-    def checks_for(diagnostics: dict[str, object]) -> dict[str, dict[str, object]]:
+    def checks_for(
+        diagnostics: dict[str, object],
+        *,
+        assumptions: list[str] | None = None,
+    ) -> dict[str, dict[str, object]]:
         report = harness._quality_report(
             plan={},
             summary={},
             expected=expected,
-            event_summary={},
+            event_summary={
+                "assumptions": assumptions or ["Source labels remain visible."]
+            },
             classifier_diagnostics=diagnostics,
             attached_file_ids=("file-1",),
         )
@@ -1579,32 +1584,36 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
     assert baseline_checks["expected_assumption_topics"]["passed"] is True
     assert baseline_checks["forbidden_assumption_topics"]["passed"] is True
 
-    mutations = (
+    slot_mutations = (
+        ("value", "synthesized_overview"),
+        ("confidence", "low"),
+        ("evidence_level", "inferred"),
+    )
+    for field, value in slot_mutations:
+        mutated = json.loads(json.dumps(_classifier_diagnostics()))
+        mutated["classifier_runs"][0]["slot_outcomes"]["report_disposition"][field] = (
+            value
+        )
+        assert (
+            checks_for(mutated)["classifier_slot:report_disposition"]["passed"] is False
+        )
+
+    file_role_mutations = (
         (
-            "slots",
-            "value",
-            "synthesized_overview",
-            "classifier_slot:report_disposition",
-        ),
-        ("slots", "confidence", "low", "classifier_slot:report_disposition"),
-        ("slots", "evidence_level", "inferred", "classifier_slot:report_disposition"),
-        (
-            "file_roles",
             "role",
             "reference_material",
             "classifier_file_role:file_index_0",
         ),
-        ("file_roles", "confidence", "medium", "classifier_file_role:file_index_0"),
+        ("confidence", "medium", "classifier_file_role:file_index_0"),
         (
-            "file_roles",
             "evidence_level",
             "inferred",
             "classifier_file_role:file_index_0",
         ),
     )
-    for collection, field, value, check_name in mutations:
+    for field, value, check_name in file_role_mutations:
         mutated = json.loads(json.dumps(_classifier_diagnostics()))
-        mutated["classifier_runs"][0][collection][0][field] = value
+        mutated["classifier_runs"][0]["file_roles"][0][field] = value
         assert checks_for(mutated)[check_name]["passed"] is False
 
     wrong_source = json.loads(json.dumps(_classifier_diagnostics()))
@@ -1623,12 +1632,14 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
         is False
     )
 
-    forbidden_assumption = json.loads(json.dumps(_classifier_diagnostics()))
-    forbidden_assumption["classifier_runs"][0]["assumptions"].append(
-        "Invented default for report layout."
-    )
     assert (
-        checks_for(forbidden_assumption)["forbidden_assumption_topics"]["passed"]
+        checks_for(
+            _classifier_diagnostics(),
+            assumptions=[
+                "Source labels remain visible.",
+                "Invented default for report layout.",
+            ],
+        )["forbidden_assumption_topics"]["passed"]
         is False
     )
 
@@ -1641,6 +1652,43 @@ def test_classifier_posture_gate_rejects_each_mutated_dimension() -> None:
     )
     negative_checks = {check["name"]: check for check in negative_report["checks"]}
     assert negative_checks["forbid_classifier_commit_grade_slots"]["passed"] is False
+
+
+@mark.parametrize("outcome", ["absent", "explicitly_uncertain"])
+def test_classifier_slot_failure_names_non_resolved_outcome(outcome: str) -> None:
+    harness = _battle_harness()
+    diagnostics = _classifier_diagnostics()
+    run = diagnostics["classifier_runs"][0]
+    if outcome == "absent":
+        run["slot_outcomes"]["report_disposition"] = {"outcome": "absent"}
+    else:
+        run["slot_outcomes"]["report_disposition"] = {
+            "outcome": "explicitly_uncertain",
+            "evidence": {
+                "source_id": "user_message:user-1",
+                "quote": "I have not decided",
+            },
+        }
+
+    report = harness._quality_report(
+        plan={},
+        summary={},
+        expected={
+            "expected_classifier_slots": [
+                {"slot_name": "report_disposition", "value": "both"}
+            ]
+        },
+        event_summary={},
+        classifier_diagnostics=diagnostics,
+    )
+
+    check = next(
+        check
+        for check in report["checks"]
+        if check["name"] == "classifier_slot:report_disposition"
+    )
+    assert check["passed"] is False
+    assert check["actual"]["outcome"] == outcome
 
 
 def test_harness_allows_template_fill_document_terminal_without_renderer_binding() -> (
@@ -8411,13 +8459,81 @@ def _classifier_runs_with_slot_evidence(
     assert isinstance(raw_runs, list)
     runs = [run for run in raw_runs if isinstance(run, Mapping)]
     assert len(runs) == 1
-    slots = runs[0]["slots"]
-    assert isinstance(slots, list)
-    slot = slots[0]
+    slot_outcomes = runs[0]["slot_outcomes"]
+    assert isinstance(slot_outcomes, dict)
+    slot = slot_outcomes["report_disposition"]
     assert isinstance(slot, dict)
     slot["confidence"] = confidence
     slot["evidence_level"] = evidence_level
     return diagnostics, runs
+
+
+@mark.parametrize(
+    ("later_outcome", "expected"),
+    [
+        ({"outcome": "absent"}, True),
+        (
+            {
+                "outcome": "resolved",
+                "value": "synthesized_overview",
+                "confidence": "low",
+                "reason": "weak guess",
+                "evidence": [],
+                "evidence_level": "inferred",
+            },
+            True,
+        ),
+        (
+            {
+                "outcome": "explicitly_uncertain",
+                "evidence": {
+                    "source_id": "user_message:user-1",
+                    "quote": "källavsnitt och en samlad rapport",
+                },
+            },
+            False,
+        ),
+        (
+            {
+                "outcome": "resolved",
+                "value": "synthesized_overview",
+                "confidence": "medium",
+                "reason": "inferred from wording",
+                "evidence": [
+                    {
+                        "source_id": "user_message:user-1",
+                        "quote": "källavsnitt och en samlad rapport",
+                    }
+                ],
+                "evidence_level": "inferred",
+            },
+            False,
+        ),
+    ],
+)
+def test_classifier_slot_commit_grade_folds_later_runs_like_the_product(
+    later_outcome: dict[str, object], expected: bool
+) -> None:
+    harness = _battle_harness()
+    diagnostics = _classifier_diagnostics()
+    runs = diagnostics["classifier_runs"]
+    assert isinstance(runs, list)
+    first_run = runs[0]
+    assert isinstance(first_run, dict)
+    later_run = json.loads(json.dumps(first_run))
+    later_run["message_id"] = "assistant-2"
+    later_run["slot_outcomes"] = {"report_disposition": later_outcome}
+    folded_runs = [first_run, later_run]
+
+    assert (
+        harness._classifier_slot_is_commit_grade(folded_runs, "report_disposition")
+        is expected
+    )
+    latest = harness._latest_classifier_claim(
+        folded_runs, identity_name="slot_name", identity_value="report_disposition"
+    )
+    assert latest is not None
+    assert latest[1]["outcome"] == later_outcome["outcome"]
 
 
 def test_classifier_commit_grade_matches_product_evidence_semantics() -> None:
@@ -8435,20 +8551,38 @@ def test_classifier_commit_grade_matches_product_evidence_semantics() -> None:
         assert ("report_disposition" in actual) is expected_commit_grade
 
     _, unknown_runs = _classifier_runs_with_slot_evidence("high", "explicit")
-    unknown_slots = unknown_runs[0]["slots"]
-    assert isinstance(unknown_slots, list)
-    unknown_slot = unknown_slots[0]
+    unknown_slot_outcomes = unknown_runs[0]["slot_outcomes"]
+    assert isinstance(unknown_slot_outcomes, dict)
+    unknown_slot = unknown_slot_outcomes["report_disposition"]
     assert isinstance(unknown_slot, dict)
     unknown_slot["value"] = "unknown"
     assert harness._first_run_commit_grade_slot_names(unknown_runs) == set()
 
     _, uncited_runs = _classifier_runs_with_slot_evidence("high", "explicit")
-    uncited_slots = uncited_runs[0]["slots"]
-    assert isinstance(uncited_slots, list)
-    uncited_slot = uncited_slots[0]
+    uncited_slot_outcomes = uncited_runs[0]["slot_outcomes"]
+    assert isinstance(uncited_slot_outcomes, dict)
+    uncited_slot = uncited_slot_outcomes["report_disposition"]
     assert isinstance(uncited_slot, dict)
     uncited_slot["evidence"] = []
     assert harness._first_run_commit_grade_slot_names(uncited_runs) == set()
+
+    for outcome_payload in (
+        {"outcome": "absent"},
+        {
+            "outcome": "explicitly_uncertain",
+            "evidence": {
+                "source_id": "user_message:user-1",
+                "quote": "I have not decided",
+            },
+        },
+    ):
+        non_resolved_diagnostics = _classifier_diagnostics()
+        raw_runs = non_resolved_diagnostics["classifier_runs"]
+        assert isinstance(raw_runs, list)
+        non_resolved_run = raw_runs[0]
+        assert isinstance(non_resolved_run, dict)
+        non_resolved_run["slot_outcomes"]["report_disposition"] = outcome_payload
+        assert harness._first_run_commit_grade_slot_names([non_resolved_run]) == set()
 
 
 def test_inferred_medium_preferred_question_is_relevant_in_quality_report() -> None:

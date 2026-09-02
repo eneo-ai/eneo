@@ -45,7 +45,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationAttempt,
     SlotClassificationConfidence,
     SlotClassificationInput,
-    SlotClassificationResult,
     SlotClassificationSource,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
@@ -75,6 +74,9 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.ai_builder.question_catalog import render_summary_label
 from eneo.flows.domain.flow import Flow, FlowStep
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 _EXAMPLE_FILE = UUID("00000000-0000-0000-0000-0000000000e1")
 
@@ -223,7 +225,7 @@ def test_replacing_the_flow_output_withdraws_the_confirmation_it_contradicts() -
 
     merge_llm_resolved_slots(
         state,
-        SlotClassificationResult(
+        slot_classification_result(
             slots=(
                 ClassifiedSlot(
                     slot_name="terminal_output",
@@ -440,7 +442,7 @@ def test_reclassifying_unchanged_example_evidence_keeps_the_confirmation() -> No
 
     merge_llm_resolved_slots(
         state,
-        SlotClassificationResult(
+        slot_classification_result(
             example_output_constraints=_constraints(
                 headings=["Samlad bedömning"],
                 style_description="Use one section per source.",
@@ -470,7 +472,7 @@ def test_new_example_evidence_replaces_the_interpretation_and_invalidates() -> N
 
     merge_llm_resolved_slots(
         state,
-        SlotClassificationResult(
+        slot_classification_result(
             example_output_constraints=_constraints(
                 headings=["Ny rubrik"],
                 style_description="En annan struktur.",
@@ -800,7 +802,7 @@ def test_a_user_revision_over_the_same_attachment_replaces_the_interpretation() 
     )
     merge_llm_resolved_slots(
         state,
-        SlotClassificationResult(example_output_constraints=revised),
+        slot_classification_result(example_output_constraints=revised),
         prompt_hash="c" * 64,
         freeform_text="",
     )
@@ -885,7 +887,7 @@ def _classifier_metadata(*slots: ClassifiedSlot) -> dict[str, object]:
     metadata = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(slots=slots),
+            result=slot_classification_result(slots=slots),
         ),
         prompt_hash="c" * 64,
         classification_input=SlotClassificationInput(

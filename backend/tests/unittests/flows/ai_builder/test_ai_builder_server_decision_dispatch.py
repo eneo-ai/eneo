@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -20,6 +20,9 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputMode,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     canonical_architecture_commit_payload,
     finalize_architecture_commit,
@@ -33,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 from eneo.flows.ai_builder.ai_builder_discovery_models import BackendQuestion
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     FocusedSlotClassificationRuntime,
+    classify_question_slot_once,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -191,8 +195,6 @@ def _focused_slot_response(*slots: dict[str, object]) -> dict[str, object]:
         "example_output_constraints": None,
         "schema_direction": None,
         "secondary_obligations": [],
-        "assumptions": [],
-        "contradictions": [],
     }
 
 
@@ -731,6 +733,114 @@ async def test_newer_output_uncertainty_invalidates_persisted_focused_result() -
     assert result.action_kind == "ask_question"
     assert any(isinstance(event, AIBuilderQuestionEvent) for event in result.events)
     assert replayed_state.focused_classification_attempted_slots == ["terminal_output"]
+    assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_focused_explicit_uncertainty_reaches_the_state_fold() -> None:
+    quote = "I defer choosing the artifact medium."
+    runtime, litellm_client = _focused_runtime(
+        {
+            **_focused_slot_response(),
+            "slots": {
+                "terminal_output": {
+                    "outcome": "explicitly_uncertain",
+                    "evidence": {
+                        "source_id": "user_message:user-focused-uncertain",
+                        "quote": quote,
+                    },
+                }
+            },
+        }
+    )
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="structured_text",
+        source="model",
+        confidence="medium",
+        evidence=[
+            "model:terminal_output:" + "a" * 64,
+            "quote:user_message:old-output:structured_text",
+        ],
+        evidence_level="inferred",
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=quote,
+            message_id="user-focused-uncertain",
+        )
+    ]
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="terminal_output"),
+            conversation=conversation,
+            planning_state=state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert result.action_kind == "ask_question"
+    assert "terminal_output" not in state.resolved_slots
+    assert state.slot_uncertainties["terminal_output"].kind == "explicitly_uncertain"
+    assert litellm_client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_focused_absent_outcome_keeps_its_total_projection_and_diagnostic() -> (
+    None
+):
+    runtime, litellm_client = _focused_runtime(_focused_slot_response())
+    state = PlanningState.empty()
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Build a document workflow.",
+            message_id="user-focused-absent",
+        )
+    ]
+
+    capability = MagicMock(mode=StructuredOutputMode.JSON_OBJECT)
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_discovery_runtime."
+        "resolve_structured_output_capability",
+        return_value=capability,
+    ) as resolve_capability:
+        outcome = await classify_question_slot_once(
+            slot_name="terminal_output",
+            conversation=conversation,
+            flow=None,
+            state=state,
+            attachment_context=None,
+            ui_language="en",
+            tenant_id=uuid4(),
+            usage_tracker=ProposalTurnTelemetry(
+                request_id=uuid4(),
+                model="focused-test",
+                target_kind=TargetKind.CREATE,
+            ),
+            runtime=runtime,
+        )
+
+    assert outcome.resolved is False
+    assert outcome.metadata is not None
+    assert outcome.metadata.slot_outcomes["terminal_output"].outcome == "absent"
+    assert [(item.code, item.slot_name) for item in outcome.metadata.diagnostics] == [
+        ("slot_outcome_omitted", "terminal_output")
+    ]
+    resolve_capability.assert_called_once_with(
+        litellm_model="focused-test",
+        provider_type="openai",
+    )
     assert litellm_client.acompletion.await_count == 1
 
 

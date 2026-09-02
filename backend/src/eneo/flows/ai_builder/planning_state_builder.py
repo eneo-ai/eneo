@@ -86,12 +86,13 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     derive_freeform_schema_candidates,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    UNKNOWN_SLOT_VALUE,
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
     ClassifiedNamedResultEvidence,
     ClassifiedSlot,
+    ExplicitlyUncertainSlotClassificationOutcome,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationResult,
     planning_reference_cites_source,
 )
@@ -124,6 +125,7 @@ from eneo.flows.ai_builder.planning_state import (
     SchemaEvidence,
     SlotConfidence,
     SlotSource,
+    SlotUncertainty,
     UnplacedNamedResultPlacement,
     is_named_result_location_id,
     named_content_fields_edit_evidence_reference,
@@ -419,6 +421,7 @@ def _reconcile_report_disposition_after_classifier_replay(
         evidence=["question_answer:report_disposition"],
         confidence="high",
     )
+    state.slot_uncertainties.pop("report_disposition", None)
 
 
 # Sources a model reading may neither clear nor overwrite on its own. A flow
@@ -540,6 +543,9 @@ def _carry_forward_planner_state(
         and persisted.architecture_commit is not None
     ):
         rebuilt.architecture_commit = persisted.architecture_commit
+    for slot_name, uncertainty in persisted.slot_uncertainties.items():
+        if slot_name not in rebuilt.resolved_slots:
+            rebuilt.slot_uncertainties.setdefault(slot_name, uncertainty)
     current_file_ids = {item.file_id for item in rebuilt.file_roles}
     for file_role in persisted.file_roles:
         if file_role.file_id not in attached_file_ids:
@@ -891,41 +897,50 @@ def merge_llm_resolved_slots(
             example_inference=example_inference,
         )
 
-    for classified_slot in classification_result.slots:
-        if not _model_slot_is_persistable(classified_slot.slot_name):
+    for slot_name, outcome in classification_result.slot_outcomes.items():
+        if not _model_slot_is_persistable(slot_name):
             continue
-        if classified_slot.slot_name in settled_by_acceptance:
+        if slot_name in settled_by_acceptance:
+            state.slot_uncertainties.pop(slot_name, None)
             continue
-        if classified_slot.slot_name in model_blocked_slots:
-            _clear_nonprotected_model_slot(state, classified_slot.slot_name)
+        if isinstance(outcome, ExplicitlyUncertainSlotClassificationOutcome):
+            _clear_nonprotected_model_slot(state, slot_name)
+            if slot_name not in state.resolved_slots:
+                state.slot_uncertainties[slot_name] = SlotUncertainty(
+                    slot=slot_name,
+                    kind="explicitly_uncertain",
+                )
             continue
-        if not classified_slot.evidence:
+        if not isinstance(outcome, ResolvedSlotClassificationOutcome):
             continue
-        if classified_slot.value == UNKNOWN_SLOT_VALUE:
-            _clear_nonprotected_model_slot(state, classified_slot.slot_name)
+        if slot_name in model_blocked_slots:
+            _clear_nonprotected_model_slot(state, slot_name)
             continue
-        if classified_slot.confidence == "low":
+        if not outcome.evidence or outcome.confidence == "low":
             continue
-        if classified_slot.value not in legal_slot_values(classified_slot.slot_name):
+        if outcome.value not in legal_slot_values(slot_name):
             continue
-        existing_slot = state.resolved_slots.get(classified_slot.slot_name)
+        existing_slot = state.resolved_slots.get(slot_name)
         if not _model_slot_can_replace(
             existing_slot=existing_slot,
-            model_confidence=classified_slot.confidence,
+            model_confidence=outcome.confidence,
         ):
+            if existing_slot is not None:
+                state.slot_uncertainties.pop(slot_name, None)
             continue
 
-        state.resolved_slots[classified_slot.slot_name] = ResolvedSlot(
-            name=classified_slot.slot_name,
-            value=classified_slot.value,
+        state.resolved_slots[slot_name] = ResolvedSlot(
+            name=slot_name,
+            value=outcome.value,
             source="model",
             evidence=[
-                f"model:{classified_slot.slot_name}:{prompt_hash}",
-                *[item.planning_reference() for item in classified_slot.evidence],
+                f"model:{slot_name}:{prompt_hash}",
+                *[item.planning_reference() for item in outcome.evidence],
             ],
-            confidence=classified_slot.confidence,
-            evidence_level=classified_slot.evidence_level,
+            confidence=outcome.confidence,
+            evidence_level=outcome.evidence_level,
         )
+        state.slot_uncertainties.pop(slot_name, None)
 
     _merge_model_named_result_evidence(
         state,
@@ -1616,6 +1631,7 @@ def apply_policy_defaults_from_resolved_slots(
     if primary_runtime_input is not None:
         if (
             "document_material_scope" not in state.resolved_slots
+            and "document_material_scope" not in state.slot_uncertainties
             and primary_runtime_input.value in {"documents", "text_and_documents"}
         ):
             state.resolved_slots["document_material_scope"] = ResolvedSlot(
@@ -1794,6 +1810,14 @@ def _reconcile_dependent_slot_relevance(state: PlanningState) -> None:
             require_commit_grade_primary_input=False,
         ):
             state.resolved_slots.pop(slot_name, None)
+    for slot_name in tuple(state.slot_uncertainties):
+        if not _dependent_slot_is_relevant(
+            slot_name=slot_name,
+            state=state,
+            unresolved_values_are_relevant=True,
+            require_commit_grade_primary_input=False,
+        ):
+            state.slot_uncertainties.pop(slot_name, None)
 
 
 def _dependent_slot_is_relevant(
@@ -2430,6 +2454,7 @@ def apply_attested_requirements(
             requirement_id,
             value,
         )
+        state.slot_uncertainties.pop(requirement_id, None)
 
 
 def _attestation_outranks(slot: ResolvedSlot) -> bool:

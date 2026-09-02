@@ -14,6 +14,9 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputMode,
+)
 from eneo.flows.ai_builder import (
     ai_builder_slot_classification_contract as slot_classification_contract,
 )
@@ -129,6 +132,7 @@ async def classify_slots(
     ui_language: str | None = None,
     bias: SlotClassificationBias | None = None,
     focused_slot_name: str | None = None,
+    structured_output_mode: StructuredOutputMode,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     max_input_tokens: int,
@@ -165,6 +169,7 @@ async def classify_slots(
     response_format = _slot_classification_response_format(
         slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
+        mode=structured_output_mode,
     )
     cache_key = slot_classification_prompt_hash(
         classification_input=classification_input,
@@ -180,6 +185,7 @@ async def classify_slots(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
+        structured_output_mode=structured_output_mode,
     )
     cached = (
         _SLOT_CLASSIFICATION_CACHE.get(cache_key) if focused_slot_name is None else None
@@ -203,7 +209,8 @@ async def classify_slots(
     completion_kwargs = completion_model_route.prepare_provider_kwargs(
         ModelKwargs(temperature=0.0)
     )
-    completion_kwargs["response_format"] = response_format
+    if response_format:
+        completion_kwargs["response_format"] = response_format
     completion_kwargs.pop("timeout", None)
     request_budget = _resolve_slot_classification_request_budget(
         messages=messages,
@@ -291,8 +298,10 @@ async def classify_slots(
                 cached=False,
             ),
             "accepted_slot_count": len(result.slots),
-            "assumption_count": len(result.assumptions),
-            "contradiction_count": len(result.contradictions),
+            "omitted_slot_count": sum(
+                diagnostic.code == "slot_outcome_omitted"
+                for diagnostic in result.diagnostics
+            ),
             "elapsed_ms": elapsed_ms,
         },
     )
@@ -350,6 +359,7 @@ def admit_slot_classification_input(
     ui_language: str | None,
     bias: SlotClassificationBias | None,
     focused_slot_name: str | None = None,
+    structured_output_mode: StructuredOutputMode,
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
@@ -361,6 +371,7 @@ def admit_slot_classification_input(
         schema_candidate_fingerprints=tuple(
             candidate.fingerprint for candidate in schema_candidates
         ),
+        mode=structured_output_mode,
     )
 
     def fits(
@@ -569,14 +580,20 @@ def _slot_classification_response_format(
     allowed_slot_values: Mapping[str, Collection[str]],
     *,
     schema_candidate_fingerprints: Collection[str] = (),
+    mode: StructuredOutputMode,
 ) -> dict[str, object]:
+    if mode is StructuredOutputMode.PROMPT_WITH_PYDANTIC_VALIDATION:
+        return {}
+    if mode is StructuredOutputMode.JSON_OBJECT:
+        return {"type": "json_object"}
     return {
         "type": "json_schema",
         "json_schema": {
             "name": f"ai_builder_slot_classification_v{SLOT_CLASSIFICATION_SCHEMA_VERSION}",
-            # Strict structured outputs reject maxLength/maxItems in current
-            # provider subsets; parser and persisted metadata validators still
-            # enforce the same bounds as a backstop.
+            # Strict structured outputs reject the length and item bounds this
+            # schema carries; the parser projects every offered slot to a typed
+            # outcome and records omissions, so totality does not depend on
+            # provider-side strictness.
             "strict": False,
             "schema": slot_classification_json_schema(
                 allowed_slot_values,
@@ -601,6 +618,7 @@ def slot_classification_prompt_hash(
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
     safety_buffer_tokens: int = 0,
+    structured_output_mode: StructuredOutputMode,
 ) -> str:
     return hashlib.sha256(
         _classification_cache_payload(
@@ -621,6 +639,7 @@ def slot_classification_prompt_hash(
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             safety_buffer_tokens=safety_buffer_tokens,
+            structured_output_mode=structured_output_mode,
         ).encode("utf-8")
     ).hexdigest()
 
@@ -714,7 +733,10 @@ def _build_slot_classification_prompt(
     system = (
         "You classify unresolved flow-builder intent into constrained slot values. "
         "Return JSON only. Never explain outside the schema. "
-        "Use a slot only when the conversation provides real evidence. "
+        "Return exactly one keyed outcome for every offered slot: resolved, "
+        "explicitly_uncertain, or absent. Resolve only from real evidence. Use "
+        "explicitly_uncertain only with one exact quote from a user_message or "
+        "structured_answer source; ordinary ambiguity or model ignorance is absent. "
         "Every slot, file_role, form_intake, and checkpoint_update classification "
         "must include "
         "evidence objects with a listed source_id and an exact, case-sensitive "
@@ -871,9 +893,8 @@ def _build_slot_classification_prompt(
         "of runtime free-text fields per section, heading, rubric, or similar. "
         "Do not classify final report headings or output sections as form intake. "
         "If the user explicitly says they do not know, have not decided, are "
-        "unsure, or want help choosing a slot, emit that slot with value "
-        "`unknown`, confidence `high`, and reason `user_explicit_uncertain`; "
-        "do not choose the most likely option. "
+        "unsure, or want help choosing a slot, emit explicitly_uncertain with "
+        "their exact quote; do not choose the most likely option. "
         "For report_disposition, classify per_source_sections when the user wants "
         "a separate report section or document record for each uploaded source; "
         "classify synthesized_overview when they want the sources combined into "
@@ -889,13 +910,12 @@ def _build_slot_classification_prompt(
         "classifier response. Treat attachment-only conclusions as medium "
         "confidence unless the conversation independently confirms the same "
         "requirement. "
-        "If still ambiguous, use value `unknown` with confidence `low` and explain "
-        "what question should be asked in contradictions."
+        "If still ambiguous, emit absent."
     )
     focused_instruction = (
         "This is a focused second-chance classification. Decide only whether "
         f"the value of exactly slot `{focused_slot_name}` is stated in the "
-        "user's own words. Cite the exact quote or return that slot as unknown. "
+        "user's own words. Cite the exact quote or return that slot as absent. "
         "Leave every non-slot classification field empty or null.\n\n"
         if focused_slot_name is not None
         else ""
@@ -914,19 +934,6 @@ def _build_slot_classification_prompt(
         f"{chr(10).join(schema_candidate_lines) if schema_candidate_lines else '(none)'}\n\n"
         "Allowed secondary_obligations values:\n"
         f"{obligation_values}\n\n"
-        "Return JSON with this shape:\n"
-        "{"
-        '"slots": [{"slot_name": str, "value": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
-        '"file_roles": [{"file_id": str, "role": str, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
-        '"checkpoint_updates": [{"operation": "update"|"clear", "producer_kind": "transcript"|"structured_result"|"report_text", "mode": "view"|"edit"|null, "confidence": "high"|"medium", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"}], '
-        '"form_intake": {"needs_form_fields": bool, "sectioned_form_intake": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}], "evidence_level": "explicit"|"inferred"} | null, '
-        '"named_result_evidence": {"operation": "update"|"clear", "upserts": [str | {"name": str, ("segments": [str] | "unplaced": true)?, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "removals": [str | {"name": str, ("segments": [str] | "unplaced": true)?, "evidence": [{"source_id": str, "quote": exact_quote_str}]}], "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
-        '"example_output_constraints": {"source_file_ids": [str], "headings": [str], "style_constraints": [{"category": "tone"|"detail_level"|"organization"|"formatting"|"audience", "description": str}], "confidence": "high"|"medium"|"low", "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
-        '"schema_direction": {"input_fingerprint": str|null, "output_fingerprint": str|null, "reference_only": bool, "confidence": "high"|"medium"|"low", "reason": str, "evidence": [{"source_id": str, "quote": exact_quote_str}]} | null, '
-        '"secondary_obligations": [str], '
-        '"assumptions": [str], '
-        '"contradictions": [str]'
-        "}\n"
         "Use only the listed slot_name values, option values, and "
         "secondary_obligations values."
     )
@@ -983,6 +990,7 @@ def _classification_cache_payload(
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
     safety_buffer_tokens: int = 0,
+    structured_output_mode: StructuredOutputMode,
 ) -> str:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
     prompt = _build_slot_classification_prompt(
@@ -1014,6 +1022,7 @@ def _classification_cache_payload(
             schema_candidate_fingerprints=tuple(
                 candidate.fingerprint for candidate in schema_candidates
             ),
+            mode=structured_output_mode,
         ),
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)

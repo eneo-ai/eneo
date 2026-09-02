@@ -8,6 +8,9 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    resolve_structured_output_capability,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_ATTACHMENT_LIMIT_MESSAGE,
     AI_BUILDER_MAX_ATTACHMENTS,
@@ -372,6 +375,10 @@ async def classify_question_slot_once(
         return FocusedSlotClassificationOutcome(resolved=False)
     state.focused_classification_attempted_slots.append(slot_name)
     focused_values = {slot_name: allowed_values[slot_name]}
+    structured_output_mode = resolve_structured_output_capability(
+        litellm_model=runtime.completion_model_route.litellm_model,
+        provider_type=runtime.completion_model_route.provider_type,
+    ).mode
     admitted_input = admit_slot_classification_input(
         classification_input=classification_input,
         attachment_context=attachment_context,
@@ -381,6 +388,7 @@ async def classify_question_slot_once(
         ui_language=ui_language,
         bias=None,
         focused_slot_name=slot_name,
+        structured_output_mode=structured_output_mode,
         litellm_model=runtime.completion_model_route.litellm_model,
         max_input_tokens=runtime.max_input_tokens,
         max_output_tokens=runtime.max_output_tokens,
@@ -401,6 +409,7 @@ async def classify_question_slot_once(
         max_input_tokens=runtime.max_input_tokens,
         max_output_tokens=runtime.max_output_tokens,
         safety_buffer_tokens=runtime.budget_policy.conversation_safety_buffer_tokens,
+        structured_output_mode=structured_output_mode,
     )
     attempt = await classify_slots(
         litellm_client=runtime.litellm_client,
@@ -410,6 +419,7 @@ async def classify_question_slot_once(
         tenant_id=tenant_id,
         ui_language=ui_language,
         focused_slot_name=slot_name,
+        structured_output_mode=structured_output_mode,
         usage_tracker=usage_tracker,
         before_provider_call=runtime.before_provider_call,
         max_input_tokens=runtime.max_input_tokens,
@@ -422,7 +432,18 @@ async def classify_question_slot_once(
     result = attempt.result
     assert result is not None
     focused_result = SlotClassificationResult(
+        # This legacy slots projection is deleted with the focused reader in commit 3.
         slots=tuple(slot for slot in result.slots if slot.slot_name == slot_name),
+        slot_outcomes={
+            slot_name: outcome
+            for outcome_name, outcome in result.slot_outcomes.items()
+            if outcome_name == slot_name
+        },
+        diagnostics=tuple(
+            diagnostic
+            for diagnostic in result.diagnostics
+            if diagnostic.slot_name == slot_name
+        ),
         cached=result.cached,
     )
     freeform_text = aggregate_unprompted_user_text(conversation)
@@ -777,6 +798,10 @@ async def build_runtime_discovery_context(
         for intent in state.checkpoint_intents
         if intent.operation == "set"
     )
+    structured_output_mode = resolve_structured_output_capability(
+        litellm_model=completion_model_route.litellm_model,
+        provider_type=completion_model_route.provider_type,
+    ).mode
     classification_input = admit_slot_classification_input(
         classification_input=classification_input,
         attachment_context=attachment_context,
@@ -785,6 +810,7 @@ async def build_runtime_discovery_context(
         active_checkpoint_producers=active_checkpoint_producers,
         ui_language=ui_language,
         bias=bias,
+        structured_output_mode=structured_output_mode,
         litellm_model=completion_model_route.litellm_model,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
@@ -807,6 +833,7 @@ async def build_runtime_discovery_context(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
+        structured_output_mode=structured_output_mode,
     )
     attempt = await classify_slots(
         litellm_client=litellm_client,
@@ -818,6 +845,7 @@ async def build_runtime_discovery_context(
         tenant_id=tenant_id,
         ui_language=ui_language,
         bias=bias,
+        structured_output_mode=structured_output_mode,
         usage_tracker=usage_tracker,
         before_provider_call=before_provider_call,
         max_input_tokens=max_input_tokens,

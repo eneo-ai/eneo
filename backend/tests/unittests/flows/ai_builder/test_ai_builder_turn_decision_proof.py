@@ -18,8 +18,8 @@ from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    UNKNOWN_SLOT_VALUE,
-    ClassifiedSlot,
+    ClassifiedEvidence,
+    ExplicitlyUncertainSlotClassificationOutcome,
     SlotClassificationResult,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
@@ -113,15 +113,14 @@ def _output_uncertain_state() -> PlanningState:
     merge_llm_resolved_slots(
         state,
         SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value=UNKNOWN_SLOT_VALUE,
-                    confidence="high",
-                    reason="user_explicit_uncertain",
-                    evidence=("not sure what the final output should be",),
-                ),
-            )
+            slot_outcomes={
+                "terminal_output": ExplicitlyUncertainSlotClassificationOutcome(
+                    quote=ClassifiedEvidence(
+                        source_id="user_message:test",
+                        quote="not sure what the final output should be",
+                    )
+                )
+            }
         ),
         prompt_hash="e" * 64,
         freeform_text="not sure what the final output should be",

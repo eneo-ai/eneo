@@ -1747,8 +1747,8 @@ class TestSendMessageToolCall:
         assert reloaded.outcome == "parse_failed"
         assert reloaded.prompt_hash is not None
         assert reloaded.slots == []
-        assert reloaded.assumptions == []
-        assert reloaded.contradictions == []
+        assert reloaded.slot_outcomes == {}
+        assert reloaded.diagnostics == []
         assert (
             build_planning_state_from_conversation([persisted_message]).resolved_slots
             == {}
@@ -1775,40 +1775,61 @@ class TestSendMessageToolCall:
             source_id = prompt.split('"source_id": "', maxsplit=1)[1].split(
                 '"', maxsplit=1
             )[0]
+            response_format = kwargs["response_format"]
+            assert isinstance(response_format, Mapping)
+            json_schema = response_format["json_schema"]
+            assert isinstance(json_schema, Mapping)
+            schema = json_schema["schema"]
+            assert isinstance(schema, Mapping)
+            properties = schema["properties"]
+            assert isinstance(properties, Mapping)
+            slot_schema = properties["slots"]
+            assert isinstance(slot_schema, Mapping)
+            offered_slots = slot_schema["required"]
+            assert isinstance(offered_slots, list)
+            slot_outcomes = {
+                slot_name: {"outcome": "absent"}
+                for slot_name in offered_slots
+                if isinstance(slot_name, str)
+            }
+            slot_outcomes.update(
+                {
+                    "comparison_scope": {
+                        "outcome": "resolved",
+                        "value": "same_run_compare",
+                        "confidence": "high",
+                        "reason": "The user wants a same-run comparison.",
+                        "evidence": [
+                            {
+                                "source_id": source_id,
+                                "quote": "jämföra dem",
+                            }
+                        ],
+                        "evidence_level": "explicit",
+                    },
+                    "report_disposition": {
+                        "outcome": "resolved",
+                        "value": "synthesized_overview",
+                        "confidence": "high",
+                        "reason": (
+                            "The user explicitly requests one combined overview."
+                        ),
+                        "evidence": [
+                            {
+                                "source_id": source_id,
+                                "quote": (
+                                    "en samlad översikt utan källspecifika avsnitt"
+                                ),
+                            }
+                        ],
+                        "evidence_level": "explicit",
+                    },
+                }
+            )
             return _make_llm_response(
                 content=json.dumps(
                     {
-                        "slots": [
-                            {
-                                "slot_name": "comparison_scope",
-                                "value": "same_run_compare",
-                                "confidence": "high",
-                                "reason": "The user wants a same-run comparison.",
-                                "evidence": [
-                                    {
-                                        "source_id": source_id,
-                                        "quote": "jämföra dem",
-                                    }
-                                ],
-                                "evidence_level": "explicit",
-                            },
-                            {
-                                "slot_name": "report_disposition",
-                                "value": "synthesized_overview",
-                                "confidence": "high",
-                                "reason": "The user explicitly requests one combined overview.",
-                                "evidence": [
-                                    {
-                                        "source_id": source_id,
-                                        "quote": (
-                                            "en samlad översikt utan källspecifika "
-                                            "avsnitt"
-                                        ),
-                                    }
-                                ],
-                                "evidence_level": "explicit",
-                            },
-                        ],
+                        "slots": slot_outcomes,
                         "file_roles": [],
                         "checkpoint_updates": [],
                         "form_intake": None,
@@ -1816,8 +1837,6 @@ class TestSendMessageToolCall:
                         "example_output_constraints": None,
                         "schema_direction": None,
                         "secondary_obligations": [],
-                        "assumptions": [],
-                        "contradictions": [],
                     }
                 )
             )

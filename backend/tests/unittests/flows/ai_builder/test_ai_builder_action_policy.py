@@ -17,8 +17,8 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    UNKNOWN_SLOT_VALUE,
-    ClassifiedSlot,
+    ClassifiedEvidence,
+    ExplicitlyUncertainSlotClassificationOutcome,
     SlotClassificationEvidenceLevel,
     SlotClassificationResult,
 )
@@ -1071,15 +1071,14 @@ def test_policy_can_ask_output_after_classifier_uncertainty_clears_guess() -> No
     merge_llm_resolved_slots(
         state,
         SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value=UNKNOWN_SLOT_VALUE,
-                    confidence="high",
-                    reason="user_explicit_uncertain",
-                    evidence=("not sure what the final output should be",),
-                ),
-            )
+            slot_outcomes={
+                "terminal_output": ExplicitlyUncertainSlotClassificationOutcome(
+                    quote=ClassifiedEvidence(
+                        source_id="user_message:test",
+                        quote="not sure what the final output should be",
+                    )
+                )
+            }
         ),
         prompt_hash="b" * 64,
         freeform_text="",
@@ -1120,15 +1119,14 @@ def test_classifier_uncertainty_keeps_protected_output_sources_resolved(
     merge_llm_resolved_slots(
         state,
         SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="terminal_output",
-                    value=UNKNOWN_SLOT_VALUE,
-                    confidence="high",
-                    reason="user_explicit_uncertain",
-                    evidence=("not sure what the final output should be",),
-                ),
-            )
+            slot_outcomes={
+                "terminal_output": ExplicitlyUncertainSlotClassificationOutcome(
+                    quote=ClassifiedEvidence(
+                        source_id="user_message:test",
+                        quote="not sure what the final output should be",
+                    )
+                )
+            }
         ),
         prompt_hash="c" * 64,
         freeform_text="",

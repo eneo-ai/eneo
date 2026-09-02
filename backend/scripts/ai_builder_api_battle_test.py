@@ -7360,6 +7360,43 @@ def _classifier_runs(
     return _mapping_list(diagnostics.get("classifier_runs"))
 
 
+def _classifier_slot_claims(
+    run: Mapping[str, object],
+) -> list[Mapping[str, object]]:
+    raw_outcomes = run.get("slot_outcomes")
+    if not isinstance(raw_outcomes, Mapping):
+        return []
+    claims: list[Mapping[str, object]] = []
+    for slot_name, raw_outcome in raw_outcomes.items():
+        if not isinstance(slot_name, str) or not isinstance(raw_outcome, Mapping):
+            continue
+        outcome = raw_outcome.get("outcome")
+        if outcome == "resolved":
+            claims.append(
+                {
+                    "slot_name": slot_name,
+                    "outcome": outcome,
+                    "value": raw_outcome.get("value"),
+                    "confidence": raw_outcome.get("confidence"),
+                    "reason": raw_outcome.get("reason"),
+                    "evidence": raw_outcome.get("evidence"),
+                    "evidence_level": raw_outcome.get("evidence_level"),
+                }
+            )
+        elif outcome == "explicitly_uncertain":
+            quote = raw_outcome.get("evidence")
+            claims.append(
+                {
+                    "slot_name": slot_name,
+                    "outcome": outcome,
+                    "evidence": [quote] if isinstance(quote, Mapping) else [],
+                }
+            )
+        elif outcome == "absent":
+            claims.append({"slot_name": slot_name, "outcome": outcome})
+    return claims
+
+
 def _persisted_named_result_names(
     diagnostics: Mapping[str, object] | None,
 ) -> list[str]:
@@ -7403,12 +7440,16 @@ def _classifier_evidence_contract_is_valid(
 def _latest_classifier_claim(
     runs: list[Mapping[str, object]],
     *,
-    collection_name: str,
+    collection_name: str | None = None,
     identity_name: str,
     identity_value: str,
 ) -> tuple[Mapping[str, object], Mapping[str, object]] | None:
     for run in reversed(runs):
-        claims = _mapping_list(run.get(collection_name))
+        claims = (
+            _classifier_slot_claims(run)
+            if collection_name is None
+            else _mapping_list(run.get(collection_name))
+        )
         for claim in reversed(claims):
             if claim.get(identity_name) == identity_value:
                 return run, claim
@@ -7441,6 +7482,7 @@ def _classifier_claim_summary(
         key: claim.get(key)
         for key in (
             "slot_name",
+            "outcome",
             "value",
             "file_id",
             "role",
@@ -7467,6 +7509,8 @@ def _classifier_claim_matches(
     actual: Mapping[str, object],
     expected: Mapping[str, object],
 ) -> bool:
+    if "value" in expected and actual.get("outcome") != "resolved":
+        return False
     for key in (
         "slot_name",
         "value",
@@ -7522,7 +7566,7 @@ def _invalid_classifier_evidence_sources(
             if (source_id := _optional_string(source, "source_id")) is not None
         }
         claims = [
-            *_mapping_list(run.get("slots")),
+            *_classifier_slot_claims(run),
             *_mapping_list(run.get("file_roles")),
         ]
         form_intake = run.get("form_intake")
@@ -7574,7 +7618,7 @@ def _first_run_commit_grade_slot_names(
         return set()
     first_run = runs[0]
     names: set[str] = set()
-    for claim in _mapping_list(first_run.get("slots")):
+    for claim in _classifier_slot_claims(first_run):
         slot_name = _optional_string(claim, "slot_name")
         if slot_name is None:
             continue
@@ -7627,23 +7671,38 @@ def _classifier_slot_is_commit_grade(
     runs: list[Mapping[str, object]],
     slot_name: str,
 ) -> bool:
-    claim = _latest_classifier_claim(
-        runs,
-        collection_name="slots",
-        identity_name="slot_name",
-        identity_value=slot_name,
-    )
-    if claim is None:
-        return False
-    summary = _classifier_claim_summary(*claim)
-    return _classifier_claim_is_commit_grade(summary)
+    """Fold the runs the way the product folds classifier outcomes.
+
+    A later ``absent`` outcome, and a resolved outcome the product ignores
+    (low confidence or uncited), leave the earlier reading in place; explicit
+    uncertainty clears it; the newest effective resolved outcome decides.
+    """
+
+    for run in reversed(runs):
+        for claim in reversed(_classifier_slot_claims(run)):
+            if claim.get("slot_name") != slot_name:
+                continue
+            outcome = claim.get("outcome")
+            if outcome == "absent":
+                continue
+            if outcome == "explicitly_uncertain":
+                return False
+            summary = _classifier_claim_summary(run, claim)
+            if summary.get("confidence") == "low" or not _string_list(
+                summary.get("evidence_quotes")
+            ):
+                continue
+            return _classifier_claim_is_commit_grade(summary)
+    return False
 
 
 def _classifier_claim_is_commit_grade(summary: Mapping[str, object]) -> bool:
     """Mirror the product's commit-grade rule for model-resolved slots."""
 
-    if summary.get("value") == "unknown" or not _string_list(
-        summary.get("evidence_quotes")
+    if (
+        summary.get("outcome") != "resolved"
+        or summary.get("value") == "unknown"
+        or not _string_list(summary.get("evidence_quotes"))
     ):
         return False
     confidence = summary.get("confidence")
@@ -7653,13 +7712,9 @@ def _classifier_claim_is_commit_grade(summary: Mapping[str, object]) -> bool:
 
 
 def _classifier_assumptions(
-    runs: list[Mapping[str, object]],
     event_summary: Mapping[str, object],
 ) -> list[str]:
-    assumptions = _string_list(event_summary.get("assumptions"))
-    for run in runs:
-        _extend_unique_strings(assumptions, _string_list(run.get("assumptions")))
-    return assumptions
+    return _string_list(event_summary.get("assumptions"))
 
 
 def _contains_topic(values: list[str], topic: str) -> bool:
@@ -7951,7 +8006,6 @@ def _quality_report(
             continue
         actual_slot = _latest_classifier_claim(
             classifier_runs,
-            collection_name="slots",
             identity_name="slot_name",
             identity_value=slot_name,
         )
@@ -8025,7 +8079,7 @@ def _quality_report(
             [],
         )
 
-    assumptions = _classifier_assumptions(classifier_runs, event_summary)
+    assumptions = _classifier_assumptions(event_summary)
     expected_assumption_topics = _string_list(
         expected.get("expected_assumption_topics")
     )

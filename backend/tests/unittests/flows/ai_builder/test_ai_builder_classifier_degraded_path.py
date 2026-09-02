@@ -27,6 +27,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 CLASSIFIER_MERGE_CONTRACT_CASES = (
     pytest.param(
@@ -134,7 +137,7 @@ def _classifier_result_for(
     *,
     source_id: str = "user_message:merge-contract",
 ) -> SlotClassificationResult:
-    return SlotClassificationResult(
+    return slot_classification_result(
         slots=tuple(
             ClassifiedSlot(
                 slot_name=slot_name,

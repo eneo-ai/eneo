@@ -355,11 +355,12 @@ def _flagship_classifier_diagnostics() -> dict[str, object]:
                         "coverage": "fully_seen",
                     },
                 ],
-                "slots": [
-                    {
-                        "slot_name": "terminal_output",
+                "slot_outcomes": {
+                    "terminal_output": {
+                        "outcome": "resolved",
                         "value": "docx_document",
                         "confidence": "high",
+                        "reason": "The user asks to fill the attached DOCX template.",
                         "evidence_level": "explicit",
                         "evidence": [
                             {
@@ -368,7 +369,8 @@ def _flagship_classifier_diagnostics() -> dict[str, object]:
                             }
                         ],
                     }
-                ],
+                },
+                "diagnostics": [],
                 "file_roles": [
                     {
                         "file_id": "template-1",

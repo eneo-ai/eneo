@@ -638,7 +638,7 @@ def _make_plan_stream_event():
 # ---------------------------------------------------------------------------
 
 
-def test_classifier_diagnostic_projection_exposes_compaction_degradation() -> None:
+def test_classifier_diagnostic_projection_exposes_slot_omission() -> None:
     runs = _classifier_diagnostic_runs(
         [
             ConversationMessage(
@@ -652,8 +652,13 @@ def test_classifier_diagnostic_projection_exposes_compaction_degradation() -> No
                         "model": "openai/gpt-test",
                         "provider": "openai",
                         "source_inventory": [],
-                        "slots": [],
-                        "contradictions": ["conversation_compaction:count,bytes"],
+                        "slot_outcomes": {"terminal_output": {"outcome": "absent"}},
+                        "diagnostics": [
+                            {
+                                "code": "slot_outcome_omitted",
+                                "slot_name": "terminal_output",
+                            }
+                        ],
                     }
                 },
             )
@@ -661,7 +666,7 @@ def test_classifier_diagnostic_projection_exposes_compaction_degradation() -> No
     )
 
     assert len(runs) == 1
-    assert runs[0].contradictions == ["conversation_compaction:count,bytes"]
+    assert runs[0].diagnostics[0].code == "slot_outcome_omitted"
 
 
 class TestAuthorizeAIBuilderRequest:
@@ -1028,9 +1033,9 @@ class TestGetSessionEndpoint:
                                 "message_id": "user-1",
                             }
                         ],
-                        "slots": [
-                            {
-                                "slot_name": "post_processing_goal",
+                        "slot_outcomes": {
+                            "post_processing_goal": {
+                                "outcome": "resolved",
                                 "value": "stop_after_primary_operation",
                                 "confidence": "high",
                                 "reason": "The user asked for transcription only.",
@@ -1042,7 +1047,8 @@ class TestGetSessionEndpoint:
                                 ],
                                 "evidence_level": "explicit",
                             }
-                        ],
+                        },
+                        "diagnostics": [],
                     }
                 },
             )
@@ -1079,9 +1085,9 @@ class TestGetSessionEndpoint:
                             "truncated": False,
                         }
                     ],
-                    "slots": [
-                        {
-                            "slot_name": "post_processing_goal",
+                    "slot_outcomes": {
+                        "post_processing_goal": {
+                            "outcome": "resolved",
                             "value": "stop_after_primary_operation",
                             "confidence": "high",
                             "reason": "The user asked for transcription only.",
@@ -1093,7 +1099,8 @@ class TestGetSessionEndpoint:
                             ],
                             "evidence_level": "explicit",
                         }
-                    ],
+                    },
+                    "diagnostics": [],
                     "file_roles": [],
                     "checkpoint_updates": [],
                     "secondary_obligations": [],
@@ -1101,8 +1108,6 @@ class TestGetSessionEndpoint:
                     "named_result_evidence": None,
                     "example_output_constraints": None,
                     "schema_direction": None,
-                    "assumptions": [],
-                    "contradictions": [],
                 }
             ],
         }

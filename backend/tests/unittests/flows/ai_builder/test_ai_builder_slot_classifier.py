@@ -26,6 +26,9 @@ from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
     ResolvedCompletionModelRoute,
 )
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputMode,
+)
 from eneo.flows.ai_builder import (
     ai_builder_error_contract as error_contract_module,
 )
@@ -56,7 +59,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     classify_slots as _classify_slots,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
-    slot_classification_prompt_hash,
+    slot_classification_prompt_hash as _slot_classification_prompt_hash,
 )
 from eneo.flows.ai_builder.planning_state import (
     CheckpointProducerKind,
@@ -79,7 +82,19 @@ async def classify_slots(**kwargs: Any):
             minimum_conversation_budget_tokens=0,
         ),
     )
+    kwargs.setdefault(
+        "structured_output_mode",
+        StructuredOutputMode.STRICT_JSON_SCHEMA,
+    )
     return await _classify_slots(**kwargs)
+
+
+def slot_classification_prompt_hash(**kwargs: Any) -> str:
+    kwargs.setdefault(
+        "structured_output_mode",
+        StructuredOutputMode.STRICT_JSON_SCHEMA,
+    )
+    return _slot_classification_prompt_hash(**kwargs)
 
 
 def _classification_input(
@@ -120,9 +135,406 @@ _VALID_CLASSIFICATION_RESPONSE: dict[str, object] = {
     "example_output_constraints": None,
     "schema_direction": None,
     "secondary_obligations": [],
-    "assumptions": [],
-    "contradictions": [],
 }
+
+
+def test_non_strict_parser_projects_omitted_slots_as_typed_absent() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE),
+        allowed_slot_values={
+            "report_disposition": {
+                "per_source_sections",
+                "synthesized_overview",
+                "both",
+            }
+        },
+        classification_input=_classification_input(
+            "Skriv ett avsnitt per källa och en samlad bedömning."
+        ),
+    )
+
+    assert result is not None
+    outcome = result.slot_outcomes["report_disposition"]
+    assert outcome.kind == "absent"
+    assert result.diagnostics == (
+        classification_contract.SlotClassificationDiagnostic(
+            code="slot_outcome_omitted",
+            slot_name="report_disposition",
+        ),
+    )
+
+
+_REPORT_RECEIPT_CLASSIFIER_PROJECTIONS = (
+    (
+        "c1-remissvar-r01",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "terminal_output",
+        ),
+    ),
+    (
+        "c1-remissvar-r02",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "terminal_output",
+        ),
+    ),
+    (
+        "c1-remissvar-r03",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "terminal_output",
+        ),
+    ),
+    (
+        "d-remissvar-r01",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "terminal_output",
+        ),
+    ),
+    (
+        "d-remissvar-r02",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "terminal_output",
+        ),
+    ),
+    (
+        "d-remissvar-r03",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "terminal_output",
+        ),
+    ),
+    (
+        "d-exemplarform-r01",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "structured_io_contract",
+            "terminal_output",
+        ),
+    ),
+    (
+        "d-exemplarform-r02",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "structured_io_contract",
+            "terminal_output",
+        ),
+    ),
+    (
+        "d-exemplarform-r03",
+        (
+            "comparison_scope",
+            "document_material_scope",
+            "post_processing_goal",
+            "primary_runtime_input",
+            "runtime_metadata_fields",
+            "structured_io_contract",
+            "terminal_output",
+        ),
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("receipt", "answered_slots"),
+    _REPORT_RECEIPT_CLASSIFIER_PROJECTIONS,
+    ids=[item[0] for item in _REPORT_RECEIPT_CLASSIFIER_PROJECTIONS],
+)
+def test_report_receipt_projection_records_offered_but_unanswered_slot(
+    receipt: str,
+    answered_slots: tuple[str, ...],
+) -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": [{"slot_name": slot_name} for slot_name in answered_slots],
+            }
+        ),
+        allowed_slot_values={"report_disposition": {"both"}},
+        classification_input=_classification_input(receipt),
+    )
+
+    assert result is not None
+    assert set(result.slot_outcomes) == {"report_disposition"}
+    assert result.slot_outcomes["report_disposition"].kind == "absent"
+    assert result.diagnostics == (
+        classification_contract.SlotClassificationDiagnostic(
+            code="slot_outcome_omitted",
+            slot_name="report_disposition",
+        ),
+    )
+
+
+def test_non_strict_parser_refuses_malformed_and_duplicate_slot_entries() -> None:
+    malformed = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "not-a-terminal-output",
+                        "confidence": "high",
+                        "reason": "unsupported value",
+                        "evidence": [_evidence("I need a PDF")],
+                    }
+                ],
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("I need a PDF"),
+    )
+    duplicate_entry = {
+        "slot_name": "terminal_output",
+        "value": "pdf_document",
+        "confidence": "high",
+        "reason": "requested PDF",
+        "evidence": [_evidence("I need a PDF")],
+    }
+    duplicate = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": [duplicate_entry, duplicate_entry],
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("I need a PDF"),
+    )
+
+    assert malformed is not None
+    assert malformed.slot_outcomes["terminal_output"].kind == "absent"
+    assert malformed.diagnostics[0].code == "slot_outcome_malformed"
+    assert duplicate is not None
+    assert duplicate.slot_outcomes["terminal_output"].kind == "absent"
+    assert duplicate.diagnostics[0].code == "slot_outcome_duplicate"
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {
+            "value": "pdf_document",
+            "confidence": "high",
+            "reason": "requested PDF",
+            "evidence": [_evidence("I need a PDF")],
+            "evidence_level": "explicit",
+        },
+        {"outcome": "absent", "reason": "not supplied"},
+        {
+            "outcome": "explicitly_uncertain",
+            "evidence": {
+                "source_id": "user_message:user-1",
+                "quote": "I am not sure",
+                "extra": "not allowed",
+            },
+        },
+        {
+            "outcome": "resolved",
+            "value": "pdf_document",
+            "confidence": "high",
+            "evidence": [_evidence("I need a PDF")],
+            "evidence_level": "explicit",
+        },
+    ],
+    ids=[
+        "missing-discriminator",
+        "absent-extra-field",
+        "malformed-evidence",
+        "resolved-missing-required-field",
+    ],
+)
+def test_keyed_slot_outcomes_require_the_exact_discriminated_shape(
+    entry: dict[str, object],
+) -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": {"terminal_output": entry},
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("I need a PDF"),
+    )
+
+    assert result is not None
+    assert result.slot_outcomes["terminal_output"].kind == "absent"
+    assert result.diagnostics == (
+        classification_contract.SlotClassificationDiagnostic(
+            code="slot_outcome_malformed",
+            slot_name="terminal_output",
+        ),
+    )
+
+
+def test_keyed_duplicate_slot_is_a_typed_duplicate_outcome() -> None:
+    absent = json.dumps({"outcome": "absent"})
+    resolved = json.dumps(
+        {
+            "outcome": "resolved",
+            "value": "pdf_document",
+            "confidence": "high",
+            "reason": "requested PDF",
+            "evidence": [_evidence("I need a PDF")],
+            "evidence_level": "explicit",
+        }
+    )
+    content = json.dumps(_VALID_CLASSIFICATION_RESPONSE).replace(
+        '"slots": []',
+        f'"slots": {{"terminal_output": {absent}, "terminal_output": {resolved}}}',
+    )
+
+    result = parse_slot_classification_response(
+        content,
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("I need a PDF"),
+    )
+
+    assert result is not None
+    assert result.slot_outcomes["terminal_output"].kind == "absent"
+    assert result.diagnostics == (
+        classification_contract.SlotClassificationDiagnostic(
+            code="slot_outcome_duplicate",
+            slot_name="terminal_output",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE).replace(
+            '"file_roles": []',
+            '"file_roles": [], "file_roles": []',
+        ),
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE).replace(
+            '"slots": []',
+            '"slots": {"terminal_output": {"outcome": "absent", "outcome": "absent"}}',
+        ),
+    ],
+    ids=["top-level", "inside-slot-outcome"],
+)
+def test_duplicate_json_key_outside_the_keyed_slot_index_fails_parsing(
+    content: str,
+) -> None:
+    assert (
+        parse_slot_classification_response(
+            content,
+            allowed_slot_values={"terminal_output": {"pdf_document"}},
+            classification_input=_classification_input("I need a PDF"),
+        )
+        is None
+    )
+
+
+def test_parser_admits_only_exact_user_owned_explicit_uncertainty() -> None:
+    quote = "Jag vet inte exakt vilket format"
+    quoted = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": {
+                    "terminal_output": {
+                        "outcome": "explicitly_uncertain",
+                        "evidence": _evidence(quote),
+                    }
+                },
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input(quote),
+    )
+    unsupported = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": {
+                    "terminal_output": {
+                        "outcome": "explicitly_uncertain",
+                        "evidence": {
+                            "source_id": "user_message:user-1",
+                            "quote": "I don't know",
+                        },
+                    }
+                },
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("Please choose for me"),
+    )
+
+    assert quoted is not None
+    outcome = quoted.slot_outcomes["terminal_output"]
+    assert outcome.kind == "explicitly_uncertain"
+    assert outcome.quote.quote == quote
+    assert unsupported is not None
+    assert unsupported.slot_outcomes["terminal_output"].kind == "absent"
+    assert unsupported.diagnostics[0].code == "slot_outcome_malformed"
+
+
+def test_response_schema_requires_one_keyed_outcome_per_offered_slot() -> None:
+    schema = classification_contract.slot_classification_json_schema(
+        {
+            "report_disposition": {
+                "per_source_sections",
+                "synthesized_overview",
+                "both",
+            },
+            "terminal_output": {"pdf_document"},
+        }
+    )
+
+    assert "assumptions" not in schema["properties"]
+    assert "contradictions" not in schema["properties"]
+    slots = schema["properties"]["slots"]
+    assert slots["type"] == "object"
+    assert slots["required"] == ["report_disposition", "terminal_output"]
+    assert slots["additionalProperties"] is False
+    terminal_variants = slots["properties"]["terminal_output"]["oneOf"]
+    assert [
+        variant["properties"]["outcome"]["const"] for variant in terminal_variants
+    ] == [
+        "resolved",
+        "explicitly_uncertain",
+        "absent",
+    ]
 
 
 def _make_response(content: object) -> MagicMock:
@@ -351,8 +763,6 @@ def test_parser_accepts_field_declaration_using_source_relative_citation_boundar
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -476,8 +886,6 @@ def test_parser_distinguishes_json_shape_notation_from_literal_field_punctuation
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -547,8 +955,6 @@ def _named_result_response_with_locations(
             "example_output_constraints": None,
             "schema_direction": None,
             "secondary_obligations": [],
-            "assumptions": [],
-            "contradictions": [],
         }
     )
 
@@ -1506,8 +1912,6 @@ def test_parser_refuses_unverified_named_result_evidence(
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -1550,8 +1954,6 @@ def test_parser_refuses_short_citations_of_nested_or_list_names(
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -1594,8 +1996,6 @@ def test_parser_accepts_only_cited_output_field_deltas(
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -1801,8 +2201,6 @@ def test_parser_requires_explicit_removal_intent(
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -1870,8 +2268,6 @@ def test_parser_accepts_explicit_clear_of_named_json_fields() -> None:
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -1929,8 +2325,6 @@ def test_parser_rejects_field_delta_reconstructed_from_prior_user_sources() -> N
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -1966,8 +2360,6 @@ def test_parser_stamps_complete_schema_candidate_set_and_accepts_both_boundaries
                     "evidence": [_evidence(quote)],
                 },
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -2007,8 +2399,6 @@ def test_parser_rejects_schema_direction_outside_complete_candidate_set() -> Non
                     "evidence": [_evidence(quote)],
                 },
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -2248,8 +2638,6 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
                         "evidence": [_evidence("en eller flera filer")],
                     },
                 ],
-                "assumptions": ["PDF is requested"],
-                "contradictions": ["input is ambiguous"],
             }
         ),
         allowed_slot_values={
@@ -2260,22 +2648,10 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     )
 
     assert result is not None
-    assert [slot.slot_name for slot in result.slots] == [
-        "terminal_output",
-        "primary_runtime_input",
-    ]
-    assert result.slots[0].value == "pdf_document"
-    assert result.slots[1].value == "unknown"
-    assert result.slots[0].evidence == (
-        ClassifiedEvidence(
-            source_id="user_message:user-1",
-            quote="Slutrapporten ska vara en pdf fil",
-        ),
-    )
-    assert result.slots[0].evidence_level == "explicit"
-    assert result.slots[1].evidence_level == "inferred"
-    assert result.assumptions == ("PDF is requested",)
-    assert result.contradictions == ("input is ambiguous",)
+    assert result.slots == ()
+    assert result.slot_outcomes["terminal_output"].kind == "absent"
+    assert result.slot_outcomes["primary_runtime_input"].kind == "absent"
+    assert result.diagnostics[0].code == "slot_outcome_duplicate"
 
 
 def test_parse_slot_classification_response_downgrades_unsupported_claims() -> None:
@@ -2887,20 +3263,19 @@ def test_example_output_constraints_reject_fabricated_citations() -> None:
     assert result.example_output_constraints is None
 
 
-def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> None:
+def test_parse_slot_classification_response_accepts_typed_explicit_uncertainty() -> (
+    None
+):
     result = parse_slot_classification_response(
         json.dumps(
             {
                 **_VALID_CLASSIFICATION_RESPONSE,
-                "slots": [
-                    {
-                        "slot_name": "terminal_output",
-                        "value": "unknown",
-                        "confidence": "high",
-                        "reason": "user_explicit_uncertain",
-                        "evidence": [_evidence("Jag vet inte exakt vilket format")],
-                    },
-                ],
+                "slots": {
+                    "terminal_output": {
+                        "outcome": "explicitly_uncertain",
+                        "evidence": _evidence("Jag vet inte exakt vilket format"),
+                    }
+                },
             }
         ),
         allowed_slot_values={"terminal_output": {"docx_document", "structured_text"}},
@@ -2908,17 +3283,12 @@ def test_parse_slot_classification_response_accepts_explicit_uncertainty() -> No
     )
 
     assert result is not None
-    assert len(result.slots) == 1
-    slot = result.slots[0]
-    assert slot.slot_name == "terminal_output"
-    assert slot.value == "unknown"
-    assert slot.confidence == "high"
-    assert slot.reason == "user_explicit_uncertain"
-    assert slot.evidence == (
-        ClassifiedEvidence(
-            source_id="user_message:user-1",
-            quote="Jag vet inte exakt vilket format",
-        ),
+    assert result.slots[0].classification_kind == "explicitly_uncertain"
+    outcome = result.slot_outcomes["terminal_output"]
+    assert outcome.kind == "explicitly_uncertain"
+    assert outcome.quote == ClassifiedEvidence(
+        source_id="user_message:user-1",
+        quote="Jag vet inte exakt vilket format",
     )
 
 
@@ -3029,6 +3399,75 @@ def test_prompt_hash_changes_when_allowed_slot_values_change() -> None:
     )
 
     assert changed_hash != base_hash
+
+
+def test_prompt_hash_changes_with_structured_output_mode() -> None:
+    kwargs = {
+        "classification_input": _classification_input("Sammanfatta ärendet"),
+        "ui_language": "sv",
+        "allowed_slot_values": {"terminal_output": {"pdf_document"}},
+        "litellm_model": "openai/gpt-test",
+        "provider": "openai",
+        "supported_model_kwargs": _route().supported_model_kwargs,
+    }
+
+    hashes = {
+        slot_classification_prompt_hash(
+            **kwargs,
+            structured_output_mode=mode,
+        )
+        for mode in StructuredOutputMode
+    }
+
+    assert len(hashes) == len(StructuredOutputMode)
+
+
+@pytest.mark.parametrize(
+    ("mode", "fits"),
+    [
+        (StructuredOutputMode.STRICT_JSON_SCHEMA, False),
+        (StructuredOutputMode.JSON_OBJECT, True),
+        (StructuredOutputMode.PROMPT_WITH_PYDANTIC_VALIDATION, True),
+    ],
+)
+def test_near_limit_admission_uses_the_selected_response_format_size(
+    mode: StructuredOutputMode,
+    fits: bool,
+) -> None:
+    classification_input = _classification_input("Return a PDF")
+    kwargs = {
+        "classification_input": classification_input,
+        "attachment_context": None,
+        "allowed_slot_values": {"terminal_output": {"pdf_document"}},
+        "schema_candidates": (),
+        "active_checkpoint_producers": (),
+        "ui_language": "en",
+        "bias": None,
+        "litellm_model": "openai/gpt-test",
+        "max_input_tokens": 1_000,
+        "max_output_tokens": 4_096,
+        "budget_policy": AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=0,
+            minimum_conversation_budget_tokens=0,
+        ),
+        "structured_output_mode": mode,
+    }
+    with (
+        patch.object(classifier, "count_message_tokens", return_value=100),
+        patch.object(
+            classifier,
+            "count_tokens",
+            side_effect=lambda value, _model: len(value),
+        ),
+    ):
+        if not fits:
+            with pytest.raises(AIBuilderKnownProviderRejectionException):
+                classifier.admit_slot_classification_input(**kwargs)
+            return
+
+        admitted = classifier.admit_slot_classification_input(**kwargs)
+
+    assert admitted == classification_input
 
 
 def test_prompt_hash_changes_with_model_input_budget() -> None:
@@ -3490,6 +3929,20 @@ def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     assert "en fil jag kan ladda ner" in user_prompt
 
 
+def test_classification_prompt_uses_typed_outcomes_without_json_shape_echo() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input("Please choose the output."),
+        allowed_slot_values={"terminal_output": frozenset({"pdf_document"})},
+        ui_language="en",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "resolved, explicitly_uncertain, or absent" in prompt
+    assert "Return JSON with this shape" not in prompt
+    assert '"assumptions"' not in prompt
+    assert '"contradictions"' not in prompt
+
+
 def test_classification_prompt_includes_unconfirmed_uploaded_file_evidence() -> None:
     file_id = uuid4()
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
@@ -3601,7 +4054,7 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
         f"at most {classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH}"
         in prompt
     )
-    assert "exact_quote_str" in prompt
+    assert "exact source quotes for every content claim" in prompt
     assert "form_intake" in prompt
     assert (
         "Do not classify final report headings or output sections as form intake"
@@ -3609,7 +4062,7 @@ def test_classification_prompt_places_evidence_bounds_in_model_contract() -> Non
     )
 
 
-def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
+def test_classification_prompt_requires_typed_quoted_uncertainty() -> None:
     messages = classifier._build_slot_classification_prompt(
         classification_input=_classification_input(
             "Jag vet inte exakt vilket format slutresultatet ska vara ännu, "
@@ -3623,9 +4076,9 @@ def test_classification_prompt_treats_explicit_uncertainty_as_unknown() -> None:
 
     prompt = "\n".join(message["content"] for message in messages)
     assert "explicitly says they do not know" in prompt
-    assert "`unknown`" in prompt
-    assert "`high`" in prompt
-    assert "user_explicit_uncertain" in prompt
+    assert "emit explicitly_uncertain" in prompt
+    assert "their exact quote" in prompt
+    assert "user_explicit_uncertain" not in prompt
     assert "do not choose the most likely option" in prompt
 
 
@@ -3661,8 +4114,6 @@ def test_classification_prompt_leads_with_simple_named_result_entries() -> None:
         "Never omit a citation because its location is unproven; omit the placement "
         "instead."
     ) in prompt
-    assert '"upserts": [str | {"name": str' in prompt
-    assert '"removals": [str | {"name": str' in prompt
 
 
 @pytest.mark.asyncio
@@ -3804,13 +4255,11 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(
             {
-                "slots": [],
+                "slots": {"primary_runtime_input": {"outcome": "absent"}},
                 "file_roles": [],
                 "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         )
     )
@@ -3823,6 +4272,7 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         tenant_id=uuid4(),
         ui_language="sv",
         max_output_tokens=4096,
+        structured_output_mode=StructuredOutputMode.STRICT_JSON_SCHEMA,
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
@@ -3845,8 +4295,6 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         "example_output_constraints",
         "schema_direction",
         "secondary_obligations",
-        "assumptions",
-        "contradictions",
     ]
     assert schema["additionalProperties"] is False
     output_fields_schema = schema["properties"]["named_result_evidence"]["anyOf"][0]
@@ -3889,16 +4337,13 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
         classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
     )
     slot_schema = schema["properties"]["slots"]
-    assert slot_schema["maxItems"] == 1
-    slot_variant = slot_schema["items"]["anyOf"][0]
-    assert slot_variant["properties"]["slot_name"] == {
-        "type": "string",
-        "enum": ["primary_runtime_input"],
-    }
+    assert slot_schema["required"] == ["primary_runtime_input"]
+    assert slot_schema["additionalProperties"] is False
+    slot_variant = slot_schema["properties"]["primary_runtime_input"]["oneOf"][0]
+    assert slot_variant["properties"]["outcome"] == {"const": "resolved"}
     assert slot_variant["properties"]["value"]["enum"] == [
         "audio",
         "documents",
-        "unknown",
     ]
     assert "evidence_level" in slot_variant["required"]
     assert slot_variant["properties"]["evidence_level"]["enum"] == [
@@ -3918,14 +4363,6 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
             "maxLength"
         ]
         == classification_contract.CLASSIFICATION_EVIDENCE_MAX_LENGTH
-    )
-    assert (
-        schema["properties"]["assumptions"]["maxItems"]
-        == classification_contract.CLASSIFICATION_NOTES_MAX_ITEMS
-    )
-    assert (
-        schema["properties"]["assumptions"]["items"]["maxLength"]
-        == classification_contract.CLASSIFICATION_NOTE_MAX_LENGTH
     )
     example_schema = schema["properties"]["example_output_constraints"]["anyOf"][0]
     assert example_schema["required"] == [
@@ -3950,6 +4387,25 @@ async def test_classify_slots_requests_bounded_json_schema_response_format() -> 
 
 
 @pytest.mark.asyncio
+async def test_classify_slots_uses_selected_response_schema_mode() -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE)
+    )
+    await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(),
+        classification_input=_classification_input(f"strict-schema-{uuid4()}"),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+        structured_output_mode=StructuredOutputMode.STRICT_JSON_SCHEMA,
+    )
+    response_format = litellm_client.acompletion.await_args.kwargs["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is False
+
+
+@pytest.mark.asyncio
 async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
@@ -3960,8 +4416,6 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
                 "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         )
     )
@@ -3986,12 +4440,13 @@ async def test_classify_slots_omits_unsupported_temperature_but_keeps_schema() -
         classification_input=_classification_input(f"unsupported-temp-{uuid4()}"),
         allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
         tenant_id=uuid4(),
+        structured_output_mode=StructuredOutputMode.JSON_OBJECT,
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
     assert litellm_client.acompletion.await_count == 1
     assert "temperature" not in call_kwargs
-    assert call_kwargs["response_format"]["type"] == "json_schema"
+    assert call_kwargs["response_format"]["type"] == "json_object"
 
 
 @pytest.mark.asyncio
@@ -4046,8 +4501,6 @@ async def test_classification_uses_real_resolved_route_without_discovery_call() 
                 "checkpoint_updates": [],
                 "form_intake": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         )
     )
@@ -4057,6 +4510,7 @@ async def test_classification_uses_real_resolved_route_without_discovery_call() 
         classification_input=_classification_input(f"real-route-{uuid4()}"),
         allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
         tenant_id=tenant.id,
+        structured_output_mode=StructuredOutputMode.JSON_OBJECT,
     )
 
     assert provider_loader.await_count == 1
@@ -4064,7 +4518,7 @@ async def test_classification_uses_real_resolved_route_without_discovery_call() 
     outgoing = litellm_client.acompletion.await_args.kwargs
     assert outgoing["api_key"] == "test-only"
     assert "temperature" not in outgoing
-    assert outgoing["response_format"]["type"] == "json_schema"
+    assert outgoing["response_format"]["type"] == "json_object"
 
 
 def test_slot_classification_prompt_separates_source_material_from_artifacts() -> None:
@@ -4136,10 +4590,8 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
 
     prompt = "\n".join(message["content"] for message in messages)
     assert "example_output means the user attached a file as an example" in prompt
-    assert '"evidence": [{"source_id": str, "quote": exact_quote_str}]' in prompt
+    assert "Cite exact source quotes for every content claim" in prompt
     assert "attachment-only conclusions as medium confidence" in prompt
-    assert '"file_roles": [{"file_id": str, "role": str' in prompt
-    assert '"example_output_constraints": {' in prompt
     assert "tone, detail_level, organization, formatting, or audience" in prompt
     assert "does not promise exact visual layout" in prompt
     assert "Use the conversation and file evidence together" in prompt
@@ -4178,7 +4630,7 @@ async def test_classify_slots_logs_tenant_context(
 ) -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
-        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE)
     )
     log_calls: list[dict[str, object]] = []
 

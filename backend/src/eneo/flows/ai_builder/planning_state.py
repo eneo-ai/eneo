@@ -98,6 +98,7 @@ SlotSource = Literal[
 
 SlotConfidence = Literal["high", "medium", "low"]
 SlotEvidenceLevel = Literal["explicit", "inferred"]
+SlotUncertaintyKind = Literal["explicitly_uncertain"]
 RuntimeMetadataFieldPurpose = Literal[
     "interpret_input",
     "shape_result",
@@ -288,6 +289,18 @@ class ResolvedSlot(_PlanningModel):
                     )
                 )
         return assert_never(self.source)
+
+
+class SlotUncertainty(_PlanningModel):
+    slot: str
+    kind: SlotUncertaintyKind
+
+    @field_validator("slot")
+    @classmethod
+    def require_classifier_slot(cls, slot: str) -> str:
+        if slot not in LLM_RESOLVABLE_SLOT_NAMES:
+            raise ValueError("slot uncertainty requires a classifier slot")
+        return slot
 
 
 CheckpointIntentOperation = Literal["set", "clear"]
@@ -916,6 +929,7 @@ class PlanningState(_PlanningModel):
     resolved_slots: dict[str, ResolvedSlot] = Field(
         default_factory=dict[str, ResolvedSlot]
     )
+    slot_uncertainties: dict[str, SlotUncertainty] = Field(default_factory=dict)
     focused_classification_attempted_slots: list[str] = Field(
         default_factory=list[str],
         max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
@@ -994,6 +1008,13 @@ class PlanningState(_PlanningModel):
 
     @model_validator(mode="after")
     def _owned_collections_are_valid(self) -> PlanningState:
+        if set(self.resolved_slots) & set(self.slot_uncertainties):
+            raise ValueError("resolved and uncertain slot keys must be disjoint")
+        if any(
+            slot_name != uncertainty.slot
+            for slot_name, uncertainty in self.slot_uncertainties.items()
+        ):
+            raise ValueError("slot uncertainty keys must match their slots")
         exact_by_identity: dict[tuple[str, ...], NamedResultEvidence] = {}
         unplaced_leaves: set[str] = set()
         exact_leaves: set[str] = set()

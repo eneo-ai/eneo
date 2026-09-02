@@ -47,11 +47,9 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_ITEMS,
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-    CLASSIFICATION_NOTE_MAX_LENGTH,
-    CLASSIFICATION_NOTES_MAX_ITEMS,
     CLASSIFICATION_REASON_MAX_LENGTH,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
-    UNKNOWN_SLOT_VALUE,
+    AbsentSlotClassificationOutcome,
     CheckpointUpdateOperation,
     ClassifiedCheckpointUpdate,
     ClassifiedEvidence,
@@ -59,9 +57,13 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFormIntake,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
+    ExplicitlyUncertainSlotClassificationOutcome,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationAttemptOutcome,
     SlotClassificationConfidence,
+    SlotClassificationDiagnostic,
+    SlotClassificationDiagnosticCode,
     SlotClassificationEvidenceLevel,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -287,8 +289,7 @@ class SlotClassificationSlotMetadata(BaseModel):
 
     @model_validator(mode="after")
     def validate_slot_value(self) -> "SlotClassificationSlotMetadata":
-        legal_values = legal_slot_values(self.slot_name) | {"unknown"}
-        if self.value not in legal_values:
+        if self.value not in legal_slot_values(self.slot_name):
             raise ValueError(f"unsupported slot value for {self.slot_name}")
         if self.confidence != "low" and not self.evidence:
             raise ValueError("supported slot classification requires evidence")
@@ -303,6 +304,80 @@ class SlotClassificationSlotMetadata(BaseModel):
             evidence=tuple(item.to_classified_evidence() for item in self.evidence),
             evidence_level=self.evidence_level,
         )
+
+
+class ResolvedSlotClassificationOutcomeMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["resolved"]
+    value: str = Field(min_length=1, max_length=128)
+    confidence: SlotClassificationConfidence
+    reason: str = Field(min_length=1, max_length=CLASSIFICATION_REASON_MAX_LENGTH)
+    evidence: list[SlotClassificationEvidence] = Field(
+        default_factory=_empty_slot_classification_evidence,
+        max_length=CLASSIFICATION_EVIDENCE_MAX_ITEMS,
+    )
+    evidence_level: SlotClassificationEvidenceLevel = "inferred"
+
+    @model_validator(mode="after")
+    def require_supported_evidence(self) -> ResolvedSlotClassificationOutcomeMetadata:
+        if self.confidence != "low" and not self.evidence:
+            raise ValueError("supported slot classification requires evidence")
+        return self
+
+    def to_outcome(
+        self,
+        *,
+        slot_name: LLMResolvableSlotName,
+    ) -> ResolvedSlotClassificationOutcome:
+        if self.value not in legal_slot_values(slot_name):
+            raise ValueError(f"unsupported slot value for {slot_name}")
+        return ResolvedSlotClassificationOutcome(
+            value=self.value,
+            confidence=self.confidence,
+            reason=self.reason,
+            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
+            evidence_level=self.evidence_level,
+        )
+
+
+class ExplicitlyUncertainSlotClassificationOutcomeMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["explicitly_uncertain"]
+    evidence: SlotClassificationEvidence
+
+    def to_outcome(self) -> ExplicitlyUncertainSlotClassificationOutcome:
+        return ExplicitlyUncertainSlotClassificationOutcome(
+            quote=self.evidence.to_classified_evidence()
+        )
+
+
+class AbsentSlotClassificationOutcomeMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["absent"]
+
+    def to_outcome(self) -> AbsentSlotClassificationOutcome:
+        return AbsentSlotClassificationOutcome()
+
+
+SlotClassificationOutcomeMetadata: TypeAlias = Annotated[
+    ResolvedSlotClassificationOutcomeMetadata
+    | ExplicitlyUncertainSlotClassificationOutcomeMetadata
+    | AbsentSlotClassificationOutcomeMetadata,
+    Field(discriminator="outcome"),
+]
+
+
+class SlotClassificationDiagnosticMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: SlotClassificationDiagnosticCode
+    slot_name: LLMResolvableSlotName
+
+    def to_diagnostic(self) -> SlotClassificationDiagnostic:
+        return SlotClassificationDiagnostic(code=self.code, slot_name=self.slot_name)
 
 
 class SlotClassificationFormIntakeMetadata(BaseModel):
@@ -480,16 +555,6 @@ class SlotClassificationSchemaDirectionMetadata(BaseModel):
         )
 
 
-SlotClassificationNote: TypeAlias = Annotated[
-    str,
-    Field(min_length=1, max_length=CLASSIFICATION_NOTE_MAX_LENGTH),
-]
-
-
-def _empty_slot_classification_slots() -> list[SlotClassificationSlotMetadata]:
-    return []
-
-
 def _empty_slot_classification_sources() -> list[SlotClassificationSourceMetadata]:
     return []
 
@@ -504,11 +569,20 @@ def _empty_slot_classification_checkpoint_updates() -> list[
     return []
 
 
-def _empty_slot_classification_notes() -> list[SlotClassificationNote]:
+def _empty_result_obligations() -> list[ResultObligation]:
     return []
 
 
-def _empty_result_obligations() -> list[ResultObligation]:
+def _empty_slot_classification_outcomes() -> dict[
+    LLMResolvableSlotName,
+    SlotClassificationOutcomeMetadata,
+]:
+    return {}
+
+
+def _empty_slot_classification_diagnostics() -> list[
+    SlotClassificationDiagnosticMetadata
+]:
     return []
 
 
@@ -524,8 +598,14 @@ class SlotClassificationMetadata(BaseModel):
         default_factory=_empty_slot_classification_sources,
         max_length=500,
     )
-    slots: list[SlotClassificationSlotMetadata] = Field(
-        default_factory=_empty_slot_classification_slots,
+    slot_outcomes: dict[LLMResolvableSlotName, SlotClassificationOutcomeMetadata] = (
+        Field(
+            default_factory=_empty_slot_classification_outcomes,
+            max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
+        )
+    )
+    diagnostics: list[SlotClassificationDiagnosticMetadata] = Field(
+        default_factory=_empty_slot_classification_diagnostics,
         max_length=len(LLM_RESOLVABLE_SLOT_NAMES),
     )
     file_roles: list[SlotClassificationFileRoleMetadata] = Field(
@@ -544,14 +624,21 @@ class SlotClassificationMetadata(BaseModel):
     named_result_evidence: SlotClassificationNamedResultEvidenceMetadata | None = None
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     schema_direction: SlotClassificationSchemaDirectionMetadata | None = None
-    assumptions: list[SlotClassificationNote] = Field(
-        default_factory=_empty_slot_classification_notes,
-        max_length=CLASSIFICATION_NOTES_MAX_ITEMS,
-    )
-    contradictions: list[SlotClassificationNote] = Field(
-        default_factory=_empty_slot_classification_notes,
-        max_length=CLASSIFICATION_NOTES_MAX_ITEMS,
-    )
+
+    @property
+    def slots(self) -> list[SlotClassificationSlotMetadata]:
+        return [
+            SlotClassificationSlotMetadata(
+                slot_name=slot_name,
+                value=outcome.value,
+                confidence=outcome.confidence,
+                reason=outcome.reason,
+                evidence=outcome.evidence,
+                evidence_level=outcome.evidence_level,
+            )
+            for slot_name, outcome in self.slot_outcomes.items()
+            if isinstance(outcome, ResolvedSlotClassificationOutcomeMetadata)
+        ]
 
     @field_validator("schema_version")
     @classmethod
@@ -559,17 +646,6 @@ class SlotClassificationMetadata(BaseModel):
         if schema_version != SLOT_CLASSIFICATION_SCHEMA_VERSION:
             raise ValueError("unsupported slot classification metadata version")
         return schema_version
-
-    @field_validator("slots")
-    @classmethod
-    def ensure_unique_slots(
-        cls,
-        slots: list[SlotClassificationSlotMetadata],
-    ) -> list[SlotClassificationSlotMetadata]:
-        slot_names = [slot.slot_name for slot in slots]
-        if len(slot_names) != len(set(slot_names)):
-            raise ValueError("slot classification metadata must not duplicate slots")
-        return slots
 
     @field_validator("source_inventory")
     @classmethod
@@ -622,10 +698,15 @@ class SlotClassificationMetadata(BaseModel):
             raise ValueError(
                 "provider-call slot classification metadata requires prompt_hash"
             )
+        for slot_name, outcome in self.slot_outcomes.items():
+            if isinstance(
+                outcome, ResolvedSlotClassificationOutcomeMetadata
+            ) and outcome.value not in legal_slot_values(slot_name):
+                raise ValueError(f"unsupported slot value for {slot_name}")
         if self.outcome != "resolved" and any(
             (
-                self.slots,
-                self.assumptions,
+                self.slot_outcomes,
+                self.diagnostics,
                 self.file_roles,
                 self.checkpoint_updates,
                 self.secondary_obligations,
@@ -633,7 +714,6 @@ class SlotClassificationMetadata(BaseModel):
                 self.named_result_evidence is not None,
                 self.example_output_constraints is not None,
                 self.schema_direction is not None,
-                self.contradictions,
             )
         ):
             raise ValueError(
@@ -641,7 +721,22 @@ class SlotClassificationMetadata(BaseModel):
             )
         sources_by_id = {source.source_id: source for source in self.source_inventory}
         source_ids = set(sources_by_id)
-        evidence_items = [evidence for slot in self.slots for evidence in slot.evidence]
+        evidence_items = [
+            evidence
+            for outcome in self.slot_outcomes.values()
+            for evidence in (
+                outcome.evidence
+                if isinstance(outcome, ResolvedSlotClassificationOutcomeMetadata)
+                else (
+                    [outcome.evidence]
+                    if isinstance(
+                        outcome,
+                        ExplicitlyUncertainSlotClassificationOutcomeMetadata,
+                    )
+                    else []
+                )
+            )
+        ]
         evidence_items.extend(
             evidence for file_role in self.file_roles for evidence in file_role.evidence
         )
@@ -670,12 +765,35 @@ class SlotClassificationMetadata(BaseModel):
         ):
             raise ValueError("checkpoint updates require user-owned evidence")
         if any(
-            slot.slot_name == "terminal_output"
-            and not classification_evidence_has_user_owned_source(
-                (evidence.source_id for evidence in slot.evidence),
+            not classification_evidence_has_user_owned_source(
+                (outcome.evidence.source_id,),
                 source_kinds_by_id=source_kinds_by_id,
             )
-            for slot in self.slots
+            for outcome in self.slot_outcomes.values()
+            if isinstance(
+                outcome,
+                ExplicitlyUncertainSlotClassificationOutcomeMetadata,
+            )
+        ):
+            raise ValueError("explicit slot uncertainty requires user-owned evidence")
+        if any(
+            slot_name == "terminal_output"
+            and not classification_evidence_has_user_owned_source(
+                (
+                    evidence.source_id
+                    for evidence in (
+                        outcome.evidence
+                        if isinstance(
+                            outcome,
+                            ResolvedSlotClassificationOutcomeMetadata,
+                        )
+                        else [outcome.evidence]
+                    )
+                ),
+                source_kinds_by_id=source_kinds_by_id,
+            )
+            for slot_name, outcome in self.slot_outcomes.items()
+            if not isinstance(outcome, AbsentSlotClassificationOutcomeMetadata)
         ):
             raise ValueError(
                 "terminal-output classification requires user-owned evidence"
@@ -758,6 +876,18 @@ class SlotClassificationMetadata(BaseModel):
             )
         return SlotClassificationResult(
             slots=tuple(slot.to_classified_slot() for slot in self.slots),
+            slot_outcomes={
+                slot_name: (
+                    outcome.to_outcome(slot_name=slot_name)
+                    if isinstance(
+                        outcome,
+                        ResolvedSlotClassificationOutcomeMetadata,
+                    )
+                    else outcome.to_outcome()
+                )
+                for slot_name, outcome in self.slot_outcomes.items()
+            },
+            diagnostics=tuple(item.to_diagnostic() for item in self.diagnostics),
             file_roles=tuple(
                 file_role.to_classified_file_role() for file_role in self.file_roles
             ),
@@ -775,8 +905,6 @@ class SlotClassificationMetadata(BaseModel):
                 else None
             ),
             secondary_obligations=tuple(self.secondary_obligations),
-            assumptions=tuple(self.assumptions),
-            contradictions=tuple(self.contradictions),
         )
 
     def effective_retention_identities(self) -> frozenset[ClassifierRetentionIdentity]:
@@ -784,11 +912,16 @@ class SlotClassificationMetadata(BaseModel):
         if self.outcome != "resolved":
             return frozenset()
         identities: set[ClassifierRetentionIdentity] = set()
-        for slot in self.slots:
-            if slot.value == UNKNOWN_SLOT_VALUE or (
-                slot.confidence != "low" and slot.evidence
+        for slot_name, outcome in self.slot_outcomes.items():
+            if isinstance(
+                outcome,
+                ExplicitlyUncertainSlotClassificationOutcomeMetadata,
+            ) or (
+                isinstance(outcome, ResolvedSlotClassificationOutcomeMetadata)
+                and outcome.confidence != "low"
+                and outcome.evidence
             ):
-                identities.add(("slot", slot.slot_name))
+                identities.add(("slot", slot_name))
         identities.update(
             ("file_role", str(file_role.file_id))
             for file_role in self.file_roles
@@ -831,7 +964,18 @@ class SlotClassificationMetadata(BaseModel):
         compaction_limits: frozenset[Literal["count", "bytes"]] = frozenset(),
     ) -> "SlotClassificationMetadata":
         """Project one classifier run to effective rebuild facts and their sources."""
-        slots = [slot for slot in self.slots if ("slot", slot.slot_name) in identities]
+        slot_outcomes: dict[
+            LLMResolvableSlotName,
+            SlotClassificationOutcomeMetadata,
+        ] = {
+            slot_name: (
+                outcome
+                if isinstance(outcome, AbsentSlotClassificationOutcomeMetadata)
+                or ("slot", slot_name) in identities
+                else AbsentSlotClassificationOutcomeMetadata(outcome="absent")
+            )
+            for slot_name, outcome in self.slot_outcomes.items()
+        }
         file_roles = [
             file_role
             for file_role in self.file_roles
@@ -865,10 +1009,26 @@ class SlotClassificationMetadata(BaseModel):
             for obligation in self.secondary_obligations
             if ("secondary_obligation", obligation) in identities
         ]
+        slot_outcome_evidence = [
+            evidence
+            for outcome in slot_outcomes.values()
+            for evidence in (
+                outcome.evidence
+                if isinstance(outcome, ResolvedSlotClassificationOutcomeMetadata)
+                else (
+                    [outcome.evidence]
+                    if isinstance(
+                        outcome,
+                        ExplicitlyUncertainSlotClassificationOutcomeMetadata,
+                    )
+                    else []
+                )
+            )
+        ]
         evidence_source_ids = {
             evidence.source_id
             for evidence in (
-                *[evidence for slot in slots for evidence in slot.evidence],
+                *slot_outcome_evidence,
                 *[
                     evidence
                     for file_role in file_roles
@@ -907,20 +1067,10 @@ class SlotClassificationMetadata(BaseModel):
             if source.source_id in evidence_source_ids
             or source.file_id in retained_file_ids
         ]
-        contradictions = (
-            [
-                "conversation_compaction:"
-                + ",".join(
-                    limit for limit in ("count", "bytes") if limit in compaction_limits
-                )
-            ]
-            if compaction_limits
-            else []
-        )
         return self.model_copy(
             update={
                 "source_inventory": source_inventory,
-                "slots": slots,
+                "slot_outcomes": slot_outcomes,
                 "file_roles": file_roles,
                 "checkpoint_updates": checkpoint_updates,
                 "secondary_obligations": secondary_obligations,
@@ -928,11 +1078,6 @@ class SlotClassificationMetadata(BaseModel):
                 "named_result_evidence": named_result_evidence,
                 "example_output_constraints": example_output_constraints,
                 "schema_direction": schema_direction,
-                # Free-form model notes are diagnostics, not rebuild facts, and
-                # never reach the requirements disclosure. Compaction keeps only
-                # its typed, consumer-visible degradation marker here.
-                "assumptions": [],
-                "contradictions": contradictions,
             }
         )
 
@@ -1391,7 +1536,7 @@ def _bounded_metadata_text(
     value: str,
     *,
     fallback: str,
-    max_length: int = CLASSIFICATION_NOTE_MAX_LENGTH,
+    max_length: int = CLASSIFICATION_REASON_MAX_LENGTH,
 ) -> str:
     stripped = value.strip()
     if not stripped:
@@ -1558,17 +1703,18 @@ def slot_classification_metadata_from_attempt(
         raise ValueError(
             "Live named-result deltas require a materialized replay snapshot"
         )
-    slot_payloads: list[dict[str, object]] = []
-    seen_slot_names: set[str] = set()
-    for slot in result.slots:
-        payload = _slot_classification_slot_payload(slot)
-        if payload is None:
-            continue
-        slot_name = payload.get("slot_name")
-        if not isinstance(slot_name, str) or slot_name in seen_slot_names:
-            continue
-        slot_payloads.append(payload)
-        seen_slot_names.add(slot_name)
+    slot_outcome_payloads = {
+        slot_name: payload
+        for slot_name, outcome in result.slot_outcomes.items()
+        if slot_name in LLM_RESOLVABLE_SLOT_NAMES
+        and (
+            payload := _slot_classification_outcome_payload(
+                slot_name=slot_name,
+                outcome=outcome,
+            )
+        )
+        is not None
+    }
     form_intake_payload = _slot_classification_form_intake_payload(result.form_intake)
     file_role_payloads = [
         _slot_classification_file_role_payload(file_role)
@@ -1610,7 +1756,12 @@ def slot_classification_metadata_from_attempt(
             "model": model,
             "provider": provider,
             "source_inventory": list(source_inventory_by_id.values()),
-            "slots": slot_payloads,
+            "slot_outcomes": slot_outcome_payloads,
+            "diagnostics": [
+                {"code": item.code, "slot_name": item.slot_name}
+                for item in result.diagnostics
+                if item.slot_name in LLM_RESOLVABLE_SLOT_NAMES
+            ],
             "file_roles": file_role_payloads,
             "checkpoint_updates": checkpoint_update_payloads,
             "secondary_obligations": secondary_obligations,
@@ -1628,38 +1779,37 @@ def slot_classification_metadata_from_attempt(
             "schema_direction": _slot_classification_schema_direction_payload(
                 result.schema_direction
             ),
-            "assumptions": [
-                _bounded_metadata_text(value, fallback="assumption")
-                for value in result.assumptions
-                if value.strip()
-            ][:CLASSIFICATION_NOTES_MAX_ITEMS],
-            "contradictions": [
-                _bounded_metadata_text(value, fallback="contradiction")
-                for value in result.contradictions
-                if value.strip()
-            ][:CLASSIFICATION_NOTES_MAX_ITEMS],
         }
     )
 
 
-def _slot_classification_slot_payload(slot: ClassifiedSlot) -> dict[str, object] | None:
-    if slot.slot_name not in LLM_RESOLVABLE_SLOT_NAMES:
-        return None
-    if slot.value != UNKNOWN_SLOT_VALUE and slot.value not in legal_slot_values(
-        slot.slot_name
-    ):
-        return None
-    return {
-        "slot_name": slot.slot_name,
-        "value": slot.value,
-        "confidence": slot.confidence,
-        "reason": _bounded_metadata_text(
-            slot.reason,
-            fallback="slot classification",
-        ),
-        "evidence": _slot_classification_evidence_payloads(slot.evidence),
-        "evidence_level": slot.evidence_level,
-    }
+def _slot_classification_outcome_payload(
+    *,
+    slot_name: str,
+    outcome: object,
+) -> dict[str, object] | None:
+    if isinstance(outcome, ResolvedSlotClassificationOutcome):
+        if outcome.value not in legal_slot_values(slot_name):
+            return {"outcome": "absent"}
+        return {
+            "outcome": outcome.kind,
+            "value": outcome.value,
+            "confidence": outcome.confidence,
+            "reason": _bounded_metadata_text(
+                outcome.reason,
+                fallback="slot classification",
+            ),
+            "evidence": _slot_classification_evidence_payloads(outcome.evidence),
+            "evidence_level": outcome.evidence_level,
+        }
+    if isinstance(outcome, ExplicitlyUncertainSlotClassificationOutcome):
+        evidence = _slot_classification_evidence_payloads((outcome.quote,))
+        if not evidence:
+            return None
+        return {"outcome": outcome.kind, "evidence": evidence[0]}
+    if isinstance(outcome, AbsentSlotClassificationOutcome):
+        return {"outcome": outcome.kind}
+    return None
 
 
 def _slot_classification_form_intake_payload(

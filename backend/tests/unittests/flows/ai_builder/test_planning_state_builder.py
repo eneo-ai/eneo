@@ -54,6 +54,8 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedNamedResultDelta,
     ClassifiedNamedResultEvidence,
     ClassifiedSlot,
+    ExplicitlyUncertainSlotClassificationOutcome,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationConfidence,
     SlotClassificationEvidenceLevel,
@@ -90,6 +92,7 @@ from eneo.flows.ai_builder.planning_state import (
     SchemaResolution,
     SlotConfidence,
     SlotSource,
+    SlotUncertainty,
     StepTriple,
     UnplacedNamedResultPlacement,
     is_named_content_fields_edit_reference,
@@ -108,6 +111,9 @@ from eneo.flows.ai_builder.planning_state_builder import (
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 
 def _state(
@@ -450,6 +456,264 @@ def _model_evidence(
     )
 
 
+def test_model_uncertainty_and_resolution_remain_disjoint() -> None:
+    state = _state()
+    quote = ClassifiedEvidence(
+        source_id="user_message:test-source",
+        quote="I have not decided the output format",
+    )
+
+    merge_llm_resolved_slots(
+        state,
+        slot_classification_result(
+            slot_outcomes={
+                "terminal_output": ExplicitlyUncertainSlotClassificationOutcome(
+                    quote=quote
+                )
+            }
+        ),
+        prompt_hash="a" * 64,
+        freeform_text=quote.quote,
+    )
+
+    assert state.slot_uncertainties == {
+        "terminal_output": SlotUncertainty(
+            slot="terminal_output",
+            kind="explicitly_uncertain",
+        )
+    }
+    assert "terminal_output" not in state.resolved_slots
+
+    merge_llm_resolved_slots(
+        state,
+        slot_classification_result(
+            slot_outcomes={
+                "terminal_output": ResolvedSlotClassificationOutcome(
+                    value="pdf_document",
+                    confidence="high",
+                    reason="The user chose PDF",
+                    evidence=(quote,),
+                    evidence_level="explicit",
+                )
+            }
+        ),
+        prompt_hash="b" * 64,
+        freeform_text=quote.quote,
+    )
+
+    assert state.slot_uncertainties == {}
+    assert state.resolved_slots["terminal_output"].value == "pdf_document"
+
+
+def test_policy_default_does_not_resolve_an_explicitly_uncertain_slot() -> None:
+    state = _state()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        name="primary_runtime_input",
+        value="documents",
+        source="model",
+    )
+    quote = ClassifiedEvidence(
+        source_id="user_message:test-source",
+        quote="I have not decided whether each run has one or several documents",
+    )
+
+    merge_llm_resolved_slots(
+        state,
+        slot_classification_result(
+            slot_outcomes={
+                "document_material_scope": (
+                    ExplicitlyUncertainSlotClassificationOutcome(quote=quote)
+                )
+            }
+        ),
+        prompt_hash="a" * 64,
+        freeform_text=quote.quote,
+    )
+    apply_policy_defaults_from_resolved_slots(state, freeform_text=quote.quote)
+
+    assert "document_material_scope" not in state.resolved_slots
+    assert state.slot_uncertainties["document_material_scope"] == SlotUncertainty(
+        slot="document_material_scope",
+        kind="explicitly_uncertain",
+    )
+
+
+def test_uncertainty_rejects_non_classifier_slots() -> None:
+    with pytest.raises(ValueError, match="classifier slot"):
+        SlotUncertainty(
+            slot="docx_output_mode",
+            kind="explicitly_uncertain",
+        )
+
+
+def test_uncertainty_survives_compacted_replay_until_a_structured_correction() -> None:
+    quote = "I have not decided the output format"
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:uncertain-output",
+                kind="user_message",
+                text=quote,
+                message_id="uncertain-output",
+            ),
+        ),
+        current_user_message_id="uncertain-output",
+    )
+    result = slot_classification_result(
+        slot_outcomes={
+            "terminal_output": ExplicitlyUncertainSlotClassificationOutcome(
+                quote=ClassifiedEvidence(
+                    source_id="user_message:uncertain-output",
+                    quote=quote,
+                )
+            )
+        }
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(outcome="resolved", result=result),
+        prompt_hash="a" * 64,
+        classification_input=classification_input,
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    compacted = metadata.retain_effective_semantics(
+        metadata.effective_retention_identities()
+    )
+    conversation = [
+        ConversationMessage(
+            message_id="uncertain-output",
+            role="user",
+            content=quote,
+            metadata=metadata_with_slot_classification(None, compacted),
+        )
+    ]
+
+    uncertain = build_planning_state_from_conversation(conversation)
+
+    assert uncertain.slot_uncertainties["terminal_output"].kind == (
+        "explicitly_uncertain"
+    )
+    assert "terminal_output" not in uncertain.resolved_slots
+
+    conversation.append(
+        ConversationMessage(
+            message_id="resolved-output",
+            role="user",
+            content="PDF",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_option_ids": ["pdf_document"],
+                    "selected_values": ["pdf_document"],
+                }
+            },
+        )
+    )
+    corrected = build_planning_state_from_conversation(conversation)
+
+    assert corrected.slot_uncertainties == {}
+    assert corrected.resolved_slots["terminal_output"].value == "pdf_document"
+
+
+def test_document_scope_uncertainty_survives_replay_compaction_and_correction() -> None:
+    quote = "I have not decided whether each run has one or several documents"
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:uncertain-scope",
+                kind="user_message",
+                text=quote,
+                message_id="uncertain-scope",
+            ),
+        ),
+        current_user_message_id="uncertain-scope",
+    )
+    metadata = slot_classification_metadata_from_attempt(
+        SlotClassificationAttempt(
+            outcome="resolved",
+            result=slot_classification_result(
+                slot_outcomes={
+                    "document_material_scope": (
+                        ExplicitlyUncertainSlotClassificationOutcome(
+                            quote=ClassifiedEvidence(
+                                source_id="user_message:uncertain-scope",
+                                quote=quote,
+                            )
+                        )
+                    )
+                }
+            ),
+        ),
+        prompt_hash="a" * 64,
+        classification_input=classification_input,
+        model="openai/gpt-test",
+        provider="openai",
+    )
+    assert metadata is not None
+    primary_answer = ConversationMessage(
+        role="user",
+        content="Documents",
+        metadata={
+            "question_answer": {
+                "question_id": "primary_runtime_input",
+                "selected_option_id": "documents",
+                "selected_value": "documents",
+            }
+        },
+    )
+    uncertain_message = ConversationMessage(
+        message_id="uncertain-scope",
+        role="user",
+        content=quote,
+        metadata=metadata_with_slot_classification(None, metadata),
+    )
+
+    replayed = build_planning_state_from_conversation(
+        [primary_answer, uncertain_message]
+    )
+
+    assert "document_material_scope" not in replayed.resolved_slots
+    assert replayed.slot_uncertainties["document_material_scope"].kind == (
+        "explicitly_uncertain"
+    )
+
+    compacted = metadata.retain_effective_semantics(
+        metadata.effective_retention_identities()
+    )
+    uncertain_message.metadata = metadata_with_slot_classification(None, compacted)
+    compacted_state = build_planning_state_from_conversation(
+        [primary_answer, uncertain_message]
+    )
+
+    assert "document_material_scope" not in compacted_state.resolved_slots
+    assert compacted_state.slot_uncertainties["document_material_scope"].kind == (
+        "explicitly_uncertain"
+    )
+
+    corrected = build_planning_state_from_conversation(
+        [
+            primary_answer,
+            uncertain_message,
+            ConversationMessage(
+                role="user",
+                content="One document per run",
+                metadata={
+                    "question_answer": {
+                        "question_id": "document_material_scope",
+                        "selected_option_id": "single_document_case",
+                        "selected_value": "single_document_case",
+                    }
+                },
+            ),
+        ]
+    )
+
+    assert "document_material_scope" not in corrected.slot_uncertainties
+    assert corrected.resolved_slots["document_material_scope"].value == (
+        "single_document_case"
+    )
+
+
 def _two_timestamp_hierarchies() -> list[NamedResultEvidence]:
     return [
         NamedResultEvidence(
@@ -517,8 +781,6 @@ def _parse_named_result_delta(
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -541,7 +803,7 @@ def _slot_classification_metadata(
     evidence_quotes.extend(
         item.quote for update in checkpoint_updates for item in update.evidence
     )
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         slots=slots,
         form_intake=form_intake,
         checkpoint_updates=checkpoint_updates,
@@ -587,7 +849,7 @@ def test_conversation_replay_overlays_live_attachment_role_evidence() -> None:
             ),
         )
     )
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         file_roles=(
             ClassifiedFileRole(
                 file_id=file_id,
@@ -2133,7 +2395,7 @@ class TestRuntimeMetadataClassificationBoundaries:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
@@ -2170,7 +2432,7 @@ class TestRuntimeMetadataClassificationBoundaries:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
@@ -2212,7 +2474,7 @@ class TestRuntimeMetadataClassificationBoundaries:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
@@ -2603,7 +2865,7 @@ class TestSlotClassificationMetadataReplay:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name="terminal_output",
@@ -2819,8 +3081,6 @@ class TestModelSlotMerge:
                         "example_output_constraints": None,
                         "schema_direction": None,
                         "secondary_obligations": [],
-                        "assumptions": [],
-                        "contradictions": [],
                     }
                 ),
                 allowed_slot_values={},
@@ -2894,7 +3154,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(),
@@ -2946,7 +3206,7 @@ class TestModelSlotMerge:
         )
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(exact,),
@@ -2965,7 +3225,7 @@ class TestModelSlotMerge:
         weak_evidence = _model_evidence("Timestamp")
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(
@@ -3050,8 +3310,6 @@ class TestModelSlotMerge:
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],
-                    "assumptions": [],
-                    "contradictions": [],
                 }
             ),
             allowed_slot_values={},
@@ -3124,7 +3382,7 @@ class TestModelSlotMerge:
         weak_evidence = _model_evidence("Timestamp")
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(
@@ -3155,7 +3413,7 @@ class TestModelSlotMerge:
         evidence = _model_evidence("Events")
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(
@@ -3180,7 +3438,7 @@ class TestModelSlotMerge:
         replacement_evidence = _model_evidence("Replace Events with incidents")
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(
@@ -3214,7 +3472,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "primary_runtime_input",
@@ -3255,14 +3513,14 @@ class TestModelSlotMerge:
         )
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(checkpoint_updates=(requested,)),
+            slot_classification_result(checkpoint_updates=(requested,)),
             prompt_hash="a" * 64,
             freeform_text="I want to approve the report before delivery.",
         )
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
                         operation="clear",
@@ -3303,7 +3561,7 @@ class TestModelSlotMerge:
         ):
             merge_llm_resolved_slots(
                 _state(),
-                SlotClassificationResult(
+                slot_classification_result(
                     checkpoint_updates=(checkpoint, checkpoint),
                 ),
                 prompt_hash="a" * 64,
@@ -3363,8 +3621,6 @@ class TestModelSlotMerge:
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],
-                    "assumptions": [],
-                    "contradictions": [],
                 }
             ),
             allowed_slot_values={},
@@ -3425,7 +3681,7 @@ class TestModelSlotMerge:
         }
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=tuple(
@@ -3477,7 +3733,7 @@ class TestModelSlotMerge:
         classification = slot_classification_metadata_from_attempt(
             SlotClassificationAttempt(
                 outcome="resolved",
-                result=SlotClassificationResult(
+                result=slot_classification_result(
                     slots=(
                         ClassifiedSlot(
                             slot_name="terminal_output",
@@ -3528,7 +3784,7 @@ class TestModelSlotMerge:
         priority_evidence = _model_evidence("Lägg även till priority.")
         merge_llm_resolved_slots(
             replayed,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(
@@ -3570,7 +3826,7 @@ class TestModelSlotMerge:
         clear_classification = slot_classification_metadata_from_attempt(
             SlotClassificationAttempt(
                 outcome="resolved",
-                result=SlotClassificationResult(named_result_evidence=clear_delta),
+                result=slot_classification_result(named_result_evidence=clear_delta),
             ),
             prompt_hash="d" * 64,
             classification_input=SlotClassificationInput(
@@ -3629,7 +3885,7 @@ class TestModelSlotMerge:
         with pytest.raises(AIBuilderBadRequestException) as exc_info:
             merge_llm_resolved_slots(
                 state,
-                SlotClassificationResult(
+                slot_classification_result(
                     named_result_evidence=ClassifiedNamedResultDelta(
                         operation="update",
                         upserts=(
@@ -3850,7 +4106,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=(
@@ -4023,8 +4279,6 @@ class TestModelSlotMerge:
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],
-                    "assumptions": [],
-                    "contradictions": [],
                 }
             ),
             allowed_slot_values={},
@@ -4079,7 +4333,7 @@ class TestModelSlotMerge:
         named_evidence = _model_evidence("case_id och status")
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=tuple(
@@ -4119,7 +4373,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="clear",
                     upserts=(),
@@ -4155,7 +4409,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("terminal_output", "pdf_document", "high"),)
             ),
             prompt_hash="d" * 64,
@@ -4171,7 +4425,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("terminal_output", "structured_json", "high"),)
             ),
             prompt_hash="e" * 64,
@@ -4238,8 +4492,6 @@ class TestModelSlotMerge:
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],
-                    "assumptions": [],
-                    "contradictions": [],
                 }
             ),
             allowed_slot_values=llm_resolvable_slot_values_for_state(state),
@@ -4302,8 +4554,6 @@ class TestModelSlotMerge:
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],
-                    "assumptions": [],
-                    "contradictions": [],
                 }
             ),
             allowed_slot_values=llm_resolvable_slot_values_for_state(state),
@@ -4504,7 +4754,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified("primary_runtime_input", "text", "high"),
                     _classified("terminal_output", "pdf_document", "high"),
@@ -4534,7 +4784,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "post_processing_goal",
@@ -4564,7 +4814,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "post_processing_goal",
@@ -4647,7 +4897,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("terminal_output", "pdf_document", "medium"),)
             ),
             prompt_hash="a" * 64,
@@ -4709,7 +4959,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("primary_runtime_input", "audio", "high"),)
             ),
             prompt_hash="c" * 64,
@@ -4786,7 +5036,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
@@ -4821,7 +5071,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
@@ -4853,7 +5103,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "runtime_metadata_fields",
@@ -4889,7 +5139,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified("terminal_output", "pdf_document", "medium"),
                     _classified("primary_runtime_input", "text", "medium"),
@@ -4907,7 +5157,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified("primary_runtime_input", "json", "high"),
                     _classified("terminal_output", "structured_json", "high"),
@@ -4926,7 +5176,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(secondary_obligations=("risks", "actions")),
+            slot_classification_result(secondary_obligations=("risks", "actions")),
             prompt_hash="a" * 64,
             freeform_text=(
                 "Jämför dokumenten och ta också fram risker och rekommenderade åtgärder."
@@ -4944,7 +5194,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 form_intake=ClassifiedFormIntake(
                     needs_form_fields=True,
                     sectioned_form_intake=True,
@@ -4974,7 +5224,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 form_intake=ClassifiedFormIntake(
                     needs_form_fields=True,
                     sectioned_form_intake=False,
@@ -5006,7 +5256,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified(
                         "primary_runtime_input",
@@ -5030,7 +5280,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("terminal_output", "pdf_document", "low"),)
             ),
             prompt_hash="e" * 64,
@@ -5044,7 +5294,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("primary_runtime_input", "unknown", "high"),)
             ),
             prompt_hash="f" * 64,
@@ -5065,7 +5315,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("terminal_output", "structured_text", "high"),)
             ),
             prompt_hash="f" * 64,
@@ -5087,7 +5337,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(_classified("terminal_output", "structured_text", "high"),)
             ),
             prompt_hash="f" * 64,
@@ -5103,7 +5353,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 slots=(
                     _classified("docx_output_mode", "template_fill_docx", "high"),
                     _classified(
@@ -5139,7 +5389,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=UUID(file_id),
@@ -5200,7 +5450,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=file_id,
@@ -5254,7 +5504,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=file_id,
@@ -5300,7 +5550,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=file_id,
@@ -5347,7 +5597,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=file_id,
@@ -5422,7 +5672,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 example_output_constraints=constraints,
             ),
             prompt_hash="x" * 64,
@@ -5445,7 +5695,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=file_id,
@@ -5488,7 +5738,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(example_output_constraints=replacement),
+            slot_classification_result(example_output_constraints=replacement),
             prompt_hash="s" * 64,
             freeform_text="",
         )
@@ -5547,7 +5797,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 example_output_constraints=constraints,
             ),
             prompt_hash="y" * 64,
@@ -5576,7 +5826,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=UUID(file_id),
@@ -5615,7 +5865,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=UUID(file_id),
@@ -5655,7 +5905,7 @@ class TestModelSlotMerge:
 
         merge_llm_resolved_slots(
             state,
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=UUID(file_id),
@@ -5681,7 +5931,7 @@ class TestModelSlotMerge:
         with pytest.raises(ValueError, match="prompt_hash"):
             merge_llm_resolved_slots(
                 state,
-                SlotClassificationResult(
+                slot_classification_result(
                     slots=(_classified("primary_runtime_input", "text", "high"),)
                 ),
                 prompt_hash="",
@@ -6160,7 +6410,7 @@ class TestMixedRuntimeMaterialChoice:
         state = build_planning_state_from_conversation(
             self._conversation("document_primary_input")
         )
-        classification = SlotClassificationResult(
+        classification = slot_classification_result(
             slots=[
                 _classified(
                     "primary_runtime_input",
@@ -6240,7 +6490,7 @@ class TestNamedContentFieldsEdit:
             slot_classification_metadata_from_attempt(
                 SlotClassificationAttempt(
                     outcome="resolved",
-                    result=SlotClassificationResult(),
+                    result=slot_classification_result(),
                 ),
                 prompt_hash="b" * 64,
                 classification_input=classification_input,
@@ -6326,7 +6576,7 @@ class TestNamedContentFieldsEdit:
             slot_classification_metadata_from_attempt(
                 SlotClassificationAttempt(
                     outcome="resolved",
-                    result=SlotClassificationResult(),
+                    result=slot_classification_result(),
                 ),
                 prompt_hash="f" * 64,
                 classification_input=classification_input,
@@ -6473,7 +6723,7 @@ class TestNamedContentFieldsEdit:
             slot_classification_metadata_from_attempt(
                 SlotClassificationAttempt(
                     outcome="resolved",
-                    result=SlotClassificationResult(),
+                    result=slot_classification_result(),
                 ),
                 prompt_hash="f" * 64,
                 classification_input=classification_input,
@@ -6679,7 +6929,7 @@ class TestNamedContentFieldsEdit:
             slot_classification_metadata_from_attempt(
                 SlotClassificationAttempt(
                     outcome="resolved",
-                    result=SlotClassificationResult(),
+                    result=slot_classification_result(),
                 ),
                 prompt_hash="e" * 64,
                 classification_input=classification_input,

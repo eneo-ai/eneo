@@ -24,6 +24,9 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputMode,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_for_assistant_question,
 )
@@ -86,6 +89,10 @@ async def classify_slots(**kwargs: Any):
             conversation_safety_buffer_tokens=0,
             minimum_conversation_budget_tokens=0,
         ),
+    )
+    kwargs.setdefault(
+        "structured_output_mode",
+        StructuredOutputMode.STRICT_JSON_SCHEMA,
     )
     return await _classify_slots(**kwargs)
 
@@ -250,8 +257,6 @@ def _mock_response(slots: list[dict[str, object]]) -> MagicMock:
             "example_output_constraints": None,
             "schema_direction": None,
             "secondary_obligations": [],
-            "assumptions": [],
-            "contradictions": [],
         },
         ensure_ascii=False,
     )

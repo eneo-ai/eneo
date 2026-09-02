@@ -75,7 +75,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    UNKNOWN_SLOT_VALUE,
+    AbsentSlotClassificationOutcome,
     ClassifiedEvidence,
     ClassifiedFileRole,
     ClassifiedNamedResultDelta,
@@ -83,8 +83,8 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedSchemaDirection,
     ClassifiedSlot,
     SlotClassificationAttempt,
+    SlotClassificationDiagnostic,
     SlotClassificationInput,
-    SlotClassificationResult,
     SlotClassificationSource,
     parse_slot_classification_response,
 )
@@ -115,6 +115,9 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 
 def _make_response(content: object, *, complete_contract: bool = True) -> MagicMock:
@@ -135,8 +138,6 @@ def _make_response(content: object, *, complete_contract: bool = True) -> MagicM
                         "example_output_constraints": None,
                         "schema_direction": None,
                         "secondary_obligations": [],
-                        "assumptions": [],
-                        "contradictions": [],
                         **payload,
                     }
                 )
@@ -487,7 +488,7 @@ async def test_runtime_classifies_corrective_text_sent_with_structured_answer(
     classify = AsyncMock(
         return_value=SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(),
+            result=slot_classification_result(),
         )
     )
     monkeypatch.setattr(runtime, "classify_slots", classify)
@@ -546,7 +547,7 @@ async def test_runtime_applies_exact_structured_answer_without_model_call(
     classify = AsyncMock(
         return_value=SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(),
+            result=slot_classification_result(),
         )
     )
     monkeypatch.setattr(runtime, "classify_slots", classify)
@@ -598,7 +599,7 @@ async def test_runtime_retains_named_results_until_structured_output_choice(
     classify = AsyncMock(
         return_value=SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(
+            result=slot_classification_result(
                 named_result_evidence=ClassifiedNamedResultDelta(
                     operation="update",
                     upserts=tuple(
@@ -728,8 +729,6 @@ def test_blank_current_turn_cannot_readmit_prior_named_json_fields() -> None:
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         ),
         allowed_slot_values={},
@@ -937,18 +936,18 @@ def test_slot_classification_input_keeps_parser_shape_invariants() -> None:
     assert structured_source.truncated is True
 
 
-def test_classifier_prose_never_reaches_the_requirements_disclosure() -> None:
-    """Model notes are diagnostics; the confirmation identity is server-derived.
-
-    Copying regenerated model prose into the summary moved the requirements
-    version on every turn over unchanged evidence.
-    """
-
+def test_classifier_diagnostics_never_reach_the_requirements_disclosure() -> None:
     analysis = analyze_discovery(
         [ConversationMessage(role="user", content="Build a document summary flow.")],
         planning_state=_resolved_state(),
-        slot_classification_result=SlotClassificationResult(
-            assumptions=("The output can be a short summary.",)
+        slot_classification_result=slot_classification_result(
+            slot_outcomes={"terminal_output": AbsentSlotClassificationOutcome()},
+            diagnostics=(
+                SlotClassificationDiagnostic(
+                    code="slot_outcome_omitted",
+                    slot_name="terminal_output",
+                ),
+            ),
         ),
     )
 
@@ -1125,7 +1124,7 @@ async def test_degraded_turn_replays_semantic_role_over_fresh_attachment_facts()
             ),
         )
     )
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         file_roles=(
             ClassifiedFileRole(
                 file_id=file_id,
@@ -1592,7 +1591,7 @@ async def test_second_template_in_a_later_turn_reopens_docx_mode() -> None:
     prior_classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(
+            result=slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name="terminal_output",
@@ -1956,7 +1955,7 @@ async def test_runtime_infers_schema_only_after_example_output_classification() 
             quote=exact_json,
         ),
     )
-    classification_result = SlotClassificationResult(
+    classification_result = slot_classification_result(
         file_roles=(
             ClassifiedFileRole(
                 file_id=file_id,
@@ -2041,7 +2040,7 @@ async def test_runtime_records_incomplete_example_json_without_guessing_schema()
     file_id = uuid4()
     source_id = f"uploaded_file:{file_id}"
     excerpt = '{"decision":"approved"'
-    classification_result = SlotClassificationResult(
+    classification_result = slot_classification_result(
         file_roles=(
             ClassifiedFileRole(
                 file_id=file_id,
@@ -2259,7 +2258,7 @@ async def test_runtime_persists_exact_admitted_source_inventory(
         assert isinstance(candidate, SlotClassificationInput)
         admitted_input = candidate
         return SlotClassificationAttempt(
-            outcome="resolved", result=SlotClassificationResult()
+            outcome="resolved", result=slot_classification_result()
         )
 
     monkeypatch.setattr(runtime, "classify_slots", capture_classification_input)
@@ -2537,7 +2536,7 @@ async def test_runtime_discards_orphan_named_result_delta_atomically(
     classify = AsyncMock(
         return_value=SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(
+            result=slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name="terminal_output",
@@ -2637,8 +2636,6 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         )
     )
@@ -2780,8 +2777,6 @@ async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         )
     )
@@ -2825,7 +2820,7 @@ async def test_runtime_materializes_incremental_named_result_addition_and_remova
         text="Return JSON with case_id and status.",
         message_id="user-1",
     )
-    result = SlotClassificationResult(
+    result = slot_classification_result(
         slots=(
             ClassifiedSlot(
                 slot_name="terminal_output",
@@ -2917,8 +2912,6 @@ async def test_runtime_materializes_incremental_named_result_addition_and_remova
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         )
     )
@@ -3056,8 +3049,6 @@ async def test_runtime_retains_named_result_evidence_for_non_json_terminal_outpu
                 "example_output_constraints": None,
                 "schema_direction": None,
                 "secondary_obligations": [],
-                "assumptions": [],
-                "contradictions": [],
             }
         )
     )
@@ -3241,9 +3232,7 @@ async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifie
     None
 ):
     litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
-    )
+    litellm_client.acompletion.return_value = _make_response(json.dumps({"slots": []}))
 
     await build_runtime_discovery_context(
         [
@@ -3462,14 +3451,9 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
     )
     assert context.planning_state.resolved_slots["report_disposition"].value == "both"
     assert context.planning_state.file_roles[0].role == "example_output"
-    allowed_schema = litellm_client.acompletion.await_args.kwargs["response_format"][
-        "json_schema"
-    ]["schema"]
-    offered_slots = {
-        variant["properties"]["slot_name"]["enum"][0]
-        for variant in allowed_schema["properties"]["slots"]["items"]["anyOf"]
-    }
-    assert "report_disposition" in offered_slots
+    request_messages = litellm_client.acompletion.await_args.kwargs["messages"]
+    prompt = "\n".join(message["content"] for message in request_messages)
+    assert "report_disposition" in prompt
 
     analysis = analyze_discovery(
         conversation,
@@ -3484,9 +3468,7 @@ async def test_uploaded_docx_evidence_alone_does_not_deterministically_resolve_t
     None
 ):
     litellm_client = AsyncMock()
-    litellm_client.acompletion.return_value = _make_response(
-        json.dumps({"slots": [], "assumptions": [], "contradictions": []})
-    )
+    litellm_client.acompletion.return_value = _make_response(json.dumps({"slots": []}))
 
     state = (
         await build_runtime_discovery_context(
@@ -3595,16 +3577,12 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(
             {
-                "slots": [
-                    {
-                        "slot_name": "terminal_output",
-                        "value": UNKNOWN_SLOT_VALUE,
-                        "confidence": "high",
-                        "reason": "user_explicit_uncertain",
-                        "evidence": [_cited("Jag vet inte exakt vilket format")],
-                        "evidence_level": "explicit",
-                    },
-                ],
+                "slots": {
+                    "terminal_output": {
+                        "outcome": "explicitly_uncertain",
+                        "evidence": _cited("Jag vet inte exakt vilket format"),
+                    }
+                },
             }
         )
     )

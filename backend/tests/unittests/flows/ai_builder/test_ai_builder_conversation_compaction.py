@@ -46,6 +46,8 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedSlot,
+    ExplicitlyUncertainSlotClassificationOutcome,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -65,6 +67,9 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 
 def _msg(
@@ -109,18 +114,23 @@ def _classifier_msg(
 ) -> ConversationMessage:
     source_id = f"user_message:{message_id}"
     quote = f"{slot_name} is {value}"
+    outcome = (
+        ExplicitlyUncertainSlotClassificationOutcome(
+            quote=ClassifiedEvidence(source_id=source_id, quote=quote)
+        )
+        if value == "unknown"
+        else ResolvedSlotClassificationOutcome(
+            value=value,
+            confidence=confidence,
+            reason="typed test classification",
+            evidence=(ClassifiedEvidence(source_id=source_id, quote=quote),),
+            evidence_level="inferred",
+        )
+    )
     return _classifier_result_msg(
         message_id,
-        SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name=slot_name,
-                    value=value,
-                    confidence=confidence,
-                    reason="typed test classification",
-                    evidence=(ClassifiedEvidence(source_id=source_id, quote=quote),),
-                ),
-            )
+        slot_classification_result(
+            slot_outcomes={slot_name: outcome},
         ),
     )
 
@@ -136,7 +146,7 @@ def _focused_classifier_msg(
     classification = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(
+            result=slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name=slot_name,
@@ -189,10 +199,26 @@ def _classifier_result_msg(
         if uploaded_file_id is not None
         else f"user_message:{message_id}"
     )
+    outcome_evidence = [
+        evidence
+        for outcome in result.slot_outcomes.values()
+        for evidence in (
+            outcome.evidence
+            if isinstance(outcome, ResolvedSlotClassificationOutcome)
+            else (
+                (outcome.quote,)
+                if isinstance(
+                    outcome,
+                    ExplicitlyUncertainSlotClassificationOutcome,
+                )
+                else ()
+            )
+        )
+    ]
     evidence_quotes = [
         evidence.quote
         for evidence in (
-            *[evidence for slot in result.slots for evidence in slot.evidence],
+            *outcome_evidence,
             *[
                 evidence
                 for file_role in result.file_roles
@@ -303,7 +329,7 @@ def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
         ),
         _classifier_result_msg(
             "file-old",
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=file_id,
@@ -323,7 +349,7 @@ def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
         ),
         _classifier_result_msg(
             "file-new",
-            SlotClassificationResult(
+            slot_classification_result(
                 file_roles=(
                     ClassifiedFileRole(
                         file_id=file_id,
@@ -343,7 +369,7 @@ def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
         ),
         _classifier_result_msg(
             "form-old",
-            SlotClassificationResult(
+            slot_classification_result(
                 form_intake=ClassifiedFormIntake(
                     needs_form_fields=True,
                     sectioned_form_intake=True,
@@ -360,7 +386,7 @@ def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
         ),
         _classifier_result_msg(
             "form-new",
-            SlotClassificationResult(
+            slot_classification_result(
                 form_intake=ClassifiedFormIntake(
                     needs_form_fields=True,
                     sectioned_form_intake=False,
@@ -377,14 +403,7 @@ def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
         ),
         _classifier_result_msg(
             "obligations",
-            SlotClassificationResult(secondary_obligations=("risks", "actions")),
-        ),
-        _classifier_result_msg(
-            "notes-only",
-            SlotClassificationResult(
-                assumptions=("diagnostic assumption is not a rebuild fact",),
-                contradictions=("diagnostic contradiction is not a rebuild fact",),
-            ),
+            slot_classification_result(secondary_obligations=("risks", "actions")),
         ),
         *[_msg("assistant", content=f"filler {index}") for index in range(20)],
         _msg("user", content="continue"),
@@ -422,10 +441,7 @@ def test_count_compaction_retains_complete_classifier_semantic_family() -> None:
     ]
     retained_file_run = next(item for item in classifications if item.file_roles)
     assert retained_file_run.source_inventory[0].file_id == file_id
-    assert [note for item in classifications for note in item.contradictions] == [
-        "conversation_compaction:count"
-    ]
-    assert not any(item.assumptions for item in classifications)
+    assert all(not item.diagnostics for item in classifications)
 
 
 def test_count_and_byte_compaction_retain_example_output_constraints_for_rebuild() -> (
@@ -456,7 +472,7 @@ def test_count_and_byte_compaction_retain_example_output_constraints_for_rebuild
     )
     classifier_message = _classifier_result_msg(
         "example-output",
-        SlotClassificationResult(
+        slot_classification_result(
             file_roles=(
                 ClassifiedFileRole(
                     file_id=file_id,
@@ -556,7 +572,7 @@ def test_byte_compaction_rebuild_matches_after_later_slot_correction() -> None:
         for message in compacted
         if (parsed := slot_classification_from_metadata(message.metadata)) is not None
     )
-    assert classification.contradictions == ["conversation_compaction:bytes"]
+    assert classification.diagnostics == []
 
 
 def test_focused_classification_survives_count_and_byte_compaction() -> None:
@@ -586,10 +602,7 @@ def test_focused_classification_survives_count_and_byte_compaction() -> None:
         max_conversation_bytes=without_old + 100,
     )
 
-    for compacted, limit in (
-        (count_compacted, "count"),
-        (byte_compacted, "bytes"),
-    ):
+    for compacted in (count_compacted, byte_compacted):
         assert build_planning_state_from_conversation(compacted) == expected
         classifications = [
             classification
@@ -601,11 +614,7 @@ def test_focused_classification_survives_count_and_byte_compaction() -> None:
         assert [slot.value for item in classifications for slot in item.slots] == [
             "docx_document"
         ]
-        assert [
-            contradiction
-            for item in classifications
-            for contradiction in item.contradictions
-        ] == [f"conversation_compaction:{limit}"]
+        assert all(not item.diagnostics for item in classifications)
 
 
 def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:
@@ -614,7 +623,7 @@ def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:
     conversation = [
         _classifier_result_msg(
             "checkpoint-view",
-            SlotClassificationResult(
+            slot_classification_result(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
                         evidence_level="explicit",
@@ -635,7 +644,7 @@ def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:
         ),
         _classifier_result_msg(
             "checkpoint-edit",
-            SlotClassificationResult(
+            slot_classification_result(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
                         evidence_level="explicit",
@@ -678,7 +687,7 @@ def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
     conversation = [
         _classifier_result_msg(
             "checkpoint-required",
-            SlotClassificationResult(
+            slot_classification_result(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
                         evidence_level="explicit",
@@ -699,7 +708,7 @@ def test_compaction_retains_checkpoint_revocation_for_rebuild() -> None:
         ),
         _classifier_result_msg(
             "checkpoint-revoked",
-            SlotClassificationResult(
+            slot_classification_result(
                 checkpoint_updates=(
                     ClassifiedCheckpointUpdate(
                         evidence_level="explicit",
@@ -746,7 +755,7 @@ def test_compaction_preserves_latest_complete_named_result_snapshot() -> None:
     first_quote = "Create a machine-readable report containing case_id."
     first_message = _classifier_result_msg(
         "json-fields-old",
-        SlotClassificationResult(
+        slot_classification_result(
             slots=(
                 ClassifiedSlot(
                     slot_name="terminal_output",
@@ -811,7 +820,7 @@ def test_compaction_preserves_latest_complete_named_result_snapshot() -> None:
             content="Keep case_id and add status.",
             metadata=_classifier_result_msg(
                 "json-fields-new",
-                SlotClassificationResult(),
+                slot_classification_result(),
                 retained_source_inventory=tuple(first_classification.source_inventory),
                 named_result_evidence_snapshot=(
                     SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
@@ -869,7 +878,7 @@ def test_compaction_preserves_latest_complete_named_result_snapshot() -> None:
     assert build_planning_state_from_conversation(compacted) == expected
 
 
-def test_compaction_retains_explicit_unknown_that_clears_older_model_slot() -> None:
+def test_compaction_retains_explicit_uncertainty_that_clears_older_model_slot() -> None:
     conversation = [
         _classifier_msg(
             "known-slot",
@@ -895,13 +904,13 @@ def test_compaction_retains_explicit_unknown_that_clears_older_model_slot() -> N
 
     assert "terminal_output" not in expected.resolved_slots
     assert build_planning_state_from_conversation(compacted) == expected
-    retained_values = [
-        slot.value
+    retained_outcomes = [
+        outcome.outcome
         for message in compacted
         if (classification := slot_classification_from_metadata(message.metadata))
-        for slot in classification.slots
+        for outcome in classification.slot_outcomes.values()
     ]
-    assert retained_values == ["unknown"]
+    assert retained_outcomes == ["explicitly_uncertain"]
 
 
 def test_compaction_keeps_older_effective_slot_when_later_confidence_is_low() -> None:
@@ -951,7 +960,7 @@ def test_exact_limits_do_not_mark_classifier_diagnostics_degraded() -> None:
 
     parsed = slot_classification_from_metadata(at_count_limit[0].metadata)
     assert parsed is not None
-    assert parsed.contradictions == []
+    assert parsed.diagnostics == []
 
 
 def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:
@@ -1986,7 +1995,7 @@ def test_compaction_keeps_the_field_list_the_user_edited() -> None:
     quote = "Create a machine-readable report containing case_id and status."
     described = _classifier_result_msg(
         "json-fields",
-        SlotClassificationResult(
+        slot_classification_result(
             slots=(
                 ClassifiedSlot(
                     slot_name="terminal_output",
@@ -2065,7 +2074,7 @@ def test_compaction_replays_a_placed_field_at_its_parent_path() -> None:
     )
     described = _classifier_result_msg(
         "json-fields",
-        SlotClassificationResult(),
+        slot_classification_result(),
         named_result_evidence_snapshot=(
             SlotClassificationNamedResultEvidenceMetadata.from_materialized_state(
                 operation="replace",

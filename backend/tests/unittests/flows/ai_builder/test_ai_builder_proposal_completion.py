@@ -31,6 +31,9 @@ from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
     ResolvedCompletionModelRoute,
 )
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputMode,
+)
 from eneo.flows.ai_builder import (
     ai_builder_error_contract as error_contract_module,
 )
@@ -1621,6 +1624,7 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
         ),
         allowed_slot_values={"terminal_output": {"pdf_document"}},
         tenant_id=uuid4(),
+        structured_output_mode=StructuredOutputMode.STRICT_JSON_SCHEMA,
         usage_tracker=tracker,
         max_input_tokens=100_000,
         max_output_tokens=4_096,

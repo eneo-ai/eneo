@@ -81,9 +81,10 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
 )
 from eneo.flows.ai_builder.ai_builder_signal_confidence import ScoredSignal
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    UNKNOWN_SLOT_VALUE,
     ClassifiedEvidence,
     ClassifiedSlot,
+    ExplicitlyUncertainSlotClassificationOutcome,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationEvidenceLevel,
     SlotClassificationResult,
@@ -106,6 +107,9 @@ from eneo.flows.ai_builder.planning_state_builder import (
 )
 from eneo.flows.ai_builder.question_catalog import render_summary_label
 from eneo.flows.domain.flow import Flow, FlowStep
+from tests.unittests.flows.ai_builder.slot_classification_test_support import (
+    slot_classification_result,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -179,7 +183,7 @@ def _classified_open_interview(
                 evidence_level="inferred",
             )
         )
-    classification = SlotClassificationResult(slots=tuple(slots))
+    classification = slot_classification_result(slots=tuple(slots))
     state = PlanningState.empty()
     merge_llm_resolved_slots(
         state,
@@ -636,7 +640,7 @@ class TestLowConfidenceDiscoveryGate:
             analysis = analyze_discovery(
                 conversation,
                 planning_state=planning_state,
-                slot_classification_result=SlotClassificationResult(
+                slot_classification_result=slot_classification_result(
                     slots=(
                         ClassifiedSlot(
                             slot_name="terminal_output",
@@ -712,7 +716,7 @@ class TestLowConfidenceDiscoveryGate:
                 accepted_value,
                 source=accepted_source,
             )
-        classifier_result = SlotClassificationResult(
+        classifier_result = slot_classification_result(
             slots=(
                 ClassifiedSlot(
                     slot_name="terminal_output",
@@ -2100,13 +2104,8 @@ class TestExtendedClarificationHints:
     @pytest.mark.parametrize(
         ("case_id", "primary_runtime_input", "classified_goal"),
         [
-            (
-                "interview_open_citizen_feedback",
-                "text",
-                ("unknown", "high", "user_explicit_uncertain"),
-            ),
             # Ordinary semantic ambiguity: the classifier contract returns
-            # unknown with LOW confidence — the common vague-interview shape.
+            # an absent purpose — the common vague-interview shape.
             (
                 "interview_open_citizen_feedback",
                 "text",
@@ -2171,7 +2170,7 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(
             conversation,
             planning_state=planning_state,
-            slot_classification_result=SlotClassificationResult(
+            slot_classification_result=slot_classification_result(
                 slots=tuple(classified_slots)
             ),
         )
@@ -2288,17 +2287,12 @@ class TestExtendedClarificationHints:
         # spend the purpose question on, so discovery stays quiet about it.
         prompt = _battle_case_prompt("interview_open_accessibility_reports")
         conversation = _open_interview_conversation(prompt)
-        classification = SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="primary_runtime_input",
-                    value=UNKNOWN_SLOT_VALUE,
-                    confidence="high",
-                    reason="user_explicit_uncertain",
-                    evidence=_classifier_evidence(prompt),
-                    evidence_level="explicit",
-                ),
-            )
+        classification = slot_classification_result(
+            slot_outcomes={
+                "primary_runtime_input": ExplicitlyUncertainSlotClassificationOutcome(
+                    quote=_classifier_evidence(prompt)[0]
+                )
+            }
         )
         state = PlanningState.empty()
         merge_llm_resolved_slots(
@@ -2349,33 +2343,26 @@ class TestExtendedClarificationHints:
             evidence=[f"quote:user_message:test-source:{prompt}"],
             evidence_level="explicit",
         )
-        classification_result = SlotClassificationResult(
-            slots=(
-                ClassifiedSlot(
-                    slot_name="primary_runtime_input",
-                    value="unknown",
-                    confidence="high",
-                    reason="user_explicit_uncertain",
-                    evidence=_classifier_evidence(prompt),
-                    evidence_level="explicit",
+        classification_result = slot_classification_result(
+            slot_outcomes={
+                "primary_runtime_input": ExplicitlyUncertainSlotClassificationOutcome(
+                    quote=_classifier_evidence(prompt)[0]
                 ),
-                ClassifiedSlot(
-                    slot_name="post_processing_goal",
+                "post_processing_goal": ResolvedSlotClassificationOutcome(
                     value="extract_key_information",
                     confidence="high",
                     reason="The requested extraction outcome is explicit.",
                     evidence=_classifier_evidence(prompt),
                     evidence_level="explicit",
                 ),
-                ClassifiedSlot(
-                    slot_name="terminal_output",
+                "terminal_output": ResolvedSlotClassificationOutcome(
                     value="structured_json",
                     confidence="high",
                     reason="The JSON result is explicit.",
                     evidence=_classifier_evidence(prompt),
                     evidence_level="explicit",
                 ),
-            )
+            }
         )
 
         analysis = analyze_discovery(
@@ -2433,7 +2420,7 @@ class TestExtendedClarificationHints:
         ]
 
         async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
-            result = SlotClassificationResult(
+            result = slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name="post_processing_goal",
@@ -2730,7 +2717,7 @@ class TestExtendedClarificationHints:
 
         async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
             captured_allowed_values.update(kwargs["allowed_slot_values"])
-            result = SlotClassificationResult(
+            result = slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name="runtime_metadata_fields",
@@ -2779,7 +2766,7 @@ class TestExtendedClarificationHints:
         ]
 
         async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
-            result = SlotClassificationResult(
+            result = slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name="post_processing_goal",
@@ -2853,7 +2840,7 @@ class TestExtendedClarificationHints:
         ]
 
         async def fake_classify_slots(**kwargs: Any) -> SlotClassificationAttempt:
-            result = SlotClassificationResult(
+            result = slot_classification_result(
                 slots=(
                     ClassifiedSlot(
                         slot_name="post_processing_goal",

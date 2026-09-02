@@ -45,6 +45,11 @@ SlotClassificationAttemptOutcome = Literal[
     "skipped_context_budget",
     "skipped_no_resolvable_slots",
 ]
+SlotClassificationDiagnosticCode = Literal[
+    "slot_outcome_duplicate",
+    "slot_outcome_malformed",
+    "slot_outcome_omitted",
+]
 SlotClassificationSourceKind = Literal[
     "user_message",
     "structured_answer",
@@ -60,7 +65,7 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
     {"$", "@", "#", "/", "\\", ":", "[", "]", "{", "}", "."}
 )
 UNKNOWN_SLOT_VALUE = "unknown"
-SLOT_CLASSIFICATION_SCHEMA_VERSION = 24
+SLOT_CLASSIFICATION_SCHEMA_VERSION = 25
 _DECLARED_SHAPE_BY_NOTATION: Mapping[str, NamedResultDeclaredShape] = {
     "[]": "array",
     "{}": "object",
@@ -74,8 +79,6 @@ CLASSIFICATION_REASON_MAX_LENGTH = 500
 # share this bound, and a delta that exceeds it is a malformed delta rather than
 # truncated, because a silently dropped quote leaves a name uncited.
 NAMED_RESULT_DELTA_CITATION_MAX_ITEMS = 12
-CLASSIFICATION_NOTE_MAX_LENGTH = 500
-CLASSIFICATION_NOTES_MAX_ITEMS = 10
 EXAMPLE_OUTPUT_HEADINGS_MAX_ITEMS = 20
 EXAMPLE_OUTPUT_STYLE_CONSTRAINTS_MAX_ITEMS = 20
 EXAMPLE_OUTPUT_CITATIONS_MAX_ITEMS = 12
@@ -225,6 +228,74 @@ class ClassifiedSlot:
     reason: str
     evidence: tuple[ClassifiedEvidence, ...] = ()
     evidence_level: SlotClassificationEvidenceLevel = "inferred"
+    classification_kind: Literal["resolved", "explicitly_uncertain"] = "resolved"
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSlotClassificationOutcome:
+    value: str
+    confidence: SlotClassificationConfidence
+    reason: str
+    evidence: tuple[ClassifiedEvidence, ...]
+    evidence_level: SlotClassificationEvidenceLevel
+    kind: Literal["resolved"] = dataclass_field(default="resolved", init=False)
+
+    @classmethod
+    def from_classified_slot(
+        cls,
+        slot: ClassifiedSlot,
+    ) -> ResolvedSlotClassificationOutcome:
+        return cls(
+            value=slot.value,
+            confidence=slot.confidence,
+            reason=slot.reason,
+            evidence=slot.evidence,
+            evidence_level=slot.evidence_level,
+        )
+
+    def to_classified_slot(self, slot_name: str) -> ClassifiedSlot:
+        return ClassifiedSlot(
+            slot_name=slot_name,
+            value=self.value,
+            confidence=self.confidence,
+            reason=self.reason,
+            evidence=self.evidence,
+            evidence_level=self.evidence_level,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ExplicitlyUncertainSlotClassificationOutcome:
+    quote: ClassifiedEvidence
+    kind: Literal["explicitly_uncertain"] = dataclass_field(
+        default="explicitly_uncertain",
+        init=False,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AbsentSlotClassificationOutcome:
+    kind: Literal["absent"] = dataclass_field(default="absent", init=False)
+
+
+SlotClassificationOutcome = (
+    ResolvedSlotClassificationOutcome
+    | ExplicitlyUncertainSlotClassificationOutcome
+    | AbsentSlotClassificationOutcome
+)
+
+
+def _empty_slot_classification_outcomes() -> dict[
+    str,
+    SlotClassificationOutcome,
+]:
+    return {}
+
+
+@dataclass(frozen=True, slots=True)
+class SlotClassificationDiagnostic:
+    code: SlotClassificationDiagnosticCode
+    slot_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,6 +389,10 @@ def _classified_named_result_identity(
 @dataclass(frozen=True, slots=True)
 class SlotClassificationResult:
     slots: tuple[ClassifiedSlot, ...] = ()
+    slot_outcomes: dict[str, SlotClassificationOutcome] = dataclass_field(
+        default_factory=_empty_slot_classification_outcomes
+    )
+    diagnostics: tuple[SlotClassificationDiagnostic, ...] = ()
     file_roles: tuple[ClassifiedFileRole, ...] = ()
     checkpoint_updates: tuple[ClassifiedCheckpointUpdate, ...] = ()
     form_intake: ClassifiedFormIntake | None = None
@@ -325,8 +400,6 @@ class SlotClassificationResult:
     example_output_constraints: ExampleOutputConstraintEvidence | None = None
     schema_direction: ClassifiedSchemaDirection | None = None
     secondary_obligations: tuple[ResultObligation, ...] = ()
-    assumptions: tuple[str, ...] = ()
-    contradictions: tuple[str, ...] = ()
     cached: bool = False
 
 
@@ -408,94 +481,81 @@ def parse_slot_classification_response(
     schema_candidate_fingerprints: Collection[str] = (),
 ) -> SlotClassificationResult | None:
     try:
-        raw = json.loads(content)
-    except json.JSONDecodeError:
+        raw = _decode_slot_classification_json(content)
+    except (json.JSONDecodeError, _DuplicateJsonKey):
         return None
 
-    if not isinstance(raw, dict):
+    if raw is None:
         return None
-    raw_dict = cast(dict[str, Any], raw)
+    raw_dict = raw
     if not _slot_classification_top_level_contract_is_valid(
         raw_dict,
         allowed_slot_values=allowed_slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
     ):
         return None
-    raw_slots = cast(list[object], raw_dict["slots"])
 
     slot_values = normalize_slot_classification_values(allowed_slot_values)
-    source_kinds_by_id: dict[str, SlotClassificationSourceKind] = {
-        source.source_id: source.kind for source in classification_input.sources
-    }
+    raw_slot_entries = _raw_slot_entries_by_name(
+        raw_dict["slots"],
+        allowed_slot_names=frozenset(slot_values),
+    )
+    slot_outcomes: dict[str, SlotClassificationOutcome] = {}
+    diagnostics: list[SlotClassificationDiagnostic] = []
+    for slot_name in slot_values:
+        entries = raw_slot_entries.get(slot_name, ())
+        if not entries:
+            slot_outcomes[slot_name] = AbsentSlotClassificationOutcome()
+            diagnostics.append(
+                SlotClassificationDiagnostic(
+                    code="slot_outcome_omitted",
+                    slot_name=slot_name,
+                )
+            )
+            continue
+        if len(entries) != 1:
+            slot_outcomes[slot_name] = AbsentSlotClassificationOutcome()
+            diagnostics.append(
+                SlotClassificationDiagnostic(
+                    code="slot_outcome_duplicate",
+                    slot_name=slot_name,
+                )
+            )
+            continue
+        outcome = _parse_slot_outcome(
+            slot_name=slot_name,
+            raw_value=entries[0].value,
+            legacy_entry=entries[0].legacy_entry,
+            allowed_values=slot_values[slot_name],
+            classification_input=classification_input,
+        )
+        if outcome is None:
+            slot_outcomes[slot_name] = AbsentSlotClassificationOutcome()
+            diagnostics.append(
+                SlotClassificationDiagnostic(
+                    code="slot_outcome_malformed",
+                    slot_name=slot_name,
+                )
+            )
+            continue
+        slot_outcomes[slot_name] = outcome
     slots: list[ClassifiedSlot] = []
-    seen_slot_names: set[str] = set()
-    for item in raw_slots:
-        if not isinstance(item, dict):
-            continue
-        item_dict = cast(dict[str, Any], item)
-        slot_name = item_dict.get("slot_name")
-        value = item_dict.get("value")
-        confidence = item_dict.get("confidence")
-        reason = item_dict.get("reason")
-        evidence = _parse_classification_evidence(
-            item_dict.get("evidence", []),
-            classification_input=classification_input,
-        )
-        if not isinstance(slot_name, str) or slot_name not in slot_values:
-            continue
-        if slot_name in seen_slot_names:
-            continue
-        if not isinstance(value, str) or not value.strip():
-            continue
-        normalized_value = value.strip()
-        if (
-            normalized_value != UNKNOWN_SLOT_VALUE
-            and normalized_value not in slot_values[slot_name]
-        ):
-            continue
-        if confidence not in {"high", "medium", "low"}:
-            continue
-        evidence_level = _validated_evidence_level(
-            item_dict.get("evidence_level", "inferred"),
-            evidence,
-            classification_input=classification_input,
-            structured_question_id=slot_name,
-        )
-        if slot_name == "terminal_output" and not (
-            classification_evidence_has_user_owned_source(
-                (item.source_id for item in evidence),
-                source_kinds_by_id=source_kinds_by_id,
+    for slot_name, outcome in slot_outcomes.items():
+        if isinstance(outcome, ResolvedSlotClassificationOutcome):
+            slots.append(outcome.to_classified_slot(slot_name))
+        elif isinstance(outcome, ExplicitlyUncertainSlotClassificationOutcome):
+            slots.append(
+                ClassifiedSlot(
+                    slot_name=slot_name,
+                    value=UNKNOWN_SLOT_VALUE,
+                    confidence="high",
+                    reason="explicit user uncertainty",
+                    evidence=(outcome.quote,),
+                    evidence_level="explicit",
+                    classification_kind="explicitly_uncertain",
+                )
             )
-        ):
-            continue
-        confidence_value = cast(SlotClassificationConfidence, confidence)
-        slots.append(
-            ClassifiedSlot(
-                slot_name=slot_name,
-                value=normalized_value,
-                confidence=_downgrade_unsupported_confidence(
-                    confidence_value,
-                    evidence,
-                ),
-                reason=reason.strip()
-                if isinstance(reason, str) and reason.strip()
-                else "slot classification",
-                evidence=evidence,
-                evidence_level=evidence_level,
-            )
-        )
-        seen_slot_names.add(slot_name)
 
-    assumptions = tuple(
-        item.strip()
-        for item in cast(list[object], raw_dict.get("assumptions", []))
-        if isinstance(item, str) and item.strip()
-    )
-    contradictions = tuple(
-        item.strip()
-        for item in cast(list[object], raw_dict.get("contradictions", []))
-        if isinstance(item, str) and item.strip()
-    )
     file_roles = _parse_file_roles(
         raw_dict.get("file_roles", []),
         classification_input=classification_input,
@@ -534,6 +594,8 @@ def parse_slot_classification_response(
     )
     return SlotClassificationResult(
         slots=tuple(slots),
+        slot_outcomes=slot_outcomes,
+        diagnostics=tuple(diagnostics),
         file_roles=file_roles,
         checkpoint_updates=checkpoint_updates,
         form_intake=form_intake,
@@ -541,9 +603,67 @@ def parse_slot_classification_response(
         example_output_constraints=example_output_constraints,
         schema_direction=schema_direction,
         secondary_obligations=secondary_obligations,
-        assumptions=assumptions,
-        contradictions=contradictions,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _RawJsonObject:
+    pairs: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _KeyedSlotObject:
+    pairs: tuple[tuple[str, object], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _RawSlotEntry:
+    value: object
+    legacy_entry: bool
+
+
+class _DuplicateJsonKey(Exception):
+    pass
+
+
+def _decode_slot_classification_json(content: str) -> dict[str, object] | None:
+    raw = json.loads(
+        content,
+        object_pairs_hook=_raw_json_object_from_pairs,
+    )
+    if not isinstance(raw, _RawJsonObject):
+        return None
+    if len(raw.pairs) != len({key for key, _ in raw.pairs}):
+        raise _DuplicateJsonKey
+
+    decoded: dict[str, object] = {}
+    for key, value in raw.pairs:
+        if key == "slots" and isinstance(value, _RawJsonObject):
+            decoded[key] = _KeyedSlotObject(
+                tuple(
+                    (slot_name, _materialize_unique_json(slot_value))
+                    for slot_name, slot_value in value.pairs
+                )
+            )
+        else:
+            decoded[key] = _materialize_unique_json(value)
+    return decoded
+
+
+def _raw_json_object_from_pairs(
+    pairs: list[tuple[str, object]],
+) -> _RawJsonObject:
+    return _RawJsonObject(tuple(pairs))
+
+
+def _materialize_unique_json(value: object) -> object:
+    if isinstance(value, _RawJsonObject):
+        if len(value.pairs) != len({key for key, _ in value.pairs}):
+            raise _DuplicateJsonKey
+        return {key: _materialize_unique_json(item) for key, item in value.pairs}
+    if isinstance(value, list):
+        return [_materialize_unique_json(item) for item in cast(list[object], value)]
+    return value
 
 
 def _slot_classification_top_level_contract_is_valid(
@@ -560,6 +680,10 @@ def _slot_classification_top_level_contract_is_valid(
         return False
     for field, schema in properties.items():
         value = payload[field]
+        if field == "slots":
+            if not isinstance(value, (dict, list, _KeyedSlotObject)):
+                return False
+            continue
         if schema.get("type") == "array":
             if not isinstance(value, list):
                 return False
@@ -567,6 +691,175 @@ def _slot_classification_top_level_contract_is_valid(
         if value is not None and not isinstance(value, dict):
             return False
     return True
+
+
+def _raw_slot_entries_by_name(
+    raw_value: object,
+    *,
+    allowed_slot_names: frozenset[str],
+) -> dict[str, tuple[_RawSlotEntry, ...]]:
+    if isinstance(raw_value, _KeyedSlotObject):
+        entries: dict[str, list[_RawSlotEntry]] = {}
+        for slot_name, value in raw_value.pairs:
+            if slot_name in allowed_slot_names:
+                entries.setdefault(slot_name, []).append(
+                    _RawSlotEntry(value=value, legacy_entry=False)
+                )
+        return {slot_name: tuple(values) for slot_name, values in entries.items()}
+    if isinstance(raw_value, dict):
+        return {
+            slot_name: (_RawSlotEntry(value=value, legacy_entry=False),)
+            for slot_name, value in cast(dict[str, object], raw_value).items()
+            if slot_name in allowed_slot_names
+        }
+    if not isinstance(raw_value, list):
+        return {}
+    # PROMPT/JSON_OBJECT routes normalize the legacy sparse array here.
+    entries = {}
+    for item in cast(list[object], raw_value):
+        if not isinstance(item, dict):
+            continue
+        item_dict = cast(dict[str, object], item)
+        slot_name = item_dict.get("slot_name")
+        if not isinstance(slot_name, str) or slot_name not in allowed_slot_names:
+            continue
+        entries.setdefault(slot_name, []).append(
+            _RawSlotEntry(value=item_dict, legacy_entry=True)
+        )
+    return {slot_name: tuple(values) for slot_name, values in entries.items()}
+
+
+def _parse_slot_outcome(
+    *,
+    slot_name: str,
+    raw_value: object,
+    legacy_entry: bool,
+    allowed_values: Collection[str],
+    classification_input: SlotClassificationInput,
+) -> SlotClassificationOutcome | None:
+    if not isinstance(raw_value, dict):
+        return None
+    item = cast(dict[str, Any], raw_value)
+    outcome_kind = item.get("outcome")
+    if outcome_kind == "absent":
+        if not legacy_entry and set(item) != {"outcome"}:
+            return None
+        return AbsentSlotClassificationOutcome()
+    if (
+        legacy_entry
+        and outcome_kind is None
+        and item.get("value") == UNKNOWN_SLOT_VALUE
+    ):
+        return AbsentSlotClassificationOutcome()
+    if outcome_kind == "explicitly_uncertain":
+        if set(item) != {"outcome", "evidence"} or not _evidence_item_is_exact(
+            item.get("evidence")
+        ):
+            return None
+        evidence = _parse_classification_evidence(
+            [item.get("evidence")],
+            classification_input=classification_input,
+            max_items=1,
+        )
+        source_kinds: dict[str, SlotClassificationSourceKind] = {
+            source.source_id: source.kind for source in classification_input.sources
+        }
+        if len(evidence) != 1 or not classification_evidence_has_user_owned_source(
+            (evidence[0].source_id,),
+            source_kinds_by_id=source_kinds,
+        ):
+            return None
+        return ExplicitlyUncertainSlotClassificationOutcome(quote=evidence[0])
+    if outcome_kind != "resolved" and not (legacy_entry and outcome_kind is None):
+        return None
+    if not legacy_entry and set(item) != {
+        "outcome",
+        "value",
+        "confidence",
+        "reason",
+        "evidence",
+        "evidence_level",
+    }:
+        return None
+    value = item.get("value")
+    confidence = item.get("confidence")
+    if not isinstance(value, str) or value.strip() not in allowed_values:
+        return None
+    if confidence not in {"high", "medium", "low"}:
+        return None
+    raw_evidence = item.get("evidence", [])
+    if not legacy_entry and not _evidence_array_is_exact(raw_evidence):
+        return None
+    evidence = _parse_classification_evidence(
+        raw_evidence,
+        classification_input=classification_input,
+    )
+    source_kinds: dict[str, SlotClassificationSourceKind] = {
+        source.source_id: source.kind for source in classification_input.sources
+    }
+    if slot_name == "terminal_output" and not (
+        classification_evidence_has_user_owned_source(
+            (candidate.source_id for candidate in evidence),
+            source_kinds_by_id=source_kinds,
+        )
+    ):
+        return None
+    raw_evidence_level = item.get("evidence_level", "inferred")
+    if not legacy_entry and raw_evidence_level not in {"explicit", "inferred"}:
+        return None
+    evidence_level = _validated_evidence_level(
+        raw_evidence_level,
+        evidence,
+        classification_input=classification_input,
+        structured_question_id=slot_name,
+    )
+    reason = item.get("reason")
+    if not legacy_entry and (
+        not isinstance(reason, str)
+        or not reason.strip()
+        or len(reason) > CLASSIFICATION_REASON_MAX_LENGTH
+    ):
+        return None
+    return ResolvedSlotClassificationOutcome(
+        value=value.strip(),
+        confidence=_downgrade_unsupported_confidence(
+            cast(SlotClassificationConfidence, confidence),
+            evidence,
+        ),
+        reason=(
+            reason.strip()
+            if isinstance(reason, str) and reason.strip()
+            else "slot classification"
+        ),
+        evidence=evidence,
+        evidence_level=evidence_level,
+    )
+
+
+def _evidence_array_is_exact(raw_value: object) -> bool:
+    if not isinstance(raw_value, list):
+        return False
+    items = cast(list[object], raw_value)
+    return len(items) <= CLASSIFICATION_EVIDENCE_MAX_ITEMS and all(
+        _evidence_item_is_exact(item) for item in items
+    )
+
+
+def _evidence_item_is_exact(raw_value: object) -> bool:
+    if not isinstance(raw_value, dict):
+        return False
+    item = cast(dict[str, object], raw_value)
+    if set(item) != {"source_id", "quote"}:
+        return False
+    source_id = item.get("source_id")
+    quote = item.get("quote")
+    return (
+        isinstance(source_id, str)
+        and bool(source_id.strip())
+        and isinstance(quote, str)
+        and bool(quote.strip())
+        and len(quote) <= CLASSIFICATION_EVIDENCE_MAX_LENGTH
+    )
 
 
 class _MalformedNamedResultDelta(Exception):
@@ -2076,11 +2369,7 @@ def _slot_classification_top_level_properties(
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
     normalized_fingerprints = tuple(sorted(set(schema_candidate_fingerprints)))
     return {
-        "slots": {
-            "type": "array",
-            "maxItems": len(normalized_values),
-            "items": _slot_classification_slot_schema(normalized_values),
-        },
+        "slots": _slot_classification_slot_schema(normalized_values),
         "file_roles": {
             "type": "array",
             "items": _classified_file_role_schema(),
@@ -2123,8 +2412,6 @@ def _slot_classification_top_level_properties(
             "maxItems": len(RESULT_OBLIGATION_VALUES),
             "items": {"type": "string", "enum": list(RESULT_OBLIGATION_VALUES)},
         },
-        "assumptions": _classification_note_array_schema(),
-        "contradictions": _classification_note_array_schema(),
     }
 
 
@@ -2249,35 +2536,54 @@ def _classified_schema_direction_schema(
 def _slot_classification_slot_schema(
     allowed_slot_values: Mapping[str, Collection[str]],
 ) -> dict[str, object]:
-    slot_variants = [
-        {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [
-                "slot_name",
-                "value",
-                "confidence",
-                "reason",
-                "evidence",
-                "evidence_level",
-            ],
-            "properties": {
-                "slot_name": {"type": "string", "enum": [slot_name]},
-                "value": {
-                    "type": "string",
-                    "enum": sorted({*values, UNKNOWN_SLOT_VALUE}),
+    properties = {
+        slot_name: {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "outcome",
+                        "value",
+                        "confidence",
+                        "reason",
+                        "evidence",
+                        "evidence_level",
+                    ],
+                    "properties": {
+                        "outcome": {"const": "resolved"},
+                        "value": {"type": "string", "enum": sorted(values)},
+                        "confidence": _classification_confidence_schema(),
+                        "reason": _classification_reason_schema(),
+                        "evidence": _classification_evidence_array_schema(),
+                        "evidence_level": _classification_evidence_level_schema(),
+                    },
                 },
-                "confidence": _classification_confidence_schema(),
-                "reason": _classification_reason_schema(),
-                "evidence": _classification_evidence_array_schema(),
-                "evidence_level": _classification_evidence_level_schema(),
-            },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["outcome", "evidence"],
+                    "properties": {
+                        "outcome": {"const": "explicitly_uncertain"},
+                        "evidence": _classification_evidence_schema(),
+                    },
+                },
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["outcome"],
+                    "properties": {"outcome": {"const": "absent"}},
+                },
+            ]
         }
         for slot_name, values in sorted(allowed_slot_values.items())
-    ]
-    if not slot_variants:
-        return {"type": "object", "additionalProperties": False}
-    return {"anyOf": slot_variants}
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": list(properties),
+        "properties": properties,
+    }
 
 
 def _classified_file_role_schema() -> dict[str, object]:
@@ -2455,18 +2761,6 @@ def _classification_reason_schema() -> dict[str, object]:
     }
 
 
-def _classification_note_array_schema() -> dict[str, object]:
-    return {
-        "type": "array",
-        "maxItems": CLASSIFICATION_NOTES_MAX_ITEMS,
-        "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": CLASSIFICATION_NOTE_MAX_LENGTH,
-        },
-    }
-
-
 def _classification_evidence_array_schema(
     *,
     max_items: int = CLASSIFICATION_EVIDENCE_MAX_ITEMS,
@@ -2474,17 +2768,21 @@ def _classification_evidence_array_schema(
     return {
         "type": "array",
         "maxItems": max_items,
-        "items": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["source_id", "quote"],
-            "properties": {
-                "source_id": {"type": "string", "minLength": 1},
-                "quote": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
-                },
+        "items": _classification_evidence_schema(),
+    }
+
+
+def _classification_evidence_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["source_id", "quote"],
+        "properties": {
+            "source_id": {"type": "string", "minLength": 1},
+            "quote": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": CLASSIFICATION_EVIDENCE_MAX_LENGTH,
             },
         },
     }

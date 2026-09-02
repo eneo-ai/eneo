@@ -3636,9 +3636,7 @@ def _confirmation_conversation(
 
 
 @pytest.mark.asyncio
-async def test_resumed_old_classification_rebuilds_placement_and_rearms_confirmation() -> (
-    None
-):
+async def test_resumed_stale_classification_is_rejected_and_rearms_discovery() -> None:
     planner = _make_planner()
     legacy_message_id = "legacy-hierarchy"
     legacy_quote = (
@@ -3758,8 +3756,6 @@ async def test_resumed_old_classification_rebuilds_placement_and_rearms_confirma
         "example_output_constraints": None,
         "schema_direction": None,
         "secondary_obligations": [],
-        "assumptions": [],
-        "contradictions": [],
     }
     response = MagicMock()
     response.choices = [
