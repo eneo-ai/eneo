@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import statistics
 import subprocess
 import sys
 from collections import Counter
@@ -1019,6 +1021,200 @@ def _render_release_markdown(report: dict[str, Any]) -> str:
 
 _INVALID_RECEIPT_EXIT = 2
 
+# The token baseline reads only observations the product completed. Acquisition
+# faults never spent a first attempt on the product's behalf, and a turn from
+# an error-terminated bundle would credit a failure with a token cost.
+TOKEN_BASELINE_POPULATION = "completed_observations"
+_BUNDLE_GLOB = "ai-builder-api-battle-test-*.json"
+
+
+def _median(values: list[int]) -> float | None:
+    return statistics.median(values) if values else None
+
+
+def _p90(values: list[int]) -> int | None:
+    """Nearest-rank 90th percentile; the frozen R17 numbers use this rank."""
+
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(0.9 * len(ordered)) - 1)]
+
+
+def _bundle_int(value: object, *, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ReceiptError(f"{where} must be a non-negative integer; got {value!r}.")
+    return value
+
+
+def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
+    """Proposal and classifier token economics of one suite root, frozen.
+
+    Every later gate compares against the same aggregation, so the population
+    and the statistics live here and nowhere else: first proposal attempts of
+    completed observations, medians as the middle value, p90 as nearest rank.
+    Classifier usage the projection could not supply is counted, never zero.
+    """
+
+    bundle_paths = sorted(suite_dir.glob(_BUNDLE_GLOB))
+    if not bundle_paths:
+        raise ReceiptError(f"{suite_dir} holds no observation bundles.")
+    revisions: set[str] = set()
+    status_counts: Counter[str] = Counter()
+    prompt: list[int] = []
+    completion: list[int] = []
+    total: list[int] = []
+    classifier_calls: list[int] = []
+    classifier_prompt: list[int] = []
+    classifier_total: list[int] = []
+    classifier_unknown = 0
+    for path in bundle_paths:
+        where = str(path)
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(bundle, dict):
+            raise ReceiptError(f"{where} must contain a JSON object.")
+        bundle = cast(dict[str, Any], bundle)
+        revision = bundle.get("app_version")
+        if not isinstance(revision, str) or not revision:
+            raise ReceiptError(f"{where}: app_version is missing.")
+        revisions.add(revision)
+        observation = bundle.get("observation")
+        if not isinstance(observation, dict):
+            raise ReceiptError(f"{where}: carries no sealed observation.")
+        observation = cast(dict[str, Any], observation)
+        status = observation.get("observation_status")
+        if not isinstance(status, str) or not status:
+            raise ReceiptError(f"{where}: observation_status is missing.")
+        status_counts[status] += 1
+        if status != "completed":
+            continue
+        diagnostics = bundle.get("proposal_telemetry_diagnostics")
+        turns = (
+            diagnostics.get("proposal_turns") if isinstance(diagnostics, dict) else None
+        )
+        for position, turn in enumerate(turns if isinstance(turns, list) else []):
+            attempts = turn.get("attempts") if isinstance(turn, dict) else None
+            if not isinstance(attempts, list) or not attempts:
+                raise ReceiptError(
+                    f"{where}: proposal_turns[{position}] has no attempts."
+                )
+            first = attempts[0]
+            if not isinstance(first, dict):
+                raise ReceiptError(
+                    f"{where}: proposal_turns[{position}].attempts[0] is malformed."
+                )
+            first = cast(dict[str, Any], first)
+            key = f"{where}: proposal_turns[{position}].attempts[0]"
+            prompt.append(
+                _bundle_int(first.get("prompt_tokens"), where=f"{key}.prompt_tokens")
+            )
+            completion.append(
+                _bundle_int(
+                    first.get("completion_tokens"), where=f"{key}.completion_tokens"
+                )
+            )
+            total.append(
+                _bundle_int(first.get("total_tokens"), where=f"{key}.total_tokens")
+            )
+        journey = bundle.get("journey")
+        usage = journey.get("classifier_usage") if isinstance(journey, dict) else None
+        if not isinstance(usage, dict):
+            classifier_unknown += 1
+            continue
+        usage = cast(dict[str, Any], usage)
+        key = f"{where}: journey.classifier_usage"
+        classifier_calls.append(_bundle_int(usage.get("calls"), where=f"{key}.calls"))
+        classifier_prompt.append(
+            _bundle_int(usage.get("prompt_tokens"), where=f"{key}.prompt_tokens")
+        )
+        classifier_total.append(
+            _bundle_int(usage.get("total_tokens"), where=f"{key}.total_tokens")
+        )
+    if len(revisions) != 1:
+        raise ReceiptError(
+            f"{suite_dir} spans {len(revisions)} source revisions; a baseline "
+            "describes one build."
+        )
+    return {
+        "suite_dir": str(suite_dir),
+        "source_revision": next(iter(revisions)),
+        "population": TOKEN_BASELINE_POPULATION,
+        "observation_status_counts": dict(sorted(status_counts.items())),
+        "proposal_first_attempt": {
+            "turns": len(total),
+            "median_total_tokens": _median(total),
+            "median_prompt_tokens": _median(prompt),
+            "median_completion_tokens": _median(completion),
+            "p90_prompt_tokens": _p90(prompt),
+        },
+        "classifier": {
+            "observations_with_usage": len(classifier_calls),
+            "observations_without_usage": classifier_unknown,
+            "median_calls": _median(classifier_calls),
+            "median_prompt_tokens": _median(classifier_prompt),
+            "median_total_tokens": _median(classifier_total),
+        },
+    }
+
+
+def token_baseline_delta(
+    current: dict[str, Any], baseline: dict[str, Any]
+) -> dict[str, dict[str, float | None]]:
+    """Per-metric movement of `current` against a frozen baseline report."""
+
+    deltas: dict[str, dict[str, float | None]] = {}
+    for section in ("proposal_first_attempt", "classifier"):
+        current_section = current.get(section)
+        baseline_section = baseline.get(section)
+        if not isinstance(current_section, dict) or not isinstance(
+            baseline_section, dict
+        ):
+            raise ReceiptError(f"token baseline reports lack the {section} section.")
+        current_section = cast(dict[str, Any], current_section)
+        baseline_section = cast(dict[str, Any], baseline_section)
+        for metric, current_value in current_section.items():
+            if not str(metric).startswith(("median_", "p90_")):
+                continue
+            baseline_value = baseline_section.get(metric)
+            movable = isinstance(current_value, (int, float)) and isinstance(
+                baseline_value, (int, float)
+            )
+            deltas[f"{section}.{metric}"] = {
+                "baseline": float(baseline_value) if movable else None,
+                "current": float(current_value) if movable else None,
+                "delta": float(current_value - baseline_value) if movable else None,
+            }
+    return deltas
+
+
+def _render_token_baseline_markdown(
+    report: dict[str, Any], deltas: dict[str, dict[str, float | None]] | None
+) -> str:
+    lines = [
+        f"# Token baseline: {report['source_revision']}",
+        "",
+        f"Population: {report['population']} "
+        f"({json.dumps(report['observation_status_counts'])})",
+        "",
+        "| metric | value |",
+        "| --- | --- |",
+    ]
+    for section in ("proposal_first_attempt", "classifier"):
+        for metric, value in cast(dict[str, Any], report[section]).items():
+            lines.append(f"| {section}.{metric} | {value} |")
+    if deltas:
+        lines += [
+            "",
+            "| metric | baseline | current | delta |",
+            "| --- | --- | --- | --- |",
+        ]
+        for metric, movement in deltas.items():
+            lines.append(
+                f"| {metric} | {movement['baseline']} | {movement['current']} | "
+                f"{movement['delta']} |"
+            )
+    return "\n".join(lines)
+
 
 def _release_exit_code(report: dict[str, Any]) -> int:
     if report["release"] == "invalid":
@@ -1088,7 +1284,47 @@ def main() -> None:
         "--format", choices=("markdown", "json"), default="markdown"
     )
 
+    baseline_mode = modes.add_parser(
+        "token-baseline",
+        help="Aggregate first-attempt proposal and classifier token spend of one suite root.",
+    )
+    baseline_mode.add_argument("suite_dir", type=Path)
+    baseline_mode.add_argument(
+        "--against",
+        type=Path,
+        default=None,
+        help="A frozen token-baseline JSON report to state movement against.",
+    )
+    baseline_mode.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown"
+    )
     args = parser.parse_args()
+    if args.mode == "token-baseline":
+        try:
+            report = token_baseline_report(args.suite_dir)
+            deltas = (
+                token_baseline_delta(
+                    report,
+                    json.loads(args.against.read_text(encoding="utf-8")),
+                )
+                if args.against is not None
+                else None
+            )
+        except ReceiptError as error:
+            print(f"Refusing to aggregate this root: {error}", file=sys.stderr)
+            raise SystemExit(_INVALID_RECEIPT_EXIT) from error
+        if args.format == "json":
+            json.dump(
+                {**report, "against": deltas} if deltas is not None else report,
+                sys.stdout,
+                ensure_ascii=False,
+                indent=2,
+            )
+            sys.stdout.write("\n")
+        else:
+            sys.stdout.write(_render_token_baseline_markdown(report, deltas))
+            sys.stdout.write("\n")
+        return
     if args.mode == "release-verdict":
         try:
             report = release_verdict_report(

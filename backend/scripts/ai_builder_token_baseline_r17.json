@@ -1,0 +1,24 @@
+{
+  "suite_dir": "/Users/ccimen/eneo/flows-tidy-ai-builder/.codex/artifacts/diagnostic-report-layout-r17/broad-p1/ai-builder-api-battle-suite-20260831T161848",
+  "source_revision": "DEV-13c26052d487",
+  "population": "completed_observations",
+  "observation_status_counts": {
+    "completed": 101,
+    "error_terminated": 2,
+    "invalid_evidence": 1
+  },
+  "proposal_first_attempt": {
+    "turns": 83,
+    "median_total_tokens": 4108,
+    "median_prompt_tokens": 2741,
+    "median_completion_tokens": 1236,
+    "p90_prompt_tokens": 3671
+  },
+  "classifier": {
+    "observations_with_usage": 0,
+    "observations_without_usage": 101,
+    "median_calls": null,
+    "median_prompt_tokens": null,
+    "median_total_tokens": null
+  }
+}

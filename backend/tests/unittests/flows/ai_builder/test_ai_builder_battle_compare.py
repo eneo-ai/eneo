@@ -625,3 +625,141 @@ def test_modal_outcome_decides_the_representative_row(tmp_path: Path) -> None:
     assert case["mechanics_direction"] == "improved"
     assert case["direction"] == "inconclusive"
     assert case["current_unstable"] is True
+
+
+def _bundle(
+    *,
+    status: str,
+    revision: str = "DEV-abc",
+    attempts: tuple[tuple[int, int, int], ...] = ((2_700, 1_200, 3_900),),
+    classifier_usage: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    journey: dict[str, Any] = {"outcome_class": "plan_first_pass"}
+    if classifier_usage is not None:
+        journey["classifier_usage"] = classifier_usage
+    return {
+        "app_version": revision,
+        "observation": {"observation_status": status},
+        "journey": journey,
+        "proposal_telemetry_diagnostics": {
+            "proposal_turns": [
+                {
+                    "attempts": [
+                        {
+                            "attempt": 1,
+                            "prompt_tokens": prompt,
+                            "completion_tokens": completion,
+                            "total_tokens": total,
+                        }
+                    ]
+                }
+                for prompt, completion, total in attempts
+            ]
+        },
+    }
+
+
+def _write_bundles(root: Path, bundles: list[dict[str, Any]]) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    for index, bundle in enumerate(bundles):
+        (root / f"ai-builder-api-battle-test-{index:03d}.json").write_text(
+            json.dumps(bundle), encoding="utf-8"
+        )
+    return root
+
+
+def test_token_baseline_reads_completed_observations_only(tmp_path: Path) -> None:
+    """An acquisition fault spent nothing on the product; it must not move a median."""
+    module = _compare_module()
+
+    root = _write_bundles(
+        tmp_path / "suite",
+        [
+            _bundle(
+                status="completed",
+                attempts=((2_000, 1_000, 3_000),),
+                classifier_usage={
+                    "calls": 1,
+                    "prompt_tokens": 8_000,
+                    "total_tokens": 8_300,
+                },
+            ),
+            _bundle(
+                status="completed",
+                attempts=((3_000, 1_400, 4_400), (2_500, 1_100, 3_600)),
+            ),
+            _bundle(
+                status="acquisition_failure",
+                attempts=((9_000, 9_000, 18_000),),
+                classifier_usage={
+                    "calls": 9,
+                    "prompt_tokens": 90_000,
+                    "total_tokens": 99_000,
+                },
+            ),
+        ],
+    )
+
+    report = module.token_baseline_report(root)
+
+    assert report["source_revision"] == "DEV-abc"
+    assert report["population"] == "completed_observations"
+    assert report["observation_status_counts"] == {
+        "acquisition_failure": 1,
+        "completed": 2,
+    }
+    assert report["proposal_first_attempt"] == {
+        "turns": 3,
+        "median_total_tokens": 3_600,
+        "median_prompt_tokens": 2_500,
+        "median_completion_tokens": 1_100,
+        "p90_prompt_tokens": 3_000,
+    }
+    assert report["classifier"] == {
+        "observations_with_usage": 1,
+        "observations_without_usage": 1,
+        "median_calls": 1,
+        "median_prompt_tokens": 8_000,
+        "median_total_tokens": 8_300,
+    }
+
+
+def test_token_baseline_refuses_a_root_spanning_two_builds(tmp_path: Path) -> None:
+    module = _compare_module()
+    root = _write_bundles(
+        tmp_path / "suite",
+        [_bundle(status="completed"), _bundle(status="completed", revision="DEV-def")],
+    )
+    with pytest.raises(module.ReceiptError, match="source revisions"):
+        module.token_baseline_report(root)
+    with pytest.raises(module.ReceiptError, match="no observation bundles"):
+        module.token_baseline_report(tmp_path / "empty")
+
+
+def test_token_baseline_delta_names_each_movable_metric(tmp_path: Path) -> None:
+    module = _compare_module()
+    current = module.token_baseline_report(
+        _write_bundles(
+            tmp_path / "current",
+            [_bundle(status="completed", attempts=((2_000, 1_000, 3_000),))],
+        )
+    )
+    baseline = module.token_baseline_report(
+        _write_bundles(
+            tmp_path / "baseline",
+            [_bundle(status="completed", attempts=((2_500, 1_000, 3_500),))],
+        )
+    )
+
+    deltas = module.token_baseline_delta(current, baseline)
+
+    assert deltas["proposal_first_attempt.median_prompt_tokens"] == {
+        "baseline": 2_500.0,
+        "current": 2_000.0,
+        "delta": -500.0,
+    }
+    assert deltas["classifier.median_prompt_tokens"] == {
+        "baseline": None,
+        "current": None,
+        "delta": None,
+    }
