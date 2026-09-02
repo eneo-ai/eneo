@@ -51,7 +51,109 @@ describe("BuilderReviewScreen approval", () => {
       screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm() })
     );
     await waitFor(() => expect(createFlowFromPlan).toHaveBeenCalledOnce());
-    await waitFor(() => expect(onapplied).toHaveBeenCalledOnce());
+    // The beat before the callback is covered by the fake-timer test below.
+    expect(onapplied).not.toHaveBeenCalled();
+  });
+
+  it("shows the creation moment in the footer and opens the flow after a beat", async () => {
+    // Confirming closes the dialog at once, the footer the reader used shows
+    // the success, and the created flow opens after a fixed beat.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const createFlowFromPlan = vi.fn().mockResolvedValue({
+        flow_id: "flow-1",
+        flow_name: "Ljud till PDF",
+        steps_created: 2,
+        steps_updated: 0,
+        steps_removed: 0
+      });
+      const onapplied = vi.fn();
+      const { unmount } = render(BuilderReviewScreenHarness, {
+        currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+        state: makeCreateState(),
+        screenProps: { onapplied },
+        onservice: (service) => {
+          service.createFlowFromPlan = createFlowFromPlan;
+        }
+      });
+
+      await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve_create() }));
+      await fireEvent.click(
+        screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm() })
+      );
+      // Let the create call resolve and the beat start.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createFlowFromPlan).toHaveBeenCalledOnce();
+      expect(screen.queryByText(m.ai_builder_approve_dialog_title())).toBeNull();
+      // Focus rests on the footer row itself, not on the disabled button it
+      // contains: the wrapper is the focusable element that holds the actions.
+      const active = document.activeElement as HTMLElement;
+      expect(active.getAttribute("tabindex")).toBe("-1");
+      expect(active.querySelector("button")).not.toBeNull();
+
+      await vi.advanceTimersByTimeAsync(899);
+      expect(onapplied).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onapplied).toHaveBeenCalledWith(expect.objectContaining({ flow_id: "flow-1" }));
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not open the flow on behalf of a screen the reader already left", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const createFlowFromPlan = vi.fn().mockResolvedValue({
+        flow_id: "flow-1",
+        flow_name: "Ljud till PDF",
+        steps_created: 2,
+        steps_updated: 0,
+        steps_removed: 0
+      });
+      const onapplied = vi.fn();
+      const { unmount } = render(BuilderReviewScreenHarness, {
+        currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+        state: makeCreateState(),
+        screenProps: { onapplied },
+        onservice: (service) => {
+          service.createFlowFromPlan = createFlowFromPlan;
+        }
+      });
+
+      await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve_create() }));
+      await fireEvent.click(
+        screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm() })
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createFlowFromPlan).toHaveBeenCalledOnce();
+      unmount();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onapplied).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("replaces the footer actions with the success moment once the flow exists", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...makeCreateState(),
+        applyResult: {
+          flow_id: "flow-1",
+          flow_name: "Ljud till PDF",
+          steps_created: 2,
+          steps_updated: 0,
+          steps_removed: 0
+        }
+      }
+    });
+
+    expect(screen.getByText(m.ai_builder_applied_success())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_applied_opening())).toBeTruthy();
+    expect(screen.queryByRole("button", { name: m.ai_builder_approve_create() })).toBeNull();
+    expect(screen.queryByRole("button", { name: m.ai_builder_modify() })).toBeNull();
   });
 
   it("keeps approve then apply as two steps in edit mode", async () => {

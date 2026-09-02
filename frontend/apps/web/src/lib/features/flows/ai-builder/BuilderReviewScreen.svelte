@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import { onDestroy, tick } from "svelte";
   import { m } from "$lib/paraglide/messages";
+  import IconLoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { getLocale } from "$lib/paraglide/runtime";
   import TokenUsageBadge from "$lib/features/flows/components/TokenUsageBadge.svelte";
-  import { toast } from "$lib/components/toast";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -492,11 +493,32 @@
     void service.sendMessage(text, undefined, undefined, editContext);
   }
 
+  // The created flow opens on its own page. A beat between "skapat" and the
+  // navigation lets the reader see the success before the page changes.
+  // Reading time is the same for everyone; only the drawing of the check
+  // is subject to reduced motion, and CSS owns that.
+  const OPEN_AFTER_CREATE_MS = 900;
+  // Navigating on behalf of a screen the reader has already left would pull
+  // them back; the beat is cancelled by unmount.
+  let mounted = true;
+  onDestroy(() => {
+    mounted = false;
+  });
+
+  // Where the reader's focus lands when the dialog closes: the button that
+  // opened it is disabled while the flow is created, so the footer's status
+  // column takes focus and the live region there narrates the rest.
+  let footerStatusEl = $state<HTMLDivElement | null>(null);
+
   async function handlePrimaryAction() {
+    approveDialogOpen = false;
+    await tick();
+    footerStatusEl?.focus({ preventScroll: true });
     if (isCreateMode) {
       try {
         const result = await service.createFlowFromPlan();
-        toast.success(m.ai_builder_created_toast());
+        await new Promise((resolve) => setTimeout(resolve, OPEN_AFTER_CREATE_MS));
+        if (!mounted) return;
         onapplied?.({ flow_id: result.flow_id, focusStepIndex });
       } catch {
         // Surfaced through service.applyError / service.createFailureOutcome.
@@ -1165,32 +1187,47 @@
           />
         </div>
 
-        {#if service.applyResult}
+        {#if service.applyResult && !isCreateMode}
           <div
-            class="border-positive-default/40 bg-positive-dimmer mt-3.5 rounded-[9px] border px-3.5 py-3"
+            class="border-positive-default/40 bg-positive-dimmer mt-3.5 flex items-start gap-3 rounded-[9px] border px-3.5 py-3"
             role="status"
             aria-live="polite"
           >
-            <p class="text-positive-stronger text-[0.8125rem] font-semibold">
-              {m.ai_builder_applied_success()}
-            </p>
-            <p class="text-positive-stronger/80 mt-0.5 text-xs leading-relaxed">
-              {m.ai_builder_applied_counts({
-                created: service.applyResult.steps_created,
-                updated: service.applyResult.steps_updated,
-                removed: service.applyResult.steps_removed
-              })}
-            </p>
-            {#if service.canContinueEditing}
-              <Button
-                variant="outline"
-                size="sm"
-                class="mt-3"
-                onclick={() => void service.continueEditing()}
-              >
-                {m.ai_builder_continue_editing()}
-              </Button>
-            {/if}
+            <svg
+              class="success-mark text-positive-stronger mt-px size-6 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle class="success-ring" cx="12" cy="12" r="10" />
+              <path class="success-tick" d="m8 12.5 2.6 2.6L16 9.5" />
+            </svg>
+            <div class="min-w-0 flex-1">
+              <p class="text-positive-stronger text-[0.8125rem] font-semibold">
+                {m.ai_builder_applied_success_edit()}
+              </p>
+              <p class="text-positive-stronger/80 mt-0.5 text-xs leading-relaxed">
+                {m.ai_builder_applied_counts({
+                  created: service.applyResult.steps_created,
+                  updated: service.applyResult.steps_updated,
+                  removed: service.applyResult.steps_removed
+                })}
+              </p>
+              {#if service.canContinueEditing}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="mt-3"
+                  onclick={() => void service.continueEditing()}
+                >
+                  {m.ai_builder_continue_editing()}
+                </Button>
+              {/if}
+            </div>
           </div>
         {/if}
 
@@ -1296,30 +1333,61 @@
     <div
       class="border-default bg-primary/95 sticky bottom-0 z-20 shrink-0 border-t px-7 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur max-sm:px-3"
     >
-      <div class="mx-auto flex max-w-[53.75rem] flex-wrap items-center gap-2.5 2xl:max-w-[62.5rem]">
-        <div class="flex flex-col max-sm:w-full">
-          <span class="text-secondary text-xs">
-            {m.ai_builder_footer_steps_nothing_created({ count: stepCount })}
-          </span>
-          <span class="text-secondary text-xs text-pretty max-sm:hidden">
-            {m.ai_builder_footer_draft_not_running()}
-          </span>
-          {#if service.isRevisingPlan}
-            <span
-              class="text-accent-stronger text-xs font-semibold"
-              role="status"
-              aria-live="polite"
+      <div
+        bind:this={footerStatusEl}
+        tabindex="-1"
+        class="mx-auto flex max-w-[53.75rem] flex-wrap items-center gap-2.5 outline-none 2xl:max-w-[62.5rem]"
+      >
+        {#if isCreateMode && service.applyResult}
+          <!-- The one authored moment of the flow, in the bar the reader just
+               used: the check draws itself, the line says what happened, and
+               the page moves on. -->
+          <div class="flex items-center gap-3" role="status" aria-live="polite">
+            <svg
+              class="success-mark text-positive-stronger size-6 shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
             >
-              {m.ai_builder_footer_locked_while_revising()}
+              <circle class="success-ring" cx="12" cy="12" r="10" />
+              <path class="success-tick" d="m8 12.5 2.6 2.6L16 9.5" />
+            </svg>
+            <div class="flex flex-col">
+              <span class="text-primary text-[0.8125rem] font-semibold">
+                {m.ai_builder_applied_success()}
+              </span>
+              <span class="text-secondary text-xs">{m.ai_builder_applied_opening()}</span>
+            </div>
+          </div>
+        {:else}
+          <div class="flex flex-col max-sm:w-full">
+            <span class="text-secondary text-xs">
+              {m.ai_builder_footer_steps_nothing_created({ count: stepCount })}
             </span>
-          {:else if planNotApprovable}
-            <!-- A change request left the session waiting for a plan that never
+            <span class="text-secondary text-xs text-pretty max-sm:hidden">
+              {m.ai_builder_footer_draft_not_running()}
+            </span>
+            {#if service.isRevisingPlan}
+              <span
+                class="text-accent-stronger text-xs font-semibold"
+                role="status"
+                aria-live="polite"
+              >
+                {m.ai_builder_footer_locked_while_revising()}
+              </span>
+            {:else if planNotApprovable}
+              <!-- A change request left the session waiting for a plan that never
                  came; the shown plan is context, not something to approve. -->
-            <span class="text-warning-stronger text-xs font-semibold" role="status">
-              {m.ai_builder_footer_plan_needs_update()}
-            </span>
-          {/if}
-        </div>
+              <span class="text-warning-stronger text-xs font-semibold" role="status">
+                {m.ai_builder_footer_plan_needs_update()}
+              </span>
+            {/if}
+          </div>
+        {/if}
         <!-- On a phone the primary action sits on top, within thumb reach. -->
         <div class="ml-auto flex gap-2 max-sm:w-full max-sm:flex-col-reverse">
           {#if !service.applyResult}
@@ -1345,6 +1413,12 @@
                   service.conflict !== null}
                 onclick={() => (approveDialogOpen = true)}
               >
+                {#if service.isCreating}
+                  <IconLoaderCircle
+                    class="size-3.5 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                {/if}
                 {service.isCreating
                   ? m.ai_builder_creating()
                   : createFailed
@@ -1462,6 +1536,29 @@
 {/if}
 
 <style lang="postcss">
+  .success-ring,
+  .success-tick {
+    stroke-dasharray: 64;
+    stroke-dashoffset: 64;
+    animation: success-draw 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .success-tick {
+    stroke-dasharray: 16;
+    stroke-dashoffset: 16;
+    animation-delay: 0.22s;
+  }
+  @keyframes success-draw {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .success-ring,
+    .success-tick {
+      animation: none;
+      stroke-dashoffset: 0;
+    }
+  }
   @reference "@eneo/ui/styles";
 
   .progress-ring {
