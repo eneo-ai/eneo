@@ -41,8 +41,13 @@
   const isEdit = $derived(targetKind === "edit");
 </script>
 
-<div class="flex flex-1 items-center justify-center px-7 py-8 max-sm:px-3 max-sm:py-5">
-  <div class="task-screen my-auto w-full max-w-[40.625rem] 2xl:max-w-[45rem]">
+<!-- Anchored a little below the rail rather than centred: on a tall screen a
+     centred prompt floats half a viewport down, and the composer is the
+     first thing the reader should reach. -->
+<div
+  class="flex flex-1 justify-center px-7 pt-[clamp(2.5rem,14vh,7.5rem)] pb-8 max-sm:px-3 max-sm:pt-6 max-sm:pb-5"
+>
+  <div class="task-screen w-full max-w-[40.625rem] 2xl:max-w-[45rem]">
     <h2
       class="text-primary text-[1.6875rem] leading-tight font-extrabold tracking-[-0.03em] text-pretty"
     >

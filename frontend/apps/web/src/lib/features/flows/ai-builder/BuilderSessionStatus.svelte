@@ -19,7 +19,9 @@
   const savingProblem = $derived(service.error?.code === "network");
 </script>
 
-<div class="flex min-w-0 flex-1 items-center gap-3">
+<!-- Content-sized and pushed right: growing into the title's space is
+     what truncated "AI-byggaren" on a phone. -->
+<div class="ml-auto flex min-w-0 shrink-0 items-center gap-3">
   {#if savingProblem}
     <span
       class="text-warning-stronger inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold max-sm:sr-only"

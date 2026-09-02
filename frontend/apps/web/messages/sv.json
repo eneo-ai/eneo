@@ -4554,7 +4554,7 @@
   "ai_builder_task_intro_edit": "Beskriv ändringen med egna ord. Eneo visar ett förslag som du godkänner. Inget sparas innan dess.",
   "ai_builder_task_placeholder": "Till exempel: Ljudfilen från ett nämndmöte ska transkriberas och bli en strukturerad PDF-rapport.",
   "ai_builder_task_placeholder_edit": "Till exempel: Lägg till en sammanfattning på första sidan.",
-  "ai_builder_task_model_note": "Eneo väljer modell per steg. Modellen syns i planen och ändras i stegredigeraren, men då måste flödet avpubliceras först.",
+  "ai_builder_task_model_note": "Eneo väljer modell per steg. Du kan ändra det i planen efteråt.",
   "ai_builder_model_label": "Byggassistentens modell",
   "ai_builder_model_usage_hint": "Används för att bygga och redigera planen, inte för transkribering eller körning.",
   "ai_builder_reasoning_minimal": "Minimal",

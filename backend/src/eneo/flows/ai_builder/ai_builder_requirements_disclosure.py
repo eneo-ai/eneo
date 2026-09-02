@@ -1111,6 +1111,14 @@ def _slot_assumption(
     )
 
 
+def _in_sentence(label: str) -> str:
+    """Lower the first letter of a label unless it opens with an acronym."""
+
+    if len(label) >= 2 and label[:2].isupper():
+        return label
+    return label[:1].lower() + label[1:]
+
+
 def _summary_text(
     resolved: Mapping[str, object],
     locale: Locale,
@@ -1131,20 +1139,24 @@ def _summary_text(
         locale,
     )
     if runtime_input or terminal_output or post_processing_goal:
+        # Option labels are title-cased for the option list; inside a sentence
+        # they read as nouns, so they drop the capital unless they open with
+        # an acronym ("PDF-dokument").
         if locale == "sv":
             summary = (
-                f"Flödet ska ta emot {runtime_input or 'indata'} vid körning "
-                f"och leverera {terminal_output or 'ett slutresultat'}."
+                f"Flödet tar emot {_in_sentence(runtime_input or 'indata')} vid "
+                f"körning och levererar "
+                f"{_in_sentence(terminal_output or 'ett slutresultat')}."
             )
             if post_processing_goal:
-                summary += f" Resultatet ska hjälpa till med: {post_processing_goal}."
+                summary += f" Syftet med bearbetningen: {post_processing_goal}."
             return summary
         summary = (
-            f"The flow should accept {runtime_input or 'runtime input'} "
-            f"and deliver {terminal_output or 'a final result'}."
+            f"The flow accepts {_in_sentence(runtime_input or 'runtime input')} at "
+            f"runtime and delivers {_in_sentence(terminal_output or 'a final result')}."
         )
         if post_processing_goal:
-            summary += f" The result should help with: {post_processing_goal}."
+            summary += f" Purpose of the processing: {post_processing_goal}."
         return summary
 
     if locale == "sv":

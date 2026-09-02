@@ -1012,10 +1012,10 @@
             <span class="text-secondary text-xs">{m.ai_builder_confirm_note_after()}</span>
           </span>
           {#if !readOnly}
+            <!-- Describing a change has one home: the composer bar right
+                 below the card. A second button for it here read as two
+                 different actions. -->
             <div class="ml-auto flex flex-wrap gap-2">
-              <Button variant="outline" onclick={() => openChange(null)} {disabled}>
-                {m.ai_builder_confirm_change_answers()}
-              </Button>
               <Button variant="default" onclick={onconfirm} {disabled}>
                 {m.ai_builder_confirm_action()}
               </Button>

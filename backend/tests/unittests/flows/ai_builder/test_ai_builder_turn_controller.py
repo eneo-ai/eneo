@@ -778,8 +778,8 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert isinstance(decision, ConfirmRequirements)
     payload = decision.payload
     assert payload.summary == (
-        "Flödet ska ta emot Dokument vid körning och leverera DOCX-dokument. "
-        "Resultatet ska hjälpa till med: Strukturera materialet."
+        "Flödet tar emot dokument vid körning och levererar DOCX-dokument. "
+        "Syftet med bearbetningen: Strukturera materialet."
     )
     assert payload.input_description == "Primär indata vid körning: Dokument."
     assert payload.output_description == "Huvudsakligt slutresultat: DOCX-dokument."
@@ -1420,7 +1420,7 @@ def test_server_confirmation_summarizes_processing_goal() -> None:
 
     assert isinstance(decision, ConfirmRequirements)
     payload = decision.payload
-    assert "Resultatet ska hjälpa till med: Beslut, nästa steg" in payload.summary
+    assert "Syftet med bearbetningen: Beslut, nästa steg" in payload.summary
     assert {decision.topic for decision in payload.key_decisions} >= {
         "Syfte med bearbetningen",
     }

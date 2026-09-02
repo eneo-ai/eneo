@@ -34,8 +34,9 @@
 
 <Page.Root>
   <Page.Header>
+    <!-- A short fixed title: the truncating mode capped it at 40% of the
+         row and clipped "AI-byggaren" on phones although the row had room. -->
     <Page.Title
-      truncate={true}
       parent={{ href: `/spaces/${$currentSpace.routeId}/flows` }}
       title={m.ai_builder_tab()}
     ></Page.Title>

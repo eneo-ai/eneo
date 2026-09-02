@@ -1394,7 +1394,8 @@ describe("FlowAIBuilder confirm, build and review", () => {
     renderShell({ fetch, stream, resumeSessionId: "s-1" });
 
     await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
-    await fireEvent.click(button(m.ai_builder_confirm_change_answers()));
+    // The collapsed composer bar is one button: its title, an example and "Skriv".
+    await fireEvent.click(screen.getByText(m.ai_builder_change_request_write()).closest("button")!);
     const box = await screen.findByRole("textbox", {
       name: m.ai_builder_change_request_textarea_label()
     });

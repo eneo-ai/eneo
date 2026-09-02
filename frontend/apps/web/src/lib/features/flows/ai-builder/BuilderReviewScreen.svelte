@@ -1300,7 +1300,7 @@
           <span class="text-secondary text-xs">
             {m.ai_builder_footer_steps_nothing_created({ count: stepCount })}
           </span>
-          <span class="text-secondary text-xs text-pretty">
+          <span class="text-secondary text-xs text-pretty max-sm:hidden">
             {m.ai_builder_footer_draft_not_running()}
           </span>
           {#if service.isRevisingPlan}

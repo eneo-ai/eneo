@@ -4554,7 +4554,7 @@
   "ai_builder_task_intro_edit": "Describe the change in your own words. Eneo shows a proposal for you to approve. Nothing is saved before that.",
   "ai_builder_task_placeholder": "For example: The audio file from a committee meeting should be transcribed and turned into a structured PDF report.",
   "ai_builder_task_placeholder_edit": "For example: Add a summary on the first page.",
-  "ai_builder_task_model_note": "Eneo picks a model per step. The model is shown in the plan and changed in the step editor, which requires unpublishing the flow first.",
+  "ai_builder_task_model_note": "Eneo picks a model per step. You can change it in the plan afterwards.",
   "ai_builder_model_label": "AI Builder model",
   "ai_builder_model_usage_hint": "Used to build and edit the plan, not for transcription or runtime.",
   "ai_builder_reasoning_minimal": "Minimal",
