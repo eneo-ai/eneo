@@ -31,6 +31,14 @@ COMPOSE_SECTION_BODY_KEY = "section_body"
 COMPOSE_SOURCE_LABEL_KEY = "source_label"
 COMPOSE_REPORT_TITLE_KEY = "report_title"
 COMPOSE_OVERALL_OVERVIEW_KEY = "overall_overview"
+DIRECT_COMPOSE_SCALAR_FIELD_TYPES = frozenset({"string", "number", "boolean"})
+_CANONICAL_SECTION_FIELDS = frozenset(
+    {
+        COMPOSE_SECTION_TITLE_KEY,
+        COMPOSE_SECTION_BODY_KEY,
+        COMPOSE_SOURCE_LABEL_KEY,
+    }
+)
 
 
 def requested_output_section_contracts(
@@ -248,20 +256,30 @@ def is_bound_document_report_compose_topology(
         section_schema = _schema_properties(section_producer.output_contract).get(
             section_source.field_name
         )
-        section_fields = {
-            COMPOSE_SECTION_TITLE_KEY,
-            COMPOSE_SECTION_BODY_KEY,
-            COMPOSE_SOURCE_LABEL_KEY,
-        }
+        item_properties = _array_item_properties(section_schema)
+        required_template_fields = _required_section_template_field_names(
+            item_properties
+        )
         if (
             section_schema is None
             or section_ref.item_template is None
-            or not section_fields.issubset(_array_item_properties(section_schema))
-            or not section_fields.issubset(
+            or not required_template_fields
+            or not required_template_fields.issubset(
                 item_template_field_names(section_ref.item_template)
             )
+            or "source_file_id" in item_template_field_names(section_ref.item_template)
         ):
             return False
+        if not _CANONICAL_SECTION_FIELDS.issubset(item_properties):
+            if (
+                section_producer is not prior_steps[0]
+                or section_source.field_name != "documents"
+                or not all(
+                    _schema_declares_direct_compose_scalar(field_schema)
+                    for field_schema in item_properties.values()
+                )
+            ):
+                return False
         canonical_producer_indexes.append(prior_steps.index(section_producer))
     for ref in refs:
         producer = prior_steps_by_ref[ref.step_ref]
@@ -348,6 +366,11 @@ def _compose_section_item_template(
     item_properties: Mapping[str, object],
     section_label_by_key: Mapping[str, str],
 ) -> str:
+    if not _CANONICAL_SECTION_FIELDS.issubset(item_properties):
+        return _compose_source_record_item_template(
+            item_properties=item_properties,
+            section_label_by_key=section_label_by_key,
+        )
     source_label = "Source" if ui_language == "en" else "Källa"
     template = (
         f"## {{{COMPOSE_SECTION_TITLE_KEY}}}\n\n"
@@ -369,6 +392,64 @@ def _compose_section_item_template(
     if not additional_fields:
         return template
     return f"{template}\n\n" + "\n\n".join(additional_fields)
+
+
+def _compose_source_record_item_template(
+    *,
+    item_properties: Mapping[str, object],
+    section_label_by_key: Mapping[str, str],
+) -> str:
+    content_fields = _source_record_content_field_names(item_properties)
+    field_lines = [
+        f"{_item_template_literal(section_label_by_key.get(field_name, _humanized_field_name(field_name)))}: "
+        f"{{{field_name}}}"
+        for field_name in content_fields
+    ]
+    parts = [f"## {{{COMPOSE_SOURCE_LABEL_KEY}}}"]
+    if field_lines:
+        parts.append("\n\n".join(field_lines))
+    return "\n\n".join(parts)
+
+
+def _source_record_content_field_names(
+    item_properties: Mapping[str, object],
+) -> tuple[str, ...]:
+    fields = tuple(
+        field_name
+        for field_name in item_properties
+        if field_name not in {COMPOSE_SOURCE_LABEL_KEY, "source_file_id"}
+    )
+    authored_fields = tuple(
+        field_name for field_name in fields if field_name != "source_material"
+    )
+    return authored_fields or fields
+
+
+def _required_section_template_field_names(
+    item_properties: Mapping[str, object],
+) -> frozenset[str]:
+    if _CANONICAL_SECTION_FIELDS.issubset(item_properties):
+        return _CANONICAL_SECTION_FIELDS
+    if COMPOSE_SOURCE_LABEL_KEY not in item_properties:
+        return frozenset()
+    return frozenset(
+        {
+            COMPOSE_SOURCE_LABEL_KEY,
+            *_source_record_content_field_names(item_properties),
+        }
+    )
+
+
+def _schema_declares_direct_compose_scalar(schema: object) -> bool:
+    match schema:
+        case {"type": str(raw_type)}:
+            return raw_type in DIRECT_COMPOSE_SCALAR_FIELD_TYPES
+        case {"type": [str(raw_type), "null"]}:
+            return raw_type in DIRECT_COMPOSE_SCALAR_FIELD_TYPES
+        case {"type": ["null", str(raw_type)]}:
+            return raw_type in DIRECT_COMPOSE_SCALAR_FIELD_TYPES
+        case _:
+            return False
 
 
 def _item_template_literal(value: str) -> str:

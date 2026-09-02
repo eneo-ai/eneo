@@ -16,6 +16,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
 )
+from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
+    is_bound_document_report_compose_topology,
+)
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
@@ -91,6 +94,7 @@ from eneo.flows.ai_builder.planning_state import (
     SchemaResolution,
 )
 from eneo.flows.flow_authoring_spec import (
+    FlowDraftSpecCore,
     InputSource,
     InputType,
     OutputMode,
@@ -109,6 +113,90 @@ def _question(input_bindings: dict[str, object] | None) -> str:
     question = effective_question_binding(input_bindings)
     assert question is not None
     return question
+
+
+def _compile_report_without_authored_section(
+    *,
+    report_disposition: ReportDisposition,
+    include_nested_reader_field: bool,
+    complete_reader_contract: bool,
+) -> FlowDraftSpecCore:
+    reader_children = [
+        {
+            "name": "summary",
+            "field_type": "string",
+            "description": "Source summary.",
+        },
+        *(
+            [
+                {
+                    "name": "risks",
+                    "field_type": "array",
+                    "description": "Source risks.",
+                }
+            ]
+            if include_nested_reader_field
+            else []
+        ),
+    ]
+    intent = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source report",
+            "plan_rationale": "Read sources and write a complete report.",
+            "steps": [
+                {
+                    "name": "Read sources",
+                    "instructions": "Read every source.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "children": reader_children,
+                        }
+                    ],
+                },
+                {
+                    "name": "Write overview",
+                    "instructions": "Write a synthesized overview.",
+                    "output_fields": [
+                        {
+                            "name": "overview",
+                            "field_type": "string",
+                            "description": "Synthesized overview.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Compose report",
+                    "instructions": "Compose the complete report.",
+                },
+            ],
+        }
+    )
+    required_fields = (
+        (
+            SourceCaptureField(
+                name="summary",
+                description="Concise summary grounded in the source material.",
+            ),
+        )
+        if complete_reader_contract
+        else ()
+    )
+    return compile_create_intent_to_spec(
+        intent,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.RENDER_VERBATIM,
+            runtime_max_files=3,
+            aggregation_intent="aggregate",
+            report_disposition=report_disposition,
+            ui_language="en",
+            source_reader_required_fields=required_fields,
+        ),
+    )
 
 
 def _slot(name: str, value: str) -> ResolvedSlot:
@@ -4970,7 +5058,7 @@ def test_compare_fan_in_follows_a_localized_document_container_rename() -> None:
     assert validate_spec(compiled).valid
 
 
-def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
+def test_report_disposition_both_keeps_authored_section_transformer() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Rapport över dokument",
@@ -5053,6 +5141,12 @@ def test_report_disposition_both_uses_deterministic_compose_topology() -> None:
             aggregation_intent=cast(AggregationIntent, "aggregate"),
             ui_language="sv",
             report_disposition="both",
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="summary",
+                    description="Kort sammanfattning grundad i källmaterialet.",
+                ),
+            ),
             runtime_input_fields=(
                 _confirmed_runtime_field(
                     "case_number", "Case number", purpose="shape_result"
@@ -5182,6 +5276,90 @@ def test_report_lowering_converts_intermediate_text_writer_without_repair(
     assert "documents" in compiled.steps[0].output_contract["properties"]
     assert compiled.steps[-2].output_mode == OutputMode.COMPOSE_TEXT
     assert compiled.steps[-1].output_mode == OutputMode.RENDER_VERBATIM
+    validation = validate_spec(compiled)
+    assert validation.valid, validation.errors
+
+
+def test_report_lowering_binds_retained_overview_to_its_new_predecessor() -> None:
+    outline = parse_create_flow_intent_arguments(
+        {
+            "flow_name": "Source report",
+            "plan_rationale": "Read sources, draft findings, and render a report.",
+            "steps": [
+                {
+                    "name": "Read sources",
+                    "instructions": "Extract grounded facts from every source.",
+                    "output_fields": [
+                        {
+                            "name": "documents",
+                            "field_type": "array",
+                            "description": "One record per source.",
+                            "children": [
+                                {
+                                    "name": "title",
+                                    "field_type": "string",
+                                    "description": "Source title.",
+                                },
+                                {
+                                    "name": "finding",
+                                    "field_type": "string",
+                                    "description": "Grounded source finding.",
+                                },
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "name": "Draft source narrative",
+                    "instructions": "Draft source-specific report prose.",
+                },
+                {
+                    "name": "Compile report facts",
+                    "instructions": "Compile the report-wide facts.",
+                    "output_fields": [
+                        {
+                            "name": "overview",
+                            "field_type": "string",
+                            "description": "Report-wide overview.",
+                        }
+                    ],
+                },
+                {
+                    "name": "Write report",
+                    "instructions": "Write the final report.",
+                },
+            ],
+        }
+    )
+
+    compiled = compile_create_intent_to_spec(
+        outline,
+        context=CreateCompileContext(
+            runtime_input_type=InputType.DOCUMENT,
+            final_output_type=OutputType.PDF,
+            final_output_mode=OutputMode.PASS_THROUGH,
+            runtime_max_files=4,
+            aggregation_intent="linear",
+            report_disposition="both",
+            ui_language="en",
+        ),
+    )
+
+    overview_index = next(
+        index
+        for index, step in enumerate(compiled.steps)
+        if step.name == "Compile report facts"
+    )
+    overview_step = compiled.steps[overview_index]
+    previous_step = compiled.steps[overview_index - 1]
+    assert overview_step.input_source == InputSource.PREVIOUS_STEP
+    assert overview_step.input_type == InputType.TEXT
+    assert overview_step.output_type == OutputType.JSON
+    assert overview_step.input_bindings == {
+        "source_refs": [
+            {"step_ref": previous_step.plan_step_ref, "output": "structured"}
+        ]
+    }
     validation = validate_spec(compiled)
     assert validation.valid, validation.errors
 
@@ -6287,7 +6465,7 @@ def test_report_disposition_both_replaces_weak_section_text_writer() -> None:
     assert validation.valid, validation.errors
 
 
-def test_report_disposition_both_inserts_missing_source_section_map() -> None:
+def test_report_disposition_both_composes_typed_reader_without_section_map() -> None:
     outline = parse_create_flow_intent_arguments(
         {
             "flow_name": "Dokumentöversikt i PDF",
@@ -6327,6 +6505,17 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
                                     "field_type": "string",
                                     "description": "Slutsatser.",
                                 },
+                                {
+                                    "name": "confidence",
+                                    "field_type": "number",
+                                    "description": "Konfidensgrad.",
+                                },
+                                {
+                                    "name": "verified",
+                                    "field_type": "boolean",
+                                    "description": "Verifierad uppgift.",
+                                    "nullable": True,
+                                },
                             ],
                         }
                     ],
@@ -6361,10 +6550,16 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
             runtime_input_type=InputType.DOCUMENT,
             final_output_type=OutputType.PDF,
             final_output_mode=OutputMode.PASS_THROUGH,
-            runtime_max_files=4,
+            runtime_max_files=3,
             aggregation_intent=cast(AggregationIntent, "aggregate"),
             ui_language="sv",
             report_disposition="both",
+            source_reader_required_fields=(
+                SourceCaptureField(
+                    name="summary",
+                    description="Kort sammanfattning grundad i källmaterialet.",
+                ),
+            ),
             result_contract_output_fields=(
                 StructuredFieldDraft(
                     name="open_questions",
@@ -6377,25 +6572,43 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
 
     assert [step.name for step in compiled.steps] == [
         "Läs varje dokument",
-        "Bygg källavsnitt",
         "Sammanställ översikt",
         "Skriv rapporttext",
         "Rendera PDF",
     ]
-    section_step = compiled.steps[1]
-    assert section_step.input_config == {"item_map": {"enabled": True, "max_items": 4}}
-    section_properties = section_step.output_contract["properties"]["source_sections"][
-        "items"
-    ]["properties"]
-    assert list(section_properties) == [
-        "section_title",
-        "section_body",
+    reader_step = compiled.steps[0]
+    assert reader_step.input_config is not None
+    runtime_input_config = reader_step.input_config["runtime_input"]
+    assert runtime_input_config["execution_mode"] == "per_source"
+    assert runtime_input_config["max_files"] == 3
+    reader_properties = reader_step.output_contract["properties"]["documents"]["items"][
+        "properties"
+    ]
+    assert set(reader_properties) == {
+        "title",
+        "document_type",
+        "category",
+        "summary",
+        "conclusions",
+        "confidence",
+        "verified",
         "source_label",
         "source_file_id",
+        "source_material",
+    }
+    assert all(
+        not step.input_config or "item_map" not in step.input_config
+        for step in compiled.steps
+    )
+    model_executing_steps = [
+        step for step in compiled.steps if step.output_mode == OutputMode.PASS_THROUGH
     ]
-    assert "source_label" not in section_step.assistant_spec.instructions
+    assert len(model_executing_steps) == 2, (
+        "Three mapped reader calls plus one overview call must total N+1 = 4 "
+        "nominal model calls at runtime."
+    )
 
-    overview_step = compiled.steps[2]
+    overview_step = compiled.steps[1]
     assert list(overview_step.output_contract["properties"]) == [
         "overall_conclusion",
         "report_title",
@@ -6403,34 +6616,41 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
         "open_questions",
     ]
 
-    compose_step = compiled.steps[3]
+    compose_step = compiled.steps[2]
     assert compose_step.output_mode == OutputMode.COMPOSE_TEXT
     assert compose_step.input_source == InputSource.PREVIOUS_STEP
     assert compose_step.input_bindings == {
-        "question": "# {{ step_c.output.structured.report_title }}",
+        "question": "# {{ step_b.output.structured.report_title }}",
         "source_refs": [
             {
-                "step_ref": "step_b",
+                "step_ref": "step_a",
                 "output": "structured",
-                "field_path": "source_sections",
+                "field_path": "documents",
                 "item_template": (
-                    "## {section_title}\n\n{section_body}\n\nKälla: {source_label}"
+                    "## {source_label}\n\n"
+                    "Title: {title}\n\n"
+                    "Document type: {document_type}\n\n"
+                    "Category: {category}\n\n"
+                    "Summary: {summary}\n\n"
+                    "Conclusions: {conclusions}\n\n"
+                    "Confidence: {confidence}\n\n"
+                    "Verified: {verified}"
                 ),
             },
             {
-                "step_ref": "step_c",
+                "step_ref": "step_b",
                 "output": "structured",
                 "field_path": "overall_overview",
                 "label": "Samlad översikt",
             },
             {
-                "step_ref": "step_c",
+                "step_ref": "step_b",
                 "output": "structured",
                 "field_path": "overall_conclusion",
                 "label": "Overall conclusion",
             },
             {
-                "step_ref": "step_c",
+                "step_ref": "step_b",
                 "output": "structured",
                 "field_path": "open_questions",
                 "label": "Open questions",
@@ -6441,6 +6661,86 @@ def test_report_disposition_both_inserts_missing_source_section_map() -> None:
         step.input_source != InputSource.ALL_PREVIOUS_STEPS for step in compiled.steps
     )
     assert validate_spec(compiled).valid
+
+
+@pytest.mark.parametrize(
+    (
+        "report_disposition",
+        "include_nested_reader_field",
+        "complete_reader_contract",
+    ),
+    [
+        ("both", False, False),
+        ("both", True, True),
+        ("per_source_sections", False, True),
+    ],
+    ids=["no-completeness-contract", "nested-reader-record", "sections-only"],
+)
+def test_report_without_direct_compose_contract_keeps_mapped_section_writer(
+    report_disposition: ReportDisposition,
+    include_nested_reader_field: bool,
+    complete_reader_contract: bool,
+) -> None:
+    compiled = _compile_report_without_authored_section(
+        report_disposition=report_disposition,
+        include_nested_reader_field=include_nested_reader_field,
+        complete_reader_contract=complete_reader_contract,
+    )
+
+    section_step = next(
+        step for step in compiled.steps if step.name == "Build source sections"
+    )
+    assert section_step.input_config == {"item_map": {"enabled": True, "max_items": 3}}
+    compose_step = compiled.steps[-2]
+    assert compose_step.input_bindings is not None
+    assert compose_step.input_bindings["source_refs"][0]["step_ref"] == (
+        section_step.plan_step_ref
+    )
+    assert compose_step.input_bindings["source_refs"][0]["field_path"] == (
+        "source_sections"
+    )
+    assert validate_spec(compiled).valid
+
+
+def test_direct_report_compose_rejects_missing_source_producer() -> None:
+    compiled = _compile_report_without_authored_section(
+        report_disposition="both",
+        include_nested_reader_field=False,
+        complete_reader_contract=True,
+    )
+    compose_index = len(compiled.steps) - 2
+    compose_step = compiled.steps[compose_index]
+    assert compose_step.input_bindings is not None
+    assert is_bound_document_report_compose_topology(compiled, compose_step)
+    source_refs = compose_step.input_bindings["source_refs"]
+    assert isinstance(source_refs, list)
+    section_ref = source_refs[0]
+    assert isinstance(section_ref, dict)
+    malformed_compose = compose_step.model_copy(
+        update={
+            "input_bindings": {
+                **compose_step.input_bindings,
+                "source_refs": [
+                    {**section_ref, "step_ref": "missing_source_reader"},
+                    *source_refs[1:],
+                ],
+            }
+        }
+    )
+    malformed = compiled.model_copy(
+        update={
+            "steps": [
+                *compiled.steps[:compose_index],
+                malformed_compose,
+                compiled.steps[-1],
+            ]
+        }
+    )
+
+    assert not is_bound_document_report_compose_topology(
+        malformed,
+        malformed_compose,
+    )
 
 
 def test_item_map_keeps_source_identity_in_contract_but_not_model_fields() -> None:

@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_assembly.document_report.merge import (
 from eneo.flows.ai_builder.ai_builder_assembly.document_report.topology import (
     COMPOSE_SECTION_BODY_KEY,
     COMPOSE_SECTION_TITLE_KEY,
+    DIRECT_COMPOSE_SCALAR_FIELD_TYPES,
 )
 from eneo.flows.ai_builder.ai_builder_assembly.plan import (
     DocumentReportSectionSource,
@@ -444,6 +445,7 @@ def append_terminal_helper_output_fields(
 def lower_document_report_topology(
     planned_steps: tuple[PlannedStep, ...],
     *,
+    source_reader_required_fields: tuple[SourceCaptureField, ...],
     report_disposition: ReportDisposition | None,
     runtime_input_type: InputType,
     final_output_type: OutputType,
@@ -497,6 +499,8 @@ def lower_document_report_topology(
             ),
         )
 
+    section_semantic_step: PlannedStep | None = None
+    section_uses_reader = False
     match report_disposition:
         case "per_source_sections" | "both":
             section_index = _source_section_single_array_index(
@@ -504,7 +508,6 @@ def lower_document_report_topology(
                 after_index=reader_index,
             )
             if section_index is None:
-                section_semantic_step: PlannedStep | None = None
                 replaced_index = reader_index + 1
                 if replaced_index < len(
                     content_steps
@@ -514,28 +517,44 @@ def lower_document_report_topology(
                         "ai_builder_document_report_weak_section_writer_replaced",
                         extra={"replaced_step_name": section_semantic_step.name},
                     )
-                section_step = _document_report_section_writer(
-                    reader_step=content_steps[reader_index],
-                    model_ref=(
-                        section_semantic_step.model_ref
-                        if section_semantic_step is not None
-                        else body_writer_step.model_ref
-                    ),
-                    ui_language=ui_language,
-                )
-                if section_semantic_step is not None:
-                    section_step = _merge_report_writer_semantics(
-                        section_step,
-                        semantic_step=section_semantic_step,
+                if (
+                    report_disposition == "both"
+                    and reader_is_mapped
+                    and section_semantic_step is None
+                    and _reader_satisfies_direct_compose_contract(
+                        content_steps[reader_index],
+                        required_fields=source_reader_required_fields,
                     )
-                content_steps.insert(reader_index + 1, section_step)
-                section_index = reader_index + 1
-                logger.info(
-                    "ai_builder_document_report_section_writer_inserted",
-                    extra={"reader_step_name": content_steps[reader_index].name},
-                )
+                ):
+                    section_index = reader_index
+                    section_uses_reader = True
+                    logger.info(
+                        "ai_builder_document_report_reader_sections_bound",
+                        extra={"reader_step_name": content_steps[reader_index].name},
+                    )
+                else:
+                    section_step = _document_report_section_writer(
+                        reader_step=content_steps[reader_index],
+                        model_ref=(
+                            section_semantic_step.model_ref
+                            if section_semantic_step is not None
+                            else body_writer_step.model_ref
+                        ),
+                        ui_language=ui_language,
+                    )
+                    if section_semantic_step is not None:
+                        section_step = _merge_report_writer_semantics(
+                            section_step,
+                            semantic_step=section_semantic_step,
+                        )
+                    content_steps.insert(reader_index + 1, section_step)
+                    section_index = reader_index + 1
+                    logger.info(
+                        "ai_builder_document_report_section_writer_inserted",
+                        extra={"reader_step_name": content_steps[reader_index].name},
+                    )
 
-            if reader_is_mapped:
+            if reader_is_mapped and not section_uses_reader:
                 content_steps = list(
                     _apply_previous_document_item_map_execution(
                         tuple(content_steps),
@@ -549,7 +568,7 @@ def lower_document_report_topology(
             )
             if section_field_name is None:
                 fail_closed()
-            if not reader_is_mapped:
+            if not reader_is_mapped and not section_uses_reader:
                 content_steps[section_index] = replace(
                     content_steps[section_index],
                     instructions=_append_single_call_section_instruction(
@@ -558,24 +577,27 @@ def lower_document_report_topology(
                         ui_language=ui_language,
                     ),
                 )
-            content_steps[section_index] = _complete_source_section_fields_for_compose(
-                content_steps[section_index],
-                result_contract_output_fields=(
-                    result_contract_output_fields
-                    if report_disposition == "per_source_sections"
-                    else ()
-                ),
-                requested_section_fields=(
-                    _requested_section_fields(
-                        requested_output_section_contracts,
-                        ui_language,
+            if not section_uses_reader:
+                content_steps[section_index] = (
+                    _complete_source_section_fields_for_compose(
+                        content_steps[section_index],
+                        result_contract_output_fields=(
+                            result_contract_output_fields
+                            if report_disposition == "per_source_sections"
+                            else ()
+                        ),
+                        requested_section_fields=(
+                            _requested_section_fields(
+                                requested_output_section_contracts,
+                                ui_language,
+                            )
+                            if report_disposition == "per_source_sections"
+                            else ()
+                        ),
+                        include_runtime_file_id=reader_is_mapped,
+                        ui_language=ui_language,
                     )
-                    if report_disposition == "per_source_sections"
-                    else ()
-                ),
-                include_runtime_file_id=reader_is_mapped,
-                ui_language=ui_language,
-            )
+                )
             if report_disposition == "per_source_sections":
                 content_steps, remaining_report_semantics = (
                     _without_report_text_semantics_after(
@@ -704,13 +726,15 @@ def lower_document_report_topology(
         ui_language=ui_language,
     )
 
-    lowered_steps = (
-        *content_steps,
-        _document_report_compose_step(
-            body_writer_step=body_writer_step,
-            ui_language=ui_language,
-        ),
-        renderer_step,
+    lowered_steps = _rederive_previous_step_underlag_channels(
+        (
+            *content_steps,
+            _document_report_compose_step(
+                body_writer_step=body_writer_step,
+                ui_language=ui_language,
+            ),
+            renderer_step,
+        )
     )
     section_source = (
         DocumentReportSectionSource(
@@ -721,6 +745,28 @@ def lower_document_report_topology(
         else None
     )
     return lowered_steps, section_source
+
+
+def _rederive_previous_step_underlag_channels(
+    planned_steps: tuple[PlannedStep, ...],
+) -> tuple[PlannedStep, ...]:
+    updated_steps = list(planned_steps)
+    changed = False
+    for index in range(1, len(updated_steps)):
+        step = updated_steps[index]
+        if step.input_source != InputSource.PREVIOUS_STEP:
+            continue
+        underlag_channel = derive_underlag_channel(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            previous_step=updated_steps[index - 1],
+            previous_field_refs=step.previous_field_refs,
+        )
+        if underlag_channel == step.underlag_channel:
+            continue
+        updated_steps[index] = replace(step, underlag_channel=underlag_channel)
+        changed = True
+    return tuple(updated_steps) if changed else planned_steps
 
 
 def _document_report_section_writer(
@@ -781,6 +827,22 @@ def _step_outputs_source_section_array(planned_step: PlannedStep) -> bool:
     item_field_names = {item.name for item in field.item_fields or ()}
     return {COMPOSE_SECTION_TITLE_KEY, COMPOSE_SECTION_BODY_KEY}.issubset(
         item_field_names
+    )
+
+
+def _reader_satisfies_direct_compose_contract(
+    planned_step: PlannedStep,
+    *,
+    required_fields: tuple[SourceCaptureField, ...],
+) -> bool:
+    if not required_fields or len(planned_step.output_fields) != 1:
+        return False
+    source_array = planned_step.output_fields[0]
+    if source_array.field_type != "array":
+        return False
+    item_fields = tuple(source_array.item_fields or ())
+    return bool(item_fields) and all(
+        field.field_type in DIRECT_COMPOSE_SCALAR_FIELD_TYPES for field in item_fields
     )
 
 
@@ -1021,11 +1083,11 @@ def _document_report_overview_writer_instructions(ui_language: str | None) -> st
     if ui_language == "en":
         return (
             "Write a concise report title and synthesized overview across the "
-            "completed source sections. Use only the supplied section content."
+            "supplied source content. Use only that content."
         )
     return (
-        "Skriv en koncis rapporttitel och samlad översikt över de färdiga "
-        "källavsnitten. Använd endast det tillhandahållna avsnittsinnehållet."
+        "Skriv en koncis rapporttitel och samlad översikt över det tillhandahållna "
+        "källinnehållet. Använd endast detta innehåll."
     )
 
 

@@ -755,6 +755,7 @@ def _assemble_create_intent(
     )
     completed_steps, document_report_section_source = lower_document_report_topology(
         completed_steps,
+        source_reader_required_fields=source_reader_required_fields,
         report_disposition=report_disposition,
         runtime_input_type=runtime_input_type,
         final_output_type=final_output_type,
