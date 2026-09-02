@@ -166,13 +166,6 @@ _CREDENTIAL_ROUTE_ERROR_CODES = frozenset(
         "transcription_model_required",
     }
 )
-_PROVIDER_REQUEST_ERROR_CODES = frozenset(
-    {
-        "planner_stream_failed",
-        "planner_upstream_error",
-        "session_turn_provider_outcome_unknown",
-    }
-)
 # The harness drove the API wrongly (scope, permission, a stale revision it
 # sent). Lease and in-progress conflicts are deliberately absent: the harness
 # serialises turns per session, so those are Builder faults it must score.
@@ -206,11 +199,13 @@ def failure_class_from_summary(
 ) -> FailureClass | None:
     """Which layer failed in a completed journey; None when nothing did.
 
-    Typed provider details decide before the error code: product paths also
-    emit `planner_upstream_error`, so the code alone cannot separate a
-    rejected credential (R19 scored one as `builder_error`) from a Builder
-    fault. Any acquisition-class error in the turn wins, because that
-    observation was never measured cleanly.
+    Only typed provider details make a provider fault: product paths also emit
+    `planner_upstream_error` (an unrenderable server question) and
+    `planner_stream_failed` (a catch-all), so a bare code never becomes an
+    acquisition fault. Route codes are the server's own closed vocabulary, and
+    harness codes name requests the harness itself sent wrongly. Any
+    acquisition-class error in the turn wins, because that observation was
+    never measured cleanly.
     """
 
     classes = [
@@ -242,10 +237,7 @@ def _error_detail_failure_class(detail: Mapping[str, Any]) -> FailureClass:
     if details.get("provider_exception_class") in _CREDENTIAL_ROUTE_PROVIDER_EXCEPTIONS:
         return "credential_route"
     code = detail.get("code")
-    if (
-        details.get("provider_disposition") is not None
-        or code in _PROVIDER_REQUEST_ERROR_CODES
-    ):
+    if details.get("provider_disposition") is not None:
         return "provider_request"
     if code in _CREDENTIAL_ROUTE_ERROR_CODES:
         return "credential_route"
@@ -770,8 +762,8 @@ def _apply_replacements(receipt: Receipt, *, suite_dir: Path) -> Receipt:
             raise ReceiptError(f"{where}: no original observation occupies this slot.")
         if not observation_is_replacement_eligible(original):
             raise ReceiptError(
-                f"{where}: the original observation is not an execution failure "
-                "and has no provider disposition, so it may not be re-measured."
+                f"{where}: the original observation is not an acquisition "
+                "failure, so it may not be re-measured."
             )
         if original.bundle_sha256 != descriptor.original_bundle_sha256:
             raise ReceiptError(
@@ -1764,7 +1756,7 @@ def acquisition_validity_checks(
 ) -> list[JsonObject]:
     """Acquisition validity only: did we MEASURE cleanly, not did the product win.
 
-    Both invariants are status-based and span EVERY selected observation, so a
+    Every invariant is status-based and spans EVERY selected observation, so a
     corrupt observation cannot ride through on a non-required case:
 
     * `execution_failure` - a caught HTTP, timeout or harness error written as

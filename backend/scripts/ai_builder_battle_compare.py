@@ -34,6 +34,7 @@ import statistics
 import subprocess
 import sys
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -1026,6 +1027,21 @@ _INVALID_RECEIPT_EXIT = 2
 # an error-terminated bundle would credit a failure with a token cost.
 TOKEN_BASELINE_POPULATION = "completed_observations"
 _BUNDLE_GLOB = "ai-builder-api-battle-test-*.json"
+_MANIFEST_FILE = "release-manifest.json"
+
+
+@dataclass(frozen=True)
+class _CaseTokenEvidence:
+    """One completed observation's token facts, kept per case for pairing."""
+
+    first_attempts: tuple[tuple[int, int, int], ...]
+    classifier: tuple[int, int, int] | None
+
+    def as_json(self) -> dict[str, Any]:
+        return {
+            "first_attempts": [list(attempt) for attempt in self.first_attempts],
+            "classifier": list(self.classifier) if self.classifier else None,
+        }
 
 
 def _median(values: list[int]) -> float | None:
@@ -1047,6 +1063,107 @@ def _bundle_int(value: object, *, where: str) -> int:
     return value
 
 
+def _int_triple(value: object, *, where: str) -> tuple[int, int, int]:
+    if not isinstance(value, list) or len(cast(list[Any], value)) != 3:
+        raise ReceiptError(f"{where} must hold three integers.")
+    items = cast(list[Any], value)
+    return (
+        _bundle_int(items[0], where=where),
+        _bundle_int(items[1], where=where),
+        _bundle_int(items[2], where=where),
+    )
+
+
+def _token_summary(
+    evidence: list[_CaseTokenEvidence],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    prompt = [attempt[0] for item in evidence for attempt in item.first_attempts]
+    completion = [attempt[1] for item in evidence for attempt in item.first_attempts]
+    total = [attempt[2] for item in evidence for attempt in item.first_attempts]
+    classifier = [item.classifier for item in evidence if item.classifier is not None]
+    return (
+        {
+            "turns": len(total),
+            "median_total_tokens": _median(total),
+            "median_prompt_tokens": _median(prompt),
+            "median_completion_tokens": _median(completion),
+            "p90_prompt_tokens": _p90(prompt),
+        },
+        {
+            "observations_with_usage": len(classifier),
+            "observations_without_usage": len(evidence) - len(classifier),
+            "median_calls": _median([usage[0] for usage in classifier]),
+            "median_prompt_tokens": _median([usage[1] for usage in classifier]),
+            "median_total_tokens": _median([usage[2] for usage in classifier]),
+        },
+    )
+
+
+def _planned_observations(suite_dir: Path) -> int | None:
+    manifest_path = suite_dir / _MANIFEST_FILE
+    if not manifest_path.is_file():
+        return None
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected = (
+        manifest.get("expected_observations") if isinstance(manifest, dict) else None
+    )
+    if not isinstance(expected, list):
+        raise ReceiptError(f"{manifest_path}: expected_observations is missing.")
+    return len(cast(list[Any], expected))
+
+
+def _bundle_case_evidence(
+    bundle: dict[str, Any], *, where: str
+) -> tuple[str, _CaseTokenEvidence]:
+    case_identity = bundle.get("case_identity")
+    case_id = case_identity.get("id") if isinstance(case_identity, dict) else None
+    if not isinstance(case_id, str) or not case_id:
+        raise ReceiptError(f"{where}: case_identity.id is missing.")
+    diagnostics = bundle.get("proposal_telemetry_diagnostics")
+    turns = diagnostics.get("proposal_turns") if isinstance(diagnostics, dict) else None
+    if not isinstance(turns, list):
+        # A completed observation always carries the diagnostics projection;
+        # without it the turn count is unknown, not zero.
+        raise ReceiptError(
+            f"{where}: proposal_telemetry_diagnostics.proposal_turns is missing."
+        )
+    first_attempts: list[tuple[int, int, int]] = []
+    for position, turn in enumerate(cast(list[Any], turns)):
+        attempts = turn.get("attempts") if isinstance(turn, dict) else None
+        if not isinstance(attempts, list) or not attempts:
+            raise ReceiptError(f"{where}: proposal_turns[{position}] has no attempts.")
+        first = cast(list[Any], attempts)[0]
+        if not isinstance(first, dict):
+            raise ReceiptError(
+                f"{where}: proposal_turns[{position}].attempts[0] is malformed."
+            )
+        first = cast(dict[str, Any], first)
+        key = f"{where}: proposal_turns[{position}].attempts[0]"
+        first_attempts.append(
+            (
+                _bundle_int(first.get("prompt_tokens"), where=f"{key}.prompt_tokens"),
+                _bundle_int(
+                    first.get("completion_tokens"), where=f"{key}.completion_tokens"
+                ),
+                _bundle_int(first.get("total_tokens"), where=f"{key}.total_tokens"),
+            )
+        )
+    journey = bundle.get("journey")
+    usage = journey.get("classifier_usage") if isinstance(journey, dict) else None
+    classifier: tuple[int, int, int] | None = None
+    if isinstance(usage, dict):
+        usage = cast(dict[str, Any], usage)
+        key = f"{where}: journey.classifier_usage"
+        classifier = (
+            _bundle_int(usage.get("calls"), where=f"{key}.calls"),
+            _bundle_int(usage.get("prompt_tokens"), where=f"{key}.prompt_tokens"),
+            _bundle_int(usage.get("total_tokens"), where=f"{key}.total_tokens"),
+        )
+    return case_id, _CaseTokenEvidence(
+        first_attempts=tuple(first_attempts), classifier=classifier
+    )
+
+
 def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
     """Proposal and classifier token economics of one suite root, frozen.
 
@@ -1054,20 +1171,17 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
     and the statistics live here and nowhere else: first proposal attempts of
     completed observations, medians as the middle value, p90 as nearest rank.
     Classifier usage the projection could not supply is counted, never zero.
+    The report keeps per-case evidence so two roots compare over the cases
+    they share; a root short of its manifest is marked partial.
     """
 
     bundle_paths = sorted(suite_dir.glob(_BUNDLE_GLOB))
     if not bundle_paths:
         raise ReceiptError(f"{suite_dir} holds no observation bundles.")
+    planned_observations = _planned_observations(suite_dir)
     revisions: set[str] = set()
     status_counts: Counter[str] = Counter()
-    prompt: list[int] = []
-    completion: list[int] = []
-    total: list[int] = []
-    classifier_calls: list[int] = []
-    classifier_prompt: list[int] = []
-    classifier_total: list[int] = []
-    classifier_unknown = 0
+    cases: dict[str, list[_CaseTokenEvidence]] = {}
     for path in bundle_paths:
         where = str(path)
         bundle = json.loads(path.read_text(encoding="utf-8"))
@@ -1088,90 +1202,112 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
         status_counts[status] += 1
         if status != "completed":
             continue
-        diagnostics = bundle.get("proposal_telemetry_diagnostics")
-        turns = (
-            diagnostics.get("proposal_turns") if isinstance(diagnostics, dict) else None
-        )
-        for position, turn in enumerate(turns if isinstance(turns, list) else []):
-            attempts = turn.get("attempts") if isinstance(turn, dict) else None
-            if not isinstance(attempts, list) or not attempts:
-                raise ReceiptError(
-                    f"{where}: proposal_turns[{position}] has no attempts."
-                )
-            first = attempts[0]
-            if not isinstance(first, dict):
-                raise ReceiptError(
-                    f"{where}: proposal_turns[{position}].attempts[0] is malformed."
-                )
-            first = cast(dict[str, Any], first)
-            key = f"{where}: proposal_turns[{position}].attempts[0]"
-            prompt.append(
-                _bundle_int(first.get("prompt_tokens"), where=f"{key}.prompt_tokens")
-            )
-            completion.append(
-                _bundle_int(
-                    first.get("completion_tokens"), where=f"{key}.completion_tokens"
-                )
-            )
-            total.append(
-                _bundle_int(first.get("total_tokens"), where=f"{key}.total_tokens")
-            )
-        journey = bundle.get("journey")
-        usage = journey.get("classifier_usage") if isinstance(journey, dict) else None
-        if not isinstance(usage, dict):
-            classifier_unknown += 1
-            continue
-        usage = cast(dict[str, Any], usage)
-        key = f"{where}: journey.classifier_usage"
-        classifier_calls.append(_bundle_int(usage.get("calls"), where=f"{key}.calls"))
-        classifier_prompt.append(
-            _bundle_int(usage.get("prompt_tokens"), where=f"{key}.prompt_tokens")
-        )
-        classifier_total.append(
-            _bundle_int(usage.get("total_tokens"), where=f"{key}.total_tokens")
-        )
+        case_id, evidence = _bundle_case_evidence(bundle, where=where)
+        cases.setdefault(case_id, []).append(evidence)
     if len(revisions) != 1:
         raise ReceiptError(
             f"{suite_dir} spans {len(revisions)} source revisions; a baseline "
             "describes one build."
         )
+    proposal, classifier = _token_summary(
+        [item for items in cases.values() for item in items]
+    )
     return {
         "suite_dir": str(suite_dir),
         "source_revision": next(iter(revisions)),
         "population": TOKEN_BASELINE_POPULATION,
         "observation_status_counts": dict(sorted(status_counts.items())),
-        "proposal_first_attempt": {
-            "turns": len(total),
-            "median_total_tokens": _median(total),
-            "median_prompt_tokens": _median(prompt),
-            "median_completion_tokens": _median(completion),
-            "p90_prompt_tokens": _p90(prompt),
-        },
-        "classifier": {
-            "observations_with_usage": len(classifier_calls),
-            "observations_without_usage": classifier_unknown,
-            "median_calls": _median(classifier_calls),
-            "median_prompt_tokens": _median(classifier_prompt),
-            "median_total_tokens": _median(classifier_total),
+        # A root whose bundles fall short of its manifest is a partial
+        # acquisition: its case mix is only its own cases, not the corpus.
+        "planned_observations": planned_observations,
+        "observed_observations": len(bundle_paths),
+        "partial": (
+            planned_observations is not None
+            and len(bundle_paths) != planned_observations
+        ),
+        "case_ids": sorted(cases),
+        "proposal_first_attempt": proposal,
+        "classifier": classifier,
+        "cases": {
+            case_id: [item.as_json() for item in items]
+            for case_id, items in sorted(cases.items())
         },
     }
 
 
+def _case_evidence_from_report(
+    report: dict[str, Any], *, where: str
+) -> dict[str, list[_CaseTokenEvidence]]:
+    """Read a report's per-case evidence back, so two reports can be paired."""
+
+    raw_cases = report.get("cases")
+    if not isinstance(raw_cases, dict):
+        raise ReceiptError(
+            f"{where}: token baseline report carries no per-case evidence."
+        )
+    evidence: dict[str, list[_CaseTokenEvidence]] = {}
+    for case_id, raw_items in cast(dict[str, Any], raw_cases).items():
+        if not isinstance(raw_items, list):
+            raise ReceiptError(f"{where}: cases[{case_id!r}] must be a list.")
+        items: list[_CaseTokenEvidence] = []
+        for raw_item in cast(list[Any], raw_items):
+            if not isinstance(raw_item, dict):
+                raise ReceiptError(
+                    f"{where}: cases[{case_id!r}] holds a malformed item."
+                )
+            raw_item = cast(dict[str, Any], raw_item)
+            attempts = raw_item.get("first_attempts")
+            if not isinstance(attempts, list):
+                raise ReceiptError(f"{where}: cases[{case_id!r}] lacks first_attempts.")
+            classifier = raw_item.get("classifier")
+            items.append(
+                _CaseTokenEvidence(
+                    first_attempts=tuple(
+                        _int_triple(attempt, where=f"{where}: cases[{case_id!r}]")
+                        for attempt in cast(list[Any], attempts)
+                    ),
+                    classifier=(
+                        _int_triple(classifier, where=f"{where}: cases[{case_id!r}]")
+                        if classifier is not None
+                        else None
+                    ),
+                )
+            )
+        evidence[str(case_id)] = items
+    return evidence
+
+
 def token_baseline_delta(
     current: dict[str, Any], baseline: dict[str, Any]
-) -> dict[str, dict[str, float | None]]:
-    """Per-metric movement of `current` against a frozen baseline report."""
+) -> dict[str, Any]:
+    """Movement of `current` against a frozen report, over the shared cases.
 
-    deltas: dict[str, dict[str, float | None]] = {}
-    for section in ("proposal_first_attempt", "classifier"):
-        current_section = current.get(section)
-        baseline_section = baseline.get(section)
-        if not isinstance(current_section, dict) or not isinstance(
-            baseline_section, dict
-        ):
-            raise ReceiptError(f"token baseline reports lack the {section} section.")
-        current_section = cast(dict[str, Any], current_section)
-        baseline_section = cast(dict[str, Any], baseline_section)
+    A partial root (the R17 broad leg holds 104 of 172 planned observations,
+    skewed away from hard cases) must not be compared as if it were the
+    corpus: both sides are re-aggregated over the cases they share, and the
+    cases either side lacks are named.
+    """
+
+    current_cases = _case_evidence_from_report(current, where="current")
+    baseline_cases = _case_evidence_from_report(baseline, where="baseline")
+    shared = sorted(set(current_cases) & set(baseline_cases))
+    if not shared:
+        raise ReceiptError("token baseline reports share no cases; nothing to compare.")
+    current_paired = _token_summary(
+        [item for case_id in shared for item in current_cases[case_id]]
+    )
+    baseline_paired = _token_summary(
+        [item for case_id in shared for item in baseline_cases[case_id]]
+    )
+    deltas: dict[str, Any] = {
+        "paired_cases": len(shared),
+        "unpaired_current_cases": sorted(set(current_cases) - set(shared)),
+        "unpaired_baseline_cases": sorted(set(baseline_cases) - set(shared)),
+    }
+    for section, current_section, baseline_section in (
+        ("proposal_first_attempt", current_paired[0], baseline_paired[0]),
+        ("classifier", current_paired[1], baseline_paired[1]),
+    ):
         for metric, current_value in current_section.items():
             if not str(metric).startswith(("median_", "p90_")):
                 continue
@@ -1188,13 +1324,16 @@ def token_baseline_delta(
 
 
 def _render_token_baseline_markdown(
-    report: dict[str, Any], deltas: dict[str, dict[str, float | None]] | None
+    report: dict[str, Any], deltas: dict[str, Any] | None
 ) -> str:
     lines = [
         f"# Token baseline: {report['source_revision']}",
         "",
         f"Population: {report['population']} "
-        f"({json.dumps(report['observation_status_counts'])})",
+        f"({json.dumps(report['observation_status_counts'])}); observed "
+        f"{report['observed_observations']} of planned "
+        f"{report['planned_observations']}"
+        + (" — PARTIAL root" if report["partial"] else ""),
         "",
         "| metric | value |",
         "| --- | --- |",
@@ -1202,13 +1341,21 @@ def _render_token_baseline_markdown(
     for section in ("proposal_first_attempt", "classifier"):
         for metric, value in cast(dict[str, Any], report[section]).items():
             lines.append(f"| {section}.{metric} | {value} |")
+    lines.append(f"| cases | {len(report['case_ids'])} |")
     if deltas:
         lines += [
+            "",
+            f"Paired cases: {deltas['paired_cases']} (unpaired current "
+            f"{len(deltas['unpaired_current_cases'])}, unpaired baseline "
+            f"{len(deltas['unpaired_baseline_cases'])})",
             "",
             "| metric | baseline | current | delta |",
             "| --- | --- | --- | --- |",
         ]
         for metric, movement in deltas.items():
+            if not isinstance(movement, dict):
+                continue
+            movement = cast(dict[str, Any], movement)
             lines.append(
                 f"| {metric} | {movement['baseline']} | {movement['current']} | "
                 f"{movement['delta']} |"

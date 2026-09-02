@@ -7,6 +7,112 @@
     "error_terminated": 2,
     "invalid_evidence": 1
   },
+  "planned_observations": 172,
+  "observed_observations": 104,
+  "partial": true,
+  "case_ids": [
+    "ambiguous_report_without_attachment_asks_one_question",
+    "attachment_docx_template_placeholders_to_fields",
+    "attachment_example_report_infers_disposition",
+    "complex_authoring_spec_first_pass",
+    "complex_meeting_audio_policy_pdf",
+    "complex_procurement_multi_document_matrix",
+    "complex_social_case_timeline_redaction",
+    "easy_email_reply_with_case_metadata",
+    "easy_hr_job_application_summary",
+    "easy_library_event_copy_text",
+    "easy_preschool_incident_note_json",
+    "easy_single_document_plain_language_summary",
+    "easy_spreadsheet_case_statistics_json",
+    "hard_archive_retention_classification",
+    "hard_budget_variance_management_report",
+    "hard_crisis_situation_report_multi_unit",
+    "hard_environment_incident_synthesis",
+    "hard_gdpr_subject_access_package",
+    "hard_many_source_documents_exhaustive_pdf",
+    "hard_mixed_audio_documents_decision_basis",
+    "hard_procurement_scoring_with_human_review",
+    "hard_property_maintenance_contract_followup",
+    "hard_school_student_support_timeline",
+    "interview_contract_open_eplatform_payload",
+    "interview_goal_accessibility_text",
+    "interview_goal_board_audio_docx",
+    "interview_goal_economy_spreadsheet",
+    "interview_goal_food_registration",
+    "interview_goal_meeting_audio",
+    "interview_goal_policy_document",
+    "interview_goal_school_transport_material",
+    "interview_input_building_supplement",
+    "interview_input_citizen_feedback",
+    "interview_input_crisis_overview",
+    "interview_input_data_catalog",
+    "interview_input_meeting_actions",
+    "interview_input_procurement_requirements",
+    "interview_input_register_extract",
+    "interview_input_student_device",
+    "interview_open_access_offboarding",
+    "interview_open_accessibility_reports",
+    "interview_open_apartment_register",
+    "interview_open_building_supplements",
+    "interview_open_citizen_feedback",
+    "interview_open_crisis_reports",
+    "interview_open_cyber_incident",
+    "interview_open_data_catalog",
+    "interview_open_data_subject_access",
+    "interview_open_employment_certificate",
+    "interview_open_environmental_complaint",
+    "interview_open_event_financing",
+    "interview_open_food_poisoning_report",
+    "interview_open_food_registration",
+    "interview_open_lss_application",
+    "interview_open_meeting_audio",
+    "interview_open_open_eplatform_handoff",
+    "interview_open_procurement_review",
+    "interview_open_public_records",
+    "interview_open_records_retention",
+    "interview_open_school_transport",
+    "interview_open_special_diet",
+    "interview_open_student_device_faults",
+    "interview_open_volunteer_interest",
+    "interview_output_building_documents",
+    "interview_output_case_statistics",
+    "interview_output_event_financing",
+    "interview_output_feedback_text",
+    "interview_output_food_establishment",
+    "interview_output_integration_errors",
+    "interview_output_meeting_audio",
+    "interview_output_privacy_documents",
+    "medium_audio_to_protocol_pdf_with_metadata",
+    "medium_citizen_request_triage",
+    "medium_document_analysis_pdf",
+    "medium_elderly_care_deviation_report",
+    "medium_finance_invoice_anomaly_review",
+    "medium_housing_company_tenant_complaint",
+    "medium_parks_work_order_prioritization",
+    "medium_permit_checklist_validation",
+    "medium_public_records_redaction_package",
+    "medium_school_absence_followup_json",
+    "medium_water_leak_citizen_notice",
+    "ordinary_json_apartment_register_change",
+    "ordinary_json_integration_failures",
+    "ordinary_json_lss_completeness",
+    "ordinary_json_school_transport",
+    "ordinary_json_security_incident",
+    "ordinary_json_special_diet",
+    "ordinary_json_suspected_food_poisoning",
+    "ordinary_json_volunteer_interest",
+    "ordinary_language_human_review_policy",
+    "ordinary_report_building_supplement",
+    "ordinary_report_committee_meeting",
+    "ordinary_report_cyber_timeline",
+    "ordinary_report_environmental_complaints",
+    "ordinary_report_event_financing",
+    "ordinary_report_procurement_comparison",
+    "ordinary_report_public_records_request",
+    "ordinary_report_student_device_incidents",
+    "simple_audio_minutes_actions",
+    "simple_document_metadata_json"
+  ],
   "proposal_first_attempt": {
     "turns": 83,
     "median_total_tokens": 4108,
@@ -20,5 +126,1111 @@
     "median_calls": null,
     "median_prompt_tokens": null,
     "median_total_tokens": null
+  },
+  "cases": {
+    "ambiguous_report_without_attachment_asks_one_question": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "attachment_docx_template_placeholders_to_fields": [
+      {
+        "first_attempts": [
+          [
+            3243,
+            641,
+            3884
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "attachment_example_report_infers_disposition": [
+      {
+        "first_attempts": [
+          [
+            2997,
+            1297,
+            4294
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "complex_authoring_spec_first_pass": [
+      {
+        "first_attempts": [
+          [
+            2516,
+            1017,
+            3533
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "complex_meeting_audio_policy_pdf": [
+      {
+        "first_attempts": [
+          [
+            2880,
+            2430,
+            5310
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "complex_procurement_multi_document_matrix": [
+      {
+        "first_attempts": [
+          [
+            2808,
+            4061,
+            6869
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "complex_social_case_timeline_redaction": [
+      {
+        "first_attempts": [
+          [
+            2408,
+            2113,
+            4521
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "easy_email_reply_with_case_metadata": [
+      {
+        "first_attempts": [
+          [
+            2741,
+            984,
+            3725
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "easy_hr_job_application_summary": [
+      {
+        "first_attempts": [
+          [
+            2679,
+            969,
+            3648
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "easy_library_event_copy_text": [
+      {
+        "first_attempts": [
+          [
+            2166,
+            652,
+            2818
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "easy_preschool_incident_note_json": [
+      {
+        "first_attempts": [
+          [
+            3102,
+            965,
+            4067
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "easy_single_document_plain_language_summary": [
+      {
+        "first_attempts": [
+          [
+            2366,
+            1123,
+            3489
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "easy_spreadsheet_case_statistics_json": [
+      {
+        "first_attempts": [
+          [
+            2613,
+            845,
+            3458
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_archive_retention_classification": [
+      {
+        "first_attempts": [
+          [
+            3060,
+            2727,
+            5787
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_budget_variance_management_report": [
+      {
+        "first_attempts": [
+          [
+            2350,
+            1524,
+            3874
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_crisis_situation_report_multi_unit": [
+      {
+        "first_attempts": [
+          [
+            2525,
+            1906,
+            4431
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_environment_incident_synthesis": [
+      {
+        "first_attempts": [
+          [
+            2374,
+            1738,
+            4112
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_gdpr_subject_access_package": [
+      {
+        "first_attempts": [
+          [
+            2302,
+            1091,
+            3393
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_many_source_documents_exhaustive_pdf": [
+      {
+        "first_attempts": [
+          [
+            2397,
+            1409,
+            3806
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_mixed_audio_documents_decision_basis": [
+      {
+        "first_attempts": [
+          [
+            2759,
+            1561,
+            4320
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_procurement_scoring_with_human_review": [
+      {
+        "first_attempts": [
+          [
+            2358,
+            2085,
+            4443
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_property_maintenance_contract_followup": [
+      {
+        "first_attempts": [
+          [
+            2328,
+            1865,
+            4193
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "hard_school_student_support_timeline": [
+      {
+        "first_attempts": [
+          [
+            2923,
+            2561,
+            5484
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_contract_open_eplatform_payload": [
+      {
+        "first_attempts": [
+          [
+            2601,
+            374,
+            2975
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_goal_accessibility_text": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_goal_board_audio_docx": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_goal_economy_spreadsheet": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_goal_food_registration": [
+      {
+        "first_attempts": [
+          [
+            2863,
+            1248,
+            4111
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_goal_meeting_audio": [
+      {
+        "first_attempts": [
+          [
+            3013,
+            1031,
+            4044
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_goal_policy_document": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_goal_school_transport_material": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_input_building_supplement": [
+      {
+        "first_attempts": [
+          [
+            2879,
+            1537,
+            4416
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_input_citizen_feedback": [
+      {
+        "first_attempts": [
+          [
+            2853,
+            527,
+            3380
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_input_crisis_overview": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_input_data_catalog": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_input_meeting_actions": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_input_procurement_requirements": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_input_register_extract": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_input_student_device": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_open_access_offboarding": [
+      {
+        "first_attempts": [
+          [
+            3056,
+            1579,
+            4635
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_accessibility_reports": [
+      {
+        "first_attempts": [
+          [
+            3653,
+            1323,
+            4976
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_apartment_register": [
+      {
+        "first_attempts": [
+          [
+            3684,
+            1058,
+            4742
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_building_supplements": [
+      {
+        "first_attempts": [
+          [
+            3019,
+            2281,
+            5300
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_citizen_feedback": [
+      {
+        "first_attempts": [
+          [
+            3041,
+            962,
+            4003
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_crisis_reports": [
+      {
+        "first_attempts": [
+          [
+            3344,
+            1172,
+            4516
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_cyber_incident": [
+      {
+        "first_attempts": [
+          [
+            3521,
+            1519,
+            5040
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_data_catalog": [
+      {
+        "first_attempts": [
+          [
+            3671,
+            1141,
+            4812
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_data_subject_access": [
+      {
+        "first_attempts": [
+          [
+            3774,
+            923,
+            4697
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_employment_certificate": [
+      {
+        "first_attempts": [
+          [
+            2931,
+            1533,
+            4464
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_environmental_complaint": [
+      {
+        "first_attempts": [
+          [
+            3641,
+            1106,
+            4747
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_event_financing": [
+      {
+        "first_attempts": [
+          [
+            3785,
+            1516,
+            5301
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_food_poisoning_report": [
+      {
+        "first_attempts": [
+          [
+            2938,
+            966,
+            3904
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_food_registration": [
+      {
+        "first_attempts": [
+          [
+            3673,
+            895,
+            4568
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_lss_application": [
+      {
+        "first_attempts": [
+          [
+            3680,
+            880,
+            4560
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_meeting_audio": [
+      {
+        "first_attempts": [
+          [
+            3390,
+            974,
+            4364
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_open_eplatform_handoff": [
+      {
+        "first_attempts": [
+          [
+            4235,
+            1672,
+            5907
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_procurement_review": [
+      {
+        "first_attempts": [
+          [
+            2657,
+            1658,
+            4315
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_public_records": [
+      {
+        "first_attempts": [
+          [
+            3778,
+            1337,
+            5115
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_records_retention": [
+      {
+        "first_attempts": [
+          [
+            3113,
+            1925,
+            5038
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_school_transport": [
+      {
+        "first_attempts": [
+          [
+            3665,
+            1811,
+            5476
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_special_diet": [
+      {
+        "first_attempts": [
+          [
+            3671,
+            2056,
+            5727
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_student_device_faults": [
+      {
+        "first_attempts": [
+          [
+            3688,
+            958,
+            4646
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_open_volunteer_interest": [
+      {
+        "first_attempts": [
+          [
+            3644,
+            896,
+            4540
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_output_building_documents": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_output_case_statistics": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_output_event_financing": [
+      {
+        "first_attempts": [
+          [
+            2840,
+            1236,
+            4076
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_output_feedback_text": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_output_food_establishment": [
+      {
+        "first_attempts": [
+          [
+            2912,
+            606,
+            3518
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "interview_output_integration_errors": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_output_meeting_audio": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "interview_output_privacy_documents": [
+      {
+        "first_attempts": [],
+        "classifier": null
+      }
+    ],
+    "medium_audio_to_protocol_pdf_with_metadata": [
+      {
+        "first_attempts": [
+          [
+            3030,
+            1028,
+            4058
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_citizen_request_triage": [
+      {
+        "first_attempts": [
+          [
+            2613,
+            793,
+            3406
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_document_analysis_pdf": [
+      {
+        "first_attempts": [
+          [
+            2509,
+            902,
+            3411
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_elderly_care_deviation_report": [
+      {
+        "first_attempts": [
+          [
+            2510,
+            1635,
+            4145
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_finance_invoice_anomaly_review": [
+      {
+        "first_attempts": [
+          [
+            2616,
+            1423,
+            4039
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_housing_company_tenant_complaint": [
+      {
+        "first_attempts": [
+          [
+            2469,
+            1576,
+            4045
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_parks_work_order_prioritization": [
+      {
+        "first_attempts": [
+          [
+            2773,
+            1478,
+            4251
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_permit_checklist_validation": [
+      {
+        "first_attempts": [
+          [
+            2776,
+            1451,
+            4227
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_public_records_redaction_package": [
+      {
+        "first_attempts": [
+          [
+            2552,
+            1524,
+            4076
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_school_absence_followup_json": [
+      {
+        "first_attempts": [
+          [
+            2612,
+            1478,
+            4090
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "medium_water_leak_citizen_notice": [
+      {
+        "first_attempts": [
+          [
+            2803,
+            955,
+            3758
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_apartment_register_change": [
+      {
+        "first_attempts": [
+          [
+            2500,
+            591,
+            3091
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_integration_failures": [
+      {
+        "first_attempts": [
+          [
+            2502,
+            559,
+            3061
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_lss_completeness": [
+      {
+        "first_attempts": [
+          [
+            2567,
+            1541,
+            4108
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_school_transport": [
+      {
+        "first_attempts": [
+          [
+            2570,
+            720,
+            3290
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_security_incident": [
+      {
+        "first_attempts": [
+          [
+            2593,
+            1118,
+            3711
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_special_diet": [
+      {
+        "first_attempts": [
+          [
+            2553,
+            656,
+            3209
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_suspected_food_poisoning": [
+      {
+        "first_attempts": [
+          [
+            2474,
+            782,
+            3256
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_json_volunteer_interest": [
+      {
+        "first_attempts": [
+          [
+            2479,
+            1006,
+            3485
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_language_human_review_policy": [
+      {
+        "first_attempts": [
+          [
+            2401,
+            719,
+            3120
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_building_supplement": [
+      {
+        "first_attempts": [
+          [
+            2516,
+            2011,
+            4527
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_committee_meeting": [
+      {
+        "first_attempts": [
+          [
+            2414,
+            861,
+            3275
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_cyber_timeline": [
+      {
+        "first_attempts": [
+          [
+            2526,
+            1736,
+            4262
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_environmental_complaints": [
+      {
+        "first_attempts": [
+          [
+            2445,
+            994,
+            3439
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_event_financing": [
+      {
+        "first_attempts": [
+          [
+            2476,
+            1208,
+            3684
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_procurement_comparison": [
+      {
+        "first_attempts": [
+          [
+            2494,
+            1534,
+            4028
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_public_records_request": [
+      {
+        "first_attempts": [
+          [
+            2487,
+            1557,
+            4044
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "ordinary_report_student_device_incidents": [
+      {
+        "first_attempts": [
+          [
+            2410,
+            1528,
+            3938
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "simple_audio_minutes_actions": [
+      {
+        "first_attempts": [
+          [
+            2674,
+            1582,
+            4256
+          ]
+        ],
+        "classifier": null
+      }
+    ],
+    "simple_document_metadata_json": [
+      {
+        "first_attempts": [
+          [
+            2618,
+            782,
+            3400
+          ]
+        ],
+        "classifier": null
+      }
+    ]
   }
 }

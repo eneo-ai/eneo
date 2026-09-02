@@ -127,21 +127,30 @@ def _ensure_backend_src_importable() -> None:
         sys.path.insert(0, backend_src_path)
 
 
-def _local_app_version() -> str:
-    import eneo
-    from eneo.main.config import get_settings
+def _require_local_eneo_checkout() -> None:
+    """A shared virtualenv can resolve `eneo` to another checkout.
 
-    # A shared virtualenv can resolve `eneo` to another checkout; the harness
-    # would then seal a version it did not run. Refuse before any observation.
+    The harness would then seal a version it did not run. This runs before
+    any version source is consulted, so ENEO_APP_VERSION cannot skip it.
+    """
+
+    import eneo
+
     backend_src = Path(__file__).resolve().parents[1] / "src"
     if not Path(eneo.__file__).resolve().is_relative_to(backend_src):
         raise RuntimeError(
             f"harness imports eneo from {eneo.__file__}, outside {backend_src}."
         )
+
+
+def _local_app_version() -> str:
+    from eneo.main.config import get_settings
+
     return get_settings().app_version
 
 
 _ensure_backend_src_importable()
+_require_local_eneo_checkout()
 LOCAL_APP_VERSION = os.getenv("ENEO_APP_VERSION") or _local_app_version()
 
 # Keep standalone script execution on the same production models as the API.
@@ -2561,9 +2570,9 @@ def _run_suite(
     )
     # Acquisition faults are STATUS-based, over every selected observation.
     # `evidence_valid is False` is the wrong predicate: an error_terminated
-    # observation (builder_error / provider_outcome_unknown) deliberately has
-    # no provenance to validate and is a PRODUCT outcome the release
-    # evaluator must score, not a corrupt receipt.
+    # observation (builder_error) deliberately has no provenance to validate
+    # and is a PRODUCT outcome the release evaluator must score, not a corrupt
+    # receipt.
     invalid_evidence_observation_count = sum(
         1
         for result in results
@@ -4314,13 +4323,20 @@ def _classifier_usage(diagnostics: Mapping[str, Any]) -> JsonObject | None:
     total_tokens = 0
     for raw_call in raw_calls:
         if not isinstance(raw_call, Mapping):
-            continue
+            return None
         if raw_call.get("call_kind") != "slot_classification":
             continue
+        prompt = _token_count(raw_call.get("prompt_tokens"))
+        completion = _token_count(raw_call.get("completion_tokens"))
+        total = _token_count(raw_call.get("total_tokens"))
+        if prompt is None or completion is None or total is None:
+            # A call whose usage the provider did not report cannot be summed
+            # into a spend figure; the whole observation stays unknown.
+            return None
         calls += 1
-        prompt_tokens += _token_count(raw_call.get("prompt_tokens"))
-        completion_tokens += _token_count(raw_call.get("completion_tokens"))
-        total_tokens += _token_count(raw_call.get("total_tokens"))
+        prompt_tokens += prompt
+        completion_tokens += completion
+        total_tokens += total
     return {
         "calls": calls,
         "prompt_tokens": prompt_tokens,
@@ -4329,10 +4345,10 @@ def _classifier_usage(diagnostics: Mapping[str, Any]) -> JsonObject | None:
     }
 
 
-def _token_count(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return 0
-    return max(value, 0)
+def _token_count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def _journey_with_proposal_economics(

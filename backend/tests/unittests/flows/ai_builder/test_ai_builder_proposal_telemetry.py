@@ -1001,5 +1001,5 @@ def test_call_records_an_older_build_wrote_in_another_shape_are_counted_as_skipp
     assert [(r.call_kind, r.attempt) for r in read.records] == [("proposal_initial", 2)]
     assert read.skipped == 2
     assert planner_call_records_from_metadata(None).skipped == 0
-    assert planner_call_records_from_metadata({"planner_telemetry": {}}).skipped == 0
+    assert planner_call_records_from_metadata({"planner_telemetry": {}}).skipped == 1
     assert planner_call_records_from_metadata({"planner_telemetry": []}).skipped == 1

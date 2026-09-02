@@ -78,7 +78,9 @@ class _PersistedPlannerTelemetry(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    call_records: list[object] = []
+    # `build_planner_telemetry` always writes the list, empty or not; an
+    # envelope without it was written by another build and is unreadable.
+    call_records: list[object]
 
 
 class PlannerCallRecordsRead(BaseModel):

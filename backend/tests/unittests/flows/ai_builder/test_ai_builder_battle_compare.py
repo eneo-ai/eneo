@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -25,6 +26,9 @@ def _compare_module() -> ModuleType:
     spec = importlib.util.spec_from_file_location("battle_compare", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    # A dataclass resolves its module through sys.modules while the class is
+    # being built; register the module first, as the harness loader does.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -631,6 +635,7 @@ def _bundle(
     *,
     status: str,
     revision: str = "DEV-abc",
+    case_id: str = "case-a",
     attempts: tuple[tuple[int, int, int], ...] = ((2_700, 1_200, 3_900),),
     classifier_usage: dict[str, int] | None = None,
 ) -> dict[str, Any]:
@@ -639,6 +644,7 @@ def _bundle(
         journey["classifier_usage"] = classifier_usage
     return {
         "app_version": revision,
+        "case_identity": {"id": case_id},
         "observation": {"observation_status": status},
         "journey": journey,
         "proposal_telemetry_diagnostics": {
@@ -708,6 +714,13 @@ def test_token_baseline_reads_completed_observations_only(tmp_path: Path) -> Non
         "acquisition_failure": 1,
         "completed": 2,
     }
+    assert report["case_ids"] == ["case-a"]
+    assert report["planned_observations"] is None
+    assert report["partial"] is False
+    assert report["cases"]["case-a"][0] == {
+        "first_attempts": [[2_000, 1_000, 3_000]],
+        "classifier": [1, 8_000, 8_300],
+    }
     assert report["proposal_first_attempt"] == {
         "turns": 3,
         "median_total_tokens": 3_600,
@@ -753,6 +766,9 @@ def test_token_baseline_delta_names_each_movable_metric(tmp_path: Path) -> None:
 
     deltas = module.token_baseline_delta(current, baseline)
 
+    assert deltas["paired_cases"] == 1
+    assert deltas["unpaired_current_cases"] == []
+    assert deltas["unpaired_baseline_cases"] == []
     assert deltas["proposal_first_attempt.median_prompt_tokens"] == {
         "baseline": 2_500.0,
         "current": 2_000.0,
@@ -763,3 +779,97 @@ def test_token_baseline_delta_names_each_movable_metric(tmp_path: Path) -> None:
         "current": None,
         "delta": None,
     }
+
+
+def test_token_baseline_delta_compares_only_the_cases_both_roots_hold(
+    tmp_path: Path,
+) -> None:
+    """A partial root is not the corpus; movement is stated over shared cases."""
+
+    module = _compare_module()
+    current = module.token_baseline_report(
+        _write_bundles(
+            tmp_path / "current",
+            [
+                _bundle(
+                    status="completed", case_id="a", attempts=((1_000, 500, 1_500),)
+                ),
+                _bundle(
+                    status="completed", case_id="b", attempts=((9_000, 500, 9_500),)
+                ),
+            ],
+        )
+    )
+    baseline = compare = module.token_baseline_report(
+        _write_bundles(
+            tmp_path / "baseline",
+            [
+                _bundle(
+                    status="completed", case_id="a", attempts=((2_000, 500, 2_500),)
+                ),
+                _bundle(status="completed", case_id="c", attempts=((100, 50, 150),)),
+            ],
+        )
+    )
+    assert compare is baseline
+
+    deltas = module.token_baseline_delta(current, baseline)
+
+    assert deltas["paired_cases"] == 1
+    assert deltas["unpaired_current_cases"] == ["b"]
+    assert deltas["unpaired_baseline_cases"] == ["c"]
+    assert deltas["proposal_first_attempt.median_prompt_tokens"] == {
+        "baseline": 2_000.0,
+        "current": 1_000.0,
+        "delta": -1_000.0,
+    }
+    with pytest.raises(module.ReceiptError, match="share no cases"):
+        module.token_baseline_delta(
+            current,
+            module.token_baseline_report(
+                _write_bundles(
+                    tmp_path / "other", [_bundle(status="completed", case_id="z")]
+                )
+            ),
+        )
+
+
+def test_token_baseline_marks_a_root_short_of_its_manifest_as_partial(
+    tmp_path: Path,
+) -> None:
+    module = _compare_module()
+    root = _write_bundles(
+        tmp_path / "suite",
+        [
+            _bundle(status="completed", case_id="a"),
+            _bundle(status="completed", case_id="b"),
+        ],
+    )
+    (root / "release-manifest.json").write_text(
+        json.dumps(
+            {
+                "expected_observations": [
+                    {"case_id": "a", "repetition": 1},
+                    {"case_id": "b", "repetition": 1},
+                    {"case_id": "c", "repetition": 1},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = module.token_baseline_report(root)
+
+    assert (report["planned_observations"], report["observed_observations"]) == (3, 2)
+    assert report["partial"] is True
+
+
+def test_token_baseline_refuses_a_completed_bundle_without_diagnostics(
+    tmp_path: Path,
+) -> None:
+    module = _compare_module()
+    bundle = _bundle(status="completed")
+    del bundle["proposal_telemetry_diagnostics"]
+    root = _write_bundles(tmp_path / "suite", [bundle])
+    with pytest.raises(module.ReceiptError, match="proposal_turns is missing"):
+        module.token_baseline_report(root)

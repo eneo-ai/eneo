@@ -9448,7 +9448,7 @@ def test_journey_economics_split_out_classifier_spend_from_provider_calls() -> N
                     "call_kind": "slot_classification",
                     "attempt": 1,
                     "prompt_tokens": 7_900,
-                    "completion_tokens": None,
+                    "completion_tokens": 200,
                     "total_tokens": 8_100,
                 },
                 {
@@ -9464,7 +9464,7 @@ def test_journey_economics_split_out_classifier_spend_from_provider_calls() -> N
     assert journey["classifier_usage"] == {
         "calls": 2,
         "prompt_tokens": 16_000,
-        "completion_tokens": 300,
+        "completion_tokens": 500,
         "total_tokens": 16_500,
     }
     assert journey["plan_outcome"]["initial_token_cost"] == 4_000
@@ -9497,6 +9497,30 @@ def test_journey_economics_report_zero_classifier_spend_for_an_empty_projection(
                 {"call_kind": "slot_classification", "attempt": 1, "total_tokens": 9}
             ],
             "provider_call_records_skipped": 1,
+        },
+        {
+            "proposal_turns": [],
+            "provider_calls": [
+                {
+                    "call_kind": "slot_classification",
+                    "attempt": 1,
+                    "prompt_tokens": None,
+                    "completion_tokens": 10,
+                    "total_tokens": 9,
+                }
+            ],
+        },
+        {
+            "proposal_turns": [],
+            "provider_calls": [
+                {
+                    "call_kind": "slot_classification",
+                    "attempt": 1,
+                    "prompt_tokens": -1,
+                    "completion_tokens": 10,
+                    "total_tokens": 9,
+                }
+            ],
         },
     ],
 )
@@ -9537,7 +9561,18 @@ def test_journey_economics_leave_classifier_spend_unknown_without_complete_evide
             },
             "provider_request",
         ),
-        ({"code": "session_turn_provider_outcome_unknown"}, "provider_request"),
+        (
+            {
+                "code": "session_turn_provider_outcome_unknown",
+                "details": {"provider_disposition": "provider_outcome_unknown"},
+            },
+            "provider_request",
+        ),
+        # Product paths emit these codes too (an unrenderable server question,
+        # the catch-all stream failure): without typed provider evidence they
+        # are Builder faults the gate must score.
+        ({"code": "planner_upstream_error"}, "builder_semantic"),
+        ({"code": "planner_stream_failed", "details": {}}, "builder_semantic"),
         ({"code": "no_planner_model_available"}, "credential_route"),
         ({"code": "insufficient_space_permission"}, "harness_configuration"),
         ({"code": "self_correction_quality_failure"}, "builder_semantic"),
@@ -9598,7 +9633,6 @@ def test_failure_class_error_code_sets_name_only_builder_error_codes() -> None:
     known_codes = {code.value for code in AIBuilderErrorCode}
     for named in (
         receipts._CREDENTIAL_ROUTE_ERROR_CODES,
-        receipts._PROVIDER_REQUEST_ERROR_CODES,
         receipts._HARNESS_CONFIGURATION_ERROR_CODES,
     ):
         assert named <= known_codes, sorted(named - known_codes)
@@ -9704,11 +9738,48 @@ def test_a_builder_fault_keeps_its_product_outcome_and_class(tmp_path: Path) -> 
 def test_harness_refuses_to_run_against_a_foreign_eneo_checkout(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """A shared virtualenv resolving `eneo` elsewhere would seal the wrong build."""
+    """A shared virtualenv resolving `eneo` elsewhere would seal the wrong build.
+
+    The guard runs at import, before any version source, so a pinned
+    ENEO_APP_VERSION cannot skip it.
+    """
 
     import eneo
 
-    harness = _battle_harness()
     monkeypatch.setattr(eneo, "__file__", "/elsewhere/backend/src/eneo/__init__.py")
+    monkeypatch.setenv("ENEO_APP_VERSION", "DEV-pinned")
     with raises(RuntimeError, match="outside"):
-        harness._local_app_version()
+        _battle_harness()
+
+
+def test_an_unrenderable_server_question_stays_a_builder_error(tmp_path: Path) -> None:
+    """The dispatch owner emits planner_upstream_error with no provider evidence."""
+
+    harness = _battle_harness()
+    interactions = [
+        {
+            "events": [
+                {
+                    "event": "error",
+                    "data": {
+                        "code": "planner_upstream_error",
+                        "message": "The AI Builder could not render the next question.",
+                        "phase": "question",
+                        "details": {"question_id": "primary_runtime_input"},
+                    },
+                }
+            ]
+        }
+    ]
+    journey = harness._journey_summary(
+        interactions, expected={}, interaction_limit=harness.MAX_INTERACTIONS_PER_CASE
+    )
+    assert journey["outcome_class"] == "builder_error"
+    assert (
+        harness.failure_class_from_summary(
+            harness._interaction_event_summary(interactions),
+            runtime_run_status=None,
+            where="test",
+        )
+        == "builder_semantic"
+    )
