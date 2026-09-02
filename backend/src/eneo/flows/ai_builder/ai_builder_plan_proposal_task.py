@@ -3,6 +3,10 @@
 This prompt is intentionally not the planner union contract. The server
 has already selected the phase; the model only drafts semantic flow
 content through the create/edit tool schema.
+
+Dynamic authoring facts are projected through AuthoringBrief and rendered
+exactly once. Static authoring rules are stated once, in the system prompt;
+the tool schema owns shapes, not rules.
 """
 
 from __future__ import annotations
@@ -322,6 +326,9 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
         else []
     )
     terminal_document_rule = _terminal_document_design_rule(brief)
+    section_rule = _requested_output_sections_design_rule(
+        brief.requested_output_sections
+    )
     obligation_projection = brief.named_results
     projected_names_rule = (
         (
@@ -364,16 +371,21 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
         ),
         "",
         "Design rules:",
+        "- Use a short human-readable `flow_name` with words and spaces; never copy internal pattern ids, capability ids, or snake_case tokens into the name.",
         "- Use as many steps as the requested workflow needs, up to the tool schema "
         "limit. For DOCX template-fill mode, use at most "
         f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation steps before the "
         "backend-owned fill step.",
         "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
+        "- Use JSON output fields when later steps need specific structured facts. Only primitive fields (string, number, boolean) may be nullable; never mark object or array fields nullable.",
+        "- Name output_fields as ASCII identifiers folded from the user's own wording (å/ä→a, ö→o, spaces and dots→underscores); keep key names the user asked for, and put display wording in descriptions.",
         "- For source-material reports, include every final-report fact or per-item short summary that must come from the source in the source-reading JSON output_fields. Do not leave user-named facts only in instructions or hide them inside generic facts/notes fields; later text or document steps should consume those fields instead of introducing new source-derived facts only in prose.",
         *([projected_names_rule] if projected_names_rule is not None else []),
+        *([section_rule] if section_rule is not None else []),
         *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime input and final output mechanics from the committed architecture.",
+        "- Do not write template variables, raw JSON Schema, raw input bindings, IDs, hashes, timestamps, step refs, or backend mechanics.",
         "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`).",
         "- The backend will compile, validate, and persist the plan for user approval.",
         *create_mode_rules,
@@ -416,6 +428,20 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
     if brief.plan_revision_context:
         lines.extend(["", brief.plan_revision_context])
     return "\n".join(lines)
+
+
+def _requested_output_sections_design_rule(
+    requested_output_sections: tuple[str, ...],
+) -> str | None:
+    if len(requested_output_sections) < 2:
+        return None
+    return (
+        "- When the user names multiple output headings/sections for an AI-generated "
+        "report or document, preserve those sections as semantic section-writing "
+        "work and add final assembly before DOCX/PDF delivery. Group only tightly "
+        "related sections when needed; do not apply this to sectioned form intake "
+        "or simple transformations."
+    )
 
 
 def _terminal_document_design_rule(brief: AuthoringBrief) -> str | None:

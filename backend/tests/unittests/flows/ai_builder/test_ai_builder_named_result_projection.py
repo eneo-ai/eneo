@@ -1785,10 +1785,6 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
     )
     assert expected_rule in prompt
     assert prompt.count("The result must contain these exact named results") == 1
-    assert not (
-        "Only primitive fields (string, number, boolean) may be nullable; "
-        "never mark object or array fields nullable." in prompt
-    )
     # The prohibition era is over: the positive contract is the only prompt
     # owner of the boundary.
     assert "Never add any of them" not in prompt

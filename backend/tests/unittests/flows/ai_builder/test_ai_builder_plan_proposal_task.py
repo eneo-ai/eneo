@@ -315,7 +315,6 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         "Exception: when the Available resources section gives portable resource slot refs"
         in prompt
     )
-    assert "human-readable `flow_name`" not in prompt
     assert "input_schema" not in prompt
     assert "assistant_ref" not in prompt
 
@@ -349,7 +348,6 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
     assert "1-based earlier propose_flow step numbers" not in create_prompt
     assert "Do not author field-level previous-step paths" in create_prompt
     assert "backend-owned refs" in create_prompt
-    assert "raw input bindings" not in create_prompt
     assert "step refs" in create_prompt
     assert "uses_previous_fields" not in edit_prompt
     assert "uses_previous_outputs" not in edit_prompt
@@ -688,8 +686,6 @@ def test_plan_proposal_prompt_keeps_create_mechanics_backend_owned():
     assert "input_fields" not in prompt
     assert "uses_form_fields" not in prompt
     assert "source-reading JSON output_fields" in prompt
-    assert "folded from the user's own wording" not in prompt
-    assert "keep key names the user asked for" not in prompt
     assert "Do not leave user-named facts only in instructions" in prompt
     assert "generic facts/notes fields" in prompt
     assert "instead of introducing new source-derived facts only in prose" in prompt
@@ -735,7 +731,7 @@ def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
     assert "only when the user explicitly asks" in prompt
 
 
-def test_plan_proposal_prompt_surfaces_requested_output_sections_once() -> None:
+def test_plan_proposal_prompt_renders_static_authoring_rules_once() -> None:
     prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         attachment_context=None,
@@ -752,11 +748,46 @@ def test_plan_proposal_prompt_surfaces_requested_output_sections_once() -> None:
             confidence="high",
         ),
     )
+    section_rule = (
+        "- When the user names multiple output headings/sections for an "
+        "AI-generated report or document, preserve those sections as semantic "
+        "section-writing work and add final assembly before DOCX/PDF delivery. "
+        "Group only tightly related sections when needed; do not apply this to "
+        "sectioned form intake or simple transformations."
+    )
+    static_rules = (
+        "- Use a short human-readable `flow_name` with words and spaces; never "
+        "copy internal pattern ids, capability ids, or snake_case tokens into "
+        "the name.",
+        "- Use JSON output fields when later steps need specific structured "
+        "facts. Only primitive fields (string, number, boolean) may be nullable; "
+        "never mark object or array fields nullable.",
+        "- Name output_fields as ASCII identifiers folded from the user's own "
+        "wording (å/ä→a, ö→o, spaces and dots→underscores); keep key names the "
+        "user asked for, and put display wording in descriptions.",
+        section_rule,
+        "- Do not write template variables, raw JSON Schema, raw input bindings, "
+        "IDs, hashes, timestamps, step refs, or backend mechanics.",
+    )
 
     assert "Requested output sections:" in prompt
     assert "- Problem/nuläge" in prompt
-    assert "preserve those sections as semantic section-writing work" not in prompt
     assert prompt.count("Problem/nuläge") == 1
+    for rule in static_rules:
+        assert prompt.count(rule) == 1
+
+    single_section_prompt = build_authoring_brief(
+        planning_state=PlanningState.empty(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        requested_output_sections=RequestedOutputSections(
+            sections=("Only section",),
+            confidence="high",
+        ),
+    )
+    assert section_rule not in single_section_prompt
 
 
 def test_plan_proposal_prompt_omits_section_rule_for_simple_transform() -> None:
