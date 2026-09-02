@@ -1759,6 +1759,113 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.streamState).toBe("failed");
   });
 
+  it("keeps a refusal issued before a turn was claimed visible after the refresh", async () => {
+    // A reopen the server refuses (stale version, not an assumption, unknown
+    // question) never claims a turn, so the session still reports the
+    // previous committed turn as clean. That clean outcome is not about this
+    // attempt and must not wipe the refusal off the screen.
+    const previousTurn = makeSession({
+      latest_turn: {
+        client_turn_id: "22222222-2222-4222-8222-222222222221",
+        state: "committed",
+        user_message_id: "22222222-2222-4222-8222-222222222222",
+        error: null,
+        requires_duplicate_provider_spend_acknowledgement: false,
+        retry_request: {
+          client_turn_id: "22222222-2222-4222-8222-222222222221",
+          message: "Build a flow",
+          model_id: "11111111-1111-4111-8111-111111111113",
+          ui_language: "sv",
+          acknowledge_duplicate_provider_spend: false
+        }
+      }
+    });
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(previousTurn),
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "error",
+          data: JSON.stringify({
+            schema_version: 2,
+            code: "invalid_question_payload",
+            category: "bad_request",
+            message: "Structured question answer could not be applied.",
+            phase: "router",
+            request_id: "req-refused",
+            eneo_error_code: 9010
+          })
+        });
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({ session: previousTurn });
+
+    await driver.sendMessage("", {
+      kind: "reopen_question",
+      question_id: "document_material_scope",
+      requirements_version: "a".repeat(64)
+    });
+
+    expect(driver.state.error).toMatchObject({ code: "invalid_question_payload" });
+  });
+
+  it("keeps a refusal visible when the previous committed turn had failed", async () => {
+    // The previous turn's persisted error is just as unrelated to this
+    // refusal as a clean outcome would be; rehydrating it would replace the
+    // refusal with a stale failure.
+    const previousTurn = makeSession({
+      latest_turn: {
+        client_turn_id: "22222222-2222-4222-8222-222222222221",
+        state: "committed",
+        user_message_id: "22222222-2222-4222-8222-222222222222",
+        error: {
+          schema_version: 2,
+          code: "planner_upstream_error",
+          category: "upstream",
+          message: "The planner could not produce a plan.",
+          phase: "planner",
+          eneo_error_code: 9024,
+          request_id: "request-previous"
+        },
+        requires_duplicate_provider_spend_acknowledgement: false,
+        retry_request: {
+          client_turn_id: "22222222-2222-4222-8222-222222222221",
+          message: "Build a flow",
+          model_id: "11111111-1111-4111-8111-111111111113",
+          ui_language: "sv",
+          acknowledge_duplicate_provider_spend: false
+        }
+      }
+    });
+    const { driver } = makeDriver({
+      fetchImpl: vi.fn().mockResolvedValue(previousTurn),
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        handlers.onMessage({
+          event: "error",
+          data: JSON.stringify({
+            schema_version: 2,
+            code: "invalid_question_payload",
+            category: "bad_request",
+            message: "Structured question answer could not be applied.",
+            phase: "router",
+            request_id: "req-refused",
+            eneo_error_code: 9010
+          })
+        });
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({ session: previousTurn });
+
+    await driver.sendMessage("", {
+      kind: "reopen_question",
+      question_id: "document_material_scope",
+      requirements_version: "a".repeat(64)
+    });
+
+    expect(driver.state.error).toMatchObject({ code: "invalid_question_payload" });
+  });
+
   it("preserves server-provided structured stream error messages", async () => {
     const { driver } = makeDriver({
       fetchImpl: vi.fn().mockResolvedValue(makeSession()),
@@ -1856,6 +1963,11 @@ describe("FlowAIBuilderDriver", () => {
   it("replaces an ambiguous transport failure with the committed server error", async () => {
     const recoverable = makeRecoverableSession("failed_before_provider");
     if (!recoverable.latest_turn) throw new Error("Expected latest turn");
+    // The turn was claimed and committed server-side: the reload names the
+    // turn this send attempted, so its persisted error replaces the guess.
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      recoverable.latest_turn.client_turn_id as `${string}-${string}-${string}-${string}-${string}`
+    );
     const committedError = {
       schema_version: 2 as const,
       code: "planner_stream_failed" as const,
@@ -1889,6 +2001,12 @@ describe("FlowAIBuilderDriver", () => {
   it("clears an ambiguous transport failure after committed success is reloaded", async () => {
     const recoverable = makeRecoverableSession("failed_before_provider");
     if (!recoverable.latest_turn) throw new Error("Expected latest turn");
+    // The reloaded turn is the one this send claimed: a real server echoes
+    // the client's turn id, which is how the driver tells it from an older
+    // committed turn left behind by a refused request.
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+      recoverable.latest_turn.client_turn_id as `${string}-${string}-${string}-${string}-${string}`
+    );
     const committedSession = {
       ...recoverable,
       latest_turn: {

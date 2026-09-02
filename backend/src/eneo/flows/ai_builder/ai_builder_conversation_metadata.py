@@ -112,6 +112,7 @@ ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
 FOCUSED_SLOT_CLASSIFICATIONS_METADATA_KEY = "focused_slot_classifications"
 NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY = "named_content_fields_edit"
+REOPEN_QUESTION_METADATA_KEY = "reopen_question"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
 
 JsonScalar: TypeAlias = str | int | float | bool | None
@@ -1244,6 +1245,28 @@ class DelegatedQuestionAnswerRequest(BaseModel):
         return canonical_question_id(question_id)
 
 
+class ReopenQuestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["reopen_question"] = "reopen_question"
+    question_id: QuestionAnswerId
+    requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("question_id", mode="before")
+    @classmethod
+    def normalize_question_id(cls, question_id: object) -> object:
+        if not isinstance(question_id, str):
+            return question_id
+        return canonical_question_id(question_id)
+
+
+class ReopenQuestionMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: QuestionAnswerId
+    requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class NamedContentFieldsEditRequest(BaseModel):
     """The field identifiers the user leaves standing on the confirmation card.
 
@@ -1337,6 +1360,7 @@ AIBuilderQuestionAnswerRequest: TypeAlias = Annotated[
     StructuredQuestionAnswerRequest
     | DelegatedQuestionAnswerRequest
     | RequirementsConfirmationMetadata
+    | ReopenQuestionRequest
     | NamedContentFieldsEditRequest,
     Field(discriminator="kind"),
 ]
@@ -1345,9 +1369,52 @@ AIBuilderQuestionAnswerInput: TypeAlias = (
     StructuredQuestionAnswerRequest
     | DelegatedQuestionAnswerRequest
     | RequirementsConfirmationMetadata
+    | ReopenQuestionRequest
     | NamedContentFieldsEditRequest
     | Mapping[str, Any]
 )
+
+
+def reopen_question_from_input(
+    value: AIBuilderQuestionAnswerInput | None,
+) -> ReopenQuestionRequest | None:
+    if value is None:
+        return None
+    data = _model_or_mapping_data(value)
+    if data.get("kind") != "reopen_question":
+        return None
+    try:
+        return ReopenQuestionRequest.model_validate(data)
+    except ValidationError:
+        return None
+
+
+def reopen_question_from_metadata(
+    metadata: object,
+) -> ReopenQuestionMetadata | None:
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    payload = _mapping_value(metadata_map.get(REOPEN_QUESTION_METADATA_KEY))
+    if payload is None:
+        return None
+    try:
+        return ReopenQuestionMetadata.model_validate(payload)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(REOPEN_QUESTION_METADATA_KEY, error)
+        return None
+
+
+def reopen_question_to_metadata(
+    reopen: ReopenQuestionRequest,
+) -> FlowPersistedJsonObject:
+    persisted = ReopenQuestionMetadata(
+        question_id=reopen.question_id,
+        requirements_version=reopen.requirements_version,
+    )
+    return {
+        REOPEN_QUESTION_METADATA_KEY: persisted.model_dump(mode="json"),
+    }
 
 
 def named_content_fields_edit_from_input(
@@ -2129,6 +2196,31 @@ def question_interaction_id_from_metadata(metadata: object) -> str | None:
     return response.question_id if response is not None else None
 
 
+def unconsumed_reopen_question(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> ReopenQuestionMetadata | None:
+    pending: ReopenQuestionMetadata | None = None
+    for message in conversation:
+        reopen = reopen_question_from_metadata(message.metadata)
+        if reopen is not None:
+            pending = reopen
+            continue
+        if pending is None:
+            continue
+        if message.role == "assistant" and (
+            assistant_question_id_from_metadata(message.metadata) == pending.question_id
+        ):
+            pending = None
+            continue
+        answer = question_answer_from_metadata(message.metadata)
+        if (
+            answer is not None
+            and question_answer_question_id(answer) == pending.question_id
+        ):
+            pending = None
+    return pending
+
+
 def ui_language_from_metadata(metadata: object) -> Literal["sv", "en"] | None:
     metadata_map = _metadata_mapping(metadata)
     if metadata_map is None:
@@ -2233,12 +2325,18 @@ def metadata_for_user_message(
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:
+        reopen = reopen_question_from_input(question_answer)
         field_edit = named_content_fields_edit_from_input(question_answer)
         confirmation_metadata = requirements_confirmation_to_metadata(question_answer)
         metadata.update(
-            named_content_fields_edit_to_metadata(field_edit)
-            if field_edit is not None
-            else confirmation_metadata or question_answer_to_metadata(question_answer)
+            reopen_question_to_metadata(reopen)
+            if reopen is not None
+            else (
+                named_content_fields_edit_to_metadata(field_edit)
+                if field_edit is not None
+                else confirmation_metadata
+                or question_answer_to_metadata(question_answer)
+            )
         )
     if ui_language is not None:
         metadata[UI_LANGUAGE_METADATA_KEY] = ui_language

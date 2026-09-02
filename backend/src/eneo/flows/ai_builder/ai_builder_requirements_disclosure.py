@@ -31,6 +31,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AssumptionRowPayload,
     KeyDecisionPayload,
     NamedContentFieldPayload,
     RequirementsDisclosureContent,
@@ -262,6 +263,7 @@ def _disclosure_content(
         key_decisions=key_decisions,
         input_description=input_description,
         output_description=output_description,
+        assumption_rows=_assumption_rows(session_state, locale),
         resolved_requirements=[
             ResolvedRequirementPayload(
                 requirement_id=slot_name,
@@ -277,6 +279,7 @@ def _disclosure_content(
                 _slot_assumption(slot_name, resolved[slot_name], locale)
                 for slot_name in sorted(resolved)
                 if not _slot_is_key_decision(resolved[slot_name])
+                and slot_name not in QUESTION_CATALOG
             ],
             *discovery_assumptions,
             *_runtime_input_field_assumptions(
@@ -293,6 +296,41 @@ def _disclosure_content(
         ],
         manual_setup_notes=[],
     )
+
+
+def _assumption_rows(
+    session_state: PlanningState,
+    locale: Locale,
+) -> list[AssumptionRowPayload]:
+    """Every settled requirement the user did not answer, as a reopenable row.
+
+    The set is the assumption bucket the prose list used to carry for slots:
+    whatever `_slot_is_key_decision` does not promote. It includes values the
+    user accepted on an earlier card, so accepting a card re-renders the same
+    rows; the card itself decides whether a row can still be reopened.
+    """
+
+    rows: list[AssumptionRowPayload] = []
+    resolved = session_state.resolved_slots
+    for slot_name in sorted(resolved):
+        slot = resolved[slot_name]
+        if _slot_is_key_decision(slot) or slot_name not in QUESTION_CATALOG:
+            continue
+        rendered = render_question(slot_name, locale)
+        label = next(
+            (option.label for option in rendered.options if option.value == slot.value),
+            _slot_value_for_slot(slot_name, slot.value, locale),
+        )
+        rows.append(
+            AssumptionRowPayload(
+                question_id=slot_name,
+                slot_name=slot_name,
+                value=slot.value,
+                topic=render_summary_label(slot_name, locale),
+                label=label,
+            )
+        )
+    return rows
 
 
 def _runtime_input_field_assumptions(

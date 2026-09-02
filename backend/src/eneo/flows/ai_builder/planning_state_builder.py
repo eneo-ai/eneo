@@ -2345,9 +2345,10 @@ def attested_requirement_values(
     """The typed facts a user accepted by confirming this disclosure.
 
     Accepting a disclosure makes its values the user's own answer, which is
-    what lets an inferred value drive an irreversible decision. Only values
-    the vocabulary still admits are returned, so a disclosure persisted under
-    an older vocabulary cannot resurrect a value the planner no longer has.
+    what lets an inferred value drive an irreversible decision; an assumption
+    the user could have reopened and did not is accepted with the rest. Only
+    values the vocabulary still admits are returned, so a disclosure persisted
+    under an older vocabulary cannot resurrect a value the planner no longer has.
     """
 
     if summary is None:

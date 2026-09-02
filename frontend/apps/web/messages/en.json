@@ -4311,6 +4311,8 @@
   "ai_builder_approve_create": "Approve and create",
   "ai_builder_approving": "Approving...",
   "ai_builder_assumptions": "Assumptions",
+  "ai_builder_assumption_change": "Change",
+  "ai_builder_assumption_change_aria": "{topic}: {label}. Change the assumption.",
   "ai_builder_badge_modified": "MODIFIED",
   "ai_builder_badge_new": "NEW",
   "ai_builder_badge_removed": "REMOVED",

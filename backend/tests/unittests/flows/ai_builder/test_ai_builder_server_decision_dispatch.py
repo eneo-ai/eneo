@@ -93,7 +93,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
     carry_forward_turn_resolved_planner_state,
 )
-from eneo.flows.ai_builder.question_catalog import render_summary_label
+from eneo.flows.ai_builder.question_catalog import render_question, render_summary_label
 
 
 def _turn() -> SessionSendTurn:
@@ -1142,6 +1142,121 @@ async def test_server_question_uses_canonical_slot_name_question_id() -> None:
     assert isinstance(arguments, dict)
     assert arguments["question_id"] == "primary_runtime_input"
     assert result.new_planning_state_version == 5
+
+
+@pytest.mark.asyncio
+async def test_reopen_dispatch_uses_the_canonical_question_without_focused_reading() -> (
+    None
+):
+    runtime, litellm_client = _focused_runtime(_focused_slot_response())
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    state = PlanningState.empty()
+    state.resolved_slots["document_material_scope"] = ResolvedSlot(
+        name="document_material_scope",
+        value="flexible_document_case",
+        source="policy_default",
+        confidence="medium",
+        evidence=["policy_default:document_material_scope=flexible_document_case"],
+    )
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(
+                slot_name="document_material_scope",
+                allow_focused_classification=False,
+            ),
+            conversation=[ConversationMessage(role="user", content="")],
+            planning_state=state,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    question = next(
+        event.data
+        for event in result.events
+        if isinstance(event, AIBuilderQuestionEvent)
+    )
+    canonical = render_question("document_material_scope", "en")
+    assert question.question_id == canonical.id
+    assert question.question == canonical.question
+    assert [(option.id, option.value, option.label) for option in question.options] == [
+        (option.id, option.value, option.label) for option in canonical.options
+    ]
+    # Reopening starts from the assumption: the assumed value is what Eneo
+    # recommends, so keeping it is one click and changing it is one choice.
+    assumed_option = next(
+        option
+        for option in question.options
+        if option.value == "flexible_document_case"
+    )
+    assert question.recommended_option_id == assumed_option.id
+    litellm_client.acompletion.assert_not_awaited()
+    repo.commit_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_reopen_returns_the_same_pending_question_without_persisting() -> (
+    None
+):
+    runtime, litellm_client = _focused_runtime(_focused_slot_response())
+    repo = AsyncMock()
+    pending = StructuredQuestionPayload(
+        question_id="document_material_scope",
+        question="How many documents can each run receive?",
+        options=[
+            StructuredQuestionOptionPayload(
+                id="single_document_case",
+                label="One document",
+                value="single_document_case",
+            )
+        ],
+        selection_mode="single",
+        allow_custom=False,
+        question_index=2,
+    )
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content=pending.question,
+            metadata={"question_id": pending.question_id, "question_index": 2},
+            tool_calls=[
+                {
+                    "id": "pending-question",
+                    "name": "ask_structured_question",
+                    "arguments": pending.model_dump(mode="json"),
+                }
+            ],
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "reopen_question": {
+                    "question_id": "document_material_scope",
+                    "requirements_version": "a" * 64,
+                }
+            },
+        ),
+    ]
+
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(
+                slot_name="document_material_scope",
+                allow_focused_classification=False,
+            ),
+            conversation=conversation,
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert result.events == (AIBuilderQuestionEvent(data=pending),)
+    assert result.new_planning_state_version == 4
+    litellm_client.acompletion.assert_not_awaited()
+    repo.commit_turn.assert_not_awaited()
 
 
 @pytest.mark.asyncio

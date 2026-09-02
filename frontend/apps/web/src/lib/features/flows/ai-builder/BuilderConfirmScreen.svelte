@@ -97,6 +97,8 @@
       addedFieldPlacements?: Record<string, string>
     ) => void;
     oneditanswer: (questionId: string) => void;
+    /** Reopen an assumption Eneo made: the server answers with its question. */
+    onreopenassumption?: (questionId: string) => void;
   }
 
   let {
@@ -122,7 +124,8 @@
     onconfirm,
     onchange,
     oneditcontentfields,
-    oneditanswer
+    oneditanswer,
+    onreopenassumption
   }: Props = $props();
 
   // Naming what Eneo derived only means something beside rows the user settled
@@ -383,6 +386,14 @@
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
   const assumptions = $derived(summary.assumptions ?? []);
+  /** Defaults Eneo chose, each reopenable to its own question. */
+  const assumptionRows = $derived(summary.assumption_rows ?? []);
+  const assumptionCount = $derived(assumptionRows.length + assumptions.length);
+  const firstAssumption = $derived(
+    assumptionRows.length > 0
+      ? `${assumptionRows[0].topic}: ${assumptionRows[0].label}`
+      : (assumptions[0] ?? "")
+  );
   const manualNotes = $derived(summary.manual_setup_notes ?? []);
 </script>
 
@@ -948,7 +959,7 @@
           </section>
         {/if}
 
-        {#if assumptions.length > 0}
+        {#if assumptionCount > 0}
           <section class="border-default mt-4 border-t pt-3.5">
             <button
               type="button"
@@ -956,7 +967,7 @@
               aria-expanded={assumptionsOpen}
               onclick={() => (assumptionsOpen = !assumptionsOpen)}
             >
-              {m.ai_builder_assumptions()} ({assumptions.length})
+              {m.ai_builder_assumptions()} ({assumptionCount})
               <IconChevronDown
                 class="text-secondary size-3.5 transition-transform {assumptionsOpen
                   ? 'rotate-180'
@@ -964,12 +975,36 @@
               />
             </button>
             {#if !assumptionsOpen}
-              <p class="text-secondary mt-1 truncate text-[0.8125rem]">{assumptions[0]}</p>
+              <p class="text-secondary mt-1 truncate text-[0.8125rem]">{firstAssumption}</p>
             {:else}
               <ul
                 class="mt-2 flex flex-col"
                 transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
               >
+                {#each assumptionRows as row (row.question_id)}
+                  <li
+                    class="border-dimmer text-secondary flex items-center justify-between gap-3 border-t py-2 text-[0.8125rem] leading-relaxed"
+                  >
+                    <span class="text-pretty">
+                      <span class="text-primary font-semibold">{row.topic}:</span>
+                      {row.label}
+                    </span>
+                    {#if !readOnly && !confirmed && onreopenassumption}
+                      <button
+                        type="button"
+                        class="text-primary hover:bg-secondary shrink-0 rounded-md px-2 py-1 text-[0.78125rem] font-semibold underline-offset-2 hover:underline"
+                        aria-label={m.ai_builder_assumption_change_aria({
+                          topic: row.topic,
+                          label: row.label
+                        })}
+                        onclick={() => onreopenassumption(row.question_id)}
+                        {disabled}
+                      >
+                        {m.ai_builder_assumption_change()}
+                      </button>
+                    {/if}
+                  </li>
+                {/each}
                 {#each assumptions as assumption (assumption)}
                   <li
                     class="border-dimmer text-secondary border-t py-2 text-[0.8125rem] leading-relaxed text-pretty"

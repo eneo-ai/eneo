@@ -138,5 +138,6 @@ def test_requirements_summary_event_serializes_typed_payload() -> None:
         "input_description": "One audio file per run.",
         "output_description": "DOCX meeting report.",
         "assumptions": [],
+        "assumption_rows": [],
         "manual_setup_notes": [],
     }

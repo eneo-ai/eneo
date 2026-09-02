@@ -23,6 +23,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_from_metadata,
     tool_calls_from_message,
     ui_language_from_metadata,
+    unconsumed_reopen_question,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
@@ -119,6 +120,8 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     build_propose_flow_tool_schema,
 )
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
+    AskCanonicalQuestion,
+    BuilderTurnControl,
     BuilderTurnDecision,
     GenerateProposal,
     resolve_turn_control,
@@ -240,6 +243,7 @@ async def prepare_planner_request(
         request = replace(request, persisted_planning_state=None)
     requirements_state = resolve_requirements_state(request.conversation)
     ui_language = _resolve_ui_language(request.conversation)
+    reopen = unconsumed_reopen_question(request.conversation)
     if request.prepared_schema_candidates is not None:
         attachment_context_result = request.prepared_attachment_context
         schema_candidates = request.prepared_schema_candidates
@@ -324,7 +328,8 @@ async def prepare_planner_request(
             # older sentences and charge the user a provider call for it.
             allow_classification=not _turn_edits_named_content_fields(
                 request.conversation
-            ),
+            )
+            and reopen is None,
             attachment_context=attachment_context_result,
             usage_tracker=request.usage_tracker,
             before_provider_call=request.before_provider_call,
@@ -372,19 +377,28 @@ async def prepare_planner_request(
     requirements_confirmation_required = (
         request.plan_edit_context is None or request.plan_edit_context.scope != "step"
     )
-    turn_control = resolve_turn_control(
-        session_state=rebuilt_planning_state,
-        selected_discovery_question_ids=discovery_analysis.selected_question_ids,
-        requirements_disclosure=requirements_disclosure,
-        confirmed_requirements_version=(
-            requirements_state.confirmed_requirements_version
-        ),
-        ui_language=ui_language,
-        attachment_context=attachment_context_result,
-        schema_candidates=control_schema_candidates,
-        schema_direction_pending=schema_direction_pending,
-        requirements_confirmation_required=requirements_confirmation_required,
-        is_edit_mode=request.flow is not None,
+    turn_control = (
+        BuilderTurnControl(
+            decision=AskCanonicalQuestion(
+                slot_name=reopen.question_id,
+                allow_focused_classification=False,
+            )
+        )
+        if reopen is not None
+        else resolve_turn_control(
+            session_state=rebuilt_planning_state,
+            selected_discovery_question_ids=discovery_analysis.selected_question_ids,
+            requirements_disclosure=requirements_disclosure,
+            confirmed_requirements_version=(
+                requirements_state.confirmed_requirements_version
+            ),
+            ui_language=ui_language,
+            attachment_context=attachment_context_result,
+            schema_candidates=control_schema_candidates,
+            schema_direction_pending=schema_direction_pending,
+            requirements_confirmation_required=requirements_confirmation_required,
+            is_edit_mode=request.flow is not None,
+        )
     )
     if not isinstance(turn_control.decision, GenerateProposal):
         return ServerOutputPrepared(

@@ -44,7 +44,23 @@ export type StructuredQuestionAnswerMetadata =
   | components["schemas"]["DelegatedQuestionAnswerRequest"]
   // Editing the content list is an answer about the contract rather than about
   // a question, and travels the same typed path.
-  | components["schemas"]["NamedContentFieldsEditRequest"];
+  | components["schemas"]["NamedContentFieldsEditRequest"]
+  // Reopening an assumption is a command: the server answers it with the
+  // canonical question instead of recording an answer.
+  | components["schemas"]["ReopenQuestionRequest"];
+
+/** The user reopening an assumption Eneo made for them; the server answers
+ *  with the canonical question, the assumed value recommended. */
+export function reopenQuestionRequest(
+  questionId: string,
+  requirementsVersion: string
+): components["schemas"]["ReopenQuestionRequest"] {
+  return {
+    kind: "reopen_question",
+    question_id: questionId,
+    requirements_version: requirementsVersion
+  };
+}
 
 /** The user handing this question back to Eneo, naming no option. */
 export function delegatedQuestionAnswer(

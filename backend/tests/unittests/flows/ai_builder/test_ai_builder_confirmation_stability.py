@@ -60,6 +60,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
     FileRoleEvidence,
+    MappedFileLimit,
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
@@ -69,10 +70,11 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     apply_attested_requirements,
+    apply_policy_defaults_from_resolved_slots,
     build_planning_state_from_conversation,
     merge_llm_resolved_slots,
 )
-from eneo.flows.ai_builder.question_catalog import render_summary_label
+from eneo.flows.ai_builder.question_catalog import render_question, render_summary_label
 from eneo.flows.domain.flow import Flow, FlowStep
 from tests.unittests.flows.ai_builder.slot_classification_test_support import (
     slot_classification_result,
@@ -202,6 +204,175 @@ def _flow_observed_document_state() -> PlanningState:
         now=lambda: datetime(2026, 8, 17, tzinfo=timezone.utc),
     )
     return state
+
+
+def test_settled_but_unanswered_slots_are_reopenable_rows_and_non_slot_facts_stay_prose() -> (
+    None
+):
+    state = _document_state()
+    state.resolved_slots["document_material_scope"] = ResolvedSlot(
+        name="document_material_scope",
+        value="flexible_document_case",
+        source="policy_default",
+        confidence="medium",
+        evidence=["policy_default:document_material_scope=flexible_document_case"],
+    )
+    state.resolved_slots["docx_output_mode"] = ResolvedSlot(
+        name="docx_output_mode",
+        value="generated_docx",
+        source="policy_default",
+        confidence="medium",
+        evidence=["policy_default:docx_output_mode=generated_docx"],
+    )
+    state.resolved_slots["report_disposition"] = ResolvedSlot(
+        name="report_disposition",
+        value="both",
+        source="heuristic",
+        confidence="medium",
+        evidence=["heuristic:report_disposition=both"],
+    )
+    state.mapped_file_limit = MappedFileLimit(
+        accepted_value=7,
+        provenance="policy_default",
+    )
+
+    disclosed = build_requirements_disclosure(state, ui_language="en")
+
+    def option_label(slot_name: str) -> str:
+        return next(
+            option.label
+            for option in render_question(slot_name, "en").options
+            if option.value == state.resolved_slots[slot_name].value
+        )
+
+    # Every settled-but-unanswered catalog slot is a row: a policy default, a
+    # heuristic reading; the row carries no provenance.
+    rows = {row.question_id: row for row in disclosed.assumption_rows}
+    assert set(rows) >= {
+        "document_material_scope",
+        "docx_output_mode",
+        "report_disposition",
+    }
+    for slot_name in (
+        "document_material_scope",
+        "docx_output_mode",
+        "report_disposition",
+    ):
+        assert rows[slot_name].model_dump() == {
+            "question_id": slot_name,
+            "slot_name": slot_name,
+            "value": state.resolved_slots[slot_name].value,
+            "topic": render_summary_label(slot_name, "en"),
+            "label": option_label(slot_name),
+        }
+    # Non-slot facts stay prose, and no slot is told twice.
+    assert any("At most 7 files" in assumption for assumption in disclosed.assumptions)
+    assert not any(
+        rows[slot_name].label in assumption
+        for slot_name in rows
+        for assumption in disclosed.assumptions
+    )
+
+    changed_non_slot_fact = state.model_copy(deep=True)
+    changed_non_slot_fact.mapped_file_limit = MappedFileLimit(
+        accepted_value=8,
+        provenance="policy_default",
+    )
+    assert (
+        build_requirements_disclosure(
+            changed_non_slot_fact,
+            ui_language="en",
+        ).requirements_version
+        != disclosed.requirements_version
+    )
+
+
+def test_answering_a_reopened_question_replaces_the_assumption_and_moves_version() -> (
+    None
+):
+    assumed = PlanningState.empty()
+    assumed.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input", "documents"
+    )
+    apply_policy_defaults_from_resolved_slots(assumed, freeform_text="")
+    before = build_requirements_disclosure(assumed, ui_language="en")
+    assert [row.question_id for row in before.assumption_rows] == [
+        "document_material_scope"
+    ]
+
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "question_answer": {
+                    "question_id": "primary_runtime_input",
+                    "selected_value": "documents",
+                }
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "reopen_question": {
+                    "question_id": "document_material_scope",
+                    "requirements_version": before.requirements_version,
+                }
+            },
+        ),
+        ConversationMessage(
+            role="assistant",
+            content="How many documents can each run receive?",
+            metadata={"question_id": "document_material_scope"},
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={
+                "question_answer": {
+                    "question_id": "document_material_scope",
+                    "selected_value": "single_document_case",
+                }
+            },
+        ),
+    ]
+
+    rebuilt = build_planning_state_from_conversation(conversation)
+    after = build_requirements_disclosure(rebuilt, ui_language="en")
+
+    assert rebuilt.resolved_slots["document_material_scope"].source == (
+        "structured_answer"
+    )
+    assert after.assumption_rows == []
+    assert after.requirements_version != before.requirements_version
+
+
+def test_confirming_the_card_accepts_its_assumptions_as_the_users_answer() -> None:
+    """An assumption is reopenable until the card is confirmed, not after.
+
+    Accepting the card accepts the row with everything else: the value becomes
+    the user's own answer, and the record the user accepted re-renders
+    unchanged, rows included, so the version does not move on acceptance.
+    """
+
+    assumed = PlanningState.empty()
+    assumed.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input", "documents"
+    )
+    apply_policy_defaults_from_resolved_slots(assumed, freeform_text="")
+    disclosed = build_requirements_disclosure(assumed, ui_language="en")
+    assert [row.question_id for row in disclosed.assumption_rows] == [
+        "document_material_scope"
+    ]
+
+    confirmed = assumed.model_copy(deep=True)
+    apply_attested_requirements(confirmed, disclosed)
+
+    assert confirmed.resolved_slots["document_material_scope"].source == (
+        "requirements_summary"
+    )
+    assert build_requirements_disclosure(confirmed, ui_language="en") == disclosed
 
 
 def test_replacing_the_flow_output_withdraws_the_confirmation_it_contradicts() -> None:

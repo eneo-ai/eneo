@@ -126,6 +126,7 @@ _ARCHITECTURE_REFUSAL_MESSAGES: Mapping[AIBuilderErrorCode, Mapping[Locale, str]
 class AskCanonicalQuestion:
     slot_name: str
     question: BackendQuestion | None = None
+    allow_focused_classification: bool = True
     # The questions still queued behind this one, counted from the ordered
     # ask queue this decision was taken from. None for the questions decided
     # ahead of that queue, where no ranked plan stands behind the ask.

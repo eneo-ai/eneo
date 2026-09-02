@@ -131,6 +131,29 @@ def test_ai_builder_openapi_errors_reference_public_error_contract() -> None:
     }
 
 
+def test_ai_builder_openapi_exposes_reopen_question_contract() -> None:
+    app = FastAPI()
+    app.include_router(ai_builder_router)
+
+    schemas = app.openapi()["components"]["schemas"]
+    question_answer = schemas["SendMessageRequest"]["properties"]["question_answer"]
+    union = question_answer["anyOf"][0]
+
+    assert union["discriminator"]["mapping"]["reopen_question"] == (
+        "#/components/schemas/ReopenQuestionRequest"
+    )
+    assert {variant["$ref"] for variant in union["oneOf"]} >= {
+        "#/components/schemas/ReopenQuestionRequest"
+    }
+    assert schemas["ReopenQuestionRequest"]["required"] == [
+        "question_id",
+        "requirements_version",
+    ]
+    assert schemas["RequirementsSummaryPayload"]["properties"]["assumption_rows"][
+        "items"
+    ] == {"$ref": "#/components/schemas/AssumptionRowPayload"}
+
+
 def test_ai_builder_route_class_translates_http_errors_to_public_contract() -> None:
     app = FastAPI()
     app.add_exception_handler(

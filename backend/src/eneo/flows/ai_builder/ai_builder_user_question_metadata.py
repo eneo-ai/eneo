@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
     DelegatedQuestionAnswerRequest,
     NamedContentFieldsEditRequest,
+    ReopenQuestionRequest,
     StructuredQuestionAnswerMetadata,
     delegated_question_answer_from_input,
     metadata_for_user_message,
@@ -20,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_answer_question_id,
     question_answer_values,
     question_response_to_metadata,
+    reopen_question_from_input,
     requirements_confirmation_from_question_answer,
     structured_question_answer_request_from_input,
     ui_language_from_question_answer,
@@ -69,10 +71,18 @@ def prepare_user_question_metadata(
     )
     is_requirements_confirmation = requirements_confirmation is not None
     delegation = delegated_question_answer_from_input(question_answer)
+    reopen = reopen_question_from_input(question_answer)
     field_edit = named_content_fields_edit_from_input(question_answer)
     metadata: FlowPersistedJsonObject | None = None
     if requirements_confirmation is not None:
         metadata = metadata_for_user_message(question_answer=requirements_confirmation)
+    elif reopen is not None:
+        metadata = metadata_for_user_message(
+            question_answer=_validated_reopen_question(
+                conversation=conversation,
+                reopen=reopen,
+            )
+        )
     elif field_edit is not None:
         metadata = metadata_for_user_message(
             question_answer=_validated_named_content_fields_edit(
@@ -254,6 +264,26 @@ def _validated_named_content_fields_edit(
             "added_field_placements": normalized_placements,
         }
     )
+
+
+def _validated_reopen_question(
+    *,
+    conversation: list[ConversationMessage],
+    reopen: ReopenQuestionRequest,
+) -> ReopenQuestionRequest:
+    disclosure = resolve_requirements_state(conversation).latest_summary
+    if (
+        disclosure is None
+        or reopen.requirements_version != disclosure.requirements_version
+    ):
+        _raise_invalid_question_payload("requirements_version_stale")
+    if reopen.question_id not in QUESTION_CATALOG:
+        _raise_invalid_question_payload("question_unsupported")
+    if reopen.question_id not in {
+        row.question_id for row in disclosure.assumption_rows
+    }:
+        _raise_invalid_question_payload("question_not_assumed")
+    return reopen
 
 
 def _validated_structured_question_answer(

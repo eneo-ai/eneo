@@ -33,12 +33,14 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     question_interaction_id_from_metadata,
     question_response_from_metadata,
     question_response_to_metadata,
+    reopen_question_from_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     requirements_summary_to_metadata,
     slot_classification_from_metadata,
     slot_classification_metadata_from_attempt,
     tool_calls_from_message,
+    unconsumed_reopen_question,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
@@ -83,6 +85,41 @@ _CLASSIFICATION_SOURCE_ID = "user_message:user-1"
 
 
 _REQUIREMENTS_VERSION = "a" * 64
+
+
+def test_reopen_command_is_consumed_once_by_its_question_or_later_answer() -> None:
+    command = ConversationMessage(
+        role="user",
+        content="",
+        metadata={
+            "reopen_question": {
+                "question_id": "document_material_scope",
+                "requirements_version": "a" * 64,
+            }
+        },
+    )
+    reopened = reopen_question_from_metadata(command.metadata)
+    assert reopened is not None
+    assert unconsumed_reopen_question([command]) == reopened
+
+    assistant_question = ConversationMessage(
+        role="assistant",
+        content="How many documents?",
+        metadata={"question_id": "document_material_scope"},
+    )
+    assert unconsumed_reopen_question([command, assistant_question]) is None
+
+    later_answer = ConversationMessage(
+        role="user",
+        content="",
+        metadata={
+            "question_answer": {
+                "question_id": "document_material_scope",
+                "selected_value": "single_document_case",
+            }
+        },
+    )
+    assert unconsumed_reopen_question([command, later_answer]) is None
 
 
 def _classified_evidence(quote: str) -> ClassifiedEvidence:

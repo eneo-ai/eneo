@@ -12,6 +12,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AssumptionRowPayload,
     NamedContentFieldPayload,
     RequirementsSummaryPayload,
     StructuredQuestionOptionPayload,
@@ -25,6 +26,7 @@ from eneo.flows.ai_builder.planning_state import (
     NamedResultEvidence,
     named_result_location_id,
 )
+from eneo.flows.ai_builder.question_catalog import render_summary_label
 
 
 def _pending_question_conversation(
@@ -564,6 +566,99 @@ def _located_field(name: str, *segments: str) -> NamedContentFieldPayload:
         unplaced=False,
         can_contain_fields=False,
     )
+
+
+def _assumed_question_conversation(
+    *,
+    version: str = "a" * 64,
+    question_id: str = "document_material_scope",
+) -> list[ConversationMessage]:
+    summary = RequirementsSummaryPayload(
+        summary="The flow accepts documents.",
+        key_decisions=[],
+        input_description="Documents.",
+        output_description="A report.",
+        requirements_version=version,
+        assumption_rows=[
+            AssumptionRowPayload(
+                question_id=question_id,
+                slot_name=question_id,
+                value="flexible_document_case",
+                topic=render_summary_label(question_id, "en"),
+                label="One or more documents",
+            )
+        ],
+    )
+    return [
+        ConversationMessage(
+            role="assistant",
+            content="Review the requirements.",
+            metadata=requirements_summary_to_metadata(summary),
+        )
+    ]
+
+
+def test_current_assumption_can_be_persisted_as_a_reopen_command() -> None:
+    prepared = prepare_user_question_metadata(
+        conversation=_assumed_question_conversation(),
+        message="",
+        question_answer={
+            "kind": "reopen_question",
+            "question_id": "document_material_scope",
+            "requirements_version": "a" * 64,
+        },
+    )
+
+    assert prepared.metadata == {
+        "reopen_question": {
+            "question_id": "document_material_scope",
+            "requirements_version": "a" * 64,
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        (
+            {
+                "kind": "reopen_question",
+                "question_id": "document_material_scope",
+                "requirements_version": "b" * 64,
+            },
+            "requirements_version_stale",
+        ),
+        (
+            {
+                "kind": "reopen_question",
+                "question_id": "terminal_output",
+                "requirements_version": "a" * 64,
+            },
+            "question_not_assumed",
+        ),
+        (
+            {
+                "kind": "reopen_question",
+                "question_id": "invented_question",
+                "requirements_version": "a" * 64,
+            },
+            "question_unsupported",
+        ),
+    ],
+)
+def test_reopen_command_is_refused_against_the_current_disclosure(
+    payload: dict[str, object],
+    reason: str,
+) -> None:
+    with pytest.raises(AIBuilderBadRequestException) as exc_info:
+        prepare_user_question_metadata(
+            conversation=_assumed_question_conversation(),
+            message="",
+            question_answer=payload,
+        )
+
+    assert exc_info.value.code is AIBuilderErrorCode.INVALID_QUESTION_PAYLOAD
+    assert exc_info.value.context == {"reason": reason}
 
 
 def test_editing_keeps_same_leaf_locations_distinct_by_opaque_id() -> None:

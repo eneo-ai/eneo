@@ -496,6 +496,17 @@ const requirementsSummaryEventDataSchema = z.object({
     )
     .optional(),
   assumptions: stringArraySchema.optional(),
+  assumption_rows: z
+    .array(
+      z.object({
+        question_id: z.string(),
+        slot_name: z.string(),
+        value: z.string(),
+        topic: z.string(),
+        label: z.string()
+      })
+    )
+    .optional(),
   manual_setup_notes: stringArraySchema.optional(),
   resolved_requirements: z
     .array(

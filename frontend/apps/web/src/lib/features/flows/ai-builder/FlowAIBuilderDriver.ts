@@ -161,6 +161,10 @@ function toPersistedQuestionAnswerMetadata(
   if (questionAnswer.kind === "delegated_question_answer") {
     return { question_id: questionAnswer.question_id, delegated: true };
   }
+  // A reopen is a command, not an answer: nothing to show as a chip.
+  if (questionAnswer.kind === "reopen_question") {
+    return null;
+  }
   if (questionAnswer.kind !== "structured_question_answer") {
     return null;
   }
@@ -574,7 +578,12 @@ export class FlowAIBuilderDriver {
     });
   }
 
-  async #refreshSession(owner: SessionOperationOwner): Promise<boolean> {
+  /** `attemptedClientTurnId` names the turn a stream just tried to claim;
+   *  only that stream's reconciliation may leave a refusal on screen. */
+  async #refreshSession(
+    owner: SessionOperationOwner,
+    options?: { attemptedClientTurnId: string }
+  ): Promise<boolean> {
     if (!this.#ownsSession(owner)) return false;
     const latestTurnState = this.latestTurnState;
     const refreshIsRequired =
@@ -593,7 +602,7 @@ export class FlowAIBuilderDriver {
         this.#authoritativeRefreshError = false;
       }
       this.#state.session = result;
-      this.#applyCommittedTurnOutcome(result);
+      this.#applyCommittedTurnOutcome(result, options?.attemptedClientTurnId);
       this.#hydrateMessagesFromConversation(result.conversation ?? []);
       this.#notify();
       return this.#syncPlanFromSession(owner);
@@ -649,8 +658,9 @@ export class FlowAIBuilderDriver {
         edit_context: editContext
       };
     }
+    const clientTurnId = crypto.randomUUID();
     const requestBody: AIBuilderSendMessageRequest = {
-      client_turn_id: crypto.randomUUID(),
+      client_turn_id: clientTurnId,
       message,
       ui_language: getLocale()
     };
@@ -886,7 +896,7 @@ export class FlowAIBuilderDriver {
         (requestBody.question_answer?.kind === "structured_question_answer" &&
           !receivedDurableStreamEvent);
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
-        await this.#refreshSession(owner);
+        await this.#refreshSession(owner, { attemptedClientTurnId: requestBody.client_turn_id });
       }
       if (receivedDone && !receivedStreamError) {
         settledStreamState = "idle";
@@ -912,7 +922,7 @@ export class FlowAIBuilderDriver {
           fallbackMessage: m.ai_builder_error_fallback_stream()
         });
         this.#notify();
-        await this.#refreshSession(owner);
+        await this.#refreshSession(owner, { attemptedClientTurnId: requestBody.client_turn_id });
       }
       return "failed";
     } finally {
@@ -1619,9 +1629,19 @@ export class FlowAIBuilderDriver {
     return Number.isNaN(parsed) ? Date.now() : parsed;
   }
 
-  #applyCommittedTurnOutcome(session: AIBuilderSession): void {
+  #applyCommittedTurnOutcome(session: AIBuilderSession, attemptedClientTurnId?: string): void {
     const latestTurn = session.latest_turn;
     if (latestTurn?.state !== "committed") return;
+
+    // A request the server refused before claiming a turn leaves the
+    // previous committed turn in place. That turn's outcome, clean or
+    // failed, says nothing about the refusal, so the refusal stays on screen.
+    if (
+      attemptedClientTurnId !== undefined &&
+      latestTurn.client_turn_id !== attemptedClientTurnId
+    ) {
+      return;
+    }
 
     if (latestTurn.error === null || latestTurn.error === undefined) {
       this.#state.error = null;
