@@ -2349,6 +2349,11 @@ class FlowTranscriptCorrections(BasePublic):
         JSONB,
         nullable=False,
     )
+    speaker_edits_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+    )
     revision: Mapped[int] = mapped_column(nullable=False, server_default="1")
     schema_version: Mapped[int] = mapped_column(nullable=False, server_default="1")
     segments_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)

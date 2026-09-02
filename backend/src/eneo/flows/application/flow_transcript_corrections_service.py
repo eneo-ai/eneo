@@ -19,9 +19,13 @@ from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionsStaleRevisionError,
     TranscriptCorrectionInvalidOccurrenceError,
     TranscriptCorrectionOccurrence,
+    TranscriptSpeakerEdit,
+    TranscriptSpeakerEditInvalidError,
     segments_content_hash,
     sort_occurrences,
+    sort_speaker_edits,
     validate_occurrences,
+    validate_speaker_edits,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -124,7 +128,9 @@ class FlowTranscriptCorrectionsService:
         step_id: UUID,
         expected_revision: int | None,
         occurrences: list[TranscriptCorrectionOccurrence],
+        speaker_edits: list[TranscriptSpeakerEdit] | None = None,
     ) -> FlowTranscriptCorrectionsView:
+        speaker_edits = speaker_edits or []
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
@@ -152,7 +158,16 @@ class FlowTranscriptCorrectionsService:
                 code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE,
                 context={"reason": exc.reason, **exc.context},
             ) from exc
+        try:
+            validate_speaker_edits(segments, speaker_edits)
+        except TranscriptSpeakerEditInvalidError as exc:
+            raise FlowBadRequestException(
+                "A speaker edit does not match the stored transcript.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT,
+                context={"reason": exc.reason, **exc.context},
+            ) from exc
         canonical = sort_occurrences(occurrences)
+        canonical_speaker_edits = sort_speaker_edits(speaker_edits)
         try:
             saved = await self.transcript_corrections_repo.save(
                 tenant_id=self.user.tenant_id,
@@ -160,6 +175,7 @@ class FlowTranscriptCorrectionsService:
                 run_id=run.id,
                 step_id=step_id,
                 occurrences_json=[occurrence.as_json() for occurrence in canonical],
+                speaker_edits_json=[edit.as_json() for edit in canonical_speaker_edits],
                 segments_hash=segments_content_hash(segments),
                 expected_revision=expected_revision,
                 principal=FlowPrincipal.from_user(self.user),

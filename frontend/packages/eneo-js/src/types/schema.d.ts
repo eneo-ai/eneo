@@ -3066,7 +3066,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 170 actions with their enabled status for the modal UI.
+     * @description Retrieve all 171 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -5141,6 +5141,13 @@ export interface paths {
      *     overlap within a segment, and the step must have stored structured transcript lines.
      *     Anchoring failures return `400` with code `flow_transcript_corrections_invalid_occurrence`;
      *     steps without structured lines return `flow_transcript_corrections_segments_unavailable`.
+     *
+     *     `speaker_edits` replaces the step's speaker reassignments the same way: a null span
+     *     reassigns the whole segment, a present span reassigns exactly `original` at
+     *     `[char_start, char_end)` of the raw text. `original_speaker` must equal the segment's
+     *     stored label, span edits must not overlap within a segment and are exclusive with a
+     *     whole-segment edit there, and a no-op edit (same speaker) is rejected. Failures return
+     *     `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
      *
      *     Service-key principals may edit corrections only for runs they own (key must have
      *     `resource_permissions.flows = write`).
@@ -10686,6 +10693,7 @@ export interface components {
       | "flow_run_review_checkpoint_cancelled"
       | "flow_run_review_checkpoint_expired"
       | "flow_run_transcript_corrections_edited"
+      | "flow_run_transcript_corrections_applied"
       | "ai_builder_session_created"
       | "ai_builder_plan_approved"
       | "ai_builder_plan_revised"
@@ -15860,6 +15868,7 @@ export interface components {
       | "flow_transcript_corrections_stale_revision"
       | "flow_transcript_corrections_segments_unavailable"
       | "flow_transcript_corrections_invalid_occurrence"
+      | "flow_transcript_corrections_invalid_speaker_edit"
       | "flow_review_open_active_conflict_invariant"
       | "flow_review_open_step_result_incomplete_invariant"
       | "flow_review_open_multiple_active_checkpoints_invariant"
@@ -22579,6 +22588,13 @@ export interface components {
      *           "original": "sugary",
      *           "segment_index": 4
      *         }
+     *       ],
+     *       "speaker_edits": [
+     *         {
+     *           "original_speaker": "SPEAKER_00",
+     *           "segment_index": 12,
+     *           "speaker": "SPEAKER_01"
+     *         }
      *       ]
      *     }
      */
@@ -22593,6 +22609,11 @@ export interface components {
        * @description The full replacement list for this step (replace-style). An empty list clears the step's corrections while keeping the revision history monotonic.
        */
       occurrences: components["schemas"]["TranscriptCorrectionOccurrencePublic"][];
+      /**
+       * Speaker Edits
+       * @description The full replacement list of speaker reassignments for this step (replace-style, like `occurrences`). Omit or send an empty list to clear them.
+       */
+      speaker_edits?: components["schemas"]["TranscriptSpeakerEditPublic"][];
     };
     /**
      * FlowTranscriptCorrectionsPublic
@@ -22610,6 +22631,13 @@ export interface components {
      *         }
      *       ],
      *       "revision": 2,
+     *       "speaker_edits": [
+     *         {
+     *           "original_speaker": "SPEAKER_00",
+     *           "segment_index": 12,
+     *           "speaker": "SPEAKER_01"
+     *         }
+     *       ],
      *       "stale": false,
      *       "step_id": "00000000-0000-0000-0000-000000000101",
      *       "updated_at": "2026-03-17T10:14:30Z"
@@ -22634,6 +22662,11 @@ export interface components {
        * @description Compare token for the next edit. Send it back as `expected_revision`; a stale value returns `400` with code `flow_transcript_corrections_stale_revision`.
        */
       revision: number;
+      /**
+       * Speaker Edits
+       * @description Speaker reassignments stored with the set; empty for sets saved before speaker edits existed.
+       */
+      speaker_edits?: components["schemas"]["TranscriptSpeakerEditPublic"][];
       /**
        * Stale
        * @description True when the step's stored transcript changed after these corrections were written (re-run or re-transcription). Stale corrections anchor to text that no longer exists and must not be applied.
@@ -31709,6 +31742,46 @@ export interface components {
        * @description Index into the transcription step's stored `transcription.segments` array (the same array the steps listing returns).
        */
       segment_index: number;
+    };
+    /**
+     * TranscriptSpeakerEditPublic
+     * @example {
+     *       "original_speaker": "SPEAKER_00",
+     *       "segment_index": 12,
+     *       "speaker": "SPEAKER_01"
+     *     }
+     */
+    TranscriptSpeakerEditPublic: {
+      /**
+       * Char End
+       * @description Exclusive character offset; must be greater than `char_start`. Null for a whole-segment reassignment.
+       */
+      char_end?: number | null;
+      /**
+       * Char Start
+       * @description Inclusive character offset into the segment's raw `text`, or null for a whole-segment reassignment.
+       */
+      char_start?: number | null;
+      /**
+       * Original
+       * @description The exact raw text at `[char_start, char_end)`, or null for a whole-segment reassignment. A mismatch returns `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
+       */
+      original?: string | null;
+      /**
+       * Original Speaker
+       * @description The segment's stored speaker label the edit anchors to. A mismatch returns `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
+       */
+      original_speaker: string;
+      /**
+       * Segment Index
+       * @description Index into the transcription step's stored `transcription.segments` array (the same array the steps listing returns).
+       */
+      segment_index: number;
+      /**
+       * Speaker
+       * @description The label the content is reassigned to. A label not present in the transcript is allowed (splitting a merged speaker); it becomes nameable once the speaker-mapping step sees it.
+       */
+      speaker: string;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -52238,7 +52311,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowTranscriptCorrectionsPublic"];
         };
       };
-      /** @description Transcript corrections edit failed. Machine-readable codes are `flow_transcript_corrections_stale_revision`, `flow_transcript_corrections_segments_unavailable`, and `flow_transcript_corrections_invalid_occurrence` (whose context carries `reason` plus the offending anchor fields). */
+      /** @description Transcript corrections edit failed. Machine-readable codes are `flow_transcript_corrections_stale_revision`, `flow_transcript_corrections_segments_unavailable`, `flow_transcript_corrections_invalid_occurrence`, and `flow_transcript_corrections_invalid_speaker_edit` (the last two carry `reason` plus the offending anchor fields in `context`). */
       400: {
         headers: {
           [name: string]: unknown;

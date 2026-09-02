@@ -554,10 +554,12 @@
                 storedSegments !== null &&
                 (correctionsController?.ready ?? false)}
               corrections={correctionsController?.occurrences ?? []}
+              speakerEdits={correctionsController?.speakerEdits ?? []}
               busy={(correctionsController?.saving ?? false) || activeAction !== null}
               onSaveLine={correctionsController ? correctionsController.saveLine : undefined}
-              onRevertLine={correctionsController
-                ? (segmentIndex) => void correctionsController?.revertLine(segmentIndex)
+              onRevertLine={correctionsController ? correctionsController.revertLine : undefined}
+              onSaveSpeakerEdits={correctionsController
+                ? correctionsController.saveSpeakerEdits
                 : undefined}
               class="lg:min-h-80"
             />

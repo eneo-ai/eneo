@@ -573,7 +573,12 @@ class FlowRunReviewCheckpointRepository:
         flow_run_id: UUID,
         expected_revision: int,
         principal: FlowPrincipal,
+        current_payload_json: FlowPersistedJsonObject | None = None,
     ) -> FlowRunReviewCheckpoint:
+        """Approve the checkpoint, optionally replacing its payload in the
+        same revision bump (transcript-corrections fold-in). A provided
+        payload is mirrored to the step result exactly like a review edit.
+        """
         (
             checkpoint_row,
             run_row,
@@ -601,7 +606,25 @@ class FlowRunReviewCheckpointRepository:
             tenant_id=tenant_id,
             target_state=FlowRunReviewCheckpointState.APPROVED,
             principal=principal,
+            values=(
+                {"current_payload_json": current_payload_json}
+                if current_payload_json is not None
+                else None
+            ),
         )
+        if current_payload_json is not None:
+            step_result_id = await self.session.scalar(
+                sa.update(FlowStepResults)
+                .where(FlowStepResults.flow_run_id == flow_run_id)
+                .where(FlowStepResults.flow_id == flow_id)
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.step_id == checkpoint_row.step_id)
+                .where(FlowStepResults.current_attempt_no == checkpoint_row.attempt_no)
+                .values(output_payload_json=current_payload_json)
+                .returning(FlowStepResults.id)
+            )
+            if step_result_id is None:
+                raise FlowReviewEditStepResultMissingError()
         await self._insert_review_checkpoint_transition_outbox(
             checkpoint=updated_checkpoint,
             run_revision=run_row.revision,

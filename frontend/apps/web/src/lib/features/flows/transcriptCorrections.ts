@@ -102,6 +102,21 @@ export function diffLineEdit(original: string, edited: string): LineEditDiff {
     endOriginal -= 1;
     endEdited -= 1;
   }
+  if (start === endOriginal) {
+    // Pure insertion: the trimmed span is zero-width in the raw text, which
+    // cannot be addressed as a replacement (occurrences need a non-empty
+    // `original`). Widen by one anchoring character; the widened character is
+    // part of the common prefix/suffix, so it is identical in both strings.
+    if (endOriginal < original.length) {
+      endOriginal += 1;
+      endEdited += 1;
+    } else if (start > 0) {
+      start -= 1;
+    } else {
+      // The raw line is empty; there is no text to anchor an insertion to.
+      return { occurrence: null, tokenShaped: null };
+    }
+  }
   const occurrence = {
     char_start: start,
     char_end: endOriginal,

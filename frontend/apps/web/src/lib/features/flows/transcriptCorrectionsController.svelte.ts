@@ -21,6 +21,12 @@ import {
   type CorrectionOccurrence,
   type OccurrenceCandidate
 } from "$lib/features/flows/transcriptCorrections";
+import {
+  applySpeakerEditOverlay,
+  sortSpeakerEdits,
+  type SpeakerEdit,
+  type SpeakerSpanInput
+} from "$lib/features/flows/transcriptRuns";
 
 export type SuggestionDialogState = {
   originalText: string;
@@ -46,6 +52,7 @@ export function createTranscriptCorrectionsController(options: {
   const { eneo, flowId, runId, stepId, rawSegments } = options;
 
   let occurrences = $state<CorrectionOccurrence[]>([]);
+  let speakerEdits = $state<SpeakerEdit[]>([]);
   let revision = $state<number | null>(null);
   let stale = $state(false);
   let loaded = $state(false);
@@ -55,6 +62,16 @@ export function createTranscriptCorrectionsController(options: {
 
   function seat(set: FlowRunTranscriptCorrections | null) {
     const nextOccurrences = (set?.occurrences ?? []).map((occurrence) => ({ ...occurrence }));
+    // The generated schema marks null-span fields optional; the domain shape
+    // uses explicit nulls, so normalize here once.
+    const nextSpeakerEdits: SpeakerEdit[] = (set?.speaker_edits ?? []).map((edit) => ({
+      segment_index: edit.segment_index,
+      char_start: edit.char_start ?? null,
+      char_end: edit.char_end ?? null,
+      original: edit.original ?? null,
+      original_speaker: edit.original_speaker,
+      speaker: edit.speaker
+    }));
     const nextRevision = set?.revision ?? null;
     const nextStale = set?.stale ?? false;
     // Keep identities stable when nothing changed: replacing the occurrence
@@ -62,11 +79,13 @@ export function createTranscriptCorrectionsController(options: {
     if (
       nextRevision === revision &&
       nextStale === stale &&
-      JSON.stringify(nextOccurrences) === JSON.stringify(occurrences)
+      JSON.stringify(nextOccurrences) === JSON.stringify(occurrences) &&
+      JSON.stringify(nextSpeakerEdits) === JSON.stringify(speakerEdits)
     ) {
       return;
     }
     occurrences = nextOccurrences;
+    speakerEdits = nextSpeakerEdits;
     revision = nextRevision;
     stale = nextStale;
   }
@@ -93,7 +112,10 @@ export function createTranscriptCorrectionsController(options: {
     );
   }
 
-  async function persist(next: CorrectionOccurrence[]): Promise<boolean> {
+  async function persist(
+    next: CorrectionOccurrence[],
+    nextSpeakerEdits: SpeakerEdit[]
+  ): Promise<boolean> {
     saving = true;
     error = null;
     try {
@@ -103,7 +125,8 @@ export function createTranscriptCorrectionsController(options: {
           runId,
           stepId,
           expectedRevision: revision,
-          occurrences: sortOccurrences(next)
+          occurrences: sortOccurrences(next),
+          speakerEdits: sortSpeakerEdits(nextSpeakerEdits)
         })
       );
       return true;
@@ -132,6 +155,15 @@ export function createTranscriptCorrectionsController(options: {
     return current.filter((occurrence) => occurrence.segment_index !== excludeSegment);
   }
 
+  /** Stale speaker edits anchor to replaced text; they never carry into a save. */
+  function baseSpeakerEdits(): SpeakerEdit[] {
+    return stale ? [] : speakerEdits;
+  }
+
+  function baseAllOccurrences(): CorrectionOccurrence[] {
+    return stale ? [] : occurrences;
+  }
+
   function overlapsExisting(
     candidate: OccurrenceCandidate,
     existing: readonly CorrectionOccurrence[]
@@ -148,8 +180,16 @@ export function createTranscriptCorrectionsController(options: {
    * Commit one edited line. `editedText` is the line as the editor sees it
    * (corrections applied), so the diff against the raw text yields the line's
    * full replacement occurrence, superseding its previous ones.
+   *
+   * `suggest: false` skips the "same correction elsewhere" dialog; multi-
+   * segment turn commits use it so sequential saves never interleave with an
+   * open dialog.
    */
-  async function saveLine(segmentIndex: number, editedText: string): Promise<boolean> {
+  async function saveLine(
+    segmentIndex: number,
+    editedText: string,
+    options: { suggest?: boolean } = {}
+  ): Promise<boolean> {
     const raw = rawSegments[segmentIndex];
     if (!raw || !loaded) return false;
     const diff = diffLineEdit(raw.text, editedText);
@@ -157,7 +197,7 @@ export function createTranscriptCorrectionsController(options: {
     if (diff.occurrence) {
       next.push({ segment_index: segmentIndex, ...diff.occurrence });
     }
-    if (diff.occurrence && diff.tokenShaped) {
+    if (diff.occurrence && diff.tokenShaped && options.suggest !== false) {
       const candidates = findOccurrences(rawSegments, diff.tokenShaped.originalText, {
         segmentIndex,
         charStart: diff.occurrence.char_start
@@ -173,7 +213,7 @@ export function createTranscriptCorrectionsController(options: {
         return true;
       }
     }
-    return persist(next);
+    return persist(next, baseSpeakerEdits());
   }
 
   async function confirmSuggestions(selected: OccurrenceCandidate[]): Promise<void> {
@@ -188,7 +228,7 @@ export function createTranscriptCorrectionsController(options: {
     }));
     const pending = [...dialog.pendingOccurrences, ...extra];
     dialog = null;
-    await persist(pending);
+    await persist(pending, baseSpeakerEdits());
   }
 
   /** "Only this line": save the edit without any of the suggested sites. */
@@ -196,11 +236,34 @@ export function createTranscriptCorrectionsController(options: {
     if (!dialog) return;
     const pending = dialog.pendingOccurrences;
     dialog = null;
-    await persist(pending);
+    await persist(pending, baseSpeakerEdits());
   }
 
   async function revertLine(segmentIndex: number): Promise<void> {
-    await persist(baseOccurrences(segmentIndex));
+    await persist(baseOccurrences(segmentIndex), baseSpeakerEdits());
+  }
+
+  /**
+   * Reassign the requested spans (or whole segments) to another speaker.
+   * The overlay merge normalizes against the stored edits (last writer
+   * wins) and fills the anchors from the raw segments, so one call covers
+   * badge reassignments and multi-line selections alike.
+   */
+  async function saveSpeakerEdits(inputs: SpeakerSpanInput[]): Promise<boolean> {
+    if (!loaded || inputs.length === 0) return false;
+    const merged = applySpeakerEditOverlay(baseSpeakerEdits(), inputs, rawSegments);
+    return persist(baseAllOccurrences(), merged);
+  }
+
+  /** Remove one stored edit, addressed by its raw anchor (null = whole line). */
+  async function revertSpeakerEdit(
+    segmentIndex: number,
+    charStart: number | null
+  ): Promise<boolean> {
+    const next = baseSpeakerEdits().filter(
+      (edit) => !(edit.segment_index === segmentIndex && edit.char_start === charStart)
+    );
+    return persist(baseAllOccurrences(), next);
   }
 
   return {
@@ -208,8 +271,12 @@ export function createTranscriptCorrectionsController(options: {
     get occurrences(): readonly CorrectionOccurrence[] {
       return stale ? [] : occurrences;
     },
+    /** Speaker edits safe to apply; empty while the stored set is stale. */
+    get speakerEdits(): readonly SpeakerEdit[] {
+      return stale ? [] : speakerEdits;
+    },
     get staleCount(): number {
-      return stale ? occurrences.length : 0;
+      return stale ? occurrences.length + speakerEdits.length : 0;
     },
     get saving(): boolean {
       return saving;
@@ -227,6 +294,8 @@ export function createTranscriptCorrectionsController(options: {
     load,
     saveLine,
     revertLine,
+    saveSpeakerEdits,
+    revertSpeakerEdit,
     confirmSuggestions,
     dismissSuggestions,
     clearError(): void {

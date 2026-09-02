@@ -301,6 +301,12 @@ async def test_review_mutations_allow_service_key_for_own_run(user, method_name)
     if method_name == "resume_review_checkpoint":
         assert result.checkpoint == checkpoint
         awaited = checkpoint_repo.resume_review_checkpoint.await_args.kwargs
+    elif method_name == "approve_review_checkpoint":
+        # Approval reports the corrections fold alongside the checkpoint; a
+        # service wired without the corrections repository never folds.
+        assert result.checkpoint == checkpoint
+        assert result.corrections_fold is None
+        awaited = checkpoint_repo.approve_review_checkpoint.await_args.kwargs
     else:
         assert result == checkpoint
         repo_method_name = (

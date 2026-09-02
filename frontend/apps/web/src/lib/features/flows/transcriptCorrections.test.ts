@@ -93,6 +93,45 @@ describe("diffLineEdit", () => {
     expect(diff.tokenShaped).toEqual({ originalText: "Anna Lisa", correctedText: "Annalisa" });
   });
 
+  it("anchors a mid-line insertion to the following character", () => {
+    const diff = diffLineEdit("Vi ses imorgon.", "Vi ses nog imorgon.");
+
+    // A pure insertion has no raw span of its own; the occurrence must
+    // address at least one raw character to be a valid replacement.
+    expect(diff.occurrence).toEqual({
+      char_start: 7,
+      char_end: 8,
+      original: "i",
+      corrected: "nog i"
+    });
+  });
+
+  it("anchors an insertion at the start of the line", () => {
+    const diff = diffLineEdit("kommer du?", "Men kommer du?");
+
+    expect(diff.occurrence).toEqual({
+      char_start: 0,
+      char_end: 1,
+      original: "k",
+      corrected: "Men k"
+    });
+  });
+
+  it("anchors an insertion at the end of the line", () => {
+    const diff = diffLineEdit("Det blir bra", "Det blir bra, tror jag");
+
+    expect(diff.occurrence).toEqual({
+      char_start: 11,
+      char_end: 12,
+      original: "a",
+      corrected: "a, tror jag"
+    });
+  });
+
+  it("returns no occurrence when inserting into an empty line", () => {
+    expect(diffLineEdit("", "Hej.")).toEqual({ occurrence: null, tokenShaped: null });
+  });
+
   it("does not treat a rewritten line as token-shaped", () => {
     const diff = diffLineEdit(
       "Detta är en helt vanlig mening med många ord.",

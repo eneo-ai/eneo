@@ -975,13 +975,21 @@ export function initFlows(client) {
 
         /**
          * Replace one transcription step's correction list. Send the full
-         * `occurrences` list; `expectedRevision` is the compare token
-         * (null creates the step's first set, an empty list clears it).
+         * `occurrences` and `speakerEdits` lists; `expectedRevision` is the
+         * compare token (null creates the step's first set, empty lists
+         * clear it).
          *
-         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[]}} params
+         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[], speakerEdits?: import('../types/resources').FlowTranscriptSpeakerEdit[]}} params
          * @returns {Promise<import('../types/resources').FlowRunTranscriptCorrections>}
          */
-        save: async ({ flowId, runId, stepId, expectedRevision = null, occurrences }) => {
+        save: async ({
+          flowId,
+          runId,
+          stepId,
+          expectedRevision = null,
+          occurrences,
+          speakerEdits = []
+        }) => {
           return _fetch(
             "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/",
             {
@@ -990,7 +998,8 @@ export function initFlows(client) {
               requestBody: {
                 "application/json": {
                   expected_revision: expectedRevision,
-                  occurrences
+                  occurrences,
+                  speaker_edits: speakerEdits
                 }
               }
             }

@@ -159,6 +159,9 @@ class FlowApiErrorCode(str, Enum):
     TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE = (
         "flow_transcript_corrections_invalid_occurrence"
     )
+    TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT = (
+        "flow_transcript_corrections_invalid_speaker_edit"
+    )
     REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT = "flow_review_open_active_conflict_invariant"
     REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT = (
         "flow_review_open_step_result_incomplete_invariant"

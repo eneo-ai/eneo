@@ -1226,6 +1226,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Rebuild the occurrence anchors from the current segments and retry.",
         user_action="Reload the transcript and apply the correction again.",
     ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="A submitted speaker edit does not match the stored transcript.",
+        consumer_action="Rebuild the speaker-edit anchors from the current segments and retry.",
+        user_action="Reload the transcript and apply the speaker change again.",
+    ),
     FlowApiErrorCode.TEMPLATE_MISSING_CONTENT: _entry(
         category="Template asset",
         surfaced_through="API error response",

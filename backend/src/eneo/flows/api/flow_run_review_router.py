@@ -14,12 +14,15 @@ from fastapi import (
     status,
 )
 
+from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
     FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE,
+    audit_actor_kwargs,
     commit_flow_runtime_write_before_response,
     error_response,
     flow_run_evidence_snapshot_transaction,
@@ -686,14 +689,46 @@ async def approve_flow_run_review_checkpoint(
             required_access=FlowApiAction.REVIEW,
             allow_service_key_principals=True,
         )
-        checkpoint = await container.flow_run_review_checkpoint_service().approve_review_checkpoint(
+        approval = await container.flow_run_review_checkpoint_service().approve_review_checkpoint(
             flow_id=id,
             run_id=run_id,
             checkpoint_id=checkpoint_id,
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
         )
+        fold = approval.corrections_fold
+        if fold is not None:
+            user = container.user()
+            actor_kwargs = audit_actor_kwargs(user)
+            await container.audit_service().log_async(
+                tenant_id=user.tenant_id,
+                actor_id=actor_kwargs["actor_id"],
+                actor_type=actor_kwargs["actor_type"],
+                actor_api_key_id=actor_kwargs["actor_api_key_id"],
+                action=ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_APPLIED,
+                entity_type=EntityType.FLOW_RUN,
+                entity_id=run_id,
+                description=(
+                    "Resolved transcript corrections at review checkpoint approval"
+                ),
+                metadata=AuditMetadata.standard(
+                    actor=user,
+                    target=fold.correction_set,
+                    extra={
+                        "flow_id": str(id),
+                        "run_id": str(run_id),
+                        "step_id": str(fold.correction_set.step_id),
+                        "checkpoint_id": str(checkpoint_id),
+                        "occurrence_count": len(fold.correction_set.occurrences_json),
+                        "speaker_edit_count": len(
+                            fold.correction_set.speaker_edits_json
+                        ),
+                        "propagated": fold.propagated,
+                        "skip_reason": fold.skip_reason,
+                    },
+                ),
+            )
         response = await _present_review_checkpoint(
-            container=container, checkpoint=checkpoint
+            container=container, checkpoint=approval.checkpoint
         )
     return response
 

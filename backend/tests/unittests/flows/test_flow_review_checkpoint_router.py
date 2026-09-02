@@ -31,6 +31,9 @@ from eneo.flows.api.flow_run_review_router import (
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
+from eneo.flows.application.flow_run_review_checkpoint_service import (
+    FlowReviewCheckpointApproval,
+)
 from eneo.flows.domain.flow import FlowRunStatus, FlowStepAttempt, FlowStepResult
 from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
@@ -388,7 +391,9 @@ async def test_approve_review_checkpoint_builds_response_inside_transaction(
 
     async def _approve_review_checkpoint(**_kwargs):
         ctx.events.append("approve_review_checkpoint")
-        return ctx.checkpoint
+        return FlowReviewCheckpointApproval(
+            checkpoint=ctx.checkpoint, corrections_fold=None
+        )
 
     ctx.review_service.approve_review_checkpoint.side_effect = (
         _approve_review_checkpoint

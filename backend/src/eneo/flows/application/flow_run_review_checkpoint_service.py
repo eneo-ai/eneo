@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, TypeAlias, TypeVar, assert_never, cast
 from uuid import UUID
 
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.application.flow_transcript_corrections_propagation import (
+    TranscriptCorrectionsFoldOutcome,
+    build_folded_transcript,
+)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
@@ -54,6 +59,9 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
     FlowRunReviewCheckpointResumeResult,
 )
+from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
+    FlowTranscriptCorrectionsRepository,
+)
 from eneo.flows.output_processing import (
     StructuredOutputValue,
     validate_against_contract,
@@ -82,6 +90,18 @@ _REVIEW_DERIVED_PAYLOAD_KEYS = frozenset({"text", "structured"})
 # The authoritative value a reviewer submits: the text of a text step, or the
 # structured value of a JSON step.
 FlowReviewEditedValue: TypeAlias = str | StructuredOutputValue
+
+
+@dataclass(frozen=True, slots=True)
+class FlowReviewCheckpointApproval:
+    """An approved checkpoint plus what happened to its transcript corrections.
+
+    ``corrections_fold`` is None when the step has no correction set (or the
+    service was wired without the corrections repository).
+    """
+
+    checkpoint: FlowRunReviewCheckpoint
+    corrections_fold: TranscriptCorrectionsFoldOutcome | None
 
 
 def review_open_terminal_invariant_error(
@@ -471,6 +491,7 @@ class FlowRunReviewCheckpointService:
         access_policy: FlowRunAccessPolicy,
         flow_run_terminalizer: FlowRunTerminalizer,
         flow_run_repo: FlowRunRepository | None = None,
+        transcript_corrections_repo: FlowTranscriptCorrectionsRepository | None = None,
     ):
         self.user = user
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
@@ -479,6 +500,9 @@ class FlowRunReviewCheckpointService:
         # Only speaker-mapping edits need step results and the run input; the
         # dependency stays optional so plain review edits need no repository.
         self.flow_run_repo = flow_run_repo
+        # Only checkpoint approval folds transcript corrections; the dependency
+        # stays optional so other review flows need no corrections repository.
+        self.transcript_corrections_repo = transcript_corrections_repo
 
     def _principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
@@ -651,14 +675,34 @@ class FlowRunReviewCheckpointService:
         run_id: UUID,
         checkpoint_id: UUID,
         expected_checkpoint_revision: int,
-    ) -> FlowRunReviewCheckpoint:
+    ) -> FlowReviewCheckpointApproval:
         principal = self._principal()
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
             access_kind="content",
         )
-        return await self._with_review_lifecycle_translation(
+        fold: TranscriptCorrectionsFoldOutcome | None = None
+        pre_fold_checkpoint: FlowRunReviewCheckpoint | None = None
+        if (
+            self.transcript_corrections_repo is not None
+            and self.flow_run_repo is not None
+        ):
+            pre_fold_checkpoint = await self._with_review_lifecycle_translation(
+                self.flow_run_review_checkpoint_repo.get_review_checkpoint_for_edit(
+                    checkpoint_id=checkpoint_id,
+                    tenant_id=self.user.tenant_id,
+                    flow_id=flow_id,
+                    flow_run_id=run.id,
+                    expected_revision=expected_checkpoint_revision,
+                )
+            )
+            fold = await self._fold_transcript_corrections(
+                run=run,
+                checkpoint=pre_fold_checkpoint,
+            )
+        folded_payload = fold.folded_payload if fold is not None else None
+        approved = await self._with_review_lifecycle_translation(
             self.flow_run_review_checkpoint_repo.approve_review_checkpoint(
                 checkpoint_id=checkpoint_id,
                 tenant_id=self.user.tenant_id,
@@ -666,7 +710,59 @@ class FlowRunReviewCheckpointService:
                 flow_run_id=run.id,
                 expected_revision=expected_checkpoint_revision,
                 principal=principal,
+                current_payload_json=folded_payload,
             )
+        )
+        if (
+            fold is not None
+            and folded_payload is not None
+            and fold.previous_text is not None
+            and pre_fold_checkpoint is not None
+        ):
+            await self._sync_run_transcript(
+                run=run,
+                checkpoint=pre_fold_checkpoint,
+                source_text=fold.previous_text,
+                new_text=str(folded_payload.get("text", "")),
+            )
+        return FlowReviewCheckpointApproval(
+            checkpoint=approved,
+            corrections_fold=fold,
+        )
+
+    async def _fold_transcript_corrections(
+        self,
+        *,
+        run: FlowRun,
+        checkpoint: FlowRunReviewCheckpoint,
+    ) -> TranscriptCorrectionsFoldOutcome | None:
+        """The step's correction set folded into the checkpoint text, if any.
+
+        Never raises for foldability problems: a stale set, a hand-edited
+        text, or a file-backed output skips the fold (with a reason) so the
+        approval itself always proceeds.
+        """
+        if self.transcript_corrections_repo is None or self.flow_run_repo is None:
+            return None
+        correction_set = await self.transcript_corrections_repo.get_for_step(
+            run_id=run.id,
+            step_id=checkpoint.step_id,
+            tenant_id=run.tenant_id,
+        )
+        if correction_set is None or (
+            not correction_set.occurrences_json
+            and not correction_set.speaker_edits_json
+        ):
+            return None
+        step_result = await self.flow_run_repo.get_step_result(
+            run_id=run.id,
+            step_id=checkpoint.step_id,
+            tenant_id=run.tenant_id,
+        )
+        return build_folded_transcript(
+            checkpoint=checkpoint,
+            step_result=step_result,
+            correction_set=correction_set,
         )
 
     async def reject_review_checkpoint(

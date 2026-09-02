@@ -1,14 +1,11 @@
 <script lang="ts">
   import { IconPlay } from "@eneo/icons/play";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import PencilLine from "lucide-svelte/icons/pencil-line";
-  import Undo2 from "lucide-svelte/icons/undo-2";
   import { untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import {
-    applySpeakerNames,
     countFiles,
     findActiveSegmentIndex,
     formatClock,
@@ -19,6 +16,27 @@
     applyTextCorrections,
     type CorrectionOccurrence
   } from "$lib/features/flows/transcriptCorrections";
+  import {
+    computeSegmentDetails,
+    nextSpeakerLabel,
+    speakerLabels,
+    type SpeakerEdit,
+    type SpeakerSpanInput
+  } from "$lib/features/flows/transcriptRuns";
+  import {
+    computeTurns,
+    splitTurnEdit,
+    turnSelectionToDisplaySpans,
+    type TranscriptTurn,
+    type TurnPart
+  } from "$lib/features/flows/transcriptTurns";
+  import {
+    selectionToSpans,
+    type SegmentGeometry,
+    type SelectionSpan
+  } from "$lib/features/flows/transcriptSelection";
+  import TranscriptTurnBlock from "./TranscriptTurn.svelte";
+  import TranscriptSpeakerToolbar from "./TranscriptSpeakerToolbar.svelte";
 
   export type SignedAudio = { url: string; expires_at: number };
 
@@ -31,9 +49,11 @@
     audioPending = false,
     editable = false,
     corrections = [],
+    speakerEdits = [],
     busy = false,
     onSaveLine,
     onRevertLine,
+    onSaveSpeakerEdits,
     class: className = ""
   }: {
     /** Transcript lines in time; empty when the transcript has no timestamps. */
@@ -48,16 +68,24 @@
     textFallback?: string;
     /** True while the caller is still finding out which audio files exist. */
     audioPending?: boolean;
-    /** Offers per-line editing; the caller owns saving through onSaveLine. */
+    /** Offers editing; false renders a clean read-only conversation. */
     editable?: boolean;
     /** Stored corrections, applied as an overlay on the raw segment text. */
     corrections?: readonly CorrectionOccurrence[];
+    /** Stored speaker reassignments, applied as an overlay on the raw labels. */
+    speakerEdits?: readonly SpeakerEdit[];
     /** Disables edit controls while the caller is saving. */
     busy?: boolean;
-    /** Commits one edited line; resolve true to close the line's editor. */
-    onSaveLine?: (segmentIndex: number, editedText: string) => Promise<boolean>;
-    /** Drops the stored corrections of one line. */
-    onRevertLine?: (segmentIndex: number) => void;
+    /** Commits one segment's edited display text; resolve true on success. */
+    onSaveLine?: (
+      segmentIndex: number,
+      editedText: string,
+      options?: { suggest?: boolean }
+    ) => Promise<boolean>;
+    /** Drops the stored text corrections of one segment. */
+    onRevertLine?: (segmentIndex: number) => Promise<void> | void;
+    /** Reassigns raw-space spans (null span = whole segment) to a speaker. */
+    onSaveSpeakerEdits?: (edits: SpeakerSpanInput[]) => Promise<boolean>;
     class?: string;
   } = $props();
 
@@ -93,15 +121,36 @@
   // resolves late would otherwise swap the source under a playing track.
   let loadGeneration = 0;
 
-  // Corrections rewrite text, speaker names rewrite labels; the overlays are
-  // orthogonal and compose. The raw `segments` prop is never mutated.
+  // Corrections rewrite text, speaker edits rewrite attribution, and speaker
+  // names rewrite labels at render time; the overlays are orthogonal and
+  // compose. The raw `segments` prop is never mutated. The display unit is
+  // the speaker TURN; the segment stays the storage anchor underneath.
   const applied = $derived(applyTextCorrections(segments, corrections));
-  const shown = $derived(applySpeakerNames(applied.segments, speakerNames));
+  const shown = $derived(applied.segments);
   const correctedFrom = $derived(applied.correctedFrom);
+  const lineDetails = $derived(computeSegmentDetails(segments, corrections, speakerEdits));
+  const turns = $derived(computeTurns(segments, corrections, speakerEdits, lineDetails));
   const totalFiles = $derived(Math.max(fileCount, countFiles(segments)));
   const hasSegments = $derived(shown.length > 0);
   const withHours = $derived(duration >= 3600 || shown.some((segment) => segment.end >= 3600));
   const seekable = $derived(!audioUnavailable && hasSegments);
+
+  const speakerEditingEnabled = $derived(editable && onSaveSpeakerEdits !== undefined);
+  const labels = $derived(speakerLabels(segments, speakerEdits));
+  const newLabel = $derived(nextSpeakerLabel(labels));
+
+  function displayName(label: string): string {
+    const name = speakerNames[label];
+    return typeof name === "string" && name.trim() ? name.trim() : label;
+  }
+
+  const speakerOptions = $derived(
+    labels.map((label) => ({
+      label,
+      display: displayName(label),
+      colorClass: speakerClass(label)
+    }))
+  );
 
   async function loadAudio(fileIndex: number, seekTo: number | null = null, autoplay = false) {
     const generation = ++loadGeneration;
@@ -170,52 +219,216 @@
     seekToTime(audioEl.currentTime + delta);
   }
 
-  function seekToSegment(segment: TranscriptSegment) {
+  /** Positions the playhead silently; playback stays under the transport. */
+  function seekToPart(part: TurnPart) {
     if (!seekable) return;
-    follow = true;
-    activeIndex = segment.index;
-    if (segment.fileIndex !== currentFile || !audioEl) {
-      void loadAudio(segment.fileIndex, segment.start, true);
+    activeIndex = part.segmentIndex;
+    if (part.fileIndex !== currentFile || !audioEl) {
+      void loadAudio(part.fileIndex, part.start, false);
       return;
     }
-    audioEl.currentTime = segment.start;
-    void audioEl.play().catch(markPlayFailure);
+    audioEl.currentTime = part.start;
   }
 
-  let editingIndex = $state(-1);
-  let draftText = $state("");
+  // ---- Turn editing -----------------------------------------------------
+  let editingTurnIndex = $state(-1);
+  let followBeforeEdit = false;
 
-  function startEdit(segment: TranscriptSegment) {
-    editingIndex = segment.index;
-    draftText = applied.segments[segment.index]?.text ?? segment.text;
-    // The list must not scroll away under an open editor while audio plays.
+  function startEditTurn(turn: TranscriptTurn) {
+    editingTurnIndex = turn.index;
+    toolbar = null;
+    // The list must not scroll away under an open editor while audio plays;
+    // follow is restored when the editor closes.
+    followBeforeEdit = follow;
     follow = false;
   }
 
-  function cancelEdit() {
-    editingIndex = -1;
-    draftText = "";
+  function closeEditor() {
+    editingTurnIndex = -1;
+    follow = followBeforeEdit;
   }
 
-  async function commitEdit(segmentIndex: number) {
+  function displaySpanToRaw(
+    geometry: SegmentGeometry,
+    displayStart: number,
+    displayEnd: number
+  ): { charStart: number; charEnd: number } | null {
+    let charStart = geometry.displayToRaw(displayStart, "start");
+    let charEnd = geometry.displayToRaw(displayEnd, "end");
+    const raw = geometry.rawText;
+    while (charStart < charEnd && /\s/.test(raw[charStart])) charStart += 1;
+    while (charEnd > charStart && /\s/.test(raw[charEnd - 1])) charEnd -= 1;
+    return charStart < charEnd ? { charStart, charEnd } : null;
+  }
+
+  async function commitTurnEdit(
+    turn: TranscriptTurn,
+    text: string,
+    reassign?: { joinedStart: number; joinedEnd: number }
+  ) {
     if (!onSaveLine) return;
-    const accepted = await onSaveLine(segmentIndex, draftText);
-    if (accepted) cancelEdit();
+    const edits = splitTurnEdit(turn, text, (index) => shown[index]?.text ?? "");
+    let accepted = true;
+    for (const edit of edits) {
+      accepted = await onSaveLine(edit.segmentIndex, edit.newSegmentText, {
+        // The dialog would interleave with sequential saves or a pending
+        // reassignment; offer suggestions only for a plain single-part edit.
+        suggest: edits.length === 1 && !reassign
+      });
+      if (!accepted) break;
+    }
+    if (!accepted) return; // the editor stays open with the draft
+    closeEditor();
+    if (!reassign || !onSaveSpeakerEdits) return;
+    // The derived turns now include the committed text, so the editor's
+    // offsets address the successor turn one-to-one.
+    const anchor = turn.parts[0];
+    const successor = turns.find(
+      (candidate) =>
+        candidate.parts[0]?.segmentIndex === anchor.segmentIndex &&
+        candidate.parts[0]?.rawStart === anchor.rawStart
+    );
+    if (!successor) return;
+    const spans: SelectionSpan[] = [];
+    for (const span of turnSelectionToDisplaySpans(
+      successor,
+      reassign.joinedStart,
+      reassign.joinedEnd
+    )) {
+      const geometry = lineDetails.get(span.segmentIndex)?.geometry;
+      if (!geometry) continue;
+      const raw = displaySpanToRaw(geometry, span.displayStart, span.displayEnd);
+      if (raw) spans.push({ segmentIndex: span.segmentIndex, ...raw });
+    }
+    if (spans.length === 0) return;
+    const block = listEl?.querySelector<HTMLElement>(`[data-turn-index="${successor.index}"]`);
+    toolbar = {
+      anchorTop: block?.offsetTop ?? 0,
+      anchorBottom: block?.offsetTop ?? 0,
+      left: 8,
+      spans
+    };
   }
 
-  function onEditKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      cancelEdit();
-    } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      if (editingIndex >= 0) void commitEdit(editingIndex);
+  async function revertTurn(turn: TranscriptTurn) {
+    if (!onRevertLine) return;
+    const segmentIndexes = turn.parts
+      .map((part) => part.segmentIndex)
+      .filter((value, index, all) => all.indexOf(value) === index);
+    for (const segmentIndex of segmentIndexes) {
+      if (correctedFrom.has(segmentIndex)) {
+        // Sequential so every save works against the fresh revision.
+        await onRevertLine(segmentIndex);
+      }
     }
   }
 
-  function focusTextarea(node: HTMLTextAreaElement) {
-    node.focus();
-    node.setSelectionRange(node.value.length, node.value.length);
+  function reassignTurn(turn: TranscriptTurn, speaker: string) {
+    void onSaveSpeakerEdits?.(
+      turn.parts.map((part) => ({
+        segment_index: part.segmentIndex,
+        char_start: part.rawStart,
+        char_end: part.rawEnd,
+        speaker
+      }))
+    );
+  }
+
+  /** Overridden parts go back to their stored speakers; the overlay merge
+      then drops the edits entirely. */
+  function resetTurn(turn: TranscriptTurn) {
+    const inputs: SpeakerSpanInput[] = [];
+    for (const part of turn.parts) {
+      const stored = segments[part.segmentIndex]?.speaker;
+      if (!part.overridden || !stored) continue;
+      inputs.push({
+        segment_index: part.segmentIndex,
+        char_start: part.rawStart,
+        char_end: part.rawEnd,
+        speaker: stored
+      });
+    }
+    if (inputs.length > 0) void onSaveSpeakerEdits?.(inputs);
+  }
+
+  // ---- Selection toolbar ------------------------------------------------
+  let toolbar = $state<{
+    anchorTop: number;
+    anchorBottom: number;
+    left: number;
+    spans: SelectionSpan[];
+  } | null>(null);
+
+  function updateSelectionToolbar() {
+    const list = listEl;
+    if (!list || !speakerEditingEnabled || busy || editingTurnIndex >= 0) {
+      toolbar = null;
+      return;
+    }
+    const selection = document.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      toolbar = null;
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!list.contains(range.startContainer) || !list.contains(range.endContainer)) {
+      toolbar = null;
+      return;
+    }
+    const spans = selectionToSpans(
+      list,
+      range,
+      (segmentIndex) => lineDetails.get(segmentIndex)?.geometry ?? null
+    );
+    if (spans.length === 0) {
+      toolbar = null;
+      return;
+    }
+    // jsdom's Range has no rect; anchoring falls back to the list origin.
+    const rect =
+      typeof range.getBoundingClientRect === "function"
+        ? range.getBoundingClientRect()
+        : { top: 0, bottom: 0, left: 0 };
+    const listRect = list.getBoundingClientRect();
+    toolbar = {
+      anchorTop: Math.max(0, rect.top - listRect.top + list.scrollTop),
+      anchorBottom: Math.max(0, rect.bottom - listRect.top + list.scrollTop),
+      left: Math.max(
+        4,
+        Math.min(rect.left - listRect.left + list.scrollLeft, list.clientWidth - 240)
+      ),
+      spans
+    };
+  }
+
+  /** Listens for selections while mounted; reads state only inside events. */
+  function watchSelection(node: HTMLElement) {
+    void node;
+    let frame = 0;
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateSelectionToolbar);
+    };
+    document.addEventListener("selectionchange", schedule);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", schedule);
+    };
+  }
+
+  async function chooseSpeakerForSelection(speaker: string) {
+    const current = toolbar;
+    if (!current || !onSaveSpeakerEdits) return;
+    toolbar = null;
+    const accepted = await onSaveSpeakerEdits(
+      current.spans.map((span) => ({
+        segment_index: span.segmentIndex,
+        char_start: span.charStart,
+        char_end: span.charEnd,
+        speaker
+      }))
+    );
+    if (accepted) window.getSelection()?.removeAllRanges();
   }
 
   function selectFile(fileIndex: number) {
@@ -226,8 +439,12 @@
 
   function onKeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement | null;
-    if (target?.closest("input, select, textarea")) return;
-    // A focused button handles Space itself (play/pause, or seek to its line).
+    if (target?.closest("input, select, textarea, [contenteditable]")) return;
+    if (event.key === "Escape") {
+      toolbar = null;
+      return;
+    }
+    // A focused button handles Space itself (play/pause, or its own action).
     if (event.key === " " && target?.closest("button")) return;
     switch (event.key) {
       case " ":
@@ -260,16 +477,18 @@
 
   function onUserScroll() {
     if (Date.now() > programmaticScrollUntil) follow = false;
+    toolbar = null;
   }
 
-  // Keep the playing line in view while the reviewer has not scrolled away.
+  // Keep the playing turn in view while the reviewer has not scrolled away.
   $effect(() => {
     const index = activeIndex;
     const list = listEl;
     if (!follow || !list || index < 0) return;
-    const line = list.querySelector<HTMLElement>(`[data-segment-index="${index}"]`);
-    if (!line || typeof list.scrollTo !== "function") return;
-    const top = line.offsetTop - list.clientHeight / 2 + line.offsetHeight / 2;
+    const part = list.querySelector<HTMLElement>(`[data-segment-index="${index}"]`);
+    const block = part?.closest<HTMLElement>("[data-turn-index]") ?? part;
+    if (!block || typeof list.scrollTo !== "function") return;
+    const top = block.offsetTop - list.clientHeight / 2 + block.offsetHeight / 2;
     programmaticScrollUntil = Date.now() + 800;
     list.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   });
@@ -441,149 +660,56 @@
     </div>
 
     <!-- Scroll listeners only observe whether the reviewer moved away from
-         the playing line; they add no interaction of their own. -->
+         the playing turn; they add no interaction of their own. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       bind:this={listEl}
-      class="bg-primary relative max-h-[32rem] flex-1 overflow-auto p-2"
+      class="bg-primary selection:bg-accent-dimmer selection:text-accent-stronger relative max-h-[32rem] flex-1 overflow-auto p-2"
       onwheel={onUserScroll}
       ontouchmove={onUserScroll}
       onscroll={onUserScroll}
+      {@attach watchSelection}
     >
-      <ol class="flex flex-col gap-0.5">
-        {#each shown as segment, position (segment.index)}
-          {#if totalFiles > 1 && (position === 0 || shown[position - 1].fileIndex !== segment.fileIndex)}
-            <li class="text-muted px-2 pt-2 pb-1 text-xs font-semibold" aria-hidden="true">
-              {m.flow_run_transcript_part({ n: String(segment.fileIndex + 1) })}
-            </li>
+      <div class="flex flex-col gap-1.5">
+        {#each turns as turn, position (turn.index)}
+          {#if totalFiles > 1 && (position === 0 || turns[position - 1].fileIndex !== turn.fileIndex)}
+            <p class="text-muted px-2 pt-2 pb-1 text-xs font-semibold" aria-hidden="true">
+              {m.flow_run_transcript_part({ n: String(turn.fileIndex + 1) })}
+            </p>
           {/if}
-          <li class="flex items-start gap-1">
-            {#if editable && editingIndex === segment.index}
-              <div
-                class="border-accent-default/40 min-w-0 flex-1 rounded-md border px-2 py-1.5"
-                data-segment-index={segment.index}
-              >
-                <div class="text-muted mb-1 flex items-center gap-2 text-xs">
-                  <span class="tabular-nums">{formatClock(segment.start, withHours)}</span>
-                  {#if segment.speaker}
-                    <span
-                      class="rounded px-1.5 py-px font-semibold {speakerClass(segment.speaker)}"
-                    >
-                      {segment.speaker}
-                    </span>
-                  {/if}
-                </div>
-                <textarea
-                  bind:value={draftText}
-                  use:focusTextarea
-                  class="border-default bg-primary focus-visible:ring-accent-default min-h-16 w-full resize-y rounded-md border px-2 py-1.5 text-sm leading-relaxed focus-visible:ring-2 focus-visible:outline-none"
-                  spellcheck="false"
-                  aria-label={m.flow_run_transcript_edit_line({
-                    time: formatClock(segment.start, withHours)
-                  })}
-                  onkeydown={onEditKeydown}></textarea>
-                <div class="mt-1 flex justify-end gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    class="h-7 text-xs"
-                    disabled={busy}
-                    onclick={cancelEdit}
-                  >
-                    {m.cancel()}
-                  </Button>
-                  <Button
-                    size="sm"
-                    class="h-7 text-xs"
-                    disabled={busy}
-                    onclick={() => void commitEdit(segment.index)}
-                  >
-                    {busy ? m.saving() : m.save()}
-                  </Button>
-                </div>
-              </div>
-            {:else}
-              <button
-                type="button"
-                data-segment-index={segment.index}
-                class="hover:bg-hover-dimmer focus-visible:ring-accent-default flex min-w-0 flex-1 items-start gap-2 rounded-md border-l-4 border-transparent px-2 py-1.5 text-left text-sm leading-relaxed transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:hover:bg-transparent {segment.index ===
-                activeIndex
-                  ? 'border-accent-default bg-accent-dimmer ring-accent-default/40 ring-1 ring-inset'
-                  : ''}"
-                aria-current={segment.index === activeIndex ? "true" : undefined}
-                disabled={!seekable}
-                title={m.flow_run_transcript_seek_to({
-                  time: formatClock(segment.start, withHours)
-                })}
-                onclick={() => seekToSegment(segment)}
-              >
-                <span
-                  class="mt-0.5 w-14 shrink-0 text-xs tabular-nums sm:w-[4.5rem] {segment.index ===
-                  activeIndex
-                    ? 'text-accent-stronger font-semibold'
-                    : 'text-muted'}"
-                >
-                  {formatClock(segment.start, withHours)}
-                </span>
-                <span class="min-w-0 flex-1">
-                  {#if segment.speaker}
-                    <span
-                      class="mr-1.5 inline-block rounded px-1.5 py-px align-baseline text-xs font-semibold {speakerClass(
-                        segment.speaker
-                      )}"
-                    >
-                      {segment.speaker}
-                    </span>
-                  {/if}
-                  <span
-                    class="{segment.index === activeIndex
-                      ? 'text-primary font-medium'
-                      : 'text-primary'} {correctedFrom.has(segment.index)
-                      ? 'decoration-accent-default underline decoration-dotted underline-offset-2'
-                      : ''}"
-                    title={correctedFrom.has(segment.index)
-                      ? m.flow_run_transcript_corrected_from({
-                          original: correctedFrom.get(segment.index) ?? ""
-                        })
-                      : undefined}>{segment.text}</span
-                  >
-                </span>
-              </button>
-              {#if editable}
-                <div class="flex shrink-0 items-center gap-0.5 pt-1">
-                  {#if correctedFrom.has(segment.index)}
-                    <button
-                      type="button"
-                      class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
-                      aria-label={m.flow_run_transcript_revert({
-                        time: formatClock(segment.start, withHours)
-                      })}
-                      title={m.flow_run_transcript_corrected_from({
-                        original: correctedFrom.get(segment.index) ?? ""
-                      })}
-                      disabled={busy}
-                      onclick={() => onRevertLine?.(segment.index)}
-                    >
-                      <Undo2 class="size-3.5" />
-                    </button>
-                  {/if}
-                  <button
-                    type="button"
-                    class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
-                    aria-label={m.flow_run_transcript_edit_line({
-                      time: formatClock(segment.start, withHours)
-                    })}
-                    disabled={busy}
-                    onclick={() => startEdit(segment)}
-                  >
-                    <PencilLine class="size-3.5" />
-                  </button>
-                </div>
-              {/if}
-            {/if}
-          </li>
+          <TranscriptTurnBlock
+            {turn}
+            activeSegmentIndex={activeIndex}
+            {withHours}
+            {editable}
+            {busy}
+            editing={editable && editingTurnIndex === turn.index}
+            {displayName}
+            {speakerClass}
+            speakerOptions={speakerEditingEnabled ? speakerOptions : []}
+            newSpeakerLabel={newLabel}
+            correctedFrom={(segmentIndex) => correctedFrom.get(segmentIndex) ?? null}
+            onSeek={seekToPart}
+            onStartEdit={() => startEditTurn(turn)}
+            onCancelEdit={closeEditor}
+            onCommitEdit={(text, reassign) => void commitTurnEdit(turn, text, reassign)}
+            onRevertTurn={() => void revertTurn(turn)}
+            onReassignTurn={(speaker) => reassignTurn(turn, speaker)}
+            onResetTurn={() => resetTurn(turn)}
+          />
         {/each}
-      </ol>
+      </div>
+      {#if toolbar}
+        <TranscriptSpeakerToolbar
+          anchorTop={toolbar.anchorTop}
+          anchorBottom={toolbar.anchorBottom}
+          left={toolbar.left}
+          options={speakerOptions}
+          newSpeakerLabel={newLabel}
+          disabled={busy}
+          onChoose={(speaker) => void chooseSpeakerForSelection(speaker)}
+        />
+      {/if}
     </div>
   {:else}
     <div class="border-default bg-primary border-b px-3 py-2">

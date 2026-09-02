@@ -20,6 +20,7 @@ from eneo.flows.api.flow_models import (
     FlowTranscriptCorrectionsEditRequest,
     FlowTranscriptCorrectionsPublic,
     TranscriptCorrectionOccurrencePublic,
+    TranscriptSpeakerEditPublic,
 )
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH,
@@ -28,7 +29,10 @@ from eneo.flows.api.flow_runtime_paths import (
 from eneo.flows.application.flow_transcript_corrections_service import (
     FlowTranscriptCorrectionsView,
 )
-from eneo.flows.domain.transcript_corrections import TranscriptCorrectionOccurrence
+from eneo.flows.domain.transcript_corrections import (
+    TranscriptCorrectionOccurrence,
+    TranscriptSpeakerEdit,
+)
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
@@ -71,6 +75,13 @@ overlap within a segment, and the step must have stored structured transcript li
 Anchoring failures return `400` with code `flow_transcript_corrections_invalid_occurrence`;
 steps without structured lines return `flow_transcript_corrections_segments_unavailable`.
 
+`speaker_edits` replaces the step's speaker reassignments the same way: a null span
+reassigns the whole segment, a present span reassigns exactly `original` at
+`[char_start, char_end)` of the raw text. `original_speaker` must equal the segment's
+stored label, span edits must not overlap within a segment and are exclusive with a
+whole-segment edit there, and a no-op edit (same speaker) is rejected. Failures return
+`400` with code `flow_transcript_corrections_invalid_speaker_edit`.
+
 Service-key principals may edit corrections only for runs they own (key must have
 `resource_permissions.flows = write`).
 
@@ -110,6 +121,18 @@ _FLOW_TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE_ERROR_EXAMPLE: dict[str, object]
     },
 }
 
+_FLOW_TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT_ERROR_EXAMPLE: dict[str, object] = {
+    "message": "A speaker edit does not match the stored transcript.",
+    "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+    "code": FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT.value,
+    "context": {
+        "reason": "original_speaker_mismatch",
+        "segment_index": 12,
+        "original_speaker": "SPEAKER_00",
+        "stored_speaker": "SPEAKER_01",
+    },
+}
+
 _FLOW_TRANSCRIPT_CORRECTIONS_EDIT_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
     FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION.value: {
         "summary": "Another editor saved corrections first.",
@@ -123,6 +146,10 @@ _FLOW_TRANSCRIPT_CORRECTIONS_EDIT_ERROR_EXAMPLES: dict[str, dict[str, object]] =
         "summary": "An occurrence no longer matches the stored transcript.",
         "value": _FLOW_TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE_ERROR_EXAMPLE,
     },
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT.value: {
+        "summary": "A speaker edit no longer matches the stored transcript.",
+        "value": _FLOW_TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT_ERROR_EXAMPLE,
+    },
 }
 
 
@@ -135,6 +162,10 @@ def _present_transcript_corrections(
         occurrences=[
             TranscriptCorrectionOccurrencePublic.model_validate(item)
             for item in view.corrections.occurrences_json
+        ],
+        speaker_edits=[
+            TranscriptSpeakerEditPublic.model_validate(item)
+            for item in view.corrections.speaker_edits_json
         ],
         revision=view.corrections.revision,
         stale=view.stale,
@@ -204,9 +235,11 @@ async def list_flow_run_transcript_corrections(
             description=(
                 "Transcript corrections edit failed. Machine-readable codes are "
                 "`flow_transcript_corrections_stale_revision`, "
-                "`flow_transcript_corrections_segments_unavailable`, and "
-                "`flow_transcript_corrections_invalid_occurrence` (whose context "
-                "carries `reason` plus the offending anchor fields)."
+                "`flow_transcript_corrections_segments_unavailable`, "
+                "`flow_transcript_corrections_invalid_occurrence`, and "
+                "`flow_transcript_corrections_invalid_speaker_edit` (the "
+                "last two carry `reason` plus the offending anchor fields "
+                "in `context`)."
             ),
             examples=_FLOW_TRANSCRIPT_CORRECTIONS_EDIT_ERROR_EXAMPLES,
         ),
@@ -264,6 +297,17 @@ async def edit_flow_run_transcript_corrections(
                 )
                 for occurrence in corrections_in.occurrences
             ],
+            speaker_edits=[
+                TranscriptSpeakerEdit(
+                    segment_index=edit.segment_index,
+                    char_start=edit.char_start,
+                    char_end=edit.char_end,
+                    original=edit.original,
+                    original_speaker=edit.original_speaker,
+                    speaker=edit.speaker,
+                )
+                for edit in corrections_in.speaker_edits
+            ],
         )
         user = container.user()
         actor_kwargs = audit_actor_kwargs(user)
@@ -284,6 +328,7 @@ async def edit_flow_run_transcript_corrections(
                     "run_id": str(run_id),
                     "step_id": str(step_id),
                     "occurrence_count": len(view.corrections.occurrences_json),
+                    "speaker_edit_count": len(view.corrections.speaker_edits_json),
                     "revision": view.corrections.revision,
                 },
             ),

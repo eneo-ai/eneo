@@ -2468,10 +2468,20 @@ FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE: dict[str, Any] = {
     "corrected": "Çagri",
 }
 
+FLOW_TRANSCRIPT_SPEAKER_EDIT_EXAMPLE: dict[str, Any] = {
+    "segment_index": 12,
+    "char_start": None,
+    "char_end": None,
+    "original": None,
+    "original_speaker": "SPEAKER_00",
+    "speaker": "SPEAKER_01",
+}
+
 FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE: dict[str, Any] = {
     "flow_run_id": "00000000-0000-0000-0000-000000000301",
     "step_id": "00000000-0000-0000-0000-000000000101",
     "occurrences": [FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE],
+    "speaker_edits": [FLOW_TRANSCRIPT_SPEAKER_EDIT_EXAMPLE],
     "revision": 2,
     "stale": False,
     "edited_by_principal_type": "user",
@@ -2482,6 +2492,7 @@ FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE: dict[str, Any] = {
 FLOW_TRANSCRIPT_CORRECTIONS_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
     "expected_revision": 1,
     "occurrences": [FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE],
+    "speaker_edits": [FLOW_TRANSCRIPT_SPEAKER_EDIT_EXAMPLE],
 }
 
 
@@ -2525,6 +2536,79 @@ class TranscriptCorrectionOccurrencePublic(BaseModel):
         return self
 
 
+class TranscriptSpeakerEditPublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_TRANSCRIPT_SPEAKER_EDIT_EXAMPLE},
+    )
+
+    segment_index: int = Field(
+        ge=0,
+        description=(
+            "Index into the transcription step's stored `transcription.segments` "
+            "array (the same array the steps listing returns)."
+        ),
+    )
+    char_start: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Inclusive character offset into the segment's raw `text`, or null "
+            "for a whole-segment reassignment."
+        ),
+    )
+    char_end: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Exclusive character offset; must be greater than `char_start`. "
+            "Null for a whole-segment reassignment."
+        ),
+    )
+    original: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The exact raw text at `[char_start, char_end)`, or null for a "
+            "whole-segment reassignment. A mismatch returns `400` with code "
+            "`flow_transcript_corrections_invalid_speaker_edit`."
+        ),
+    )
+    original_speaker: str = Field(
+        pattern=r"^SPEAKER_\d{2,}$",
+        description=(
+            "The segment's stored speaker label the edit anchors to. A "
+            "mismatch returns `400` with code "
+            "`flow_transcript_corrections_invalid_speaker_edit`."
+        ),
+    )
+    speaker: str = Field(
+        pattern=r"^SPEAKER_\d{2,}$",
+        description=(
+            "The label the content is reassigned to. A label not present in "
+            "the transcript is allowed (splitting a merged speaker); it "
+            "becomes nameable once the speaker-mapping step sees it."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_span_shape(self) -> Self:
+        span_fields = (self.char_start, self.char_end, self.original)
+        nulls = [field is None for field in span_fields]
+        if any(nulls) and not all(nulls):
+            raise ValueError(
+                "char_start, char_end and original must be all null "
+                "(whole-segment) or all present (span)"
+            )
+        if (
+            self.char_start is not None
+            and self.char_end is not None
+            and self.char_end <= self.char_start
+        ):
+            raise ValueError("char_end must be greater than char_start")
+        return self
+
+
 class FlowTranscriptCorrectionsPublic(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE},
@@ -2533,6 +2617,13 @@ class FlowTranscriptCorrectionsPublic(BaseModel):
     flow_run_id: UUID
     step_id: UUID
     occurrences: list[TranscriptCorrectionOccurrencePublic]
+    speaker_edits: list[TranscriptSpeakerEditPublic] = Field(
+        default_factory=list[TranscriptSpeakerEditPublic],
+        description=(
+            "Speaker reassignments stored with the set; empty for sets saved "
+            "before speaker edits existed."
+        ),
+    )
     revision: int = Field(
         description=(
             "Compare token for the next edit. Send it back as "
@@ -2574,5 +2665,14 @@ class FlowTranscriptCorrectionsEditRequest(BaseModel):
             "The full replacement list for this step (replace-style). An empty "
             "list clears the step's corrections while keeping the revision "
             "history monotonic."
+        ),
+    )
+    speaker_edits: list[TranscriptSpeakerEditPublic] = Field(
+        default_factory=list[TranscriptSpeakerEditPublic],
+        max_length=2000,
+        description=(
+            "The full replacement list of speaker reassignments for this step "
+            "(replace-style, like `occurrences`). Omit or send an empty list "
+            "to clear them."
         ),
     )

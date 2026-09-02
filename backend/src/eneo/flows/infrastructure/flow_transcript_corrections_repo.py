@@ -72,6 +72,7 @@ class FlowTranscriptCorrectionsRepository:
         run_id: UUID,
         step_id: UUID,
         occurrences_json: list[dict[str, Any]],
+        speaker_edits_json: list[dict[str, Any]],
         segments_hash: str,
         expected_revision: int | None,
         principal: FlowPrincipal,
@@ -91,6 +92,7 @@ class FlowTranscriptCorrectionsRepository:
                     flow_run_id=run_id,
                     step_id=step_id,
                     occurrences_json=occurrences_json,
+                    speaker_edits_json=speaker_edits_json,
                     segments_hash=segments_hash,
                     schema_version=TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION,
                     **principal_values,
@@ -118,6 +120,7 @@ class FlowTranscriptCorrectionsRepository:
             .where(FlowTranscriptCorrections.revision == expected_revision)
             .values(
                 occurrences_json=occurrences_json,
+                speaker_edits_json=speaker_edits_json,
                 segments_hash=segments_hash,
                 revision=FlowTranscriptCorrections.revision + 1,
                 schema_version=TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION,

@@ -283,14 +283,8 @@
                 getAudioUrl={transcriptContext.getAudioUrl}
                 speakerNames={transcriptSpeakerNames}
                 textFallback={outputText}
-                editable={transcriptContext.segments !== null &&
-                  (correctionsController?.ready ?? false)}
                 corrections={correctionsController?.occurrences ?? []}
-                busy={correctionsController?.saving ?? false}
-                onSaveLine={correctionsController ? correctionsController.saveLine : undefined}
-                onRevertLine={correctionsController
-                  ? (segmentIndex) => void correctionsController?.revertLine(segmentIndex)
-                  : undefined}
+                speakerEdits={correctionsController?.speakerEdits ?? []}
                 class="mt-1"
               />
             {:else if result.output_payload_json.text && !result.output_payload_json.structured && !hasResultFiles}

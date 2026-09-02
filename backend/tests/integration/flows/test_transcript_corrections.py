@@ -15,6 +15,7 @@ from eneo.flows.application.flow_transcript_corrections_service import (
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionOccurrence,
+    TranscriptSpeakerEdit,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -253,6 +254,25 @@ def _occurrence(
         char_end=char_end,
         original=original,
         corrected=corrected,
+    )
+
+
+def _speaker_edit(
+    *,
+    segment_index: int = 1,
+    char_start: int | None = None,
+    char_end: int | None = None,
+    original: str | None = None,
+    original_speaker: str = "SPEAKER_01",
+    speaker: str = "SPEAKER_00",
+) -> TranscriptSpeakerEdit:
+    return TranscriptSpeakerEdit(
+        segment_index=segment_index,
+        char_start=char_start,
+        char_end=char_end,
+        original=original,
+        original_speaker=original_speaker,
+        speaker=speaker,
     )
 
 
@@ -514,3 +534,175 @@ async def test_repo_filters_by_tenant(
             )
             == []
         )
+
+
+async def test_save_and_list_round_trip_with_speaker_edits(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        service = _service(session=session, admin_user=admin_user)
+
+        saved = await service.save(
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            expected_revision=None,
+            occurrences=[_occurrence()],
+            speaker_edits=[
+                _speaker_edit(
+                    segment_index=1,
+                    char_start=0,
+                    char_end=6,
+                    original="sugary",
+                    original_speaker="SPEAKER_01",
+                    speaker="SPEAKER_02",
+                ),
+                _speaker_edit(
+                    segment_index=0,
+                    original_speaker="SPEAKER_00",
+                    speaker="SPEAKER_03",
+                ),
+            ],
+        )
+
+        assert saved.corrections.schema_version == 2
+        # Canonical order: by segment, whole-segment edits before spans.
+        assert [
+            (item["segment_index"], item["char_start"])
+            for item in saved.corrections.speaker_edits_json
+        ] == [(0, None), (1, 0)]
+
+        views = await service.list_for_run(
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+        )
+        assert len(views) == 1
+        assert views[0].corrections.speaker_edits() == saved.corrections.speaker_edits()
+        assert views[0].stale is False
+
+
+async def test_save_rejects_invalid_speaker_edit(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        service = _service(session=session, admin_user=admin_user)
+
+        with pytest.raises(FlowBadRequestException) as excinfo:
+            await service.save(
+                flow_id=scenario.flow_id,
+                run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+                expected_revision=None,
+                occurrences=[],
+                # A no-op edit: the segment already belongs to this speaker.
+                speaker_edits=[_speaker_edit(speaker="SPEAKER_01")],
+            )
+        assert excinfo.value.code == (
+            FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT
+        )
+
+
+async def test_speaker_change_in_segments_flags_stale(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        service = _service(session=session, admin_user=admin_user)
+        await service.save(
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            expected_revision=None,
+            occurrences=[],
+            speaker_edits=[_speaker_edit()],
+        )
+
+        # Same text, different diarization label: anchors are invalid.
+        relabelled = [dict(SEGMENTS[0]), dict(SEGMENTS[1], speaker="SPEAKER_02")]
+        await _store_segments(
+            session=session,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            segments=relabelled,
+        )
+
+        views = await service.list_for_run(
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+        )
+        assert len(views) == 1
+        assert views[0].stale is True
+
+
+async def test_revision_cas_replaces_speaker_edits(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        service = _service(session=session, admin_user=admin_user)
+        saved = await service.save(
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            expected_revision=None,
+            occurrences=[],
+            speaker_edits=[_speaker_edit()],
+        )
+        assert saved.corrections.speaker_edits_json != []
+
+        cleared = await service.save(
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            expected_revision=saved.corrections.revision,
+            occurrences=[],
+            speaker_edits=[],
+        )
+        assert cleared.corrections.revision == saved.corrections.revision + 1
+        assert cleared.corrections.speaker_edits_json == []

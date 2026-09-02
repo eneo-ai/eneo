@@ -916,7 +916,8 @@ describe("flows transcript corrections endpoints", () => {
     });
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       expected_revision: 1,
-      occurrences
+      occurrences,
+      speaker_edits: []
     });
   });
 
@@ -933,7 +934,38 @@ describe("flows transcript corrections endpoints", () => {
 
     expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
       expected_revision: null,
-      occurrences: []
+      occurrences: [],
+      speaker_edits: []
+    });
+  });
+
+  it("sends speaker edits as speaker_edits in the patch body", async () => {
+    const fetch = vi.fn(async () => ({ revision: 2 }));
+    const flows = initFlows({ fetch });
+    const speakerEdits = [
+      {
+        segment_index: 1,
+        char_start: null,
+        char_end: null,
+        original: null,
+        original_speaker: "SPEAKER_01",
+        speaker: "SPEAKER_02"
+      }
+    ];
+
+    await flows.runs.transcriptCorrections.save({
+      flowId: "flow-1",
+      runId: "run-1",
+      stepId: "step-1",
+      expectedRevision: 1,
+      occurrences: [],
+      speakerEdits
+    });
+
+    expect(fetch.mock.calls[0][1].requestBody["application/json"]).toEqual({
+      expected_revision: 1,
+      occurrences: [],
+      speaker_edits: speakerEdits
     });
   });
 });

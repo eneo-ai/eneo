@@ -1539,6 +1539,7 @@ class Container(containers.DeclarativeContainer):
         access_policy=flow_run_access_policy,
         flow_run_terminalizer=flow_run_terminalizer,
         flow_run_repo=flow_run_repo,
+        transcript_corrections_repo=flow_transcript_corrections_repo,
     )
     flow_transcript_corrections_service = providers.Factory(
         FlowTranscriptCorrectionsService,
