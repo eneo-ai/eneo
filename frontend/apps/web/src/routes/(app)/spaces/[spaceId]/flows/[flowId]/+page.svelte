@@ -157,6 +157,13 @@
   const activeProcessingStep = $derived(
     $update.steps.find((step) => step.id === $activeStepId) ?? null
   );
+  // Each selected step starts at its header; the previous step's scroll offset
+  // must not carry over. jsdom has no element scrollTo, hence optional.
+  let stepEditorScrollEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    void $activeStepId;
+    stepEditorScrollEl?.scrollTo?.({ top: 0 });
+  });
 
   async function selectProcessingStep(stepId: string | null) {
     try {
@@ -1181,7 +1188,7 @@
             <div
               class="flow-processing-step-editor border-default bg-primary flex-1 overflow-hidden rounded-xl border shadow-sm xl:max-w-[900px] 2xl:max-w-[1000px]"
             >
-              <div class="h-full overflow-y-auto">
+              <div bind:this={stepEditorScrollEl} class="h-full overflow-y-auto">
                 <FlowStepEditPanel
                   steps={$update.steps}
                   activeStepId={$activeStepId}

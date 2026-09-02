@@ -29,6 +29,8 @@
   import { m } from "$lib/paraglide/messages";
   import { getChipClasses } from "$lib/features/flows/flowVariableTokens";
   import Info from "lucide-svelte/icons/info";
+  import ArrowUp from "lucide-svelte/icons/arrow-up";
+  import ArrowDown from "lucide-svelte/icons/arrow-down";
   let {
     isPublished,
     onStatsChanged
@@ -470,46 +472,26 @@
               <div
                 class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/field:opacity-100 focus-within:opacity-100"
               >
-                <button
-                  type="button"
-                  class="text-muted hover:text-primary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded transition-colors disabled:opacity-30"
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted hover:text-primary disabled:opacity-30"
                   disabled={index === 0 || isPublished}
                   onclick={() => moveField(index, -1)}
                   aria-label={m.flow_step_move_up()}
                 >
-                  <svg
-                    class="size-3"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M8 12V4M4 7l4-3 4 3" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  class="text-muted hover:text-primary hover:bg-hover-dimmer inline-flex size-7 items-center justify-center rounded transition-colors disabled:opacity-30"
+                  <ArrowUp class="size-3.5" aria-hidden="true" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="text-muted hover:text-primary disabled:opacity-30"
                   disabled={index === localFields.length - 1 || isPublished}
                   onclick={() => moveField(index, 1)}
                   aria-label={m.flow_step_move_down()}
                 >
-                  <svg
-                    class="size-3"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.5"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M8 4v8M4 9l4 3 4-3" />
-                  </svg>
-                </button>
+                  <ArrowDown class="size-3.5" aria-hidden="true" />
+                </Button>
               </div>
 
               <label class="min-w-0 flex-1">
@@ -533,14 +515,15 @@
                   </span>
                 {/if}
                 {#if !isPublished}
-                  <button
-                    type="button"
-                    class="text-muted hover:text-negative-stronger hover:bg-negative-dimmer/40 inline-flex size-8 items-center justify-center rounded-md opacity-0 transition-all group-hover/field:opacity-100 focus:opacity-100"
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="text-muted hover:text-negative-stronger hover:bg-negative-dimmer/40 opacity-0 group-hover/field:opacity-100 focus-visible:opacity-100"
                     onclick={() => removeField(index)}
                     aria-label={m.delete()}
                   >
                     <IconTrash class="size-3.5" />
-                  </button>
+                  </Button>
                 {/if}
               </div>
             </div>
@@ -665,25 +648,28 @@
                           disabled={isPublished}
                           oninput={(e) => updateOption(index, optionIndex, e.currentTarget.value)}
                         />
-                        <button
-                          type="button"
-                          class="text-muted hover:text-negative-stronger hover:bg-negative-dimmer/40 inline-flex size-11 shrink-0 items-center justify-center rounded transition-colors"
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="text-muted hover:text-negative-stronger hover:bg-negative-dimmer/40 shrink-0"
                           onclick={() => removeOption(index, optionIndex)}
                           disabled={isPublished}
                           aria-label={m.flow_form_field_remove_option_label()}
                         >
                           <IconTrash class="size-3.5" />
-                        </button>
+                        </Button>
                       </div>
                     {/each}
                     {#if !isPublished}
-                      <button
-                        type="button"
-                        class="text-accent-default hover:text-accent-stronger focus-visible:ring-ring/50 mt-0.5 self-start rounded text-left text-xs font-medium focus-visible:ring-3 focus-visible:outline-none"
+                      <Button
+                        variant="link"
+                        size="xs"
+                        class="mt-0.5 h-auto self-start px-0 font-medium"
                         onclick={() => addOption(index)}
                       >
-                        + {m.flow_form_field_add_option()}
-                      </button>
+                        <IconPlus class="size-3" aria-hidden="true" />
+                        {m.flow_form_field_add_option()}
+                      </Button>
                     {/if}
                   </div>
                 </div>
@@ -695,14 +681,14 @@
     </Card.Root>
 
     {#if !isPublished}
-      <button
-        type="button"
-        class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default focus-visible:border-accent-default focus-visible:ring-accent-default/20 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed py-3 text-sm transition-colors focus-visible:ring-3 focus-visible:outline-none"
+      <Button
+        variant="outline"
+        class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer hover:text-accent-default h-auto w-full rounded-lg border-dashed py-3 text-sm"
         onclick={addField}
       >
-        <IconPlus class="size-4" />
+        <IconPlus class="size-4" aria-hidden="true" />
         {m.flow_form_add_field()}
-      </button>
+      </Button>
     {/if}
   {/if}
 </div>

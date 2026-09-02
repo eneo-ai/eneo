@@ -14,7 +14,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { writable } from "svelte/store";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { IconWorkflow } from "@eneo/icons/workflow";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
@@ -701,6 +701,20 @@
   let taskRequestOpen = $state(0);
   let technicalRequestOpen = $state(0);
   let focusInstructionPending = $state(false);
+  // A step the user just added lands with its name selected, so typing renames
+  // it at once. Guarded by step id: revisiting the step later must not steal focus.
+  let nameInputEl = $state<HTMLInputElement | null>(null);
+  let namedNewStepId = $state<string | null>(null);
+  $effect(() => {
+    const intent = $newStepOpenIntent;
+    const el = nameInputEl;
+    const step = activeStep;
+    if (!intent || !step || !el || intent.order !== step.step_order) return;
+    if (untrack(() => namedNewStepId) === step.id) return;
+    namedNewStepId = step.id ?? null;
+    el.focus();
+    el.select();
+  });
   const chapterTaskStatus = $derived(
     activeStep
       ? getChapterTaskStatus(
@@ -980,6 +994,7 @@
               <div class="flex flex-col gap-2">
                 <Input
                   {...aria}
+                  bind:ref={nameInputEl}
                   value={activeStep.user_description ?? ""}
                   placeholder={m.flow_step_name_placeholder()}
                   disabled={isPublished}

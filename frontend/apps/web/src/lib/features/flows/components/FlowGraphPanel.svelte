@@ -6,6 +6,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   let {
     flow,
@@ -85,14 +86,10 @@
         {:else if loadState === "error"}
           <div class="text-secondary flex h-full flex-col items-center justify-center gap-3">
             <p class="text-sm">{m.flow_graph_error()}</p>
-            <button
-              type="button"
-              class="bg-hover-dimmer hover:bg-hover-default focus-visible:ring-accent-default/30 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
-              onclick={loadGraph}
-            >
+            <Button variant="secondary" size="sm" onclick={loadGraph}>
               <IconRefresh class="size-3.5" aria-hidden="true" />
               {m.flow_graph_retry()}
-            </button>
+            </Button>
           </div>
         {:else if loadState === "ready" && !hasSteps}
           <div class="text-secondary flex h-full items-center justify-center">

@@ -4,6 +4,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
   import {
     getTemplateFillOutputConfig,
@@ -163,9 +164,20 @@
       ? getTemplateFillReadiness(getTemplateFillOutputConfig(step))
       : null
   );
+  // The selected step stays in view: a step added at the end of a long list is
+  // otherwise selected off-screen. jsdom has no scrollIntoView, hence optional.
+  let rowEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    if (!isActive || !rowEl) return;
+    rowEl.scrollIntoView?.({
+      block: "nearest",
+      behavior: prefersReducedMotion() ? "auto" : "smooth"
+    });
+  });
 </script>
 
 <div
+  bind:this={rowEl}
   role="listitem"
   class="step-card-row group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-150
     {isActive ? 'border-b-default bg-accent-dimmer/40' : 'border-default hover:bg-hover-dimmer/40'}
