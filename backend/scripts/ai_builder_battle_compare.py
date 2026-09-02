@@ -82,6 +82,8 @@ _OUTCOME_RANK: dict[str, int] = {
     "plan_with_error": 2,
     "builder_error": 1,
     "acquisition_failure": 1,
+    # Receipts sealed before outcome semantics 5 carry this class.
+    "provider_outcome_unknown": 1,
     "execution_failure": 1,
     "invalid_evidence": 0,
     "unclassified": 0,

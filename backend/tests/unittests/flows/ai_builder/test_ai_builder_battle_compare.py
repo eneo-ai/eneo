@@ -189,16 +189,22 @@ def test_every_harness_outcome_class_has_a_mechanics_rank() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "before_class",
+    ["acquisition_failure", "provider_outcome_unknown"],
+)
 def test_error_terminated_siblings_do_not_rank_as_improvement(
     tmp_path: Path,
+    before_class: str,
 ) -> None:
     # Both are error-terminated journeys without a plan; swapping one for the
-    # other is a different failure, not progress.
+    # other is a different failure, not progress. The second class only
+    # exists in receipts sealed before outcome semantics 5.
     module = _compare_module()
     baseline = _write(
         tmp_path,
         "base.json",
-        [_row("case-a", "acquisition_failure", verdict="not_evaluated")],
+        [_row("case-a", before_class, verdict="not_evaluated")],
     )
     current = _write(
         tmp_path,
