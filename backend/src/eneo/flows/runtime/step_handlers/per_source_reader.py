@@ -103,6 +103,11 @@ async def execute_per_source_reader(
             f"exceeding the effective max_files ceiling of {effective_max_files}.",
             code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
         )
+    if not file_ids:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-source reader received no source files.",
+            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
+        )
     if _documents_item_schema(step.output_contract) is None:
         raise TypedIOValidationException(
             "Per-source document readers require a JSON output contract shaped "
@@ -117,16 +122,15 @@ async def execute_per_source_reader(
     )
     estimates: list[int] = []
     native_json_fallback_possible = False
-    preview_file_ids: list[UUID | None] = list(file_ids) if file_ids else [None]
-    prepared_sources: list[tuple[UUID | None, PreparedAssistantStep]] = []
-    for file_id in preview_file_ids:
+    prepared_sources: list[tuple[UUID, PreparedAssistantStep]] = []
+    for file_id in file_ids:
         preview_step = await preview_assistant_step(
             step=per_call_step,
             run=run,
             state=state,
             version_metadata=version_metadata,
             attempt_no=attempt_no,
-            requested_file_ids_override=(file_id,) if file_id is not None else (),
+            requested_file_ids_override=(file_id,),
         )
         prepared_sources.append((file_id, preview_step))
         estimates.append(
@@ -165,23 +169,6 @@ async def execute_per_source_reader(
             strict=True,
         )
     ]
-    if not file_ids:
-        prepared_step = prepared_sources[0][1]
-        output = await complete_step_execution(
-            step=per_call_step,
-            run=run,
-            state=state,
-            prepared=prepared_step.prepared,
-            deps=replace(
-                prepared_step.deps,
-                mapped_call_context=MappedProviderCallProvenance(
-                    execution_mode="per_source_reader",
-                    source_index=1,
-                ),
-            ),
-        )
-        return StepExecutionResult(output=output)
-
     mapped_evidence = MappedCallEvidence(
         policy=rag_evidence_policy,
         execution_mode="per_source",
@@ -192,7 +179,6 @@ async def execute_per_source_reader(
         for source_number, (file_id, prepared_step) in enumerate(
             prepared_sources, start=1
         ):
-            assert file_id is not None
             source_call = await _execute_one_source(
                 source_number=source_number,
                 file_id=file_id,
@@ -282,11 +268,6 @@ async def _assemble_per_source_output(
     per_source_calls: list[PerSourceReaderCall],
     mapped_rag_metadata: dict[str, Any] | None,
 ) -> StepExecutionOutput:
-    if not per_source_calls:
-        raise TypedIOValidationException(
-            f"Step {step.step_order}: per-source reader requires at least one source.",
-            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
-        )
     first_output = per_source_calls[0].output
     documents = [
         _source_document_items(call)

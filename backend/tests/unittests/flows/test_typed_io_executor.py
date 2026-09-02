@@ -2773,6 +2773,39 @@ async def test_per_source_reader_rejects_textless_file_before_provider_dispatch(
 
 
 @pytest.mark.asyncio
+async def test_per_source_reader_rejects_zero_sources_before_provider_dispatch(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
+    assistant.preview_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_per_source_reader_rejects_max_plus_one_before_assistant_prepare(user):
     executor, _, flow_run_repo, _ = _build_executor(user)
     # Ceiling 2 admits one item; two inputs are max-plus-one.
