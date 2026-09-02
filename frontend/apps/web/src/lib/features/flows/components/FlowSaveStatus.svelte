@@ -13,7 +13,10 @@
   } = $props();
 </script>
 
-<div aria-live="polite" role="status">
+<!-- A fixed minimum width: the three labels differ in length, and a badge
+     that grows and shrinks as a draft flips between unsaved, saving and
+     saved reflows the whole header row on every keystroke pause. -->
+<div aria-live="polite" role="status" class="min-w-[7.25rem]">
   {#if status === "saved"}
     <span class="flex items-center gap-1.5" in:fade={{ duration: 150 }}>
       <Badge variant="outline" class="border-default/60 text-muted-foreground gap-1.5">
@@ -24,7 +27,7 @@
   {:else if status === "saving"}
     <span class="flex items-center gap-1.5" in:fade={{ duration: 150 }}>
       <Badge variant="outline" class="border-default bg-secondary/50 text-secondary gap-1.5">
-        <Loader2 class="size-3 animate-spin" />
+        <Loader2 class="size-3 animate-spin motion-reduce:animate-none" />
         {m.flow_save_status_saving()}
       </Badge>
     </span>

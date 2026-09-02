@@ -389,11 +389,11 @@
     ? 'ring-warning-default/40 ring-1'
     : ''}"
 >
-  <!-- Toolbar -->
-  <div
-    class="border-default bg-secondary/30 flex items-center justify-between border-b px-3 py-1.5"
-  >
-    <span class="text-muted text-xs">{label}</span>
+  <!-- Toolbar. The row that hosts the editor already titles it, so the label
+       is kept for assistive technology only; repeating it here read as two
+       different fields. -->
+  <div class="border-default bg-secondary/30 flex items-center justify-end border-b px-3 py-1.5">
+    <span class="sr-only">{label}</span>
     <div class="flex items-center gap-1">
       {#if toolbar}
         {@render toolbar()}
