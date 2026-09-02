@@ -356,9 +356,10 @@ class AIBuilderProposalTelemetryDiagnosticsResponse(BaseModel):
     proposal_turns: list[AIBuilderProposalTurnDiagnostic] = Field(
         default_factory=lambda: cast(list[AIBuilderProposalTurnDiagnostic], [])
     )
-    provider_calls: list[AIBuilderProviderCallDiagnostic] = Field(
-        default_factory=lambda: cast(list[AIBuilderProviderCallDiagnostic], [])
-    )
+    provider_calls: list[AIBuilderProviderCallDiagnostic] = []
+    # Persisted call records the reader could not parse; a consumer must treat
+    # any non-zero value as unknown usage, never as zero spend.
+    provider_call_records_skipped: int = Field(default=0, ge=0)
 
 
 class AIBuilderClassifierDiagnostic(SlotClassificationMetadata):

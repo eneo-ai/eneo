@@ -102,6 +102,7 @@ def _observation(
     patterns: tuple[str, ...] = (_ROW,),
     provider_disposition: str | None = None,
     status: str = "completed",
+    failure_class: str | None = None,
 ) -> dict[str, Any]:
     return {
         "case_id": case_id,
@@ -110,6 +111,7 @@ def _observation(
         "artifact_mode": "live_execution",
         "observation_status": status,
         "outcome_class": outcome,
+        "failure_class": failure_class,
         "expectation_verdict": verdict,
         "case_contract_sha256": _RECEIPTS.canonical_sha256(_case_contract(case_id)),
         _RECEIPTS.BUNDLE_FILE_FIELD: f"{case_id}-r{repetition}.json",
@@ -212,6 +214,9 @@ def _summary(
     execution_failure_count = sum(
         row["observation_status"] == "execution_failure" for row in rows
     )
+    acquisition_failure_count = sum(
+        row["observation_status"] == "acquisition_failure" for row in rows
+    )
     invalid_evidence_count = sum(
         row["observation_status"] == "invalid_evidence" for row in rows
     )
@@ -220,6 +225,7 @@ def _summary(
     )
     acquisition_checks = _RECEIPTS.acquisition_validity_checks(
         execution_failure_observation_count=execution_failure_count,
+        acquisition_failure_observation_count=acquisition_failure_count,
         invalid_evidence_observation_count=invalid_evidence_count,
     )
     sentinel = (
@@ -235,6 +241,7 @@ def _summary(
         "repetitions": 5,
         "sentinel_verdict": sentinel,
         "execution_failure_observation_count": execution_failure_count,
+        "acquisition_failure_observation_count": acquisition_failure_count,
         "invalid_evidence_observation_count": invalid_evidence_count,
         "identity_failed_check_count": observation_identity_failure_count,
         "suite_identity_failed_check_count": 0,
@@ -533,15 +540,16 @@ def test_a_provider_marked_receipt_is_not_scored(
     rows[3] = _observation(
         "case_0",
         4,
-        outcome="provider_outcome_unknown",
-        status="error_terminated",
+        outcome="acquisition_failure",
+        status="acquisition_failure",
         provider_disposition="provider_outcome_unknown",
+        failure_class="provider_request",
     )
     verdict = _evaluate(gate, receipts, rows)
     assert not verdict.receipt_valid
     assert verdict.release == "invalid"
     assert verdict.rows == ()
-    assert any("provider disposition" in reason for reason in verdict.invalidity)
+    assert any("acquisition fault" in reason for reason in verdict.invalidity)
 
 
 @pytest.mark.parametrize("failure_kind", ["provider", "execution"])
@@ -556,10 +564,11 @@ def test_an_eligible_slot_replacement_is_merged_and_counted(
         rows[0] = _observation(
             "case_0",
             1,
-            outcome="provider_outcome_unknown",
+            outcome="acquisition_failure",
             verdict="not_evaluated",
             provider_disposition="provider_outcome_unknown",
-            status="error_terminated",
+            status="acquisition_failure",
+            failure_class="provider_request",
         )
     else:
         rows[0] = _observation(
@@ -568,6 +577,7 @@ def test_an_eligible_slot_replacement_is_merged_and_counted(
             outcome="execution_failure",
             verdict="not_evaluated",
             status="execution_failure",
+            failure_class="dependency_stack",
         )
         rows[0]["artifact_mode"] = "live_execution_failure"
     suite_dir = _suite_dir(tmp_path, rows)
@@ -603,10 +613,11 @@ def test_a_replacement_from_another_revision_is_refused(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(
@@ -626,10 +637,11 @@ def test_a_replacement_measured_against_another_model_is_refused(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
@@ -655,10 +667,11 @@ def test_replacing_more_than_five_percent_invalidates_the_receipt(
         rows[index] = _observation(
             "case_0",
             index + 1,
-            outcome="provider_outcome_unknown",
+            outcome="acquisition_failure",
             verdict="not_evaluated",
             provider_disposition="provider_outcome_unknown",
-            status="error_terminated",
+            status="acquisition_failure",
+            failure_class="provider_request",
         )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(
@@ -695,10 +708,11 @@ def test_a_replacement_with_a_sealed_identity_failure_is_refused(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     replacement = _observation("case_0", 1)
@@ -724,15 +738,26 @@ def test_a_replacement_acquisition_fault_is_not_release_ready(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(
         suite_dir,
-        [(_observation("case_0", 1, status="execution_failure"), {})],
+        [
+            (
+                _observation(
+                    "case_0",
+                    1,
+                    status="execution_failure",
+                    failure_class="dependency_stack",
+                ),
+                {},
+            )
+        ],
     )
 
     with pytest.raises(receipts.ReceiptError, match="failed its acquisition"):
@@ -746,10 +771,11 @@ def test_a_replacement_must_seal_the_original_repetition(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
@@ -771,10 +797,11 @@ def test_a_replacement_must_match_the_original_case_contract(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
@@ -799,10 +826,11 @@ def test_a_replacement_bundle_must_declare_the_v5_schema(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
@@ -824,10 +852,11 @@ def test_duplicate_replacements_for_one_slot_are_invalid(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
@@ -848,10 +877,11 @@ def test_a_replacement_reason_must_explain_the_operator_action(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(
@@ -870,10 +900,11 @@ def test_a_replacement_digest_must_resolve_to_one_unclaimed_sibling(
     rows[0] = _observation(
         "case_0",
         1,
-        outcome="provider_outcome_unknown",
+        outcome="acquisition_failure",
         verdict="not_evaluated",
         provider_disposition="provider_outcome_unknown",
-        status="error_terminated",
+        status="acquisition_failure",
+        failure_class="provider_request",
     )
     suite_dir = _suite_dir(tmp_path, rows)
     _write_replacements(suite_dir, [(_observation("case_0", 1), {})])
@@ -1736,9 +1767,29 @@ def test_receipt_rows_carry_classifier_spend_only_when_the_journey_recorded_it()
 
     assert (
         observations[0].classifier_calls,
+        observations[0].classifier_prompt_tokens,
         observations[0].classifier_total_tokens,
-    ) == (2, 16_500)
+    ) == (2, 16_000, 16_500)
     assert (
         observations[1].classifier_calls,
+        observations[1].classifier_prompt_tokens,
         observations[1].classifier_total_tokens,
-    ) == (None, None)
+    ) == (None, None, None)
+
+
+def test_an_acquisition_status_requires_an_acquisition_class(
+    receipts: ModuleType,
+) -> None:
+    row = _observation(
+        "case_0",
+        1,
+        outcome="acquisition_failure",
+        verdict="not_evaluated",
+        status="acquisition_failure",
+        failure_class="builder_semantic",
+    )
+    with pytest.raises(receipts.ReceiptError, match="acquisition failure class"):
+        receipts.observation_from_row(row, where="row")
+    row["failure_class"] = "not_a_class"
+    with pytest.raises(receipts.ReceiptError, match="not a known class"):
+        receipts.observation_from_row(row, where="row")

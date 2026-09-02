@@ -1285,6 +1285,12 @@ class TestGetSessionEndpoint:
                     }
                 },
             ),
+            ConversationMessage(
+                message_id="assistant-older-build",
+                role="assistant",
+                content="Äldre fråga.",
+                metadata={"planner_telemetry": {"call_records": ["unreadable"]}},
+            ),
         ]
         service = container.ai_builder_service.return_value
         service.get_session.return_value = session
@@ -1320,6 +1326,7 @@ class TestGetSessionEndpoint:
                 "provider_failure_kind": None,
             },
         ]
+        assert dumped["provider_call_records_skipped"] == 1
 
     @pytest.mark.anyio
     async def test_proposal_telemetry_diagnostics_reject_non_creator(self):

@@ -966,16 +966,19 @@ def test_persisted_call_records_read_back_through_the_typed_model() -> None:
     )
 
     metadata = {"planner_telemetry": telemetry.build_planner_telemetry()}
-    records = planner_call_records_from_metadata(metadata)
+    read = planner_call_records_from_metadata(metadata)
 
-    assert [(r.call_kind, r.attempt, r.total_tokens) for r in records] == [
+    assert [(r.call_kind, r.attempt, r.total_tokens) for r in read.records] == [
         ("slot_classification", 1, 9_400)
     ]
-    assert records[0].prompt_tokens == 9_000
-    assert records[0].provider_failure_kind is None
+    assert read.records[0].prompt_tokens == 9_000
+    assert read.records[0].provider_failure_kind is None
+    assert read.skipped == 0
 
 
-def test_call_records_an_older_build_wrote_in_another_shape_are_skipped() -> None:
+def test_call_records_an_older_build_wrote_in_another_shape_are_counted_as_skipped() -> (
+    None
+):
     metadata = {
         "planner_telemetry": {
             "call_records": [
@@ -993,8 +996,10 @@ def test_call_records_an_older_build_wrote_in_another_shape_are_skipped() -> Non
         }
     }
 
-    records = planner_call_records_from_metadata(metadata)
+    read = planner_call_records_from_metadata(metadata)
 
-    assert [(r.call_kind, r.attempt) for r in records] == [("proposal_initial", 2)]
-    assert planner_call_records_from_metadata(None) == ()
-    assert planner_call_records_from_metadata({"planner_telemetry": {}}) == ()
+    assert [(r.call_kind, r.attempt) for r in read.records] == [("proposal_initial", 2)]
+    assert read.skipped == 2
+    assert planner_call_records_from_metadata(None).skipped == 0
+    assert planner_call_records_from_metadata({"planner_telemetry": {}}).skipped == 0
+    assert planner_call_records_from_metadata({"planner_telemetry": []}).skipped == 1

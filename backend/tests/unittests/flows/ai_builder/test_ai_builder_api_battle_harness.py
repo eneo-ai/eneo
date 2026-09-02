@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Lock
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, get_args
 from uuid import UUID
 
 from pytest import CaptureFixture, MonkeyPatch, mark, raises
@@ -620,6 +620,7 @@ def test_send_failure_preserves_turn_identity_for_failure_bundle(
     assert exc_info.value.client_turn_id == str(turn_id)
     assert harness._failure_error_fields(exc_info.value) == {
         "error": "<urlopen error connection reset>",
+        "failure_class": "dependency_stack",
         "client_turn_id": str(turn_id),
     }
 
@@ -3169,6 +3170,7 @@ def test_acquisition_validity_ignores_product_failures_and_catches_execution_fai
 
     clean = harness.acquisition_validity_checks(
         execution_failure_observation_count=0,
+        acquisition_failure_observation_count=0,
         invalid_evidence_observation_count=0,
     )
     assert all(check["passed"] for check in clean)
@@ -3177,6 +3179,7 @@ def test_acquisition_validity_ignores_product_failures_and_catches_execution_fai
 
     dirty = harness.acquisition_validity_checks(
         execution_failure_observation_count=1,
+        acquisition_failure_observation_count=0,
         invalid_evidence_observation_count=2,
     )
     assert (
@@ -3985,6 +3988,7 @@ def test_release_run_requires_explicit_model_before_execution(
         check["passed"]
         for check in harness.acquisition_validity_checks(
             execution_failure_observation_count=0,
+            acquisition_failure_observation_count=0,
             invalid_evidence_observation_count=0,
         )
     )
@@ -3993,6 +3997,7 @@ def test_release_run_requires_explicit_model_before_execution(
             check
             for check in harness.acquisition_validity_checks(
                 execution_failure_observation_count=1,
+                acquisition_failure_observation_count=0,
                 invalid_evidence_observation_count=0,
             )
             if check["name"] == "execution_failure_observations"
@@ -4568,22 +4573,19 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
     provider_slots = {
         ("provider-a", 4): SimpleNamespace(
             slot=("provider-a", 4),
-            observation_status="error_terminated",
-            provider_dispositions=("provider_outcome_unknown",),
+            observation_status="acquisition_failure",
             bundle_sha256="1" * 64,
             case_contract_sha256=harness._case_contract_sha256(cases[0]),
         ),
         ("provider-b", 2): SimpleNamespace(
             slot=("provider-b", 2),
             observation_status="execution_failure",
-            provider_dispositions=(),
             bundle_sha256="2" * 64,
             case_contract_sha256=harness._case_contract_sha256(cases[1]),
         ),
         ("completed-clean", 1): SimpleNamespace(
             slot=("completed-clean", 1),
             observation_status="completed",
-            provider_dispositions=(),
             bundle_sha256="3" * 64,
             case_contract_sha256=harness._case_contract_sha256(cases[2]),
         ),
@@ -4592,7 +4594,6 @@ def test_replacement_batch_reuses_context_and_preflights_publication(
         SimpleNamespace(
             slot=(f"clean-{index}", 1),
             observation_status="completed",
-            provider_dispositions=(),
         )
         for index in range(37)
     )
@@ -6026,6 +6027,7 @@ def test_applied_flow_lifecycle_deletes_flow_when_fetch_fails(
     assert deleted_paths == ["/flows/flow-created/"]
     assert harness._failure_error_fields(exc_info.value) == {
         "error": "flow fetch timed out",
+        "failure_class": "dependency_stack",
         "flow_lifecycle": {"status": "deleted", "flow_id": "flow-created"},
     }
 
@@ -6155,6 +6157,7 @@ def test_cleanup_failure_invalidates_an_otherwise_successful_observation(
 
     assert harness._failure_error_fields(exc_info.value) == {
         "error": "generated Flow cleanup failed: delete timed out",
+        "failure_class": "dependency_stack",
         "flow_lifecycle": {"status": "cleanup_failed", "flow_id": "flow-leaked"},
     }
 
@@ -8511,7 +8514,7 @@ def test_inferred_medium_classifier_claim_does_not_violate_forbidden_commit_grad
 def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
     harness = _battle_harness()
     assert harness.QUESTION_RELEVANCE_SEMANTICS_VERSION == 3
-    assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 4
+    assert harness.OUTCOME_CLASSIFICATION_SEMANTICS_VERSION == 5
     assert harness.OBSERVATION_INPUT_IDENTITY_SEMANTICS_VERSION == 3
     assert harness.SUPPORTED_CASES_FILE_VERSION == 8
     identity = harness._suite_evaluator_identity(
@@ -8520,7 +8523,7 @@ def test_evaluator_identity_carries_measurement_semantics_versions() -> None:
         expected_observations=[],
     )
     assert identity["question_relevance_semantics_version"] == 3
-    assert identity["outcome_classification_semantics_version"] == 4
+    assert identity["outcome_classification_semantics_version"] == 5
     assert identity["observation_input_identity_semantics_version"] == 3
 
 
@@ -9457,13 +9460,13 @@ def test_journey_economics_split_out_classifier_spend_from_provider_calls() -> N
     assert journey["plan_outcome"]["initial_token_cost"] == 4_000
 
 
-def test_journey_economics_report_zero_classifier_spend_without_provider_calls() -> (
+def test_journey_economics_report_zero_classifier_spend_for_an_empty_projection() -> (
     None
 ):
     harness = _battle_harness()
     journey = harness._journey_with_proposal_economics(
         {"outcome_class": "plan_first_pass"},
-        diagnostics={"proposal_turns": []},
+        diagnostics={"proposal_turns": [], "provider_calls": []},
     )
 
     assert journey["classifier_usage"] == {
@@ -9472,3 +9475,217 @@ def test_journey_economics_report_zero_classifier_spend_without_provider_calls()
         "completion_tokens": 0,
         "total_tokens": 0,
     }
+
+
+@mark.parametrize(
+    "diagnostics",
+    [
+        {"proposal_turns": []},
+        {
+            "proposal_turns": [],
+            "provider_calls": [
+                {"call_kind": "slot_classification", "attempt": 1, "total_tokens": 9}
+            ],
+            "provider_call_records_skipped": 1,
+        },
+    ],
+)
+def test_journey_economics_leave_classifier_spend_unknown_without_complete_evidence(
+    diagnostics: dict[str, object],
+) -> None:
+    """Missing or unreadable call records must never score as a saving."""
+
+    harness = _battle_harness()
+    journey = harness._journey_with_proposal_economics(
+        {"outcome_class": "plan_first_pass"},
+        diagnostics=diagnostics,
+    )
+
+    assert "classifier_usage" not in journey
+
+
+@mark.parametrize(
+    ("detail", "expected_class"),
+    [
+        (
+            {
+                "code": "planner_upstream_error",
+                "details": {
+                    "provider_disposition": "known_rejection",
+                    "provider_exception_class": "authentication",
+                },
+            },
+            "credential_route",
+        ),
+        (
+            {
+                "code": "planner_upstream_error",
+                "details": {
+                    "provider_disposition": "known_rejection",
+                    "provider_exception_class": "rate_limit",
+                },
+            },
+            "provider_request",
+        ),
+        ({"code": "session_turn_provider_outcome_unknown"}, "provider_request"),
+        ({"code": "no_planner_model_available"}, "credential_route"),
+        ({"code": "insufficient_space_permission"}, "harness_configuration"),
+        ({"code": "self_correction_quality_failure"}, "builder_semantic"),
+        ({"code": "planner_parse_error", "details": {}}, "builder_semantic"),
+    ],
+)
+def test_failure_class_reads_the_typed_provider_detail_before_the_code(
+    detail: dict[str, object], expected_class: str
+) -> None:
+    harness = _battle_harness()
+    failure_class = harness.failure_class_from_summary(
+        {"error_details": [detail]}, runtime_run_status=None, where="test"
+    )
+    assert failure_class == expected_class
+
+
+def test_failure_class_prefers_an_acquisition_fault_anywhere_in_the_turn() -> None:
+    harness = _battle_harness()
+    summary = {
+        "error_details": [
+            {"code": "planner_parse_error"},
+            {
+                "code": "planner_upstream_error",
+                "details": {"provider_disposition": "x"},
+            },
+        ]
+    }
+    assert (
+        harness.failure_class_from_summary(
+            summary, runtime_run_status=None, where="test"
+        )
+        == "provider_request"
+    )
+    assert (
+        harness.failure_class_from_summary(
+            {"error_details": []}, runtime_run_status="failed", where="test"
+        )
+        == "runtime"
+    )
+    assert (
+        harness.failure_class_from_summary(
+            {"error_details": []}, runtime_run_status="completed", where="test"
+        )
+        is None
+    )
+
+
+def test_failure_class_error_code_sets_name_only_builder_error_codes() -> None:
+    """The class map is keyed by the Builder's closed error vocabulary."""
+
+    from eneo.flows.ai_builder.ai_builder_error_contract import (
+        AIBuilderErrorCode,
+        AIBuilderProviderExceptionClass,
+    )
+
+    _battle_harness()
+    receipts = sys.modules["ai_builder_receipt"]
+    known_codes = {code.value for code in AIBuilderErrorCode}
+    for named in (
+        receipts._CREDENTIAL_ROUTE_ERROR_CODES,
+        receipts._PROVIDER_REQUEST_ERROR_CODES,
+        receipts._HARNESS_CONFIGURATION_ERROR_CODES,
+    ):
+        assert named <= known_codes, sorted(named - known_codes)
+    assert receipts._CREDENTIAL_ROUTE_PROVIDER_EXCEPTIONS <= set(
+        get_args(AIBuilderProviderExceptionClass)
+    )
+
+
+def test_a_rejected_credential_is_an_acquisition_failure_not_a_product_error(
+    tmp_path: Path,
+) -> None:
+    """R19 scored a decryption failure as builder_error; the slot was never measured."""
+
+    harness = _battle_harness()
+    interactions = [
+        {
+            "events": [
+                {
+                    "event": "error",
+                    "data": {
+                        "code": "planner_upstream_error",
+                        "message": "The AI provider rejected this request.",
+                        "phase": "planner",
+                        "details": {
+                            "another_call_permitted": False,
+                            "provider_disposition": "known_rejection",
+                            "provider_exception_class": "authentication",
+                            "retry_scope": "new_turn",
+                        },
+                    },
+                }
+            ]
+        }
+    ]
+    journey = harness._journey_summary(
+        interactions, expected={}, interaction_limit=harness.MAX_INTERACTIONS_PER_CASE
+    )
+    assert journey["termination"] == "turn_error"
+    assert journey["outcome_class"] == "acquisition_failure"
+
+    bundle = _complete_reanalysis_bundle(
+        harness, case_id="rejected-credential", expected={}
+    )
+    bundle["observation_input_identity"]["sha256"] = "f" * 64
+    event_summary = harness._interaction_event_summary(interactions)
+    bundle["interactions"] = interactions
+    bundle["event_summary"] = event_summary
+    bundle["failure_summary"] = harness._failure_summary(event_summary)
+    bundle["journey"] = journey
+    bundle_path = tmp_path / "rejected-credential.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+
+    result = harness._suite_result(harness.seal_observation(bundle), bundle_path)
+
+    assert result["observation_status"] == "acquisition_failure"
+    assert result["outcome_class"] == "acquisition_failure"
+    assert result["failure_class"] == "credential_route"
+    assert result["expectation_verdict"] == "not_evaluated"
+    observation = harness.observation_from_row(result, where="rejected credential")
+    assert observation.failure_class == "credential_route"
+    assert harness.observation_is_replacement_eligible(observation) is True
+
+
+def test_a_builder_fault_keeps_its_product_outcome_and_class(tmp_path: Path) -> None:
+    harness = _battle_harness()
+    interactions = [
+        {
+            "events": [
+                {
+                    "event": "error",
+                    "data": {
+                        "code": "self_correction_quality_failure",
+                        "details": {"quality_failure_codes": "x"},
+                    },
+                }
+            ]
+        }
+    ]
+    journey = harness._journey_summary(
+        interactions, expected={}, interaction_limit=harness.MAX_INTERACTIONS_PER_CASE
+    )
+    assert journey["outcome_class"] == "builder_error"
+
+    bundle = _complete_reanalysis_bundle(harness, case_id="builder-fault", expected={})
+    bundle["observation_input_identity"]["sha256"] = "f" * 64
+    event_summary = harness._interaction_event_summary(interactions)
+    bundle["interactions"] = interactions
+    bundle["event_summary"] = event_summary
+    bundle["failure_summary"] = harness._failure_summary(event_summary)
+    bundle["journey"] = journey
+    bundle_path = tmp_path / "builder-fault.json"
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+
+    result = harness._suite_result(harness.seal_observation(bundle), bundle_path)
+
+    assert result["observation_status"] == "error_terminated"
+    assert result["outcome_class"] == "builder_error"
+    assert result["failure_class"] == "builder_semantic"
+    observation = harness.observation_from_row(result, where="builder fault")
+    assert harness.observation_is_replacement_eligible(observation) is False

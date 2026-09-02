@@ -81,32 +81,44 @@ class _PersistedPlannerTelemetry(BaseModel):
     call_records: list[object] = []
 
 
+class PlannerCallRecordsRead(BaseModel):
+    """The calls one persisted message accounts for, and how many it could not."""
+
+    model_config = ConfigDict(frozen=True)
+
+    records: tuple[PlannerCallRecordMetadata, ...] = ()
+    # Records (or a whole telemetry envelope) written in a shape this model no
+    # longer accepts. Reported, never silently zero: a receipt that cannot read
+    # a call must not score the turn as cheaper than it was.
+    skipped: int = Field(default=0, ge=0)
+
+
 def planner_call_records_from_metadata(
     metadata: Mapping[str, object] | None,
-) -> tuple[PlannerCallRecordMetadata, ...]:
+) -> PlannerCallRecordsRead:
     """The provider calls a persisted assistant message accounts for.
 
-    Reads the shape `build_planner_telemetry` writes. A message without
-    telemetry, or a record an older build wrote in a shape this model no longer
-    accepts, contributes nothing: diagnostics degrade, they never raise on the
-    request path.
+    Reads the shape `build_planner_telemetry` writes. Diagnostics degrade, they
+    never raise on the request path: a message without telemetry contributes
+    nothing, and anything unreadable is counted in `skipped`.
     """
 
-    if metadata is None:
-        return ()
+    if metadata is None or metadata.get("planner_telemetry") is None:
+        return PlannerCallRecordsRead()
     try:
         telemetry = _PersistedPlannerTelemetry.model_validate(
             metadata.get("planner_telemetry")
         )
     except ValidationError:
-        return ()
+        return PlannerCallRecordsRead(skipped=1)
     records: list[PlannerCallRecordMetadata] = []
+    skipped = 0
     for raw_record in telemetry.call_records:
         try:
             records.append(PlannerCallRecordMetadata.model_validate(raw_record))
         except ValidationError:
-            continue
-    return tuple(records)
+            skipped += 1
+    return PlannerCallRecordsRead(records=tuple(records), skipped=skipped)
 
 
 def build_planner_telemetry(

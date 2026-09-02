@@ -81,7 +81,7 @@ KNOWN_OUTCOME_CLASSES = frozenset(
         "interaction_limit_reached",
         "requirements_unconfirmed",
         "builder_error",
-        "provider_outcome_unknown",
+        "acquisition_failure",
     }
 )
 SCOREABLE_OBSERVATION_STATUSES = frozenset({"completed", "error_terminated"})
@@ -392,15 +392,6 @@ def receipt_invalidity(receipt: Receipt, matrix: MatrixState) -> tuple[str, ...]
             reasons.append(
                 f"{observation.case_id} r{observation.repetition}: unknown "
                 f"outcome_class {observation.outcome_class!r}."
-            )
-        if observation.provider_dispositions:
-            # CP0 finding 4: provider faults are not product failures, and a
-            # marked receipt must not be scored. Error CODES cannot classify
-            # them — product paths also emit `planner_upstream_error`.
-            reasons.append(
-                f"{observation.case_id} r{observation.repetition}: provider "
-                f"disposition {sorted(set(observation.provider_dispositions))} "
-                "— re-measure the slot (CP8c) rather than scoring it."
             )
         committed = observation.chosen_patterns & matrix.known_rows
         if len(committed) > 1:
@@ -900,10 +891,11 @@ def perfect_receipt(receipt: Receipt) -> Receipt:
             failure_codes=(),
             ladder_failure_codes=(),
             chosen_patterns=observation.chosen_patterns,
-            provider_dispositions=(),
+            failure_class=None,
             model_calls=0,
             total_tokens=0,
             classifier_calls=0,
+            classifier_prompt_tokens=0,
             classifier_total_tokens=0,
             elapsed_ms=0,
             # Feasibility reads typed fields only. Keeping the measured seal

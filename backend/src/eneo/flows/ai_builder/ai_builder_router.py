@@ -449,10 +449,13 @@ def _classifier_diagnostic_runs(
 
 def _provider_call_diagnostics(
     conversation: list[ConversationMessage],
-) -> list[AIBuilderProviderCallDiagnostic]:
+) -> tuple[list[AIBuilderProviderCallDiagnostic], int]:
     calls: list[AIBuilderProviderCallDiagnostic] = []
+    skipped = 0
     for message in conversation:
-        for record in planner_call_records_from_metadata(message.metadata):
+        read = planner_call_records_from_metadata(message.metadata)
+        skipped += read.skipped
+        for record in read.records:
             calls.append(
                 AIBuilderProviderCallDiagnostic(
                     message_id=message.message_id,
@@ -464,7 +467,7 @@ def _provider_call_diagnostics(
                     provider_failure_kind=record.provider_failure_kind,
                 )
             )
-    return calls
+    return calls, skipped
 
 
 def _proposal_turn_diagnostics(
@@ -1413,11 +1416,15 @@ async def get_session_proposal_telemetry_diagnostics(
         require_creator=True,
     )
     planning_state = await service.get_planning_state(session_id)
+    provider_calls, provider_call_records_skipped = _provider_call_diagnostics(
+        session.conversation
+    )
     return AIBuilderProposalTelemetryDiagnosticsResponse(
         session_id=session.id,
         architecture=_architecture_diagnostic(planning_state),
         proposal_turns=_proposal_turn_diagnostics(session.conversation),
-        provider_calls=_provider_call_diagnostics(session.conversation),
+        provider_calls=provider_calls,
+        provider_call_records_skipped=provider_call_records_skipped,
     )
 
 

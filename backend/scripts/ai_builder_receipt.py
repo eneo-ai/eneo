@@ -31,7 +31,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast, get_args
 
 JsonObject = dict[str, Any]
 
@@ -126,6 +126,142 @@ def _required_str(payload: Mapping[str, Any], key: str, *, where: str) -> str:
     return value
 
 
+FailureClass = Literal[
+    "harness_configuration",
+    "dependency_stack",
+    "credential_route",
+    "provider_request",
+    "builder_semantic",
+    "runtime",
+]
+FAILURE_CLASSES: frozenset[str] = frozenset(get_args(FailureClass))
+# The instrument, not the product, failed: the slot was never observed and may
+# be re-measured. `builder_semantic` and `runtime` are product outcomes.
+ACQUISITION_FAILURE_CLASSES: frozenset[str] = frozenset(
+    {
+        "harness_configuration",
+        "dependency_stack",
+        "credential_route",
+        "provider_request",
+    }
+)
+# `execution_failure`: the harness caught an exception and no journey exists.
+# `acquisition_failure`: the journey ended in an acquisition-class error.
+ACQUISITION_FAILURE_STATUSES: frozenset[str] = frozenset(
+    {"execution_failure", "acquisition_failure"}
+)
+ACQUISITION_FAILURE_OUTCOME_CLASS = "acquisition_failure"
+
+_CREDENTIAL_ROUTE_PROVIDER_EXCEPTIONS = frozenset(
+    {"authentication", "permission_denied", "not_found"}
+)
+_CREDENTIAL_ROUTE_ERROR_CODES = frozenset(
+    {
+        "invalid_ai_builder_settings",
+        "model_not_available",
+        "no_planner_model_available",
+        "planner_budget_missing",
+        "planner_model_missing_context_window",
+        "planner_model_missing_output_tokens",
+        "transcription_model_required",
+    }
+)
+_PROVIDER_REQUEST_ERROR_CODES = frozenset(
+    {
+        "planner_stream_failed",
+        "planner_upstream_error",
+        "session_turn_provider_outcome_unknown",
+    }
+)
+# The harness drove the API wrongly (scope, permission, a stale revision it
+# sent). Lease and in-progress conflicts are deliberately absent: the harness
+# serialises turns per session, so those are Builder faults it must score.
+_HARNESS_CONFIGURATION_ERROR_CODES = frozenset(
+    {
+        "bad_request",
+        "builder_attachment_unavailable",
+        "edit_session_flow_required",
+        "flow_is_published",
+        "flow_space_mismatch",
+        "insufficient_scope",
+        "insufficient_space_permission",
+        "invalid_plan_status",
+        "invalid_question_payload",
+        "not_found",
+        "plan_not_proposed",
+        "plan_session_mismatch",
+        "planning_state_version_mismatch",
+        "session_creator_required",
+        "stale_plan_revision",
+        "stale_revision",
+    }
+)
+
+
+def failure_class_from_summary(
+    failure_summary: Mapping[str, Any],
+    *,
+    runtime_run_status: str | None,
+    where: str,
+) -> FailureClass | None:
+    """Which layer failed in a completed journey; None when nothing did.
+
+    Typed provider details decide before the error code: product paths also
+    emit `planner_upstream_error`, so the code alone cannot separate a
+    rejected credential (R19 scored one as `builder_error`) from a Builder
+    fault. Any acquisition-class error in the turn wins, because that
+    observation was never measured cleanly.
+    """
+
+    classes = [
+        _error_detail_failure_class(
+            _mapping(detail, where=where, key=f"error_details[{position}]")
+        )
+        for position, detail in enumerate(
+            _sequence(
+                failure_summary.get("error_details"),
+                where=where,
+                key="error_details",
+            )
+        )
+    ]
+    for failure_class in classes:
+        if failure_class in ACQUISITION_FAILURE_CLASSES:
+            return failure_class
+    if classes:
+        return "builder_semantic"
+    if runtime_run_status in {"failed", "cancelled"}:
+        return "runtime"
+    return None
+
+
+def _error_detail_failure_class(detail: Mapping[str, Any]) -> FailureClass:
+    details = detail.get("details")
+    details = details if isinstance(details, Mapping) else {}
+    details = cast(Mapping[str, Any], details)
+    if details.get("provider_exception_class") in _CREDENTIAL_ROUTE_PROVIDER_EXCEPTIONS:
+        return "credential_route"
+    code = detail.get("code")
+    if (
+        details.get("provider_disposition") is not None
+        or code in _PROVIDER_REQUEST_ERROR_CODES
+    ):
+        return "provider_request"
+    if code in _CREDENTIAL_ROUTE_ERROR_CODES:
+        return "credential_route"
+    if code in _HARNESS_CONFIGURATION_ERROR_CODES:
+        return "harness_configuration"
+    return "builder_semantic"
+
+
+def _failure_class(value: object, *, where: str) -> FailureClass | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value in FAILURE_CLASSES:
+        return cast(FailureClass, value)
+    raise ReceiptError(f"{where}: failure_class {value!r} is not a known class.")
+
+
 @dataclass(frozen=True, slots=True)
 class Observation:
     """One case repetition, as the receipt recorded it."""
@@ -146,13 +282,15 @@ class Observation:
     # fired three times across the ladder is three events, not one.
     ladder_failure_codes: tuple[str, ...]
     chosen_patterns: frozenset[str]
-    provider_dispositions: tuple[str, ...]
+    # Which layer failed, when one did; acquisition classes are re-measurable.
+    failure_class: FailureClass | None
     model_calls: int | None
     total_tokens: int | None
     elapsed_ms: int | None
     # Classifier spend, split out of the authoring totals; absent on receipts
     # acquired before the diagnostics endpoint projected every provider call.
     classifier_calls: int | None
+    classifier_prompt_tokens: int | None
     classifier_total_tokens: int | None
     # The row as written. The release gate reads only the typed fields above;
     # the comparator reports on the whole receipt, and giving it the raw row
@@ -168,9 +306,7 @@ class Observation:
 def observation_is_replacement_eligible(observation: Observation) -> bool:
     """Whether an operator may re-measure this exact failed observation."""
 
-    return bool(observation.provider_dispositions) or (
-        observation.observation_status == "execution_failure"
-    )
+    return observation.observation_status in ACQUISITION_FAILURE_STATUSES
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,23 +395,16 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
                 key=f"{key}.failure_codes",
             )
         )
-    dispositions: list[str] = []
-    for position, detail in enumerate(
-        _sequence(
-            failure_summary.get("error_details"), where=where, key="error_details"
-        )
+    observation_status = _required_str(row, "observation_status", where=where)
+    failure_class = _failure_class(row.get("failure_class"), where=where)
+    if (
+        observation_status in ACQUISITION_FAILURE_STATUSES
+        and failure_class not in ACQUISITION_FAILURE_CLASSES
     ):
-        key = f"error_details[{position}]"
-        disposition = _mapping(
-            _mapping(detail, where=where, key=key).get("details"),
-            where=where,
-            key=f"{key}.details",
-        ).get("provider_disposition")
-        if disposition is None:
-            continue
-        if not isinstance(disposition, str) or not disposition:
-            raise ReceiptError(f"{where}: {key} provider_disposition must be a string.")
-        dispositions.append(disposition)
+        raise ReceiptError(
+            f"{where}: observation_status {observation_status!r} requires an "
+            f"acquisition failure class; got {failure_class!r}."
+        )
     usage = _mapping(row.get("authoring_usage"), where=where, key="authoring_usage")
     raw_classifier_usage = journey.get("classifier_usage")
     classifier_usage = (
@@ -295,7 +424,7 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         case_id=case_id,
         repetition=repetition,
         required=row.get("required") is True,
-        observation_status=_required_str(row, "observation_status", where=where),
+        observation_status=observation_status,
         outcome_class=_required_str(row, "outcome_class", where=where),
         expectation_verdict=_required_str(row, "expectation_verdict", where=where),
         case_contract_sha256=_required_str(row, "case_contract_sha256", where=where),
@@ -314,7 +443,7 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
                 architecture.get("chosen_patterns"), where=where, key="chosen_patterns"
             )
         ),
-        provider_dispositions=tuple(dispositions),
+        failure_class=failure_class,
         model_calls=_optional_int(
             usage.get("model_calls"), where=where, key="model_calls"
         ),
@@ -326,6 +455,11 @@ def observation_from_row(raw_row: Any, *, where: str) -> Observation:
         ),
         classifier_calls=_optional_int(
             classifier_usage.get("calls"), where=where, key="classifier_usage.calls"
+        ),
+        classifier_prompt_tokens=_optional_int(
+            classifier_usage.get("prompt_tokens"),
+            where=where,
+            key="classifier_usage.prompt_tokens",
         ),
         classifier_total_tokens=_optional_int(
             classifier_usage.get("total_tokens"),
@@ -1101,12 +1235,17 @@ def _require_base_release_receipt(
         observation.observation_status == "execution_failure"
         for observation in receipt.observations
     )
+    acquisition_failure_count = sum(
+        observation.observation_status == "acquisition_failure"
+        for observation in receipt.observations
+    )
     invalid_evidence_count = sum(
         observation.observation_status == "invalid_evidence"
         for observation in receipt.observations
     )
     expected_acquisition_checks = acquisition_validity_checks(
         execution_failure_observation_count=execution_failure_count,
+        acquisition_failure_observation_count=acquisition_failure_count,
         invalid_evidence_observation_count=invalid_evidence_count,
     )
     reported_acquisition_checks = [
@@ -1138,6 +1277,7 @@ def _require_base_release_receipt(
     )
     expected_counters = {
         "execution_failure_observation_count": execution_failure_count,
+        "acquisition_failure_observation_count": acquisition_failure_count,
         "invalid_evidence_observation_count": invalid_evidence_count,
         "suite_identity_failed_check_count": suite_identity_failure_count,
         "observation_identity_failed_check_count": (
@@ -1253,6 +1393,14 @@ def _require_effective_release_receipt(receipt: Receipt, *, where: str) -> None:
     )
     if execution_failure_count:
         failures.append(f"{execution_failure_count} execution-failure observation(s)")
+    acquisition_failure_count = sum(
+        observation.observation_status == "acquisition_failure"
+        for observation in receipt.observations
+    )
+    if acquisition_failure_count:
+        failures.append(
+            f"{acquisition_failure_count} acquisition-failure observation(s)"
+        )
     if failures:
         raise ReceiptError(
             f"{where}: the effective receipt failed its acquisition verdict: "
@@ -1594,6 +1742,7 @@ def receipt_membership_report(
 def acquisition_validity_checks(
     *,
     execution_failure_observation_count: int,
+    acquisition_failure_observation_count: int,
     invalid_evidence_observation_count: int,
 ) -> list[JsonObject]:
     """Acquisition validity only: did we MEASURE cleanly, not did the product win.
@@ -1605,6 +1754,9 @@ def acquisition_validity_checks(
       a `live_execution_failure` bundle. It can still satisfy bundle-count and
       hash completeness and leaves `evidence_valid` unset, so completeness
       alone would not catch it.
+    * `acquisition_failure` - a journey the Builder ended with an
+      acquisition-class error (rejected credential, provider capacity, a
+      harness-side contract error); the slot was never measured.
     * `invalid_evidence` - provenance that failed its own checks.
 
     Deliberately absent: product expectation failures (the release evaluator
@@ -1616,6 +1768,12 @@ def acquisition_validity_checks(
             "name": "execution_failure_observations",
             "passed": execution_failure_observation_count == 0,
             "actual": execution_failure_observation_count,
+            "threshold": 0,
+        },
+        {
+            "name": "acquisition_failure_observations",
+            "passed": acquisition_failure_observation_count == 0,
+            "actual": acquisition_failure_observation_count,
             "threshold": 0,
         },
         {

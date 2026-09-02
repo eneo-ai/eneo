@@ -193,7 +193,7 @@ def test_error_terminated_siblings_do_not_rank_as_improvement(
     baseline = _write(
         tmp_path,
         "base.json",
-        [_row("case-a", "provider_outcome_unknown", verdict="not_evaluated")],
+        [_row("case-a", "acquisition_failure", verdict="not_evaluated")],
     )
     current = _write(
         tmp_path,

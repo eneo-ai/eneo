@@ -75,7 +75,7 @@ _OUTCOME_RANK: dict[str, int] = {
     "requirements_unconfirmed": 2,
     "plan_with_error": 2,
     "builder_error": 1,
-    "provider_outcome_unknown": 1,
+    "acquisition_failure": 1,
     "execution_failure": 1,
     "invalid_evidence": 0,
     "unclassified": 0,

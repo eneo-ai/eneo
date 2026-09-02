@@ -63,6 +63,9 @@ from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendTurn,
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+from eneo.flows.ai_builder.ai_builder_telemetry import (
+    planner_call_records_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
     AskCanonicalQuestion,
     BuilderTurnDecision,
@@ -1640,3 +1643,53 @@ async def test_a_question_decided_outside_the_ask_queue_promises_nothing() -> No
 
     question = next(event for event in result.events if event.event == "question")
     assert question.data.questions_planned_remaining is None
+
+
+@pytest.mark.asyncio
+async def test_a_classifier_only_turn_persists_its_provider_call_for_diagnostics() -> (
+    None
+):
+    """The question turn's assistant message accounts for the classifier call.
+
+    Diagnostics read persisted metadata, so a turn that classifies and then
+    asks must leave its call record behind or the classifier's spend vanishes.
+    """
+
+    runtime, litellm_client = _focused_runtime(
+        _focused_slot_response(
+            {
+                "slot_name": "primary_runtime_input",
+                "value": "documents",
+                "confidence": "high",
+                "reason": "No admissible evidence.",
+                "evidence": [],
+                "evidence_level": "explicit",
+            }
+        )
+    )
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    result = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=AskCanonicalQuestion(slot_name="primary_runtime_input"),
+            conversation=[
+                ConversationMessage(
+                    role="user",
+                    content="The user uploads a CV.",
+                    message_id="user-classifier-only",
+                )
+            ],
+            planning_state=PlanningState.empty(),
+            focused_classification_runtime=runtime,
+        )
+    )
+
+    assert result.action_kind == "ask_question"
+    assert litellm_client.acompletion.await_count == 1
+    assistant_message = repo.commit_turn.await_args.kwargs["new_messages"][-2]
+    read = planner_call_records_from_metadata(assistant_message.metadata)
+    assert read.skipped == 0
+    assert [(record.call_kind, record.attempt) for record in read.records] == [
+        ("slot_classification", 1)
+    ]

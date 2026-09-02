@@ -46,18 +46,23 @@ _FLOW_ISOLATION_SEMANTICS_VERSION = 1
 _FLOW_APPLY_LOCK = Lock()
 
 from ai_builder_receipt import (  # noqa: E402
+    ACQUISITION_FAILURE_CLASSES,
+    ACQUISITION_FAILURE_OUTCOME_CLASS,
     BUNDLE_FILE_FIELD,
     BUNDLE_REFERENCE_FIELDS,
     BUNDLE_SHA256_FIELD,
     CLEAN_SPACE_LISTING_REQUESTS,
+    FAILURE_CLASSES,
     REPLACEMENTS_FILE,
     SUPPORTED_RECEIPT_ARTIFACT_VERSION,
+    FailureClass,
     Observation,
     ReceiptError,
     ReplacementDescriptor,
     acquisition_validity_checks,
     capacity_preflight_verdict,
     capacity_snapshot_request_count,
+    failure_class_from_summary,
     load_recoverable_release_receipt,
     observation_from_row,
     observation_identity_failure_count,
@@ -103,10 +108,12 @@ QUESTION_RELEVANCE_SEMANTICS_VERSION = 3
 # execute-flow case never produced a plan. Runtime and model observations that
 # can exist only after completion no longer turn that outcome into an
 # acquisition failure; selected release identity remains fail-closed.
-OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 4
-_ERROR_TERMINATED_OUTCOME_CLASSES = frozenset(
-    {"builder_error", "provider_outcome_unknown"}
-)
+# v5: every failure carries a typed `failure_class`. A journey the Builder
+# ended on an acquisition-class error (rejected credential, provider capacity,
+# harness contract) is `acquisition_failure`, never `builder_error`: R19 scored
+# a credential decryption failure as a product error.
+OUTCOME_CLASSIFICATION_SEMANTICS_VERSION = 5
+_ERROR_TERMINATED_OUTCOME_CLASSES = frozenset({"builder_error"})
 # v2: raw fixture bytes and the extracted runtime content are separate input
 # identities. Runtime lineage records the content the step consumed; it must
 # not be compared to the original upload digest.
@@ -156,18 +163,51 @@ class BattleTurnError(ValueError):
     def __init__(self, *, client_turn_id: str, cause: Exception) -> None:
         super().__init__(str(cause))
         self.client_turn_id = client_turn_id
+        self.cause = cause
 
 
 class BattleFlowLifecycleError(ValueError):
     """An applied benchmark Flow could not complete its owned lifecycle."""
 
-    def __init__(self, *, message: str, flow_lifecycle: JsonObject) -> None:
+    def __init__(
+        self,
+        *,
+        message: str,
+        flow_lifecycle: JsonObject,
+        cause: Exception | None = None,
+    ) -> None:
         super().__init__(message)
         self.flow_lifecycle = flow_lifecycle
+        self.cause = cause
+
+
+def harness_failure_class(error: Exception) -> FailureClass:
+    """Which layer a harness-caught exception belongs to.
+
+    The stack answering with 5xx, refusing the connection or timing out is a
+    dependency fault; a 4xx means the harness drove the API wrongly (a key
+    without delete permission leaked three Flows on 2026-09-02); anything the
+    harness raised itself is its own configuration.
+    """
+
+    cause = (
+        error.cause
+        if isinstance(error, (BattleTurnError, BattleFlowLifecycleError))
+        and error.cause is not None
+        else error
+    )
+    if isinstance(cause, HTTPError):
+        return "dependency_stack" if cause.code >= 500 else "harness_configuration"
+    if isinstance(cause, (URLError, TimeoutError)):
+        return "dependency_stack"
+    return "harness_configuration"
 
 
 def _failure_error_fields(error: Exception) -> JsonObject:
-    fields: JsonObject = {"error": str(error)}
+    fields: JsonObject = {
+        "error": str(error),
+        "failure_class": harness_failure_class(error),
+    }
     if isinstance(error, BattleTurnError):
         fields["client_turn_id"] = error.client_turn_id
     if isinstance(error, BattleFlowLifecycleError):
@@ -2499,6 +2539,17 @@ def _run_suite(
         if result.get("observation_status") == "execution_failure"
         and result.get("required") is True
     )
+    acquisition_failure_count = sum(
+        1
+        for result in results
+        if result.get("observation_status") == "acquisition_failure"
+    )
+    required_acquisition_failure_count = sum(
+        1
+        for result in results
+        if result.get("observation_status") == "acquisition_failure"
+        and result.get("required") is True
+    )
     # Acquisition faults are STATUS-based, over every selected observation.
     # `evidence_valid is False` is the wrong predicate: an error_terminated
     # observation (builder_error / provider_outcome_unknown) deliberately has
@@ -2567,6 +2618,7 @@ def _run_suite(
     )
     acquisition_checks = acquisition_validity_checks(
         execution_failure_observation_count=case_error_count,
+        acquisition_failure_observation_count=acquisition_failure_count,
         invalid_evidence_observation_count=invalid_evidence_observation_count,
     )
     receipt_integrity = _suite_receipt_integrity(
@@ -2622,9 +2674,13 @@ def _run_suite(
         "sentinel_gate_scope": sentinel_gate_scope,
         "receipt_integrity": receipt_integrity,
         "execution_failure_observation_count": case_error_count,
+        "acquisition_failure_observation_count": acquisition_failure_count,
         "invalid_evidence_observation_count": invalid_evidence_observation_count,
         "expectation_failed_observation_count": quality_failure_run_count,
         "required_execution_failure_observation_count": required_case_error_count,
+        "required_acquisition_failure_observation_count": (
+            required_acquisition_failure_count
+        ),
         "required_invalid_evidence_observation_count": (
             required_invalid_evidence_observation_count
         ),
@@ -3723,6 +3779,7 @@ def _apply_execute_and_cleanup_flow(
         raise BattleFlowLifecycleError(
             message=message,
             flow_lifecycle=lifecycle,
+            cause=cleanup_error,
         ) from cleanup_error
     if primary_error is not None:
         lifecycle = (
@@ -3740,6 +3797,7 @@ def _apply_execute_and_cleanup_flow(
             raise BattleFlowLifecycleError(
                 message=str(primary_error),
                 flow_lifecycle=lifecycle,
+                cause=primary_error,
             ) from primary_error
         raise primary_error
 
@@ -4226,28 +4284,34 @@ def _optional_request_json(*, config: ApiConfig, path: str) -> JsonObject | None
         raise
 
 
-def _classifier_usage(raw_calls: object) -> JsonObject:
+def _classifier_usage(diagnostics: Mapping[str, Any]) -> JsonObject | None:
     """Tokens and calls the classifier spent, summed over every send turn.
 
     Read from the diagnostics endpoint's `provider_calls`, which lists every
-    provider call whether or not the turn produced a proposal attempt. Absent
-    on receipts acquired before that projection existed.
+    provider call whether or not the turn produced a proposal attempt. None,
+    not zero, when the endpoint projected no calls or skipped records it could
+    not read: missing evidence must never score as a saving.
     """
 
+    raw_calls = diagnostics.get("provider_calls")
+    skipped = diagnostics.get("provider_call_records_skipped")
+    if not isinstance(raw_calls, list):
+        return None
+    if isinstance(skipped, int) and not isinstance(skipped, bool) and skipped > 0:
+        return None
     calls = 0
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
-    if isinstance(raw_calls, list):
-        for raw_call in raw_calls:
-            if not isinstance(raw_call, Mapping):
-                continue
-            if raw_call.get("call_kind") != "slot_classification":
-                continue
-            calls += 1
-            prompt_tokens += _token_count(raw_call.get("prompt_tokens"))
-            completion_tokens += _token_count(raw_call.get("completion_tokens"))
-            total_tokens += _token_count(raw_call.get("total_tokens"))
+    for raw_call in raw_calls:
+        if not isinstance(raw_call, Mapping):
+            continue
+        if raw_call.get("call_kind") != "slot_classification":
+            continue
+        calls += 1
+        prompt_tokens += _token_count(raw_call.get("prompt_tokens"))
+        completion_tokens += _token_count(raw_call.get("completion_tokens"))
+        total_tokens += _token_count(raw_call.get("total_tokens"))
     return {
         "calls": calls,
         "prompt_tokens": prompt_tokens,
@@ -4323,7 +4387,9 @@ def _journey_with_proposal_economics(
     plan_outcome["attempt_failure_ladder"] = attempt_ladder
     plan_outcome["initial_token_cost"] = initial_token_cost
     plan_outcome["repair_token_cost"] = repair_token_cost
-    enriched["classifier_usage"] = _classifier_usage(diagnostics.get("provider_calls"))
+    classifier_usage = _classifier_usage(diagnostics)
+    if classifier_usage is not None:
+        enriched["classifier_usage"] = classifier_usage
     enriched["plan_outcome"] = plan_outcome
     return enriched
 
@@ -5686,6 +5752,25 @@ def _suite_result(bundle: JsonObject, bundle_path: Path) -> JsonObject:
     }
 
 
+def _observation_failure_class(bundle: JsonObject) -> FailureClass | None:
+    if bundle.get("artifact_mode") == "live_execution_failure":
+        recorded = bundle.get("failure_class")
+        if not isinstance(recorded, str) or recorded not in FAILURE_CLASSES:
+            raise ValueError("execution failure bundle carries no failure class.")
+        return cast(FailureClass, recorded)
+    failure_summary = bundle.get("failure_summary")
+    runtime_evidence = bundle.get("runtime_evidence")
+    run = runtime_evidence.get("run") if isinstance(runtime_evidence, Mapping) else None
+    run_status = run.get("status") if isinstance(run, Mapping) else None
+    return failure_class_from_summary(
+        cast(Mapping[str, Any], failure_summary)
+        if isinstance(failure_summary, Mapping)
+        else {},
+        runtime_run_status=run_status if isinstance(run_status, str) else None,
+        where="failure_summary",
+    )
+
+
 def _observation_projection(bundle: JsonObject) -> JsonObject:
     report = bundle.get("quality_report")
     checks = report.get("checks") if isinstance(report, Mapping) else []
@@ -5717,6 +5802,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         for check in checks
         if isinstance(check, Mapping) and check.get("passed") is not True
     ]
+    failure_class = _observation_failure_class(bundle)
     failed_identity_checks = [
         check
         for check in identity_checks
@@ -5739,7 +5825,13 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         expectation_verdict = "not_evaluated"
     elif completed_live_execution and evidence_valid is not True:
         journey_outcome = journey.get("outcome_class")
-        if journey_outcome in _ERROR_TERMINATED_OUTCOME_CLASSES:
+        if journey_outcome == ACQUISITION_FAILURE_OUTCOME_CLASS:
+            # The Builder ended the turn on an error the instrument owns; the
+            # product was never observed and the slot may be re-measured.
+            outcome_class = journey_outcome
+            observation_status = "acquisition_failure"
+            expectation_verdict = "not_evaluated"
+        elif journey_outcome in _ERROR_TERMINATED_OUTCOME_CLASSES:
             # An error-terminated turn has no provenance to validate; the
             # journey outcome is the truth and must not be masked as an
             # observation problem (13 masked rows in the 2026-08-06 run).
@@ -5778,6 +5870,7 @@ def _observation_projection(bundle: JsonObject) -> JsonObject:
         "observation_status": observation_status,
         "expectation_verdict": expectation_verdict,
         "outcome_class": outcome_class,
+        "failure_class": failure_class,
         "evidence_valid": evidence_valid,
         "evidence_failed_check_count": len(evidence_failed_checks),
         "evidence_failed_checks": evidence_failed_checks,
@@ -7021,6 +7114,9 @@ def _journey_summary(
         _int_value(telemetry.get("parse_repair_attempts_total")) or 0
     )
     error_codes = _string_list(event_summary.get("error_codes"))
+    failure_class = failure_class_from_summary(
+        event_summary, runtime_run_status=None, where="journey"
+    )
     if not has_plan:
         plan_outcome_kind = "terminal_failure"
     elif repair_attempts or parse_repair_attempts or error_codes:
@@ -7041,8 +7137,8 @@ def _journey_summary(
             outcome_class = "plan_with_error"
         else:
             outcome_class = "plan_first_pass"
-    elif "session_turn_provider_outcome_unknown" in error_codes:
-        outcome_class = "provider_outcome_unknown"
+    elif failure_class in ACQUISITION_FAILURE_CLASSES:
+        outcome_class = ACQUISITION_FAILURE_OUTCOME_CLASS
     elif error_codes:
         outcome_class = "builder_error"
     elif (
