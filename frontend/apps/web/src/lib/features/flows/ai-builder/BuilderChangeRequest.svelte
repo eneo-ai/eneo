@@ -78,23 +78,25 @@
             class="bg-accent-dimmer text-accent-stronger inline-flex h-[1.625rem] items-center gap-1.5 rounded-full pr-1 pl-2.5 text-xs font-semibold"
           >
             {scopeLabel}
-            <button
-              type="button"
-              class="hover:bg-accent-default/15 focus-visible:ring-accent-default/40 inline-flex size-5 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none"
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              class="hover:bg-accent-default/15 size-5 rounded-full"
               aria-label={m.ai_builder_change_request_clear_scope()}
               onclick={onclearscope}
             >
               <IconX class="size-3" />
-            </button>
+            </Button>
           </span>
         {/if}
-        <button
-          type="button"
-          class="text-secondary hover:text-primary focus-visible:ring-accent-default/40 ml-auto rounded text-xs focus-visible:ring-2 focus-visible:outline-none"
+        <Button
+          variant="ghost"
+          size="xs"
+          class="text-secondary hover:text-primary ml-auto"
           onclick={() => (open = false)}
         >
           {m.ai_builder_change_request_close()}
-        </button>
+        </Button>
       </div>
       <Textarea
         bind:ref={textarea}

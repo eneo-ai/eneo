@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import FlowAIBuilderQuestion from "./FlowAIBuilderQuestion.svelte";
   import type { ChatMessage } from "./protocol";
@@ -64,10 +65,13 @@
       >
         <span class="text-secondary shrink-0 text-xs">{m.ai_builder_question_answers_label()}</span>
         {#each answered as item (item.questionId)}
-          <button
-            type="button"
-            class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[0.8125rem] max-sm:h-[44px] max-sm:max-w-[70vw] max-sm:px-3.5"
-            class:opacity-60={editingQuestionId === item.questionId}
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-[1.875rem] max-w-full shrink-0 gap-1.5 rounded-full px-2.5 text-[0.8125rem] font-normal max-sm:h-[44px] max-sm:max-w-[70vw] max-sm:px-3.5 {editingQuestionId ===
+            item.questionId
+              ? 'opacity-60'
+              : ''}"
             title={item.question}
             aria-label={m.ai_builder_question_chip_aria({
               question: item.question,
@@ -88,7 +92,7 @@
             <span class="text-accent-stronger shrink-0 font-semibold"
               >{m.ai_builder_question_change()}</span
             >
-          </button>
+          </Button>
         {/each}
       </div>
     {/if}
@@ -96,13 +100,14 @@
     {#if editingQuestionId}
       <p class="text-secondary mb-2 flex items-center gap-2 text-xs">
         {m.ai_builder_question_editing_note()}
-        <button
-          type="button"
-          class="text-accent-stronger font-semibold hover:underline"
+        <Button
+          variant="link"
+          size="xs"
+          class="text-accent-stronger h-auto p-0 font-semibold"
           onclick={() => oncanceledit?.()}
         >
           {m.cancel()}
-        </button>
+        </Button>
       </p>
     {/if}
 

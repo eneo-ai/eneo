@@ -620,13 +620,14 @@
             <span class="min-w-0 flex-1 leading-relaxed text-pretty">
               {service.latestReviewNote}
             </span>
-            <button
-              type="button"
-              class="text-accent-stronger focus-visible:ring-accent-stronger/40 ml-auto rounded text-xs font-semibold whitespace-nowrap hover:underline focus-visible:ring-2 focus-visible:outline-none"
+            <Button
+              variant="link"
+              size="xs"
+              class="text-accent-stronger ml-auto h-auto p-0 font-semibold whitespace-nowrap"
               onclick={() => service.dismissReviewNote()}
             >
               {m.ai_builder_review_note_acknowledge()}
-            </button>
+            </Button>
           </div>
         {/if}
 

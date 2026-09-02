@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -181,13 +182,14 @@
             {instructions}
           </p>
           {#if instructions.length > INSTRUCTION_CLAMP_CHARS}
-            <button
-              type="button"
-              class="text-accent-stronger focus-visible:ring-accent-stronger/40 mt-1 rounded text-xs font-medium transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
+            <Button
+              variant="link"
+              size="xs"
+              class="text-accent-stronger mt-1 h-auto p-0 text-xs font-medium"
               onclick={() => (instructionsExpanded = !instructionsExpanded)}
             >
               {instructionsExpanded ? m.ai_builder_show_less() : m.ai_builder_show_more()}
-            </button>
+            </Button>
           {/if}
         {/if}
 
@@ -321,13 +323,14 @@
         {#if canRequestChange || buildDiagnosticReport}
           <div class="mt-3.5 flex flex-wrap gap-2">
             {#if canRequestChange}
-              <button
-                type="button"
-                class="border-default text-primary hover:bg-tertiary focus-visible:ring-accent-default/40 inline-flex h-8 items-center rounded-lg border px-2.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none max-sm:h-11 max-sm:w-full max-sm:justify-center"
+              <Button
+                variant="outline"
+                size="sm"
+                class="max-sm:h-11 max-sm:w-full"
                 onclick={onrequestchange}
               >
                 {m.ai_builder_step_request_change({ step: stepNumber })}
-              </button>
+              </Button>
             {/if}
             <FlowAIBuilderDiagnosticCopyButton
               buildReport={buildDiagnosticReport}

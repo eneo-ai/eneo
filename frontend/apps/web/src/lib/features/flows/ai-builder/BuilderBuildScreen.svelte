@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import type { AIBuilderStatus } from "./protocol";
@@ -49,13 +50,14 @@
         <span class="text-secondary text-[0.8125rem]">{m.ai_builder_build_confirmed_label()}</span>
         <span class="text-primary text-[0.8125rem] font-semibold">{confirmedLine}</span>
         {#if onshowconfirmation}
-          <button
-            type="button"
-            class="text-accent-stronger ml-auto text-[0.8125rem] font-semibold hover:underline"
+          <Button
+            variant="link"
+            size="xs"
+            class="text-accent-stronger ml-auto h-auto p-0 text-[0.8125rem] font-semibold"
             onclick={onshowconfirmation}
           >
             {m.ai_builder_build_show_confirmation()}
-          </button>
+          </Button>
         {/if}
       </div>
     {/if}

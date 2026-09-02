@@ -398,15 +398,18 @@
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <span class="text-secondary text-xs">{m.ai_builder_question_answers_label()}</span>
         {#each unlistedAnswers as item (item.questionId)}
-          <button
-            type="button"
-            class="border-default bg-primary hover:bg-secondary inline-flex h-[1.875rem] max-w-full items-center gap-1.5 rounded-full border px-[0.6875rem] text-[0.78125rem]"
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-[1.875rem] max-w-full gap-1.5 rounded-full px-[0.6875rem] text-[0.78125rem] font-normal {editingQuestion
+              ?.question?.question_id === item.questionId
+              ? 'opacity-60'
+              : ''}"
             title={item.question}
             aria-label={m.ai_builder_question_chip_aria({
               question: item.question,
               answer: item.answerLabel
             })}
-            class:opacity-60={editingQuestion?.question?.question_id === item.questionId}
             onclick={() => reopenQuestion(item.questionId)}
             {disabled}
           >
@@ -422,7 +425,7 @@
             <span class="text-accent-stronger shrink-0 font-semibold">
               {m.ai_builder_question_change()}
             </span>
-          </button>
+          </Button>
         {/each}
       </div>
     {/if}
@@ -431,13 +434,14 @@
       <div class="mb-4" bind:this={editorRef}>
         <p class="text-secondary mb-2 flex items-center gap-2 text-xs">
           {m.ai_builder_question_editing_note()}
-          <button
-            type="button"
-            class="text-accent-stronger font-semibold hover:underline"
+          <Button
+            variant="link"
+            size="xs"
+            class="text-accent-stronger h-auto p-0 font-semibold"
             onclick={() => oncanceledit?.()}
           >
             {m.cancel()}
-          </button>
+          </Button>
         </p>
         {#key editingQuestion.question.question_id}
           <FlowAIBuilderQuestion
@@ -657,16 +661,17 @@
             <p class="text-secondary mt-0.5 text-xs text-pretty">
               {m.ai_builder_requirements_runtime_fields_lead()}
               {#if hasRuntimeFieldDetail}
-                <button
-                  type="button"
-                  class="text-accent-stronger ml-1 font-semibold"
+                <Button
+                  variant="link"
+                  size="xs"
+                  class="text-accent-stronger ml-1 h-auto p-0 font-semibold"
                   aria-expanded={runtimeFieldDetails}
                   onclick={() => (runtimeFieldDetails = !runtimeFieldDetails)}
                 >
                   {runtimeFieldDetails
                     ? m.ai_builder_requirements_fields_hide_detail()
                     : m.ai_builder_requirements_fields_show_detail()}
-                </button>
+                </Button>
               {/if}
             </p>
             {#if runtimeFieldDetails}
@@ -720,15 +725,16 @@
                 {/each}
                 {#if runtimeFields.length > shownRuntimeFields.length}
                   <li>
-                    <button
-                      type="button"
-                      class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
+                    <Button
+                      variant="link"
+                      size="xs"
+                      class="text-accent-stronger h-[1.625rem] p-0 text-[0.78125rem] font-semibold"
                       onclick={() => (allRuntimeFieldsShown = true)}
                     >
                       {m.ai_builder_requirements_show_all_fields({
                         count: String(runtimeFields.length)
                       })}
-                    </button>
+                    </Button>
                   </li>
                 {/if}
               </ul>
@@ -779,9 +785,10 @@
                   </DropdownMenu.Root>
                 {/if}
                 {#if !readOnly && !confirmed && oneditcontentfields}
-                  <button
-                    type="button"
-                    class="hover:bg-negative-dimmer/40 hover:text-negative-stronger text-secondary inline-flex size-5 items-center justify-center rounded-full transition-colors"
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    class="hover:bg-negative-dimmer/40 hover:text-negative-stronger text-secondary size-5 rounded-full"
                     aria-label={cascade > 0
                       ? m.ai_builder_requirements_field_remove_with_children({
                           field: field.label,
@@ -798,7 +805,7 @@
                     onclick={() => removeContentField(field)}
                   >
                     <IconX class="size-3" aria-hidden="true" />
-                  </button>
+                  </Button>
                 {/if}
               </li>
             {/snippet}
@@ -825,15 +832,16 @@
                 {/each}
                 {#if !allContentFieldsShown && visibleGroupFields(group).length < group.fields.length}
                   <li>
-                    <button
-                      type="button"
-                      class="text-accent-stronger inline-flex h-[1.625rem] items-center text-[0.78125rem] font-semibold"
+                    <Button
+                      variant="link"
+                      size="xs"
+                      class="text-accent-stronger h-[1.625rem] p-0 text-[0.78125rem] font-semibold"
                       onclick={() => (allContentFieldsShown = true)}
                     >
                       {m.ai_builder_requirements_group_show_more({
                         count: String(group.fields.length - visibleGroupFields(group).length)
                       })}
-                    </button>
+                    </Button>
                   </li>
                 {/if}
               </ul>
@@ -916,15 +924,16 @@
                       </Button>
                     </form>
                   {:else}
-                    <button
-                      type="button"
-                      class="border-default text-secondary hover:text-primary inline-flex h-[1.625rem] items-center rounded-full border border-dashed px-2.5 text-[0.78125rem]"
-                      bind:this={addContentFieldButton}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-[1.625rem] rounded-full border-dashed px-2.5 text-[0.78125rem] font-normal"
+                      bind:ref={addContentFieldButton}
                       {disabled}
                       onclick={() => (addingContentField = true)}
                     >
                       {m.ai_builder_requirements_field_add()}
-                    </button>
+                    </Button>
                   {/if}
                 </li>
               {/if}
