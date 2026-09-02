@@ -636,6 +636,8 @@ def _bundle(
     status: str,
     revision: str = "DEV-abc",
     case_id: str = "case-a",
+    contract: str = "c" * 64,
+    repetition: int = 1,
     attempts: tuple[tuple[int, int, int], ...] = ((2_700, 1_200, 3_900),),
     classifier_usage: dict[str, int] | None = None,
 ) -> dict[str, Any]:
@@ -645,6 +647,8 @@ def _bundle(
     return {
         "app_version": revision,
         "case_identity": {"id": case_id},
+        "case_contract_sha256": contract,
+        "repetition": repetition,
         "observation": {"observation_status": status},
         "journey": journey,
         "proposal_telemetry_diagnostics": {
@@ -665,11 +669,42 @@ def _bundle(
     }
 
 
-def _write_bundles(root: Path, bundles: list[dict[str, Any]]) -> Path:
+def _write_bundles(
+    root: Path,
+    bundles: list[dict[str, Any]],
+    *,
+    model: str = "model-a",
+    revision: str = "DEV-abc",
+    planned: int | None = None,
+    manifest: bool = True,
+) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     for index, bundle in enumerate(bundles):
         (root / f"ai-builder-api-battle-test-{index:03d}.json").write_text(
             json.dumps(bundle), encoding="utf-8"
+        )
+    if manifest:
+        expected = [
+            {
+                "case_id": bundle["case_identity"]["id"],
+                "repetition": bundle["repetition"],
+                "case_contract_sha256": bundle["case_contract_sha256"],
+            }
+            for bundle in bundles
+        ]
+        for index in range(max(0, (planned or 0) - len(bundles))):
+            expected.append({"case_id": f"planned-{index}", "repetition": 1})
+        (root / "release-manifest.json").write_text(
+            json.dumps(
+                {
+                    "expected_observations": expected,
+                    "release_identity": {
+                        "model": {"requested_id": model},
+                        "build": {"app_version": revision},
+                    },
+                }
+            ),
+            encoding="utf-8",
         )
     return root
 
@@ -714,10 +749,12 @@ def test_token_baseline_reads_completed_observations_only(tmp_path: Path) -> Non
         "acquisition_failure": 1,
         "completed": 2,
     }
-    assert report["case_ids"] == ["case-a"]
-    assert report["planned_observations"] is None
-    assert report["partial"] is False
+    assert list(report["cases"]) == ["case-a"]
+    assert report["model"] == {"requested_id": "model-a"}
+    assert (report["planned_observations"], report["partial"]) == (3, False)
     assert report["cases"]["case-a"][0] == {
+        "case_contract_sha256": "c" * 64,
+        "repetition": 1,
         "first_attempts": [[2_000, 1_000, 3_000]],
         "classifier": [1, 8_000, 8_300],
     }
@@ -743,10 +780,16 @@ def test_token_baseline_refuses_a_root_spanning_two_builds(tmp_path: Path) -> No
         tmp_path / "suite",
         [_bundle(status="completed"), _bundle(status="completed", revision="DEV-def")],
     )
-    with pytest.raises(module.ReceiptError, match="source revisions"):
+    with pytest.raises(module.ReceiptError, match="one build"):
         module.token_baseline_report(root)
     with pytest.raises(module.ReceiptError, match="no observation bundles"):
         module.token_baseline_report(tmp_path / "empty")
+    with pytest.raises(module.ReceiptError, match="no release-manifest.json"):
+        module.token_baseline_report(
+            _write_bundles(
+                tmp_path / "unsealed", [_bundle(status="completed")], manifest=False
+            )
+        )
 
 
 def test_token_baseline_delta_names_each_movable_metric(tmp_path: Path) -> None:
@@ -834,6 +877,32 @@ def test_token_baseline_delta_compares_only_the_cases_both_roots_hold(
         )
 
 
+def test_token_baseline_delta_refuses_a_different_model_or_rewritten_case(
+    tmp_path: Path,
+) -> None:
+    """Same case id under another model or contract is another experiment."""
+
+    module = _compare_module()
+    current = module.token_baseline_report(
+        _write_bundles(tmp_path / "current", [_bundle(status="completed")])
+    )
+    other_model = module.token_baseline_report(
+        _write_bundles(
+            tmp_path / "other-model", [_bundle(status="completed")], model="model-b"
+        )
+    )
+    with pytest.raises(module.ReceiptError, match="different models"):
+        module.token_baseline_delta(current, other_model)
+    rewritten = module.token_baseline_report(
+        _write_bundles(
+            tmp_path / "rewritten",
+            [_bundle(status="completed", contract="d" * 64)],
+        )
+    )
+    with pytest.raises(module.ReceiptError, match="share no cases"):
+        module.token_baseline_delta(current, rewritten)
+
+
 def test_token_baseline_marks_a_root_short_of_its_manifest_as_partial(
     tmp_path: Path,
 ) -> None:
@@ -844,18 +913,7 @@ def test_token_baseline_marks_a_root_short_of_its_manifest_as_partial(
             _bundle(status="completed", case_id="a"),
             _bundle(status="completed", case_id="b"),
         ],
-    )
-    (root / "release-manifest.json").write_text(
-        json.dumps(
-            {
-                "expected_observations": [
-                    {"case_id": "a", "repetition": 1},
-                    {"case_id": "b", "repetition": 1},
-                    {"case_id": "c", "repetition": 1},
-                ]
-            }
-        ),
-        encoding="utf-8",
+        planned=3,
     )
 
     report = module.token_baseline_report(root)

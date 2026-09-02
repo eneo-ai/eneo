@@ -59,6 +59,9 @@ AIBuilderProviderFailureStage = Literal[
     "slot_classification",
 ]
 AIBuilderProviderTurnState = Literal["committed", "provider_outcome_unknown"]
+# The public error detail a provider failure carries; the measurement receipt
+# accepts exactly these values as provider evidence.
+AIBuilderProviderDisposition = Literal["known_rejection", "provider_outcome_unknown"]
 AIBuilderProviderRetryScope = Literal["new_turn", "acknowledged_same_turn"]
 AIBuilderProviderStatusClass = Literal["1xx", "2xx", "3xx", "4xx", "5xx"]
 AIBuilderProviderExceptionClass = Literal[
@@ -513,13 +516,12 @@ def _provider_public_error(
     retry_scope: AIBuilderProviderRetryScope,
     request_id: str | None,
 ) -> AIBuilderPublicError:
+    disposition: AIBuilderProviderDisposition = (
+        "known_rejection" if turn_state == "committed" else "provider_outcome_unknown"
+    )
     details: dict[str, object] = {
         "another_call_permitted": False,
-        "provider_disposition": (
-            "known_rejection"
-            if turn_state == "committed"
-            else "provider_outcome_unknown"
-        ),
+        "provider_disposition": disposition,
         "provider_exception_class": exception_class,
         "retry_scope": retry_scope,
     }

@@ -2647,8 +2647,8 @@ def _run_suite(
     receipt_complete = receipt_integrity["status"] == "complete"
     sentinel_checks_pass = (
         identity_failure_count == 0
-        # `acquisition_validity_checks` owns the two observation-status
-        # checks; identity and receipt completeness are gated separately.
+        # `acquisition_validity_checks` owns the observation-status checks;
+        # identity and receipt completeness are gated separately.
         # An exploratory probe may legitimately contain an execution
         # failure or invalid evidence - that is often what is being probed -
         # so it must not fail the run.
@@ -2866,8 +2866,8 @@ def _run_replacement_batch(
             )
         if not observation_is_replacement_eligible(original):
             raise ValueError(
-                f"{case_id!r} repetition {repetition} is not an execution failure "
-                "and has no provider disposition, so it may not be re-measured."
+                f"{case_id!r} repetition {repetition} is not an acquisition "
+                "failure, so it may not be re-measured."
             )
         case = cases_by_id.get(case_id)
         if case is None:

@@ -1,6 +1,10 @@
 {
   "suite_dir": "/Users/ccimen/eneo/flows-tidy-ai-builder/.codex/artifacts/diagnostic-report-layout-r17/broad-p1/ai-builder-api-battle-suite-20260831T161848",
   "source_revision": "DEV-13c26052d487",
+  "model": {
+    "requested_id": "69ea7ad9-19e1-4dac-bcbe-9eb715e12644",
+    "sha256": "894a56226dc686f11e170df895a3390cda0d08fea0a2bf2b79361b1ba18e7996"
+  },
   "population": "completed_observations",
   "observation_status_counts": {
     "completed": 101,
@@ -10,109 +14,6 @@
   "planned_observations": 172,
   "observed_observations": 104,
   "partial": true,
-  "case_ids": [
-    "ambiguous_report_without_attachment_asks_one_question",
-    "attachment_docx_template_placeholders_to_fields",
-    "attachment_example_report_infers_disposition",
-    "complex_authoring_spec_first_pass",
-    "complex_meeting_audio_policy_pdf",
-    "complex_procurement_multi_document_matrix",
-    "complex_social_case_timeline_redaction",
-    "easy_email_reply_with_case_metadata",
-    "easy_hr_job_application_summary",
-    "easy_library_event_copy_text",
-    "easy_preschool_incident_note_json",
-    "easy_single_document_plain_language_summary",
-    "easy_spreadsheet_case_statistics_json",
-    "hard_archive_retention_classification",
-    "hard_budget_variance_management_report",
-    "hard_crisis_situation_report_multi_unit",
-    "hard_environment_incident_synthesis",
-    "hard_gdpr_subject_access_package",
-    "hard_many_source_documents_exhaustive_pdf",
-    "hard_mixed_audio_documents_decision_basis",
-    "hard_procurement_scoring_with_human_review",
-    "hard_property_maintenance_contract_followup",
-    "hard_school_student_support_timeline",
-    "interview_contract_open_eplatform_payload",
-    "interview_goal_accessibility_text",
-    "interview_goal_board_audio_docx",
-    "interview_goal_economy_spreadsheet",
-    "interview_goal_food_registration",
-    "interview_goal_meeting_audio",
-    "interview_goal_policy_document",
-    "interview_goal_school_transport_material",
-    "interview_input_building_supplement",
-    "interview_input_citizen_feedback",
-    "interview_input_crisis_overview",
-    "interview_input_data_catalog",
-    "interview_input_meeting_actions",
-    "interview_input_procurement_requirements",
-    "interview_input_register_extract",
-    "interview_input_student_device",
-    "interview_open_access_offboarding",
-    "interview_open_accessibility_reports",
-    "interview_open_apartment_register",
-    "interview_open_building_supplements",
-    "interview_open_citizen_feedback",
-    "interview_open_crisis_reports",
-    "interview_open_cyber_incident",
-    "interview_open_data_catalog",
-    "interview_open_data_subject_access",
-    "interview_open_employment_certificate",
-    "interview_open_environmental_complaint",
-    "interview_open_event_financing",
-    "interview_open_food_poisoning_report",
-    "interview_open_food_registration",
-    "interview_open_lss_application",
-    "interview_open_meeting_audio",
-    "interview_open_open_eplatform_handoff",
-    "interview_open_procurement_review",
-    "interview_open_public_records",
-    "interview_open_records_retention",
-    "interview_open_school_transport",
-    "interview_open_special_diet",
-    "interview_open_student_device_faults",
-    "interview_open_volunteer_interest",
-    "interview_output_building_documents",
-    "interview_output_case_statistics",
-    "interview_output_event_financing",
-    "interview_output_feedback_text",
-    "interview_output_food_establishment",
-    "interview_output_integration_errors",
-    "interview_output_meeting_audio",
-    "interview_output_privacy_documents",
-    "medium_audio_to_protocol_pdf_with_metadata",
-    "medium_citizen_request_triage",
-    "medium_document_analysis_pdf",
-    "medium_elderly_care_deviation_report",
-    "medium_finance_invoice_anomaly_review",
-    "medium_housing_company_tenant_complaint",
-    "medium_parks_work_order_prioritization",
-    "medium_permit_checklist_validation",
-    "medium_public_records_redaction_package",
-    "medium_school_absence_followup_json",
-    "medium_water_leak_citizen_notice",
-    "ordinary_json_apartment_register_change",
-    "ordinary_json_integration_failures",
-    "ordinary_json_lss_completeness",
-    "ordinary_json_school_transport",
-    "ordinary_json_security_incident",
-    "ordinary_json_special_diet",
-    "ordinary_json_suspected_food_poisoning",
-    "ordinary_json_volunteer_interest",
-    "ordinary_language_human_review_policy",
-    "ordinary_report_building_supplement",
-    "ordinary_report_committee_meeting",
-    "ordinary_report_cyber_timeline",
-    "ordinary_report_environmental_complaints",
-    "ordinary_report_event_financing",
-    "ordinary_report_procurement_comparison",
-    "ordinary_report_public_records_request",
-    "ordinary_report_student_device_incidents",
-    "simple_audio_minutes_actions",
-    "simple_document_metadata_json"
-  ],
   "proposal_first_attempt": {
     "turns": 83,
     "median_total_tokens": 4108,
@@ -130,12 +31,16 @@
   "cases": {
     "ambiguous_report_without_attachment_asks_one_question": [
       {
+        "case_contract_sha256": "d194b88a9dd6d71d4877ea4d1000e801c277a3aeb3739b452fed2f1d3c9e4dc6",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "attachment_docx_template_placeholders_to_fields": [
       {
+        "case_contract_sha256": "0381a932691168c7df7bbf074257137c5ffff5170eade937334147f775ba47b2",
+        "repetition": 1,
         "first_attempts": [
           [
             3243,
@@ -148,6 +53,8 @@
     ],
     "attachment_example_report_infers_disposition": [
       {
+        "case_contract_sha256": "8f4e638a3396decc7c2106f9a7e7a0a44005a7a43661da0d90a74e3e2ef634cf",
+        "repetition": 1,
         "first_attempts": [
           [
             2997,
@@ -160,6 +67,8 @@
     ],
     "complex_authoring_spec_first_pass": [
       {
+        "case_contract_sha256": "076eac70e17df538a354f8356a4b68fcf89e5d63cf685c157b24ac1cd7f074ac",
+        "repetition": 1,
         "first_attempts": [
           [
             2516,
@@ -172,6 +81,8 @@
     ],
     "complex_meeting_audio_policy_pdf": [
       {
+        "case_contract_sha256": "c16d9bdef9b773912d99e74ca253d04b0344b730a105d214d872cb761966614b",
+        "repetition": 1,
         "first_attempts": [
           [
             2880,
@@ -184,6 +95,8 @@
     ],
     "complex_procurement_multi_document_matrix": [
       {
+        "case_contract_sha256": "ec1e7984971ce5404f84074ad766ec3c9f18b0267b9fa9b013c45dd44e7ca21a",
+        "repetition": 1,
         "first_attempts": [
           [
             2808,
@@ -196,6 +109,8 @@
     ],
     "complex_social_case_timeline_redaction": [
       {
+        "case_contract_sha256": "85deac5d6d90be3fb89e2aedd16ceeaa3c249d0a64f56b8d90a1f9d27d55da54",
+        "repetition": 1,
         "first_attempts": [
           [
             2408,
@@ -208,6 +123,8 @@
     ],
     "easy_email_reply_with_case_metadata": [
       {
+        "case_contract_sha256": "346d3e6655d934ec4a0ef2ebea568fd8a15097edacd2a96e7de6c6ee3f28bb19",
+        "repetition": 1,
         "first_attempts": [
           [
             2741,
@@ -220,6 +137,8 @@
     ],
     "easy_hr_job_application_summary": [
       {
+        "case_contract_sha256": "163468953e75f45f07232efd6facd1fe817866d2e0da6d739fdd0ffaa1604752",
+        "repetition": 1,
         "first_attempts": [
           [
             2679,
@@ -232,6 +151,8 @@
     ],
     "easy_library_event_copy_text": [
       {
+        "case_contract_sha256": "3006e5696f111132630d931b921019218d2988b447950c098f29b7dfe01b9786",
+        "repetition": 1,
         "first_attempts": [
           [
             2166,
@@ -244,6 +165,8 @@
     ],
     "easy_preschool_incident_note_json": [
       {
+        "case_contract_sha256": "113f12abd7befbfd32b5f18bb3d66ae24d48057a27e92f3cb66e62b9b5865047",
+        "repetition": 1,
         "first_attempts": [
           [
             3102,
@@ -256,6 +179,8 @@
     ],
     "easy_single_document_plain_language_summary": [
       {
+        "case_contract_sha256": "793c084a9ab1ab6924de264d70b17e9ff1854d9978a757d78b170d18a988913e",
+        "repetition": 1,
         "first_attempts": [
           [
             2366,
@@ -268,6 +193,8 @@
     ],
     "easy_spreadsheet_case_statistics_json": [
       {
+        "case_contract_sha256": "e0764ae214a7d7656ab01701a92bf87af3ae3c966a7b1f3f5643f92c0eaf3f34",
+        "repetition": 1,
         "first_attempts": [
           [
             2613,
@@ -280,6 +207,8 @@
     ],
     "hard_archive_retention_classification": [
       {
+        "case_contract_sha256": "ab5e5e6fac43444e343af2dba0febad4a4b56d1919afec095bc480c0780abad9",
+        "repetition": 1,
         "first_attempts": [
           [
             3060,
@@ -292,6 +221,8 @@
     ],
     "hard_budget_variance_management_report": [
       {
+        "case_contract_sha256": "7787b3df747ad28d5309a1e503bff40f281385a35f4d486299046e495b23f1ff",
+        "repetition": 1,
         "first_attempts": [
           [
             2350,
@@ -304,6 +235,8 @@
     ],
     "hard_crisis_situation_report_multi_unit": [
       {
+        "case_contract_sha256": "1963cd3646ca4af937846427aad150886cf755e47b89f0044669abd906c3f32d",
+        "repetition": 1,
         "first_attempts": [
           [
             2525,
@@ -316,6 +249,8 @@
     ],
     "hard_environment_incident_synthesis": [
       {
+        "case_contract_sha256": "f473e5472e05e1eecc5d8000ab2fbf8133023433147a2541ac2e9fe8e1622957",
+        "repetition": 1,
         "first_attempts": [
           [
             2374,
@@ -328,6 +263,8 @@
     ],
     "hard_gdpr_subject_access_package": [
       {
+        "case_contract_sha256": "3a276862f9540073aaee2c2d423abdf1a701cadb3964750b598f9cb0c205fcac",
+        "repetition": 1,
         "first_attempts": [
           [
             2302,
@@ -340,6 +277,8 @@
     ],
     "hard_many_source_documents_exhaustive_pdf": [
       {
+        "case_contract_sha256": "9f7b347488a960ea42646c240f89e0808972b786947174ca67beb1700fdc9605",
+        "repetition": 1,
         "first_attempts": [
           [
             2397,
@@ -352,6 +291,8 @@
     ],
     "hard_mixed_audio_documents_decision_basis": [
       {
+        "case_contract_sha256": "9048410f9b59e5b52e76a03234b8fbdd54f8925bc8e4324200af1af740cc2bab",
+        "repetition": 1,
         "first_attempts": [
           [
             2759,
@@ -364,6 +305,8 @@
     ],
     "hard_procurement_scoring_with_human_review": [
       {
+        "case_contract_sha256": "08342ff0326f6fd1859943e8ff47f5a1a92f2e749ca221e434f733fe1527ee5d",
+        "repetition": 1,
         "first_attempts": [
           [
             2358,
@@ -376,6 +319,8 @@
     ],
     "hard_property_maintenance_contract_followup": [
       {
+        "case_contract_sha256": "870c77c6ecd0cbcbd1a07436ce4794914c843eb4b81adc2c1e4fa2bf4f3b0daf",
+        "repetition": 1,
         "first_attempts": [
           [
             2328,
@@ -388,6 +333,8 @@
     ],
     "hard_school_student_support_timeline": [
       {
+        "case_contract_sha256": "bd80f9406fbfb15e2dcd6f0761689b396649cea06302a65c96d8629b051728f0",
+        "repetition": 1,
         "first_attempts": [
           [
             2923,
@@ -400,6 +347,8 @@
     ],
     "interview_contract_open_eplatform_payload": [
       {
+        "case_contract_sha256": "9dbabfe9b3e0afe7cfd1d84eea5e521a91fef7c982a7de9f1813c3751d8b363b",
+        "repetition": 1,
         "first_attempts": [
           [
             2601,
@@ -412,24 +361,32 @@
     ],
     "interview_goal_accessibility_text": [
       {
+        "case_contract_sha256": "f442064817767b2ab7677655824894983fcc10a0728bf4a03939bc50125551c4",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_goal_board_audio_docx": [
       {
+        "case_contract_sha256": "51f3d87327e0b0e79a13ce8494b1583f7a44597d4dbe50a117f95f4ac787691f",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_goal_economy_spreadsheet": [
       {
+        "case_contract_sha256": "17aa6317c9ca1353371817d7bd14f1bc2457fac62732bbe3598883737bd57741",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_goal_food_registration": [
       {
+        "case_contract_sha256": "94d20be98a94b05dcbfe89acbbc307e2787daecbd5745687c8b301e9307563c5",
+        "repetition": 1,
         "first_attempts": [
           [
             2863,
@@ -442,6 +399,8 @@
     ],
     "interview_goal_meeting_audio": [
       {
+        "case_contract_sha256": "a99490668629eb7e32fa63d0da3de9ef4cc8b18fc21aea4a23215e4fc1b5e3e2",
+        "repetition": 1,
         "first_attempts": [
           [
             3013,
@@ -454,18 +413,24 @@
     ],
     "interview_goal_policy_document": [
       {
+        "case_contract_sha256": "f8e21a83af363c84a5d1928cb3b14d54aaf88e25d16ef2c149de7eddcd3bbf63",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_goal_school_transport_material": [
       {
+        "case_contract_sha256": "ba8ac6ba1a4a0a972ce516926b19e18a1327e63bdc6e032c9b5f60f75d9cbc82",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_input_building_supplement": [
       {
+        "case_contract_sha256": "5c1a751e62cedd750316e75fc40c9631d0a7e82c712e5b7fe6b5d761acaa955e",
+        "repetition": 1,
         "first_attempts": [
           [
             2879,
@@ -478,6 +443,8 @@
     ],
     "interview_input_citizen_feedback": [
       {
+        "case_contract_sha256": "c87ea5f7517d91d317544b610d0474d2a67df6cc6df54a7952cbef0f75fdbdee",
+        "repetition": 1,
         "first_attempts": [
           [
             2853,
@@ -490,42 +457,56 @@
     ],
     "interview_input_crisis_overview": [
       {
+        "case_contract_sha256": "c63dac5f9420790c6b0a646923a69b095d6fb45105e5a261ae3d569ee1e2c08f",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_input_data_catalog": [
       {
+        "case_contract_sha256": "7f2ea7bd495b5cba287001615bf91ae3fc4e40794170cb9cea4157e7bfa6ce2e",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_input_meeting_actions": [
       {
+        "case_contract_sha256": "00c5f41164c725d25e87910eff8f3376a445080fd7a752ea49455f666ddbb0e2",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_input_procurement_requirements": [
       {
+        "case_contract_sha256": "ce5ade3fa461d700fa9389030ae28d2a1aaf0d3f5f3987f722b83ced2480157c",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_input_register_extract": [
       {
+        "case_contract_sha256": "9b350ea380baa6201ec65c0d2a69f6e0e50f6e64945568ab9c97263fba3d2cfd",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_input_student_device": [
       {
+        "case_contract_sha256": "7f1b0a7cbc7048855719b2927403a283144a62bd68523e2f982abed3f68b68a3",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_open_access_offboarding": [
       {
+        "case_contract_sha256": "7c5f01587e320d648aab782aa979d9d10043190dd876e300a2710d9ea5ccdab3",
+        "repetition": 1,
         "first_attempts": [
           [
             3056,
@@ -538,6 +519,8 @@
     ],
     "interview_open_accessibility_reports": [
       {
+        "case_contract_sha256": "e06ba076c4c72d3d9a4a8ad97625c6a2bbdd009a4909ecacd2b65cc1a6fdc3d0",
+        "repetition": 1,
         "first_attempts": [
           [
             3653,
@@ -550,6 +533,8 @@
     ],
     "interview_open_apartment_register": [
       {
+        "case_contract_sha256": "b209e0554c272cf1778ea2137c3bcdd4d4005a73119dcf3f8001ee9e4d04d49f",
+        "repetition": 1,
         "first_attempts": [
           [
             3684,
@@ -562,6 +547,8 @@
     ],
     "interview_open_building_supplements": [
       {
+        "case_contract_sha256": "ba185c7cc8b76088839204b264cf0d1529aebac8ec09456df8d64c4b57b83dd7",
+        "repetition": 1,
         "first_attempts": [
           [
             3019,
@@ -574,6 +561,8 @@
     ],
     "interview_open_citizen_feedback": [
       {
+        "case_contract_sha256": "f4f5b41c10b19dcf1e8116dacacc5612c7c6790dfa2be6148589a62c6f3b777b",
+        "repetition": 1,
         "first_attempts": [
           [
             3041,
@@ -586,6 +575,8 @@
     ],
     "interview_open_crisis_reports": [
       {
+        "case_contract_sha256": "38c26fb10a5fc39b7fc4812d514dd06b6359bdb568413f36b3bd5dc6622bd276",
+        "repetition": 1,
         "first_attempts": [
           [
             3344,
@@ -598,6 +589,8 @@
     ],
     "interview_open_cyber_incident": [
       {
+        "case_contract_sha256": "88c6aaa0f1ea85e17cc3baa8654a5a3fd3972119b84a9de834cec156668e623c",
+        "repetition": 1,
         "first_attempts": [
           [
             3521,
@@ -610,6 +603,8 @@
     ],
     "interview_open_data_catalog": [
       {
+        "case_contract_sha256": "5600ab239256e0736b4923a7d634e58fc0771a52d27fa975a37c0f44e4b0b582",
+        "repetition": 1,
         "first_attempts": [
           [
             3671,
@@ -622,6 +617,8 @@
     ],
     "interview_open_data_subject_access": [
       {
+        "case_contract_sha256": "ab5d4d23c89fa0ae52a09ced65baf690edb5d73b9902f40ae37a8073e681af0e",
+        "repetition": 1,
         "first_attempts": [
           [
             3774,
@@ -634,6 +631,8 @@
     ],
     "interview_open_employment_certificate": [
       {
+        "case_contract_sha256": "c8bee7df7f8629bd49996836d86763d472868fa272c4d9de0a93339299390192",
+        "repetition": 1,
         "first_attempts": [
           [
             2931,
@@ -646,6 +645,8 @@
     ],
     "interview_open_environmental_complaint": [
       {
+        "case_contract_sha256": "4775cf66a2372c072c1cca377d7d56d73f08af79c0a00d4b9f0255b5e5798731",
+        "repetition": 1,
         "first_attempts": [
           [
             3641,
@@ -658,6 +659,8 @@
     ],
     "interview_open_event_financing": [
       {
+        "case_contract_sha256": "21904cf682a070028c8a10094b785a37ef5b5ed3057c3847fc4539182ad456fe",
+        "repetition": 1,
         "first_attempts": [
           [
             3785,
@@ -670,6 +673,8 @@
     ],
     "interview_open_food_poisoning_report": [
       {
+        "case_contract_sha256": "bc18b1295acae2284e7e5b6cab359b834568dcf849ba3568a0698c691371b5fd",
+        "repetition": 1,
         "first_attempts": [
           [
             2938,
@@ -682,6 +687,8 @@
     ],
     "interview_open_food_registration": [
       {
+        "case_contract_sha256": "ccf32d4cd9eb6655329b140004ba155e68b2f2d9f132fb988d9eaa804d53db55",
+        "repetition": 1,
         "first_attempts": [
           [
             3673,
@@ -694,6 +701,8 @@
     ],
     "interview_open_lss_application": [
       {
+        "case_contract_sha256": "10393dd53225b5075c223bb91f70417a88cb9932a57a47c701a139cd8bdbc43f",
+        "repetition": 1,
         "first_attempts": [
           [
             3680,
@@ -706,6 +715,8 @@
     ],
     "interview_open_meeting_audio": [
       {
+        "case_contract_sha256": "c35585c6e071345608670f8b61a01d527fe733ebcb8e697fabd0d4242147bba7",
+        "repetition": 1,
         "first_attempts": [
           [
             3390,
@@ -718,6 +729,8 @@
     ],
     "interview_open_open_eplatform_handoff": [
       {
+        "case_contract_sha256": "82c0bcc4cb53333d75d8a95e44b97feca03c7eb614a3e2f8c5a33739cbb8861c",
+        "repetition": 1,
         "first_attempts": [
           [
             4235,
@@ -730,6 +743,8 @@
     ],
     "interview_open_procurement_review": [
       {
+        "case_contract_sha256": "d3266942bca83ba9e76ea02b846b605fc4e5358bfa6ab11b65249b7299fdc045",
+        "repetition": 1,
         "first_attempts": [
           [
             2657,
@@ -742,6 +757,8 @@
     ],
     "interview_open_public_records": [
       {
+        "case_contract_sha256": "77f8b0d4b82e33252bb27bacc362a6804f38fc6872cac66aad7ed72ee423a2b9",
+        "repetition": 1,
         "first_attempts": [
           [
             3778,
@@ -754,6 +771,8 @@
     ],
     "interview_open_records_retention": [
       {
+        "case_contract_sha256": "308c14f14997ec08e9b9350abfd0d9e0de0972361c0f342e7a6419ebb1b4d051",
+        "repetition": 1,
         "first_attempts": [
           [
             3113,
@@ -766,6 +785,8 @@
     ],
     "interview_open_school_transport": [
       {
+        "case_contract_sha256": "53f57677c074129375c591504cd91d7e24bd6125a48590da9795a6f69d453dcf",
+        "repetition": 1,
         "first_attempts": [
           [
             3665,
@@ -778,6 +799,8 @@
     ],
     "interview_open_special_diet": [
       {
+        "case_contract_sha256": "1a9cac0f3440b6aa374af39dcbe4c4090259754d994636309f4e41e812f497ea",
+        "repetition": 1,
         "first_attempts": [
           [
             3671,
@@ -790,6 +813,8 @@
     ],
     "interview_open_student_device_faults": [
       {
+        "case_contract_sha256": "a8262721a2afbdfbdb03150f071a6d67eb3c22b331cae449d91fccbd33b56660",
+        "repetition": 1,
         "first_attempts": [
           [
             3688,
@@ -802,6 +827,8 @@
     ],
     "interview_open_volunteer_interest": [
       {
+        "case_contract_sha256": "54f1e66b441da7c79498afaa271bf518e5d47f92b39886ff16420bc58273c379",
+        "repetition": 1,
         "first_attempts": [
           [
             3644,
@@ -814,18 +841,24 @@
     ],
     "interview_output_building_documents": [
       {
+        "case_contract_sha256": "d97354b677bc4645ac13b5cd47bd46fe8b18c0c685399b7249bedd0e23e55e87",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_output_case_statistics": [
       {
+        "case_contract_sha256": "05ef5ebd19f3a2390934ac64bbba8b8054f2f583a5fbb3a7669bf57c2f8d6a6b",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_output_event_financing": [
       {
+        "case_contract_sha256": "92c98f77748bdc0a80bbd217e90728f7a0964b7d36a2e032cf0ba8371c89b3a7",
+        "repetition": 1,
         "first_attempts": [
           [
             2840,
@@ -838,12 +871,16 @@
     ],
     "interview_output_feedback_text": [
       {
+        "case_contract_sha256": "73f95170725bd928fb10448c85f632aee96f0f315ee509024939c271fac2d0d0",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_output_food_establishment": [
       {
+        "case_contract_sha256": "1ad90a431b1d355269149f6b743fae4d584abd990cb02a844d4f721020fd36c1",
+        "repetition": 1,
         "first_attempts": [
           [
             2912,
@@ -856,24 +893,32 @@
     ],
     "interview_output_integration_errors": [
       {
+        "case_contract_sha256": "c50f54acaa1df3be9b06db6ff2750c69be61ec380b7b12e99b8c4358487c8252",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_output_meeting_audio": [
       {
+        "case_contract_sha256": "0731dcba26911374d220c827bbfb952138510bfbecfa2fd2364045864adef4b7",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "interview_output_privacy_documents": [
       {
+        "case_contract_sha256": "ca8a297d2f6ed55927abb4242cd857fc58c9740c1126561bd09ca92a28ec7abb",
+        "repetition": 1,
         "first_attempts": [],
         "classifier": null
       }
     ],
     "medium_audio_to_protocol_pdf_with_metadata": [
       {
+        "case_contract_sha256": "df7852f74cc871ae7b1b3818085132362e3094ea457abd4738f40f82299bd9b5",
+        "repetition": 1,
         "first_attempts": [
           [
             3030,
@@ -886,6 +931,8 @@
     ],
     "medium_citizen_request_triage": [
       {
+        "case_contract_sha256": "c4ef121202d0cd9ec8571007c024eb662967a242cea292c3e43dc8f306d87eed",
+        "repetition": 1,
         "first_attempts": [
           [
             2613,
@@ -898,6 +945,8 @@
     ],
     "medium_document_analysis_pdf": [
       {
+        "case_contract_sha256": "c34971d4d7916e0d5a4384faef1617ad08845988d95da7b61840bf029623df25",
+        "repetition": 1,
         "first_attempts": [
           [
             2509,
@@ -910,6 +959,8 @@
     ],
     "medium_elderly_care_deviation_report": [
       {
+        "case_contract_sha256": "52e75732c1aac3c2d500d856a11921f029ef6a392616e3a173a0469f25d50ea5",
+        "repetition": 1,
         "first_attempts": [
           [
             2510,
@@ -922,6 +973,8 @@
     ],
     "medium_finance_invoice_anomaly_review": [
       {
+        "case_contract_sha256": "8157226a881bb95b0809f6eabe6e4f9e80f1ab16c6a5d8bb09e1ba1a79ab9854",
+        "repetition": 1,
         "first_attempts": [
           [
             2616,
@@ -934,6 +987,8 @@
     ],
     "medium_housing_company_tenant_complaint": [
       {
+        "case_contract_sha256": "04ee32753856799f27be2781d54e1fdd9525723da54be54a9e924ac2d3053d0d",
+        "repetition": 1,
         "first_attempts": [
           [
             2469,
@@ -946,6 +1001,8 @@
     ],
     "medium_parks_work_order_prioritization": [
       {
+        "case_contract_sha256": "0ffc80c7b654696b37c812f180ca79cecb6431a8fafd9b2983e8616987c5b335",
+        "repetition": 1,
         "first_attempts": [
           [
             2773,
@@ -958,6 +1015,8 @@
     ],
     "medium_permit_checklist_validation": [
       {
+        "case_contract_sha256": "c8a3ad310ee0fe93420fc9fc661dfa66d37ab17e7042796ab5dbafe8bf1a1c0b",
+        "repetition": 1,
         "first_attempts": [
           [
             2776,
@@ -970,6 +1029,8 @@
     ],
     "medium_public_records_redaction_package": [
       {
+        "case_contract_sha256": "e561da3287bab5193093d857b7dea2043db32bb20bbaec75bad9f82bbe9912c1",
+        "repetition": 1,
         "first_attempts": [
           [
             2552,
@@ -982,6 +1043,8 @@
     ],
     "medium_school_absence_followup_json": [
       {
+        "case_contract_sha256": "6704dce822ac4d56a8cb4148eba9ee1f80e55daa15207f3fda56d1a1b10d52a2",
+        "repetition": 1,
         "first_attempts": [
           [
             2612,
@@ -994,6 +1057,8 @@
     ],
     "medium_water_leak_citizen_notice": [
       {
+        "case_contract_sha256": "abdc8c2f4ac57af6e24f2a40eead86d0622b007adddbf9dcd7f20d1276acce1e",
+        "repetition": 1,
         "first_attempts": [
           [
             2803,
@@ -1006,6 +1071,8 @@
     ],
     "ordinary_json_apartment_register_change": [
       {
+        "case_contract_sha256": "1e888be2a705b5c272be68d1a3b19097cdf64bd39b26756246b751ff43aebd1e",
+        "repetition": 1,
         "first_attempts": [
           [
             2500,
@@ -1018,6 +1085,8 @@
     ],
     "ordinary_json_integration_failures": [
       {
+        "case_contract_sha256": "539732357e76cea3d51a90fd572d2d7cd41ec32df428cc1b224bbee116422e19",
+        "repetition": 1,
         "first_attempts": [
           [
             2502,
@@ -1030,6 +1099,8 @@
     ],
     "ordinary_json_lss_completeness": [
       {
+        "case_contract_sha256": "e9c5b2ccb671e4020306037c23224b1563aa9ef72613069c0aa51a9de0ed7e6c",
+        "repetition": 1,
         "first_attempts": [
           [
             2567,
@@ -1042,6 +1113,8 @@
     ],
     "ordinary_json_school_transport": [
       {
+        "case_contract_sha256": "856f1a0e8368c57e168996098fcbed3ecd4b290ca377dfe10c56114f0ab27c22",
+        "repetition": 1,
         "first_attempts": [
           [
             2570,
@@ -1054,6 +1127,8 @@
     ],
     "ordinary_json_security_incident": [
       {
+        "case_contract_sha256": "3dd84b052f7387cb2a7ed541e24969cee8b099cd7eacbdd7e966c04e10e76d0e",
+        "repetition": 1,
         "first_attempts": [
           [
             2593,
@@ -1066,6 +1141,8 @@
     ],
     "ordinary_json_special_diet": [
       {
+        "case_contract_sha256": "29e030ecad470b2172c6b6df4790bbce841dcb456867b5d3ec8d96e8030690ec",
+        "repetition": 1,
         "first_attempts": [
           [
             2553,
@@ -1078,6 +1155,8 @@
     ],
     "ordinary_json_suspected_food_poisoning": [
       {
+        "case_contract_sha256": "0fa276bf41432d4b95cee01296bbf0a11f6f0f83e39ef29f605ba7c47d920f5b",
+        "repetition": 1,
         "first_attempts": [
           [
             2474,
@@ -1090,6 +1169,8 @@
     ],
     "ordinary_json_volunteer_interest": [
       {
+        "case_contract_sha256": "c4f4b6507bddc2c5d36438e5f9e287ec2b4232c7d881199a886a0eccf9ada485",
+        "repetition": 1,
         "first_attempts": [
           [
             2479,
@@ -1102,6 +1183,8 @@
     ],
     "ordinary_language_human_review_policy": [
       {
+        "case_contract_sha256": "398e24920f179e2b1ba33e8bdac1a18b57a7be351e608a3cf0420e537142256a",
+        "repetition": 1,
         "first_attempts": [
           [
             2401,
@@ -1114,6 +1197,8 @@
     ],
     "ordinary_report_building_supplement": [
       {
+        "case_contract_sha256": "551ec81f220db491abfab049e6e8fc0b669daa0d05db9ee9968187f038b536bd",
+        "repetition": 1,
         "first_attempts": [
           [
             2516,
@@ -1126,6 +1211,8 @@
     ],
     "ordinary_report_committee_meeting": [
       {
+        "case_contract_sha256": "ad4b349809c58f1cc5e68b6b2010de73677e2a8fd420b81ea022c8ec57bfa348",
+        "repetition": 1,
         "first_attempts": [
           [
             2414,
@@ -1138,6 +1225,8 @@
     ],
     "ordinary_report_cyber_timeline": [
       {
+        "case_contract_sha256": "0e555b91fd03607c289676dbff046f257c38d825e400c980276d6bcfd81b8a9c",
+        "repetition": 1,
         "first_attempts": [
           [
             2526,
@@ -1150,6 +1239,8 @@
     ],
     "ordinary_report_environmental_complaints": [
       {
+        "case_contract_sha256": "d6ca57ec438d92415f0c748468688ed62c7e07636feaacd338e582adaf6a6b15",
+        "repetition": 1,
         "first_attempts": [
           [
             2445,
@@ -1162,6 +1253,8 @@
     ],
     "ordinary_report_event_financing": [
       {
+        "case_contract_sha256": "e1d92214204dae9325bfd7d09c40aae7310058d2f042e8388a739ebc2ce16e80",
+        "repetition": 1,
         "first_attempts": [
           [
             2476,
@@ -1174,6 +1267,8 @@
     ],
     "ordinary_report_procurement_comparison": [
       {
+        "case_contract_sha256": "042018a898d66f187ea531927119adc482d89e81a7e14d1ac54d43d4bf0982a7",
+        "repetition": 1,
         "first_attempts": [
           [
             2494,
@@ -1186,6 +1281,8 @@
     ],
     "ordinary_report_public_records_request": [
       {
+        "case_contract_sha256": "4d3bae20e126a30103b6c14501db18bd74b99ee0a16de9b960fc7f7129c4a1c2",
+        "repetition": 1,
         "first_attempts": [
           [
             2487,
@@ -1198,6 +1295,8 @@
     ],
     "ordinary_report_student_device_incidents": [
       {
+        "case_contract_sha256": "2af8316769a57486c3ed40a0d565813ccff4ab36cea0de751b4bc42d35756210",
+        "repetition": 1,
         "first_attempts": [
           [
             2410,
@@ -1210,6 +1309,8 @@
     ],
     "simple_audio_minutes_actions": [
       {
+        "case_contract_sha256": "5d2eedfe45307abf14b6751fc77588d72b0eec37eb322c2485dbb9e1344640eb",
+        "repetition": 1,
         "first_attempts": [
           [
             2674,
@@ -1222,6 +1323,8 @@
     ],
     "simple_document_metadata_json": [
       {
+        "case_contract_sha256": "597c69bf3850b5f8e382a1c43160b45c970b309af580f74c250a1f76b40da867",
+        "repetition": 1,
         "first_attempts": [
           [
             2618,

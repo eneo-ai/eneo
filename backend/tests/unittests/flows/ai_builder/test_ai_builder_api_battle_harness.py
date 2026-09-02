@@ -9589,6 +9589,34 @@ def test_failure_class_reads_the_typed_provider_detail_before_the_code(
     assert failure_class == expected_class
 
 
+def test_failure_class_accepts_only_the_producer_disposition_vocabulary() -> None:
+    """A typo or schema drift must never turn a Builder fault into an acquisition fault."""
+
+    from eneo.flows.ai_builder.ai_builder_error_contract import (
+        AIBuilderProviderDisposition,
+    )
+
+    _battle_harness()
+    receipts = sys.modules["ai_builder_receipt"]
+    assert receipts._PROVIDER_DISPOSITIONS == set(
+        get_args(AIBuilderProviderDisposition)
+    )
+    drifted = {
+        "error_details": [
+            {
+                "code": "planner_stream_failed",
+                "details": {"provider_disposition": "typo"},
+            }
+        ]
+    }
+    assert (
+        receipts.failure_class_from_summary(
+            drifted, runtime_run_status=None, where="test"
+        )
+        == "builder_semantic"
+    )
+
+
 def test_failure_class_prefers_an_acquisition_fault_anywhere_in_the_turn() -> None:
     harness = _battle_harness()
     summary = {
@@ -9596,7 +9624,7 @@ def test_failure_class_prefers_an_acquisition_fault_anywhere_in_the_turn() -> No
             {"code": "planner_parse_error"},
             {
                 "code": "planner_upstream_error",
-                "details": {"provider_disposition": "x"},
+                "details": {"provider_disposition": "known_rejection"},
             },
         ]
     }

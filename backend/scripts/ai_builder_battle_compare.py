@@ -1034,11 +1034,15 @@ _MANIFEST_FILE = "release-manifest.json"
 class _CaseTokenEvidence:
     """One completed observation's token facts, kept per case for pairing."""
 
+    case_contract_sha256: str
+    repetition: int
     first_attempts: tuple[tuple[int, int, int], ...]
     classifier: tuple[int, int, int] | None
 
     def as_json(self) -> dict[str, Any]:
         return {
+            "case_contract_sha256": self.case_contract_sha256,
+            "repetition": self.repetition,
             "first_attempts": [list(attempt) for attempt in self.first_attempts],
             "classifier": list(self.classifier) if self.classifier else None,
         }
@@ -1060,6 +1064,12 @@ def _p90(values: list[int]) -> int | None:
 def _bundle_int(value: object, *, where: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ReceiptError(f"{where} must be a non-negative integer; got {value!r}.")
+    return value
+
+
+def _bundle_str(value: object, *, where: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ReceiptError(f"{where} must be a non-empty string.")
     return value
 
 
@@ -1099,17 +1109,46 @@ def _token_summary(
     )
 
 
-def _planned_observations(suite_dir: Path) -> int | None:
+@dataclass(frozen=True)
+class _SuiteManifest:
+    """The identity a token baseline is bound to, read from the release manifest."""
+
+    model: dict[str, Any]
+    app_version: str
+    planned_observations: int
+
+
+def _read_manifest(suite_dir: Path) -> _SuiteManifest:
     manifest_path = suite_dir / _MANIFEST_FILE
     if not manifest_path.is_file():
-        return None
+        raise ReceiptError(
+            f"{suite_dir} has no {_MANIFEST_FILE}; a token baseline needs the "
+            "run's model, build and planned population."
+        )
+    where = str(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = (
-        manifest.get("expected_observations") if isinstance(manifest, dict) else None
-    )
+    if not isinstance(manifest, dict):
+        raise ReceiptError(f"{where} must contain a JSON object.")
+    manifest = cast(dict[str, Any], manifest)
+    expected = manifest.get("expected_observations")
     if not isinstance(expected, list):
-        raise ReceiptError(f"{manifest_path}: expected_observations is missing.")
-    return len(cast(list[Any], expected))
+        raise ReceiptError(f"{where}: expected_observations is missing.")
+    identity = manifest.get("release_identity")
+    if not isinstance(identity, dict):
+        raise ReceiptError(f"{where}: release_identity is missing.")
+    identity = cast(dict[str, Any], identity)
+    model = identity.get("model")
+    build = identity.get("build")
+    if not isinstance(model, dict) or not isinstance(build, dict):
+        raise ReceiptError(f"{where}: release_identity.model and .build are required.")
+    build = cast(dict[str, Any], build)
+    return _SuiteManifest(
+        model=dict(cast(dict[str, Any], model)),
+        app_version=_bundle_str(
+            build.get("app_version"), where=f"{where}: build.app_version"
+        ),
+        planned_observations=len(cast(list[Any], expected)),
+    )
 
 
 def _bundle_case_evidence(
@@ -1160,7 +1199,12 @@ def _bundle_case_evidence(
             _bundle_int(usage.get("total_tokens"), where=f"{key}.total_tokens"),
         )
     return case_id, _CaseTokenEvidence(
-        first_attempts=tuple(first_attempts), classifier=classifier
+        case_contract_sha256=_bundle_str(
+            bundle.get("case_contract_sha256"), where=f"{where}: case_contract_sha256"
+        ),
+        repetition=_bundle_int(bundle.get("repetition"), where=f"{where}: repetition"),
+        first_attempts=tuple(first_attempts),
+        classifier=classifier,
     )
 
 
@@ -1171,14 +1215,15 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
     and the statistics live here and nowhere else: first proposal attempts of
     completed observations, medians as the middle value, p90 as nearest rank.
     Classifier usage the projection could not supply is counted, never zero.
-    The report keeps per-case evidence so two roots compare over the cases
-    they share; a root short of its manifest is marked partial.
+    The report is bound to the manifest's model and build identity and keeps
+    per-case evidence with each case's contract hash, so two roots compare
+    only what is the same experiment; a root short of its manifest is partial.
     """
 
     bundle_paths = sorted(suite_dir.glob(_BUNDLE_GLOB))
     if not bundle_paths:
         raise ReceiptError(f"{suite_dir} holds no observation bundles.")
-    planned_observations = _planned_observations(suite_dir)
+    manifest = _read_manifest(suite_dir)
     revisions: set[str] = set()
     status_counts: Counter[str] = Counter()
     cases: dict[str, list[_CaseTokenEvidence]] = {}
@@ -1188,44 +1233,41 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
         if not isinstance(bundle, dict):
             raise ReceiptError(f"{where} must contain a JSON object.")
         bundle = cast(dict[str, Any], bundle)
-        revision = bundle.get("app_version")
-        if not isinstance(revision, str) or not revision:
-            raise ReceiptError(f"{where}: app_version is missing.")
-        revisions.add(revision)
+        revisions.add(
+            _bundle_str(bundle.get("app_version"), where=f"{where}: app_version")
+        )
         observation = bundle.get("observation")
         if not isinstance(observation, dict):
             raise ReceiptError(f"{where}: carries no sealed observation.")
         observation = cast(dict[str, Any], observation)
-        status = observation.get("observation_status")
-        if not isinstance(status, str) or not status:
-            raise ReceiptError(f"{where}: observation_status is missing.")
+        status = _bundle_str(
+            observation.get("observation_status"), where=f"{where}: observation_status"
+        )
         status_counts[status] += 1
         if status != "completed":
             continue
         case_id, evidence = _bundle_case_evidence(bundle, where=where)
         cases.setdefault(case_id, []).append(evidence)
-    if len(revisions) != 1:
+    if len(revisions) != 1 or next(iter(revisions)) != manifest.app_version:
         raise ReceiptError(
-            f"{suite_dir} spans {len(revisions)} source revisions; a baseline "
-            "describes one build."
+            f"{suite_dir}: bundles report {sorted(revisions)} but the manifest "
+            f"was sealed at {manifest.app_version!r}; a baseline describes "
+            "one build."
         )
     proposal, classifier = _token_summary(
         [item for items in cases.values() for item in items]
     )
     return {
         "suite_dir": str(suite_dir),
-        "source_revision": next(iter(revisions)),
+        "source_revision": manifest.app_version,
+        "model": manifest.model,
         "population": TOKEN_BASELINE_POPULATION,
         "observation_status_counts": dict(sorted(status_counts.items())),
         # A root whose bundles fall short of its manifest is a partial
         # acquisition: its case mix is only its own cases, not the corpus.
-        "planned_observations": planned_observations,
+        "planned_observations": manifest.planned_observations,
         "observed_observations": len(bundle_paths),
-        "partial": (
-            planned_observations is not None
-            and len(bundle_paths) != planned_observations
-        ),
-        "case_ids": sorted(cases),
+        "partial": len(bundle_paths) != manifest.planned_observations,
         "proposal_first_attempt": proposal,
         "classifier": classifier,
         "cases": {
@@ -1237,72 +1279,89 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
 
 def _case_evidence_from_report(
     report: dict[str, Any], *, where: str
-) -> dict[str, list[_CaseTokenEvidence]]:
-    """Read a report's per-case evidence back, so two reports can be paired."""
+) -> dict[tuple[str, str], list[_CaseTokenEvidence]]:
+    """Read a report's per-case evidence back, keyed by case id and contract."""
 
     raw_cases = report.get("cases")
     if not isinstance(raw_cases, dict):
         raise ReceiptError(
             f"{where}: token baseline report carries no per-case evidence."
         )
-    evidence: dict[str, list[_CaseTokenEvidence]] = {}
+    evidence: dict[tuple[str, str], list[_CaseTokenEvidence]] = {}
     for case_id, raw_items in cast(dict[str, Any], raw_cases).items():
         if not isinstance(raw_items, list):
             raise ReceiptError(f"{where}: cases[{case_id!r}] must be a list.")
-        items: list[_CaseTokenEvidence] = []
         for raw_item in cast(list[Any], raw_items):
             if not isinstance(raw_item, dict):
                 raise ReceiptError(
                     f"{where}: cases[{case_id!r}] holds a malformed item."
                 )
             raw_item = cast(dict[str, Any], raw_item)
+            key = f"{where}: cases[{case_id!r}]"
             attempts = raw_item.get("first_attempts")
             if not isinstance(attempts, list):
-                raise ReceiptError(f"{where}: cases[{case_id!r}] lacks first_attempts.")
+                raise ReceiptError(f"{key} lacks first_attempts.")
             classifier = raw_item.get("classifier")
-            items.append(
-                _CaseTokenEvidence(
-                    first_attempts=tuple(
-                        _int_triple(attempt, where=f"{where}: cases[{case_id!r}]")
-                        for attempt in cast(list[Any], attempts)
-                    ),
-                    classifier=(
-                        _int_triple(classifier, where=f"{where}: cases[{case_id!r}]")
-                        if classifier is not None
-                        else None
-                    ),
-                )
+            item = _CaseTokenEvidence(
+                case_contract_sha256=_bundle_str(
+                    raw_item.get("case_contract_sha256"),
+                    where=f"{key}.case_contract_sha256",
+                ),
+                repetition=_bundle_int(
+                    raw_item.get("repetition"), where=f"{key}.repetition"
+                ),
+                first_attempts=tuple(
+                    _int_triple(attempt, where=key)
+                    for attempt in cast(list[Any], attempts)
+                ),
+                classifier=(
+                    _int_triple(classifier, where=key)
+                    if classifier is not None
+                    else None
+                ),
             )
-        evidence[str(case_id)] = items
+            evidence.setdefault((str(case_id), item.case_contract_sha256), []).append(
+                item
+            )
     return evidence
 
 
 def token_baseline_delta(
     current: dict[str, Any], baseline: dict[str, Any]
 ) -> dict[str, Any]:
-    """Movement of `current` against a frozen report, over the shared cases.
+    """Movement of `current` against a frozen report, over the same experiment.
 
-    A partial root (the R17 broad leg holds 104 of 172 planned observations,
-    skewed away from hard cases) must not be compared as if it were the
-    corpus: both sides are re-aggregated over the cases they share, and the
+    Two reports compare only when they were measured with the same model, and
+    only over the cases whose id AND contract hash both hold: a partial root
+    (the R17 broad leg holds 104 of 172 planned observations, skewed away from
+    hard cases) or a rewritten case must not pass as the same population. The
     cases either side lacks are named.
     """
 
+    if current.get("model") != baseline.get("model"):
+        raise ReceiptError(
+            f"token baseline reports were measured with different models "
+            f"({current.get('model')!r} vs {baseline.get('model')!r}); not comparable."
+        )
     current_cases = _case_evidence_from_report(current, where="current")
     baseline_cases = _case_evidence_from_report(baseline, where="baseline")
     shared = sorted(set(current_cases) & set(baseline_cases))
     if not shared:
         raise ReceiptError("token baseline reports share no cases; nothing to compare.")
     current_paired = _token_summary(
-        [item for case_id in shared for item in current_cases[case_id]]
+        [item for identity in shared for item in current_cases[identity]]
     )
     baseline_paired = _token_summary(
-        [item for case_id in shared for item in baseline_cases[case_id]]
+        [item for identity in shared for item in baseline_cases[identity]]
     )
     deltas: dict[str, Any] = {
         "paired_cases": len(shared),
-        "unpaired_current_cases": sorted(set(current_cases) - set(shared)),
-        "unpaired_baseline_cases": sorted(set(baseline_cases) - set(shared)),
+        "unpaired_current_cases": sorted(
+            case_id for case_id, _ in set(current_cases) - set(shared)
+        ),
+        "unpaired_baseline_cases": sorted(
+            case_id for case_id, _ in set(baseline_cases) - set(shared)
+        ),
     }
     for section, current_section, baseline_section in (
         ("proposal_first_attempt", current_paired[0], baseline_paired[0]),
@@ -1329,6 +1388,7 @@ def _render_token_baseline_markdown(
     lines = [
         f"# Token baseline: {report['source_revision']}",
         "",
+        f"Model: {json.dumps(report['model'])}",
         f"Population: {report['population']} "
         f"({json.dumps(report['observation_status_counts'])}); observed "
         f"{report['observed_observations']} of planned "
@@ -1341,7 +1401,7 @@ def _render_token_baseline_markdown(
     for section in ("proposal_first_attempt", "classifier"):
         for metric, value in cast(dict[str, Any], report[section]).items():
             lines.append(f"| {section}.{metric} | {value} |")
-    lines.append(f"| cases | {len(report['case_ids'])} |")
+    lines.append(f"| cases | {len(cast(dict[str, Any], report['cases']))} |")
     if deltas:
         lines += [
             "",

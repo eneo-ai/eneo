@@ -152,6 +152,9 @@ ACQUISITION_FAILURE_STATUSES: frozenset[str] = frozenset(
 )
 ACQUISITION_FAILURE_OUTCOME_CLASS = "acquisition_failure"
 
+# The producer's closed vocabulary (`AIBuilderProviderDisposition`); a test
+# holds the two in step. Any other value is not provider evidence.
+_PROVIDER_DISPOSITIONS = frozenset({"known_rejection", "provider_outcome_unknown"})
 _CREDENTIAL_ROUTE_PROVIDER_EXCEPTIONS = frozenset(
     {"authentication", "permission_denied", "not_found"}
 )
@@ -237,7 +240,7 @@ def _error_detail_failure_class(detail: Mapping[str, Any]) -> FailureClass:
     if details.get("provider_exception_class") in _CREDENTIAL_ROUTE_PROVIDER_EXCEPTIONS:
         return "credential_route"
     code = detail.get("code")
-    if details.get("provider_disposition") is not None:
+    if details.get("provider_disposition") in _PROVIDER_DISPOSITIONS:
         return "provider_request"
     if code in _CREDENTIAL_ROUTE_ERROR_CODES:
         return "credential_route"
