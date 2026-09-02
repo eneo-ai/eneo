@@ -36,6 +36,9 @@ class JWTCreds(BaseModel):
 
     sub: EmailStr
     username: Optional[str] = None
+    # Missing claims decode as version 0 for rolling compatibility with tokens
+    # minted before credential-version based session invalidation existed.
+    credential_version: int = Field(default=0, ge=0)
 
 
 class JWTPayload(JWTMeta, JWTCreds):

@@ -16,6 +16,7 @@
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
+  import { ENEO_PASSWORD_POLICY, validateNewPassword } from "$lib/features/auth/passwordChange";
 
   const eneo = getEneo();
 
@@ -64,11 +65,27 @@
     editableUser = makeEditable(user);
   });
 
+  function hasValidPassword(): boolean {
+    if (!userPassword) return mode === "update";
+
+    const validationError = validateNewPassword(userPassword, ENEO_PASSWORD_POLICY);
+    if (validationError === "too_long_bytes") {
+      toast.warning(m.password_policy_max_bytes({ max: ENEO_PASSWORD_POLICY.maxBytes }));
+      return false;
+    }
+    if (validationError) {
+      toast.warning(m.password_policy_min_length({ min: ENEO_PASSWORD_POLICY.minLength }));
+      return false;
+    }
+    return true;
+  }
+
   async function updateUser() {
     if (!user.username) {
       toast.warning(m.cant_edit_user_without_username());
       return;
     }
+    if (!hasValidPassword()) return;
     const update = {
       ...editableUser.getEdits(),
       password: userPassword === "" ? undefined : userPassword,
@@ -94,6 +111,7 @@
     if (username === "" || editableUser.email === "" || userPassword === "") {
       return;
     }
+    if (!hasValidPassword()) return;
     const newUser = {
       ...editableUser,
       password: userPassword,
@@ -162,13 +180,16 @@
 
       <Input.Text
         bind:value={userPassword}
-        minlength="7"
-        maxlength="100"
+        minlength={String(ENEO_PASSWORD_POLICY.minLength)}
+        maxlength={String(ENEO_PASSWORD_POLICY.maxBytes)}
         label={m.password()}
-        description={m.password_needs_7_chars()}
+        description={m.password_eneo_requirements({
+          min: ENEO_PASSWORD_POLICY.minLength,
+          max: ENEO_PASSWORD_POLICY.maxBytes
+        })}
         required={mode === "create"}
         type="password"
-        autocomplete="off"
+        autocomplete="new-password"
         class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
       ></Input.Text>
 

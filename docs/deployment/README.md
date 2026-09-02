@@ -40,7 +40,7 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 #    - Set initial user credentials (creates login user):
 #        DEFAULT_TENANT_NAME=ExampleTenant
 #        DEFAULT_USER_EMAIL=user@example.com
-#        DEFAULT_USER_PASSWORD=Password1!
+#        DEFAULT_USER_PASSWORD=ChangeMePassword1!
 
 # 4b. Optional object storage:
 #    - The default deployment uses bounded PostgreSQL-inline content

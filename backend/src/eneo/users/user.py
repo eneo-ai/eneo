@@ -1,10 +1,17 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Generic, Optional, TypeVar
+from typing import TYPE_CHECKING, Annotated, Generic, Literal, Optional, TypeVar
 from uuid import UUID
 
-from pydantic import EmailStr, Field, computed_field, field_serializer, field_validator
+from pydantic import (
+    EmailStr,
+    Field,
+    SecretStr,
+    computed_field,
+    field_serializer,
+    field_validator,
+)
 
 from eneo.authentication.auth_models import (
     AccessToken,
@@ -14,6 +21,7 @@ from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB, RolePublic
 from eneo.tenants.tenant import TenantInDB
+from eneo.users.password import LOCAL_PASSWORD_POLICY
 
 
 class UserState(str, Enum):
@@ -217,6 +225,7 @@ class UserAdd(UserBase):
     state: UserState
     tenant_id: UUID
     quota_limit: Optional[int] = None
+    credential_version: int = 0
 
     roles: list[ModelId] = []
 
@@ -233,6 +242,7 @@ class UserUpdate(BaseModel):
     tenant_id: Optional[int] = None
     quota_limit: Optional[int] = None
     salt: Optional[str] = None
+    credential_version: Optional[int] = Field(default=None, ge=0)
 
     roles: Optional[list[ModelId]] = None
 
@@ -271,6 +281,7 @@ class UserInDB(UserInDBBase):
     is_active: bool = True
     state: UserState
     quota_limit: Optional[int] = None
+    credential_version: int = Field(default=0, ge=0)
 
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
@@ -314,11 +325,33 @@ class UserPublicBase(InDB, UserBase):
     quota_used: int = 0
 
 
+class LocalPasswordPolicyPublic(BaseModel):
+    min_length: int = LOCAL_PASSWORD_POLICY.min_length
+    max_bytes: int = LOCAL_PASSWORD_POLICY.max_bytes
+
+
+class EneoPasswordChangeCapabilityPublic(BaseModel):
+    source: Literal["eneo"] = "eneo"
+    policy: LocalPasswordPolicyPublic = Field(default_factory=LocalPasswordPolicyPublic)
+
+
+class ExternalPasswordChangeCapabilityPublic(BaseModel):
+    source: Literal["external"] = "external"
+    policy: None = None
+
+
+PasswordChangeCapabilityPublic = Annotated[
+    EneoPasswordChangeCapabilityPublic | ExternalPasswordChangeCapabilityPublic,
+    Field(discriminator="source"),
+]
+
+
 class UserPublic(UserPublicBase):
     truncated_api_key: Optional[str] = None
     quota_limit: Optional[int] = None
     roles: list[RolePublic]
     user_groups: list[UserGroupRead]
+    password_change: PasswordChangeCapabilityPublic
 
 
 class UserPublicWithAccessToken(UserPublic):
@@ -332,11 +365,12 @@ class UserLogin(BaseModel):
 
 class UserAddAdmin(UserBase):
     password: Optional[str] = Field(
-        min_length=7,
-        max_length=100,
         default=None,
-        description="User password (minimum 7 characters)",
-        examples=["SecurePassword123!"],
+        description=(
+            "New local password. Must contain at least 15 characters and be at "
+            "most 72 UTF-8 bytes."
+        ),
+        examples=["Correct horse battery staple"],
     )
     quota_limit: Optional[int] = Field(
         description="Storage limit in bytes (minimum 1000 bytes = 1KB)",
@@ -378,10 +412,11 @@ class UserUpdatePublic(BaseModel):
     )
     password: Optional[str] = Field(
         default=None,
-        min_length=7,
-        max_length=100,
-        description="New password (minimum 7 characters)",
-        examples=["NewSecurePassword456!"],
+        description=(
+            "New local password. Must contain at least 15 characters and be at "
+            "most 72 UTF-8 bytes."
+        ),
+        examples=["Another correct horse battery staple"],
     )
     quota_limit: Optional[int] = Field(
         description="New storage limit in bytes (minimum 1000 bytes = 1KB)",
@@ -431,3 +466,17 @@ else:
 
 class UserProvision(BaseModel):
     zitadel_token: str
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: SecretStr = Field(
+        description="Current local Eneo password.",
+        json_schema_extra={"writeOnly": True},
+    )
+    new_password: SecretStr = Field(
+        description=(
+            "New local password. The active constraints are returned in "
+            "UserPublic.password_change.policy."
+        ),
+        json_schema_extra={"writeOnly": True},
+    )

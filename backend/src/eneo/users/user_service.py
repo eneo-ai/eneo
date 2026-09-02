@@ -62,6 +62,12 @@ from eneo.settings.settings import SettingsUpsert
 from eneo.settings.settings_repo import SettingsRepository
 from eneo.tenants.tenant import TenantState
 from eneo.tenants.tenant_repo import TenantRepository
+from eneo.users.password import (
+    CurrentPasswordIncorrectError,
+    LocalPasswordChangeUnavailableError,
+    PasswordReuseError,
+    validate_new_local_password,
+)
 from eneo.users.user import (
     PropUserInvite,
     UserAdd,
@@ -692,6 +698,7 @@ class UserService:
             raise BadRequestException(f"Tenant {new_user.tenant_id} does not exist")
 
         if new_user.password is not None:
+            validate_new_local_password(new_user.password)
             salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
                 new_user.password
             )
@@ -739,12 +746,19 @@ class UserService:
         return user_in_db, access_token
 
     async def _get_user_from_token(self, token: str):
-        username = self.auth_service.get_username_from_token(
-            token, get_settings().jwt_secret
+        settings = get_settings()
+        payload, claims = self.auth_service.get_jwt_payload_with_claims(
+            token,
+            key=str(settings.jwt_secret),
+            aud=settings.jwt_audience,
+            algs=[settings.jwt_algorithm],
         )
-        if username is None:
+        if payload.username is None:
             return None
-        return await self.repo.get_user_by_username(username)
+        user = await self.repo.get_user_by_username(payload.username)
+        if user is not None:
+            self.auth_service.validate_credential_version(claims, user)
+        return user
 
     async def _resolve_space_id_for_scope(
         self, scope_type: str, scope_id: UUID
@@ -1905,6 +1919,96 @@ class UserService:
 
         return user_in_db
 
+    async def _write_local_password(
+        self,
+        *,
+        user_id: UUID,
+        new_password: str,
+        current_password: str | None,
+        require_current_password: bool,
+    ) -> "UserInDB":
+        """Serialize and persist one local credential mutation.
+
+        Both self-service changes and administrator resets use this path, so
+        hashing, password reuse protection and credential-version increments
+        cannot drift apart.
+        """
+
+        validate_new_local_password(new_password)
+        user = await self.repo.get_user_by_id_for_update(user_id)
+        if user is None:
+            raise NotFoundException("No such user")
+
+        if require_current_password:
+            if user.password is None:
+                raise LocalPasswordChangeUnavailableError(
+                    "This account does not have a local Eneo password."
+                )
+            if current_password is None or not self.auth_service.verify_password(
+                current_password, user.password
+            ):
+                raise CurrentPasswordIncorrectError(
+                    "The current password is incorrect."
+                )
+
+        if user.password is not None and self.auth_service.verify_password(
+            new_password, user.password
+        ):
+            raise PasswordReuseError(
+                "The new password must be different from the current password."
+            )
+
+        salt, hashed_password = self.auth_service.create_salt_and_hashed_password(
+            new_password
+        )
+        updated = await self.repo.update(
+            UserUpdate(
+                id=user.id,
+                password=hashed_password,
+                salt=salt,
+                credential_version=user.credential_version + 1,
+            )
+        )
+        if updated is None:
+            raise NotFoundException("No such user")
+        return updated
+
+    async def change_local_password(
+        self, *, user_id: UUID, current_password: str, new_password: str
+    ) -> "UserInDB":
+        return await self._write_local_password(
+            user_id=user_id,
+            new_password=new_password,
+            current_password=current_password,
+            require_current_password=True,
+        )
+
+    async def reset_local_password(
+        self, *, user_id: UUID, new_password: str
+    ) -> "UserInDB":
+        return await self._write_local_password(
+            user_id=user_id,
+            new_password=new_password,
+            current_password=None,
+            require_current_password=False,
+        )
+
+    async def invalidate_sessions(self, *, user_id: UUID) -> "UserInDB":
+        """Invalidate all Eneo JWTs previously minted for one user."""
+
+        user = await self.repo.get_user_by_id_for_update(user_id)
+        if user is None:
+            raise NotFoundException("No such user")
+        updated = await self.repo.update(
+            UserUpdate(
+                id=user.id,
+                credential_version=user.credential_version + 1,
+            )
+        )
+        if updated is None:
+            raise NotFoundException("No such user")
+        return updated
+
     async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
         await self._validate_email(user_update_public.email)
         await self._validate_username(user_update_public.username)
@@ -1973,20 +2077,21 @@ class UserService:
                         "At least one user must retain admin access."
                     )
 
-        user_update = UserUpdate(
-            id=user_id, **user_update_public.model_dump(exclude_unset=True)
-        )
-
+        password_updated_user: UserInDB | None = None
         if user_update_public.password is not None:
-            salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
-                user_update_public.password
+            password_updated_user = await self.reset_local_password(
+                user_id=user_id, new_password=user_update_public.password
             )
-            user_update.salt = salt
-            user_update.password = hashed_pass
 
-        user_in_db = await self.repo.update(
-            UserUpdate(**user_update.model_dump(exclude_unset=True))
+        non_password_update = user_update_public.model_dump(
+            exclude_unset=True, exclude={"password"}
         )
+        if non_password_update:
+            user_in_db = await self.repo.update(
+                UserUpdate(id=user_id, **non_password_update)
+            )
+        else:
+            user_in_db = password_updated_user
 
         if user_in_db is None:
             raise NotFoundException("No such user")

@@ -66,7 +66,7 @@ uv run python init_db.py
 ```
 
 > **Important**: The `init_db.py` script:
-> - Creates an example tenant and user (`user@example.com` / `Password1!`)
+> - Creates an example tenant and user (`user@example.com` / `ChangeMePassword1!`)
 > - Runs all database migrations automatically
 > - Can be re-run after code updates to apply new migrations
 
@@ -100,11 +100,11 @@ uv run worker
 
 2. **Login with Default Credentials**
    - Email: `user@example.com`
-   - Password: `Password1!`
+   - Password: `ChangeMePassword1!`
 
 3. **Change the Default Password** (Important!)
-   - Click user menu (top-right corner)
-   - Select "Change Password"
+   - Click the user menu (top-right corner) and open **Account**
+   - Under **Password**, select **Change password**
 
 ## Essential Configuration
 

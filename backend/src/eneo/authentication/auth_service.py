@@ -1,6 +1,5 @@
 import base64
-import secrets
-import string
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
@@ -17,6 +16,7 @@ from eneo.authentication.auth_models import (
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
+from eneo.users.password import BCRYPT_MAX_PASSWORD_BYTES
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -27,6 +27,7 @@ logger = get_logger(__name__)
 JWT_ALGORITHM = get_settings().jwt_algorithm
 JWT_AUDIENCE = get_settings().jwt_audience
 JWT_EXPIRY_TIME_MINUTES = get_settings().jwt_expiry_time
+JWT_ISSUER = get_settings().jwt_issuer
 JWT_SECRET = get_settings().jwt_secret
 OIDC_CLOCK_LEEWAY_SECONDS = get_settings().oidc_clock_leeway_seconds
 
@@ -37,21 +38,12 @@ class AuthService:
     # Even when user is not found, we verify against this to maintain consistent response times
     DUMMY_HASH = "$2b$12$CfZ8Z9V6o4d0B.3n4WGNBe4oANd8FjKc7t2rggx5xeW5c0p1sS2yW"
 
-    @staticmethod
-    def _generate_salt() -> bytes:
-        return bcrypt.gensalt()
-
-    @staticmethod
-    def _hash_password(password: str, salt: bytes) -> str:
-        pwd_bytes = password.encode("utf-8")
-        return bcrypt.hashpw(password=pwd_bytes, salt=salt).decode("utf-8")
-
     def create_salt_and_hashed_password(
-        self, plaintext_password: str | None
+        self, plaintext_password: str
     ) -> tuple[str, str]:
-        if plaintext_password is None:
-            plaintext_password = ""
         pwd_bytes = plaintext_password.encode("utf-8")
+        if len(pwd_bytes) > BCRYPT_MAX_PASSWORD_BYTES:
+            raise ValueError("Password exceeds bcrypt's maximum input size.")
         salt = bcrypt.gensalt()
         hashed_password = bcrypt.hashpw(password=pwd_bytes, salt=salt)
         return salt.decode(), hashed_password.decode("utf-8")
@@ -60,16 +52,18 @@ class AuthService:
     def verify_password(password: str, hashed_pw: str) -> bool:
         """Verify that incoming password+salt matches hashed pw"""
         password_byte_enc = password.encode("utf-8")
-        return bcrypt.checkpw(
-            password=password_byte_enc, hashed_password=hashed_pw.encode("utf-8")
-        )
-
-    @staticmethod
-    def generate_password(length: int) -> str:
-        alphabet = string.ascii_letters + string.digits
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
-
-        return password
+        # Older bcrypt releases silently truncated inputs at 72 bytes. Preserve
+        # verification compatibility for historical hashes while all new
+        # writes reject overlong values in the local password policy.
+        password_byte_enc = password_byte_enc[:BCRYPT_MAX_PASSWORD_BYTES]
+        try:
+            return bcrypt.checkpw(
+                password=password_byte_enc, hashed_password=hashed_pw.encode("utf-8")
+            )
+        except ValueError:
+            # Malformed historical hashes and unsupported inputs authenticate as
+            # invalid credentials; neither should become a server error.
+            return False
 
     def create_access_token_for_user(
         self,
@@ -100,7 +94,11 @@ class AuthService:
                 datetime.now(timezone.utc) + timedelta(minutes=expires_in)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            credential_version=getattr(user, "credential_version", 0),
+        )
         token_payload = JWTPayload(
             **jwt_meta.model_dump(),
             **jwt_creds.model_dump(),
@@ -145,7 +143,11 @@ class AuthService:
                 datetime.now(timezone.utc) + timedelta(minutes=expires_in)
             ),
         )
-        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        jwt_creds = JWTCreds(
+            sub=user.email,
+            username=user.username,
+            credential_version=getattr(user, "credential_version", 0),
+        )
         payload = {
             **JWTPayload(
                 **jwt_meta.model_dump(),
@@ -155,8 +157,41 @@ class AuthService:
         }
         return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
 
-    def get_username_from_token(self, token: str, secret_key: str) -> str | None:
-        return self.get_jwt_payload(token, key=str(secret_key)).username
+    @staticmethod
+    def validate_credential_version(
+        claims: Mapping[str, object], user: UserInDB
+    ) -> None:
+        """Reject an Eneo JWT minted before the user's latest credential change.
+
+        Version 0 is the compatibility baseline for tokens created before the
+        claim was introduced. Provider-issued identity tokens have a different
+        issuer and remain owned by that provider; applying Eneo's counter to
+        them would make every future provider login fail once the counter moved
+        past zero. Every Eneo JWT consumer that resolves a live user must call
+        this after signature verification and user lookup.
+        """
+
+        # New tokens are unambiguous: possession of the private Eneo claim
+        # opts into version enforcement regardless of issuer text. For legacy
+        # tokens without the claim, only the exact local issuer represents
+        # Eneo's version-zero compatibility baseline. A different verified
+        # issuer is provider-owned and outside Eneo session invalidation.
+        if "credential_version" not in claims and claims.get("iss") != JWT_ISSUER:
+            return
+
+        AuthService.validate_local_credential_version(
+            claims.get("credential_version", 0), user
+        )
+
+    @staticmethod
+    def validate_local_credential_version(raw_version: object, user: UserInDB) -> None:
+        """Strictly compare a local token or ticket version with live state."""
+
+        if isinstance(raw_version, bool) or not isinstance(raw_version, int):
+            raise AuthenticationException("Could not validate token credentials.")
+
+        if raw_version != getattr(user, "credential_version", 0):
+            raise AuthenticationException("Could not validate token credentials.")
 
     def get_verified_claims(
         self,
@@ -179,14 +214,32 @@ class AuthService:
         aud: str = JWT_AUDIENCE,
         algs: list[str] | None = None,
     ) -> JWTPayload:
+        payload, _ = self.get_jwt_payload_with_claims(
+            token, key=key, aud=aud, algs=algs
+        )
+        return payload
+
+    def get_jwt_payload_with_claims(
+        self,
+        token: str,
+        key: str,
+        aud: str = JWT_AUDIENCE,
+        algs: list[str] | None = None,
+    ) -> tuple[JWTPayload, dict[str, Any]]:
+        """Return both the typed payload and untouched verified claims.
+
+        The raw mapping preserves whether optional private claims were absent;
+        applying Pydantic defaults before credential-version routing would turn
+        provider tokens into apparent legacy Eneo tokens.
+        """
+
+        claims = self.get_verified_claims(token, key=key, aud=aud, algs=algs)
         try:
-            payload = JWTPayload(
-                **self.get_verified_claims(token, key=key, aud=aud, algs=algs)
-            )
+            payload = JWTPayload(**claims)
         except ValidationError:
             raise AuthenticationException("Could not validate token credentials.")
 
-        return payload
+        return payload, claims
 
     def get_payload_from_openid_jwt(
         self,
