@@ -1757,7 +1757,6 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
 
     prompt = build_authoring_brief(
         planning_state=state,
-        confirmed_requirements=None,
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -1797,7 +1796,6 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
 
     empty_prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
-        confirmed_requirements=None,
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -1848,7 +1846,6 @@ def test_the_prompt_names_exact_paths_and_marks_unplaced_results() -> None:
 
     prompt = build_authoring_brief(
         planning_state=state,
-        confirmed_requirements=None,
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,

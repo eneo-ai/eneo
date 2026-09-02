@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from inspect import signature
 from typing import Any
 from uuid import uuid4
 
@@ -15,14 +16,12 @@ from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalIntentArgumentError,
+    build_create_flow_tool_schema,
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
-)
-from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
-    ConfirmedRuntimeInputRequirement,
 )
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
@@ -356,33 +355,15 @@ class TestBuildToolSchema:
         assert admitted["steps"][-1]["output_fields"] == fields
         assert "model_ref" in arguments
 
-    def test_create_schema_is_invariant_across_runtime_inputs(
-        self,
-    ) -> None:
-        requirements = (
-            ConfirmedRuntimeInputRequirement(
-                name="audience", purpose="interpret_input"
-            ),
-            ConfirmedRuntimeInputRequirement(name="case_id", purpose="shape_result"),
-            ConfirmedRuntimeInputRequirement(name="policy", purpose="whole_flow"),
+    def test_schema_builders_do_not_accept_runtime_input_facts(self) -> None:
+        assert (
+            "confirmed_runtime_inputs"
+            not in signature(build_create_flow_tool_schema).parameters
         )
-        baseline = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
-        contextual = build_propose_flow_tool_schema(
-            resource_catalog=_empty_catalog(),
-            confirmed_runtime_inputs=requirements,
+        assert (
+            "confirmed_runtime_inputs"
+            not in signature(build_propose_flow_tool_schema).parameters
         )
-
-        assert contextual == baseline
-
-        baseline_edit = build_propose_flow_tool_schema(
-            resource_catalog=_empty_catalog(), current_steps=[]
-        )
-        contextual_edit = build_propose_flow_tool_schema(
-            resource_catalog=_empty_catalog(),
-            current_steps=[],
-            confirmed_runtime_inputs=requirements,
-        )
-        assert contextual_edit == baseline_edit
 
     def test_pure_audio_create_schema_accepts_exactly_one_semantic_step(self) -> None:
         schema = build_propose_flow_tool_schema(

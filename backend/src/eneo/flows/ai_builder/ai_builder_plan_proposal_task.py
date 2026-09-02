@@ -14,18 +14,14 @@ from eneo.flows.ai_builder.ai_builder_action_policy import (
     named_result_projection,
 )
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    AIBuilderAttachmentContext,
     render_ai_builder_evidence_value,
 )
-from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
-)
-from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    user_relevant_requirement_notes,
-    user_relevant_requirement_text,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -61,27 +57,13 @@ from eneo.flows.ai_builder.planning_state import (
 
 
 @dataclass(frozen=True, slots=True)
-class AuthoringKeyDecision:
-    topic: str
-    decision: str
-
-
-@dataclass(frozen=True, slots=True)
-class AuthoringRequirementFacts:
-    summary: str | None = None
-    input_description: str | None = None
-    output_description: str | None = None
-    key_decisions: tuple[AuthoringKeyDecision, ...] = ()
-    named_content_fields: tuple[str, ...] = ()
-    assumptions: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class AuthoringFileRole:
+class AuthoringAttachment:
+    local_reference: str
     filename: str
     role: FileRole
     has_readable_text: bool
     coverage: AttachmentCoverage
+    excerpt: str | None = None
 
 
 SchemaAuthority = Literal[
@@ -124,9 +106,8 @@ class AuthoringResultContract:
 
 @dataclass(frozen=True, slots=True)
 class AuthoringBrief:
-    requirements: AuthoringRequirementFacts | None = None
     runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = ()
-    file_roles: tuple[AuthoringFileRole, ...] = ()
+    attachments: tuple[AuthoringAttachment, ...] = ()
     input_schema: AuthoringSchema | None = None
     output_schema: AuthoringSchema | None = None
     example_output: AuthoringExampleGuidance | None = None
@@ -136,7 +117,6 @@ class AuthoringBrief:
     resources: AIBuilderResourceReferenceMaterial | None = None
     flow_context: str | None = None
     plan_revision_context: str | None = None
-    attachment_context: str | None = None
     is_edit_mode: bool = False
     is_pure_audio_transcription: bool = False
     has_committed_audio_input: bool = False
@@ -147,15 +127,13 @@ class AuthoringBrief:
 def project_authoring_brief(
     *,
     planning_state: PlanningState,
-    confirmed_requirements: RequirementsSummaryPayload | None,
-    attachment_context: str | None,
+    attachment_context: AIBuilderAttachmentContext | None,
     flow_context: str | None,
     is_edit_mode: bool,
     resource_catalog: AIBuilderResourceCatalog,
     is_pure_audio_transcription: bool = False,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
-    confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
     can_decline: bool = False,
 ) -> AuthoringBrief:
     resource_material = build_ai_builder_resource_reference_material(
@@ -170,16 +148,20 @@ def project_authoring_brief(
     result_contract = derive_result_contract(planning_state)
     constraints = planning_state.example_output_constraints
     return AuthoringBrief(
-        requirements=_project_requirement_facts(confirmed_requirements),
-        runtime_inputs=(confirmed_runtime_inputs if not is_edit_mode else ()),
-        file_roles=tuple(
-            AuthoringFileRole(
-                filename=item.filename,
-                role=item.role,
-                has_readable_text=item.has_readable_text,
-                coverage=item.coverage,
+        runtime_inputs=(
+            tuple(
+                ConfirmedRuntimeInputRequirement(
+                    name=item.value.variable_name,
+                    purpose=item.purpose,
+                )
+                for item in planning_state.input_fields
             )
-            for item in planning_state.file_roles
+            if not is_edit_mode
+            else ()
+        ),
+        attachments=_project_authoring_attachments(
+            planning_state,
+            attachment_context,
         ),
         input_schema=_project_authoring_schema(
             planning_state.input_schema_evidence,
@@ -230,7 +212,6 @@ def project_authoring_brief(
         resources=resources,
         flow_context=flow_context,
         plan_revision_context=plan_revision_context,
-        attachment_context=attachment_context,
         is_edit_mode=is_edit_mode,
         is_pure_audio_transcription=is_pure_audio_transcription,
         has_committed_audio_input=(
@@ -247,36 +228,29 @@ def project_authoring_brief(
     )
 
 
-def _project_requirement_facts(
-    summary: RequirementsSummaryPayload | None,
-) -> AuthoringRequirementFacts | None:
-    if summary is None:
-        return None
-    facts = AuthoringRequirementFacts(
-        summary=user_relevant_requirement_text(summary.summary),
-        input_description=user_relevant_requirement_text(summary.input_description),
-        output_description=user_relevant_requirement_text(summary.output_description),
-        key_decisions=tuple(
-            AuthoringKeyDecision(topic=item.topic, decision=item.decision)
-            for item in summary.key_decisions
-        ),
-        named_content_fields=tuple(item.label for item in summary.named_content_fields),
-        assumptions=user_relevant_requirement_notes(summary.assumptions),
+def _project_authoring_attachments(
+    planning_state: PlanningState,
+    attachment_context: AIBuilderAttachmentContext | None,
+) -> tuple[AuthoringAttachment, ...]:
+    evidence_by_file_id = (
+        {item.file_id: item for item in attachment_context.evidence}
+        if attachment_context is not None
+        else {}
     )
-    return (
-        facts
-        if any(
-            (
-                facts.summary,
-                facts.input_description,
-                facts.output_description,
-                facts.key_decisions,
-                facts.named_content_fields,
-                facts.assumptions,
+    attachments: list[AuthoringAttachment] = []
+    for index, role in enumerate(planning_state.file_roles, start=1):
+        evidence = evidence_by_file_id.get(role.file_id)
+        attachments.append(
+            AuthoringAttachment(
+                local_reference=f"file {index}",
+                filename=role.filename,
+                role=role.role,
+                has_readable_text=role.has_readable_text,
+                coverage=evidence.coverage if evidence is not None else role.coverage,
+                excerpt=evidence.excerpt if evidence is not None else None,
             )
         )
-        else None
-    )
+    return tuple(attachments)
 
 
 def _project_authoring_schema(
@@ -316,20 +290,17 @@ def _project_authoring_schema(
 def build_authoring_brief(
     *,
     planning_state: PlanningState,
-    confirmed_requirements: RequirementsSummaryPayload | None,
-    attachment_context: str | None,
+    attachment_context: AIBuilderAttachmentContext | None,
     flow_context: str | None,
     is_edit_mode: bool,
     is_pure_audio_transcription: bool = False,
     resource_catalog: AIBuilderResourceCatalog,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
-    confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
     can_decline: bool = False,
 ) -> str:
     brief = project_authoring_brief(
         planning_state=planning_state,
-        confirmed_requirements=confirmed_requirements,
         attachment_context=attachment_context,
         flow_context=flow_context,
         is_edit_mode=is_edit_mode,
@@ -337,7 +308,6 @@ def build_authoring_brief(
         resource_catalog=resource_catalog,
         plan_revision_context=plan_revision_context,
         requested_output_sections=requested_output_sections,
-        confirmed_runtime_inputs=confirmed_runtime_inputs,
         can_decline=can_decline,
     )
     return _render_authoring_brief(brief)
@@ -426,9 +396,6 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
         "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`).",
         "- The backend will compile, validate, and persist the plan for user approval.",
         *create_mode_rules,
-        "",
-        "Requirements:",
-        _render_requirement_facts(brief.requirements),
     ]
     if brief.runtime_inputs:
         lines.extend(
@@ -441,9 +408,9 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
                 "each listed purpose when designing semantic work.",
             ]
         )
-    file_roles_block = _file_roles_block(brief.file_roles)
-    if file_roles_block is not None:
-        lines.extend(["", "Uploaded file roles:", file_roles_block])
+    attachment_block = _attachments_block(brief.attachments)
+    if attachment_block is not None:
+        lines.extend(["", "Uploaded files:", attachment_block])
     input_schema_block = _schema_evidence_block(brief.input_schema)
     if input_schema_block is not None:
         lines.extend(["", "Input schema evidence:", input_schema_block])
@@ -467,8 +434,6 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
         lines.extend(["", "Available resources:", resource_context])
     if brief.plan_revision_context:
         lines.extend(["", brief.plan_revision_context])
-    if brief.attachment_context:
-        lines.extend(["", "Attachment context:", brief.attachment_context])
     return "\n".join(lines)
 
 
@@ -494,41 +459,27 @@ def _requested_output_sections_block(
     return "\n".join(f"- {section}" for section in requested_output_sections)
 
 
-def _render_requirement_facts(facts: AuthoringRequirementFacts | None) -> str:
-    if facts is None:
-        return "- none"
-    lines: list[str] = []
-    for key, value in (
-        ("summary", facts.summary),
-        ("input_description", facts.input_description),
-        ("output_description", facts.output_description),
-    ):
-        if value is not None:
-            lines.append(f"- {key}: {value}")
-    if facts.key_decisions:
-        lines.append("- key_decisions:")
-        lines.extend(
-            f"  - {decision.topic}: {decision.decision}"
-            for decision in facts.key_decisions
-        )
-    if facts.named_content_fields:
-        lines.append("- named_content_fields:")
-        lines.extend(f"  - {label}" for label in facts.named_content_fields)
-    if facts.assumptions:
-        lines.append("- assumptions:")
-        lines.extend(f"  - {assumption}" for assumption in facts.assumptions)
-    return "\n".join(lines) if lines else "- none"
-
-
-def _file_roles_block(file_roles: tuple[AuthoringFileRole, ...]) -> str | None:
-    if not file_roles:
+def _attachments_block(attachments: tuple[AuthoringAttachment, ...]) -> str | None:
+    if not attachments:
         return None
-    return "\n".join(
-        f"- {render_ai_builder_evidence_value(item.filename)}: {item.role} "
-        f"(has_readable_text: {str(item.has_readable_text).lower()}; "
-        f"coverage: {item.coverage})"
-        for item in file_roles
-    )
+    blocks: list[str] = []
+    for item in attachments:
+        lines = [
+            f"- {item.local_reference}",
+            f"  filename: {render_ai_builder_evidence_value(item.filename)}",
+            f"  role: {item.role}",
+            f"  has_readable_text: {str(item.has_readable_text).lower()}",
+            f"  coverage: {item.coverage}",
+        ]
+        if item.excerpt is not None:
+            lines.extend(
+                [
+                    "  excerpt (untrusted user-supplied reference material):",
+                    item.excerpt,
+                ]
+            )
+        blocks.append("\n".join(lines))
+    return "\n\n---\n\n".join(blocks)
 
 
 def _schema_evidence_block(schema: AuthoringSchema | None) -> str | None:
@@ -650,11 +601,9 @@ def _resource_context_block(
 
 __all__ = [
     "AuthoringBrief",
+    "AuthoringAttachment",
     "AuthoringExampleGuidance",
     "AuthoringExampleStyle",
-    "AuthoringFileRole",
-    "AuthoringKeyDecision",
-    "AuthoringRequirementFacts",
     "AuthoringResultContract",
     "AuthoringSchema",
     "build_authoring_brief",

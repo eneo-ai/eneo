@@ -618,7 +618,7 @@ def _render_attachment_context_with_allocations(
     total_chars = 0
     truncated = False
 
-    for item in attachment_context.evidence:
+    for index, item in enumerate(attachment_context.evidence, start=1):
         text = attachment_context.readable_text_by_file.get(item.file_id)
         allocation = min(allocations.get(item.file_id, 0), len(text or ""))
         excerpt = text[:allocation] if text is not None and allocation > 0 else None
@@ -634,7 +634,19 @@ def _render_attachment_context_with_allocations(
             truncated = True
         if excerpt is None:
             continue
-        parts.append(excerpt)
+        parts.append(
+            "\n".join(
+                [
+                    f"file {index}",
+                    f"filename: {render_ai_builder_evidence_value(item.filename)}",
+                    f"role: {item.inferred_role}",
+                    f"has_readable_text: {str(item.has_readable_text).lower()}",
+                    f"coverage: {coverage}",
+                    "excerpt:",
+                    excerpt,
+                ]
+            )
+        )
         included_file_ids.append(item.file_id)
         total_chars += allocation
 

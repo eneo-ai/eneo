@@ -32,9 +32,6 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
-from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
-    ConfirmedRuntimeInputRequirement,
-)
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_create_structured_field_schema,
     build_knowledge_refs_property_schema,
@@ -851,7 +848,6 @@ def build_create_flow_tool_schema(
     resource_catalog: AIBuilderResourceCatalog,
     tool_name: str,
     is_pure_audio_transcription: bool = False,
-    confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
 ) -> dict[str, Any]:
     model_refs = resource_catalog.small_ref_enum_for_kind("model")
     kb_refs = resource_catalog.small_ref_enum_for_kind("knowledge_base")

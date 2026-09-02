@@ -44,8 +44,6 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
-    AIBuilderKnownProviderRejectionException,
-    build_ai_builder_request_budget_exhausted_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
@@ -92,7 +90,6 @@ from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     content_free_confirmation,
-    latest_confirmed_requirements,
     resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -557,7 +554,6 @@ def build_proposal_prepared(
     current_turn_start: int,
     architecture_revised_this_turn: bool = False,
 ) -> ProposalPrepared:
-    confirmed_requirements = latest_confirmed_requirements(conversation)
     # Only the user's own wording names an output topology. The disclosure
     # renders evidence back to the user — including headings observed in an
     # attached example — and reading it here turned that example's layout into
@@ -634,24 +630,17 @@ def build_proposal_prepared(
         )
 
     def build_proposal_prompt(
-        attachment_text: str | None,
-        replayed_requirements: RequirementsSummaryPayload | None,
+        fitted_attachment_context: AIBuilderAttachmentContext | None,
     ) -> str:
         return build_authoring_brief(
             planning_state=planning_state,
-            confirmed_requirements=replayed_requirements,
-            attachment_context=attachment_text,
+            attachment_context=fitted_attachment_context,
             flow_context=flow_context,
             is_edit_mode=is_edit_mode,
             is_pure_audio_transcription=is_pure_audio_transcription,
             resource_catalog=resource_catalog,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,
-            confirmed_runtime_inputs=(
-                compile_context.confirmed_runtime_input_requirements
-                if compile_context is not None and not is_edit_mode
-                else ()
-            ),
             can_decline=decline_tool_schema is not None,
         )
 
@@ -665,17 +654,14 @@ def build_proposal_prepared(
     )
 
     def prompt_fits(
-        attachment_text: str | None,
-        replayed_requirements: RequirementsSummaryPayload | None,
+        fitted_attachment_context: AIBuilderAttachmentContext | None,
     ) -> bool:
         return (
             count_message_tokens(
                 [
                     {
                         "role": "system",
-                        "content": build_proposal_prompt(
-                            attachment_text, replayed_requirements
-                        ),
+                        "content": build_proposal_prompt(fitted_attachment_context),
                     }
                 ],
                 litellm_model,
@@ -683,26 +669,15 @@ def build_proposal_prepared(
             <= system_prompt_token_limit
         )
 
-    replayed_requirements = _fit_replayed_requirements(
-        confirmed_requirements,
-        fits=lambda requirements: prompt_fits(None, requirements),
-    )
     fitted_attachment_context = (
         fit_ai_builder_attachment_context(
             attachment_context,
-            fits_context=lambda context: prompt_fits(context, replayed_requirements),
+            fits_attachment_context=prompt_fits,
         )
         if attachment_context is not None
         else None
     )
-    proposal_system_prompt = build_proposal_prompt(
-        (
-            fitted_attachment_context.context
-            if fitted_attachment_context is not None
-            else None
-        ),
-        replayed_requirements,
-    )
+    proposal_system_prompt = build_proposal_prompt(fitted_attachment_context)
     prepared_prompt = _prepare_prompt_messages(
         conversation=conversation,
         system_prompt=proposal_system_prompt,
@@ -724,12 +699,6 @@ def build_proposal_prepared(
             "conversation_message_count": len(conversation),
             "trimmed_message_count": prepared_prompt.trimmed_message_count,
             "attachment_file_count": attachment_file_count,
-            "confirmed_requirements_present": confirmed_requirements is not None,
-            "replayed_requirement_assumptions": (
-                len(replayed_requirements.assumptions)
-                if replayed_requirements is not None
-                else 0
-            ),
         },
     )
 
@@ -819,49 +788,6 @@ def _proposal_system_prompt_token_limit(
         - request_budget.safety_buffer_tokens
         - budget_policy.minimum_conversation_budget_tokens
         - tool_tokens,
-    )
-
-
-def _fit_replayed_requirements(
-    confirmed_requirements: RequirementsSummaryPayload | None,
-    *,
-    fits: Callable[[RequirementsSummaryPayload | None], bool],
-) -> RequirementsSummaryPayload | None:
-    """Bound the replayed disclosure against the model, not a fixed count.
-
-    The disclosure is as long as the evidence the user must see — a template
-    can contribute thousands of placeholders — while the proposal prompt is
-    bounded by the model. The same budget that fits attachment text decides
-    how many confirmed assumptions are replayed; the confirmed decisions and
-    descriptions always stay, and `PlanningState` still carries every typed
-    fact into compilation.
-    """
-
-    if confirmed_requirements is None or fits(confirmed_requirements):
-        return confirmed_requirements
-
-    def with_assumptions(count: int) -> RequirementsSummaryPayload:
-        return confirmed_requirements.model_copy(
-            update={"assumptions": confirmed_requirements.assumptions[:count]},
-            deep=True,
-        )
-
-    lower = 0
-    upper = len(confirmed_requirements.assumptions)
-    while lower < upper:
-        middle = (lower + upper + 1) // 2
-        if fits(with_assumptions(middle)):
-            lower = middle
-        else:
-            upper = middle - 1
-    if lower:
-        return with_assumptions(lower)
-
-    without_assumptions = with_assumptions(0)
-    if fits(without_assumptions):
-        return without_assumptions
-    raise AIBuilderKnownProviderRejectionException(
-        build_ai_builder_request_budget_exhausted_error(request_id=None)
     )
 
 

@@ -2716,7 +2716,6 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
 
     proposal_prompt = build_authoring_brief(
         planning_state=replayed,
-        confirmed_requirements=confirmation.payload,
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,

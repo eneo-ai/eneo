@@ -19,9 +19,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
-from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
-    ConfirmedRuntimeInputRequirement,
-)
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     extract_assumptions,
@@ -61,7 +58,6 @@ def build_propose_flow_tool_schema(
     resource_catalog: AIBuilderResourceCatalog,
     current_steps: list["FlowStep"] | None = None,
     is_pure_audio_transcription: bool = False,
-    confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
 ) -> ProposalToolSchema:
     if current_steps is None:
         return cast(
@@ -70,7 +66,6 @@ def build_propose_flow_tool_schema(
                 resource_catalog=resource_catalog,
                 tool_name=PROPOSE_FLOW_TOOL_NAME,
                 is_pure_audio_transcription=is_pure_audio_transcription,
-                confirmed_runtime_inputs=confirmed_runtime_inputs,
             ),
         )
     return cast(
