@@ -1461,7 +1461,7 @@ def _require_row_matches_bundle(
     relabelled observation gets scored.
     """
 
-    _require_bundle_identity(bundle, where=where, identity=identity)
+    require_bundle_identity(bundle, where=where, identity=identity)
     sealed = _mapping(bundle.get("observation"), where=where, key="observation")
     if not sealed:
         raise ReceiptError(f"{where}: the bundle seals no observation.")
@@ -1482,7 +1482,7 @@ def _require_row_matches_bundle(
         )
 
 
-def _require_bundle_identity(
+def require_bundle_identity(
     bundle: Mapping[str, Any], *, where: str, identity: Mapping[str, Any]
 ) -> None:
     """This bundle belongs to THIS run, and says so consistently.

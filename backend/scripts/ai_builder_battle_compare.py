@@ -28,6 +28,7 @@ two builds.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import statistics
@@ -49,6 +50,8 @@ from ai_builder_receipt import (  # noqa: E402
     ReceiptError,
     load_release_receipt,
     load_summary_receipt,
+    receipt_membership_report,
+    require_bundle_identity,
 )
 from ai_builder_release_gate import (  # noqa: E402
     EvaluatorPin,
@@ -1113,9 +1116,28 @@ def _token_summary(
 class _SuiteManifest:
     """The identity a token baseline is bound to, read from the release manifest."""
 
-    model: dict[str, Any]
-    app_version: str
-    planned_observations: int
+    identity: dict[str, Any]
+    expected_observations: list[dict[str, Any]]
+
+    @property
+    def model(self) -> dict[str, Any]:
+        return dict(cast(dict[str, Any], self.identity["model"]))
+
+    @property
+    def app_version(self) -> str:
+        return str(cast(dict[str, Any], self.identity["build"])["app_version"])
+
+
+def load_json_object(path: Path, *, what: str) -> dict[str, Any]:
+    """Read one JSON object; anything unreadable is a refusal, never a traceback."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ReceiptError(f"{path}: {what} cannot be read: {error}") from error
+    if not isinstance(payload, dict):
+        raise ReceiptError(f"{path}: {what} must contain a JSON object.")
+    return cast(dict[str, Any], payload)
 
 
 def _read_manifest(suite_dir: Path) -> _SuiteManifest:
@@ -1126,10 +1148,7 @@ def _read_manifest(suite_dir: Path) -> _SuiteManifest:
             "run's model, build and planned population."
         )
     where = str(manifest_path)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict):
-        raise ReceiptError(f"{where} must contain a JSON object.")
-    manifest = cast(dict[str, Any], manifest)
+    manifest = load_json_object(manifest_path, what="release manifest")
     expected = manifest.get("expected_observations")
     if not isinstance(expected, list):
         raise ReceiptError(f"{where}: expected_observations is missing.")
@@ -1141,13 +1160,17 @@ def _read_manifest(suite_dir: Path) -> _SuiteManifest:
     build = identity.get("build")
     if not isinstance(model, dict) or not isinstance(build, dict):
         raise ReceiptError(f"{where}: release_identity.model and .build are required.")
-    build = cast(dict[str, Any], build)
+    _bundle_str(
+        cast(dict[str, Any], build).get("app_version"),
+        where=f"{where}: build.app_version",
+    )
     return _SuiteManifest(
-        model=dict(cast(dict[str, Any], model)),
-        app_version=_bundle_str(
-            build.get("app_version"), where=f"{where}: build.app_version"
-        ),
-        planned_observations=len(cast(list[Any], expected)),
+        identity=dict(identity),
+        expected_observations=[
+            dict(cast(dict[str, Any], item))
+            for item in cast(list[Any], expected)
+            if isinstance(item, dict)
+        ],
     )
 
 
@@ -1215,27 +1238,31 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
     and the statistics live here and nowhere else: first proposal attempts of
     completed observations, medians as the middle value, p90 as nearest rank.
     Classifier usage the projection could not supply is counted, never zero.
-    The report is bound to the manifest's model and build identity and keeps
-    per-case evidence with each case's contract hash, so two roots compare
-    only what is the same experiment; a root short of its manifest is partial.
+    The receipt owners decide identity and membership: every bundle must
+    prove it belongs to the manifest's run (source, build, corpus, model) and
+    occupy a planned slot with the planned contract; missing planned slots
+    make the root partial, every other membership defect refuses aggregation.
     """
 
     bundle_paths = sorted(suite_dir.glob(_BUNDLE_GLOB))
     if not bundle_paths:
         raise ReceiptError(f"{suite_dir} holds no observation bundles.")
     manifest = _read_manifest(suite_dir)
-    revisions: set[str] = set()
     status_counts: Counter[str] = Counter()
     cases: dict[str, list[_CaseTokenEvidence]] = {}
+    slots: list[dict[str, Any]] = []
     for path in bundle_paths:
         where = str(path)
-        bundle = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(bundle, dict):
-            raise ReceiptError(f"{where} must contain a JSON object.")
-        bundle = cast(dict[str, Any], bundle)
-        revisions.add(
-            _bundle_str(bundle.get("app_version"), where=f"{where}: app_version")
+        bundle = load_json_object(path, what="observation bundle")
+        require_bundle_identity(bundle, where=where, identity=manifest.identity)
+        app_version = _bundle_str(
+            bundle.get("app_version"), where=f"{where}: app_version"
         )
+        if app_version != manifest.app_version:
+            raise ReceiptError(
+                f"{where}: bundle reports {app_version!r} but the manifest was "
+                f"sealed at {manifest.app_version!r}."
+            )
         observation = bundle.get("observation")
         if not isinstance(observation, dict):
             raise ReceiptError(f"{where}: carries no sealed observation.")
@@ -1244,16 +1271,45 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
             observation.get("observation_status"), where=f"{where}: observation_status"
         )
         status_counts[status] += 1
+        case_identity = bundle.get("case_identity")
+        slots.append(
+            {
+                "case_id": (
+                    case_identity.get("id") if isinstance(case_identity, dict) else None
+                ),
+                "repetition": bundle.get("repetition"),
+                "case_contract_sha256": bundle.get("case_contract_sha256"),
+                "bundle_file": path.name,
+                "bundle_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
         if status != "completed":
             continue
         case_id, evidence = _bundle_case_evidence(bundle, where=where)
         cases.setdefault(case_id, []).append(evidence)
-    if len(revisions) != 1 or next(iter(revisions)) != manifest.app_version:
-        raise ReceiptError(
-            f"{suite_dir}: bundles report {sorted(revisions)} but the manifest "
-            f"was sealed at {manifest.app_version!r}; a baseline describes "
-            "one build."
+    membership = receipt_membership_report(
+        expected_observations=manifest.expected_observations,
+        results=slots,
+        suite_dir=suite_dir,
+    )
+    defects = {
+        name: membership[name]
+        for name in (
+            "unexpected_observation_keys",
+            "duplicate_observation_keys",
+            "invalid_expected_observation_keys",
+            "invalid_actual_observation_keys",
+            "case_contract_mismatches",
+            "invalid_bundle_references",
         )
+        if membership[name]
+    }
+    if defects:
+        raise ReceiptError(
+            f"{suite_dir}: bundles do not belong to the manifest's run: "
+            + json.dumps(defects, ensure_ascii=False)
+        )
+    missing = cast(list[Any], membership["missing_observation_keys"])
     proposal, classifier = _token_summary(
         [item for items in cases.values() for item in items]
     )
@@ -1263,11 +1319,11 @@ def token_baseline_report(suite_dir: Path) -> dict[str, Any]:
         "model": manifest.model,
         "population": TOKEN_BASELINE_POPULATION,
         "observation_status_counts": dict(sorted(status_counts.items())),
-        # A root whose bundles fall short of its manifest is a partial
-        # acquisition: its case mix is only its own cases, not the corpus.
-        "planned_observations": manifest.planned_observations,
+        # Planned slots the root never produced make it partial: its case mix
+        # is only its own cases, not the corpus.
+        "planned_observations": len(manifest.expected_observations),
         "observed_observations": len(bundle_paths),
-        "partial": len(bundle_paths) != manifest.planned_observations,
+        "partial": bool(missing),
         "proposal_first_attempt": proposal,
         "classifier": classifier,
         "cases": {
@@ -1512,7 +1568,7 @@ def main() -> None:
             deltas = (
                 token_baseline_delta(
                     report,
-                    json.loads(args.against.read_text(encoding="utf-8")),
+                    load_json_object(args.against, what="token baseline report"),
                 )
                 if args.against is not None
                 else None

@@ -7,6 +7,7 @@ a peer review found that it branded stable changes unstable (2026-08-06).
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import re
@@ -631,24 +632,64 @@ def test_modal_outcome_decides_the_representative_row(tmp_path: Path) -> None:
     assert case["current_unstable"] is True
 
 
+def _receipts() -> ModuleType:
+    _compare_module()
+    return sys.modules["ai_builder_receipt"]
+
+
+def _tracked_digest(name: str) -> str:
+    return hashlib.sha256((_SCRIPT.parent / name).read_bytes()).hexdigest()
+
+
+def _provenance(*, revision: str, model: str) -> dict[str, Any]:
+    """The identity a bundle seals with digests, as the harness writes it."""
+
+    receipts = _receipts()
+    build = {
+        "source_revision": revision,
+        "harness_sha256": _tracked_digest(receipts.HARNESS_FILE),
+        "cases_sha256": _tracked_digest(receipts.CASES_FILE),
+    }
+    model_identity = {"requested_id": model, "resolved_id": model}
+    return {
+        "source": {
+            "revision": revision,
+            "revision_sha256": hashlib.sha256(revision.encode()).hexdigest(),
+            "tracked_clean": True,
+        },
+        "build": {**build, "sha256": receipts.canonical_sha256(build)},
+        "model": {
+            **model_identity,
+            "sha256": receipts.canonical_sha256(model_identity),
+        },
+    }
+
+
 def _bundle(
     *,
     status: str,
     revision: str = "DEV-abc",
+    model: str = "model-a",
     case_id: str = "case-a",
-    contract: str = "c" * 64,
+    contract: dict[str, Any] | None = None,
     repetition: int = 1,
     attempts: tuple[tuple[int, int, int], ...] = ((2_700, 1_200, 3_900),),
     classifier_usage: dict[str, int] | None = None,
 ) -> dict[str, Any]:
+    receipts = _receipts()
     journey: dict[str, Any] = {"outcome_class": "plan_first_pass"}
     if classifier_usage is not None:
         journey["classifier_usage"] = classifier_usage
+    case_contract = (
+        contract if contract is not None else {"id": case_id, "prompt": "go"}
+    )
     return {
         "app_version": revision,
         "case_identity": {"id": case_id},
-        "case_contract_sha256": contract,
+        "case_contract": case_contract,
+        "case_contract_sha256": receipts.canonical_sha256(case_contract),
         "repetition": repetition,
+        "live_execution_provenance": _provenance(revision=revision, model=model),
         "observation": {"observation_status": status},
         "journey": journey,
         "proposal_telemetry_diagnostics": {
@@ -677,6 +718,7 @@ def _write_bundles(
     revision: str = "DEV-abc",
     planned: int | None = None,
     manifest: bool = True,
+    expected: list[dict[str, Any]] | None = None,
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     for index, bundle in enumerate(bundles):
@@ -684,25 +726,28 @@ def _write_bundles(
             json.dumps(bundle), encoding="utf-8"
         )
     if manifest:
-        expected = [
-            {
-                "case_id": bundle["case_identity"]["id"],
-                "repetition": bundle["repetition"],
-                "case_contract_sha256": bundle["case_contract_sha256"],
-            }
-            for bundle in bundles
-        ]
-        for index in range(max(0, (planned or 0) - len(bundles))):
-            expected.append({"case_id": f"planned-{index}", "repetition": 1})
+        if expected is None:
+            expected = [
+                {
+                    "case_id": bundle["case_identity"]["id"],
+                    "repetition": bundle["repetition"],
+                    "case_contract_sha256": bundle["case_contract_sha256"],
+                }
+                for bundle in bundles
+            ]
+            for index in range(max(0, (planned or 0) - len(bundles))):
+                expected.append(
+                    {
+                        "case_id": f"planned-{index}",
+                        "repetition": 1,
+                        "case_contract_sha256": "0" * 64,
+                    }
+                )
+        identity = _provenance(revision=revision, model=model)
+        identity["build"] = {**identity["build"], "app_version": revision}
         (root / "release-manifest.json").write_text(
             json.dumps(
-                {
-                    "expected_observations": expected,
-                    "release_identity": {
-                        "model": {"requested_id": model},
-                        "build": {"app_version": revision},
-                    },
-                }
+                {"expected_observations": expected, "release_identity": identity}
             ),
             encoding="utf-8",
         )
@@ -727,10 +772,12 @@ def test_token_baseline_reads_completed_observations_only(tmp_path: Path) -> Non
             ),
             _bundle(
                 status="completed",
+                repetition=2,
                 attempts=((3_000, 1_400, 4_400), (2_500, 1_100, 3_600)),
             ),
             _bundle(
                 status="acquisition_failure",
+                repetition=3,
                 attempts=((9_000, 9_000, 18_000),),
                 classifier_usage={
                     "calls": 9,
@@ -750,10 +797,12 @@ def test_token_baseline_reads_completed_observations_only(tmp_path: Path) -> Non
         "completed": 2,
     }
     assert list(report["cases"]) == ["case-a"]
-    assert report["model"] == {"requested_id": "model-a"}
+    assert report["model"]["requested_id"] == "model-a"
     assert (report["planned_observations"], report["partial"]) == (3, False)
     assert report["cases"]["case-a"][0] == {
-        "case_contract_sha256": "c" * 64,
+        "case_contract_sha256": _receipts().canonical_sha256(
+            {"id": "case-a", "prompt": "go"}
+        ),
         "repetition": 1,
         "first_attempts": [[2_000, 1_000, 3_000]],
         "classifier": [1, 8_000, 8_300],
@@ -780,7 +829,7 @@ def test_token_baseline_refuses_a_root_spanning_two_builds(tmp_path: Path) -> No
         tmp_path / "suite",
         [_bundle(status="completed"), _bundle(status="completed", revision="DEV-def")],
     )
-    with pytest.raises(module.ReceiptError, match="one build"):
+    with pytest.raises(module.ReceiptError, match="produced at|sealed at"):
         module.token_baseline_report(root)
     with pytest.raises(module.ReceiptError, match="no observation bundles"):
         module.token_baseline_report(tmp_path / "empty")
@@ -888,7 +937,9 @@ def test_token_baseline_delta_refuses_a_different_model_or_rewritten_case(
     )
     other_model = module.token_baseline_report(
         _write_bundles(
-            tmp_path / "other-model", [_bundle(status="completed")], model="model-b"
+            tmp_path / "other-model",
+            [_bundle(status="completed", model="model-b")],
+            model="model-b",
         )
     )
     with pytest.raises(module.ReceiptError, match="different models"):
@@ -896,11 +947,70 @@ def test_token_baseline_delta_refuses_a_different_model_or_rewritten_case(
     rewritten = module.token_baseline_report(
         _write_bundles(
             tmp_path / "rewritten",
-            [_bundle(status="completed", contract="d" * 64)],
+            [_bundle(status="completed", contract={"id": "case-a", "prompt": "new"})],
         )
     )
     with pytest.raises(module.ReceiptError, match="share no cases"):
         module.token_baseline_delta(current, rewritten)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_message"),
+    [
+        ("unexpected_slot", "unexpected_observation_keys"),
+        ("duplicate_slot", "duplicate_observation_keys"),
+        ("contract_mismatch", "case_contract_mismatches"),
+        ("foreign_model", "measured against"),
+    ],
+)
+def test_token_baseline_refuses_bundles_that_are_not_the_manifest_run(
+    tmp_path: Path, scenario: str, expected_message: str
+) -> None:
+    """Same-count swaps, duplicates, rewritten contracts and foreign models refuse."""
+
+    module = _compare_module()
+    planned = _bundle(status="completed", case_id="a")
+    expected = [
+        {
+            "case_id": "a",
+            "repetition": 1,
+            "case_contract_sha256": planned["case_contract_sha256"],
+        }
+    ]
+    if scenario == "unexpected_slot":
+        bundles = [_bundle(status="completed", case_id="a", repetition=9)]
+    elif scenario == "duplicate_slot":
+        bundles = [planned, _bundle(status="completed", case_id="a")]
+        expected.append(
+            {"case_id": "planned-x", "repetition": 1, "case_contract_sha256": "0" * 64}
+        )
+    elif scenario == "contract_mismatch":
+        bundles = [
+            _bundle(
+                status="completed",
+                case_id="a",
+                contract={"id": "a", "prompt": "changed"},
+            )
+        ]
+    else:
+        bundles = [_bundle(status="completed", case_id="a", model="model-b")]
+    root = _write_bundles(tmp_path / scenario, bundles, expected=expected)
+
+    with pytest.raises(module.ReceiptError, match=expected_message):
+        module.token_baseline_report(root)
+
+
+def test_a_malformed_baseline_report_is_a_refusal_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    module = _compare_module()
+    empty = tmp_path / "empty.json"
+    empty.write_text("", encoding="utf-8")
+    with pytest.raises(module.ReceiptError, match="cannot be read"):
+        module.load_json_object(empty, what="token baseline report")
+    (tmp_path / "list.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(module.ReceiptError, match="must contain a JSON object"):
+        module.load_json_object(tmp_path / "list.json", what="token baseline report")
 
 
 def test_token_baseline_marks_a_root_short_of_its_manifest_as_partial(
