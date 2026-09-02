@@ -34,7 +34,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
     ConfirmedRuntimeInputRequirement,
-    render_confirmed_runtime_input_requirements,
 )
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_create_structured_field_schema,
@@ -879,18 +878,6 @@ def build_create_flow_tool_schema(
         # proposal root when closing a nested field tree.
         output_fields_schema = step_schema["properties"].pop("output_fields")
         step_schema["properties"]["output_fields"] = output_fields_schema
-    if confirmed_runtime_inputs and not is_pure_audio_transcription:
-        rendered_runtime_inputs = render_confirmed_runtime_input_requirements(
-            confirmed_runtime_inputs
-        )
-        output_fields_description = step_schema["properties"]["output_fields"][
-            "description"
-        ]
-        step_schema["properties"]["output_fields"]["description"] = (
-            f"{output_fields_description} Confirmed server-owned runtime inputs: "
-            f"{rendered_runtime_inputs}. Do not repeat any exact runtime-input "
-            "identity as a source output field."
-        )
     return {
         "type": "function",
         "function": {

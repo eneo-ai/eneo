@@ -97,8 +97,9 @@ def test_build_ai_builder_attachment_context_fits_text_fairly() -> None:
     result = _build_with_text_budget(files, 70)
 
     assert result is not None
-    assert "one.txt" in result.context
-    assert "two.txt" in result.context
+    assert result.context is not None
+    assert "A" * 35 in result.context
+    assert "B" * 35 in result.context
     assert len(result.included_file_ids) == 2
     assert result.truncated is True
     assert result.total_chars <= 70
@@ -213,8 +214,9 @@ def test_rendered_evidence_values_are_single_line_bounded_and_escaped() -> None:
     assert "\\u0000" in rendered
     assert context is not None
     assert context.context is not None
-    assert f"Filename: {rendered}" in context.context
-    assert f"Filename: {unsafe_name}" not in context.context
+    assert rendered not in context.context
+    assert unsafe_name not in context.context
+    assert "Reference" in context.context
 
 
 def test_build_ai_builder_attachment_context_detects_structural_template_placeholders() -> (
@@ -246,8 +248,10 @@ def test_build_ai_builder_attachment_context_detects_structural_template_placeho
     assert "content:template_placeholder:kundnamn" in result.evidence[0].role_evidence
     assert "content:template_placeholder:datum" in result.evidence[0].role_evidence
     assert result.context is not None
-    assert "File role: template" in result.context
-    assert "File role: context_only" in result.context
+    assert "File role:" not in result.context
+    assert "confidence" not in result.context
+    assert "Fyll i {{ kundnamn }} och {{ datum }}." in result.context
+    assert "Lagstöd och föreskrifter" in result.context
 
 
 def test_template_placeholder_evidence_keeps_full_identity_beyond_display_cap() -> None:

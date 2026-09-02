@@ -634,12 +634,7 @@ def _render_attachment_context_with_allocations(
             truncated = True
         if excerpt is None:
             continue
-        parts.append(
-            f"Filename: {render_ai_builder_evidence_value(item.filename)}\n"
-            f"File role: {item.inferred_role} "
-            f"({item.role_confidence}, unconfirmed)\n"
-            f"{excerpt}"
-        )
+        parts.append(excerpt)
         included_file_ids.append(item.file_id)
         total_chars += allocation
 

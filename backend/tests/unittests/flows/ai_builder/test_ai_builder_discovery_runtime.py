@@ -60,7 +60,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderKnownProviderRejectionException,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
-    build_plan_proposal_system_prompt,
+    build_authoring_brief,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
@@ -2714,7 +2714,7 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
         "status",
     ]
 
-    proposal_prompt = build_plan_proposal_system_prompt(
+    proposal_prompt = build_authoring_brief(
         planning_state=replayed,
         confirmed_requirements=confirmation.payload,
         attachment_context=None,

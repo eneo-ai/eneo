@@ -3585,7 +3585,7 @@ class TestExtendedClarificationHints:
 
 
 class TestPlannerConversationEncoding:
-    def test_structured_answer_metadata_is_included_for_llm_context(self) -> None:
+    def test_replay_keeps_user_wording_without_structured_answer_metadata(self) -> None:
         payload = conversation_message_to_llm_message(
             ConversationMessage(
                 role="user",
@@ -3601,8 +3601,7 @@ class TestPlannerConversationEncoding:
         )
 
         assert payload["role"] == "user"
-        assert "Structured answer metadata" in payload["content"]
-        assert "primary_runtime_input" in payload["content"]
+        assert payload["content"] == "Documents"
 
     def test_unexpected_conversation_role_fails_loud_for_llm_context(self) -> None:
         with pytest.raises(

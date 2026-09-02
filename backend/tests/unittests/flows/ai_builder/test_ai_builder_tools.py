@@ -23,7 +23,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
     ConfirmedRuntimeInputRequirement,
-    render_confirmed_runtime_input_requirements,
 )
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
@@ -357,7 +356,7 @@ class TestBuildToolSchema:
         assert admitted["steps"][-1]["output_fields"] == fields
         assert "model_ref" in arguments
 
-    def test_create_schema_projects_runtime_identity_without_argument_shape_change(
+    def test_create_schema_is_invariant_across_runtime_inputs(
         self,
     ) -> None:
         requirements = (
@@ -367,29 +366,13 @@ class TestBuildToolSchema:
             ConfirmedRuntimeInputRequirement(name="case_id", purpose="shape_result"),
             ConfirmedRuntimeInputRequirement(name="policy", purpose="whole_flow"),
         )
-        rendered = render_confirmed_runtime_input_requirements(requirements)
         baseline = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
         contextual = build_propose_flow_tool_schema(
             resource_catalog=_empty_catalog(),
             confirmed_runtime_inputs=requirements,
         )
 
-        baseline_parameters = baseline["function"]["parameters"]
-        contextual_parameters = contextual["function"]["parameters"]
-        baseline_step = baseline_parameters["properties"]["steps"]["items"]
-        contextual_step = contextual_parameters["properties"]["steps"]["items"]
-        assert set(contextual_parameters["properties"]) == set(
-            baseline_parameters["properties"]
-        )
-        assert contextual_parameters["required"] == baseline_parameters["required"]
-        assert set(contextual_step["properties"]) == set(baseline_step["properties"])
-        assert contextual_step["required"] == baseline_step["required"]
-        assert (
-            contextual_step["properties"]["output_fields"]["items"]
-            == baseline_step["properties"]["output_fields"]["items"]
-        )
-        description = contextual_step["properties"]["output_fields"]["description"]
-        assert rendered in description
+        assert contextual == baseline
 
         baseline_edit = build_propose_flow_tool_schema(
             resource_catalog=_empty_catalog(), current_steps=[]

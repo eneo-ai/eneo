@@ -20,7 +20,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
     named_content_fields_edit_from_metadata,
     provider_safe_tool_call_id,
-    question_answer_from_metadata,
     tool_calls_from_message,
     ui_language_from_metadata,
 )
@@ -72,7 +71,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     build_plan_revision_prompt_block,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
-    build_plan_proposal_system_prompt,
+    build_authoring_brief,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
@@ -614,11 +613,6 @@ def build_proposal_prepared(
         current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
         is_pure_audio_transcription=is_pure_audio_transcription,
-        confirmed_runtime_inputs=(
-            compile_context.confirmed_runtime_input_requirements
-            if compile_context is not None and not is_edit_mode
-            else ()
-        ),
     )
     proposal_request_budget = budget_policy.proposal_request_budget(
         context_window_tokens=max_input_tokens,
@@ -643,7 +637,7 @@ def build_proposal_prepared(
         attachment_text: str | None,
         replayed_requirements: RequirementsSummaryPayload | None,
     ) -> str:
-        return build_plan_proposal_system_prompt(
+        return build_authoring_brief(
             planning_state=planning_state,
             confirmed_requirements=replayed_requirements,
             attachment_context=attachment_text,
@@ -1050,40 +1044,9 @@ def trim_conversation_for_context(
 
 
 def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageParam:
-    content = msg.content
-    question_answer = question_answer_from_metadata(msg.metadata)
-    if msg.role == "user" and question_answer is not None:
-        question_answer_payload = question_answer.model_dump(
-            mode="json",
-            exclude_none=True,
-            exclude={"kind", "ui_language"},
-        )
-        sanitized_answer = {
-            key: value
-            for key, value in question_answer_payload.items()
-            if key
-            in {
-                "question_id",
-                "selected_option_ids",
-                "selected_values",
-                "custom_value",
-            }
-        }
-        if sanitized_answer:
-            structured_note = json.dumps(
-                sanitized_answer,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            content = (
-                f"{content}\n\n[Structured answer metadata: {structured_note}]"
-                if content
-                else f"[Structured answer metadata: {structured_note}]"
-            )
-
     payload: LLMMessageParam = {
         "role": _llm_message_role(msg.role),
-        "content": content,
+        "content": msg.content,
     }
     tool_calls = tool_calls_from_message(msg)
     if tool_calls:

@@ -11,7 +11,11 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
-    build_plan_proposal_system_prompt,
+    AuthoringBrief,
+    AuthoringFileRole,
+    AuthoringRequirementFacts,
+    build_authoring_brief,
+    project_authoring_brief,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -61,6 +65,94 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     )
 
 
+def test_project_authoring_brief_create_fixture_is_typed() -> None:
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id="00000000-0000-0000-0000-000000000701",
+            filename="source-sentinel.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="excerpt_truncated",
+            role="reference_material",
+            source="model",
+            confidence="medium",
+        )
+    ]
+    runtime_inputs = (
+        ConfirmedRuntimeInputRequirement(
+            name="runtime-sentinel",
+            purpose="shape_result",
+        ),
+    )
+
+    actual = project_authoring_brief(
+        planning_state=state,
+        confirmed_requirements=_requirements(
+            summary="summary-sentinel",
+            input_description="input-sentinel",
+            output_description="output-sentinel",
+            assumptions=["assumption-sentinel"],
+        ),
+        attachment_context="attachment-sentinel",
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        requested_output_sections=RequestedOutputSections(
+            sections=("heading-sentinel",),
+            confidence="high",
+        ),
+        confirmed_runtime_inputs=runtime_inputs,
+    )
+
+    assert actual == AuthoringBrief(
+        requirements=AuthoringRequirementFacts(
+            summary="summary-sentinel",
+            input_description="input-sentinel",
+            output_description="output-sentinel",
+            assumptions=("assumption-sentinel",),
+        ),
+        runtime_inputs=runtime_inputs,
+        file_roles=(
+            AuthoringFileRole(
+                filename="source-sentinel.pdf",
+                role="reference_material",
+                has_readable_text=True,
+                coverage="excerpt_truncated",
+            ),
+        ),
+        requested_output_sections=("heading-sentinel",),
+        attachment_context="attachment-sentinel",
+    )
+
+
+def test_project_authoring_brief_edit_fixture_is_typed() -> None:
+    runtime_inputs = (
+        ConfirmedRuntimeInputRequirement(
+            name="create-only-sentinel",
+            purpose="whole_flow",
+        ),
+    )
+
+    actual = project_authoring_brief(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=None,
+        attachment_context=None,
+        flow_context="existing-flow-sentinel",
+        is_edit_mode=True,
+        resource_catalog=_empty_catalog(),
+        plan_revision_context="selected-step-sentinel",
+        confirmed_runtime_inputs=runtime_inputs,
+    )
+
+    assert actual == AuthoringBrief(
+        flow_context="existing-flow-sentinel",
+        plan_revision_context="selected-step-sentinel",
+        is_edit_mode=True,
+    )
+
+
 def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -> None:
     state = PlanningState.empty()
     requirements = (
@@ -70,7 +162,7 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
     )
     rendered = render_confirmed_runtime_input_requirements(requirements)
 
-    create_prompt = build_plan_proposal_system_prompt(
+    create_prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(),
         attachment_context=None,
@@ -79,7 +171,7 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
         resource_catalog=_empty_catalog(),
         confirmed_runtime_inputs=requirements,
     )
-    edit_prompt = build_plan_proposal_system_prompt(
+    edit_prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(),
         attachment_context=None,
@@ -89,10 +181,10 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
         confirmed_runtime_inputs=requirements,
     )
 
-    assert "Confirmed runtime inputs:" in create_prompt
+    assert "Runtime inputs:" in create_prompt
     assert rendered in create_prompt
     assert "server-owned runtime inputs" in create_prompt
-    assert "Confirmed runtime inputs:" not in edit_prompt
+    assert "Runtime inputs:" not in edit_prompt
 
 
 def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -> None:
@@ -104,7 +196,7 @@ def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -
     )
     rendered = render_confirmed_runtime_input_requirements(requirements)
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(),
         attachment_context=None,
@@ -122,7 +214,8 @@ def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -
     ]["properties"]["output_fields"]["description"]
 
     assert rendered in prompt
-    assert rendered in schema_description
+    assert rendered not in schema_description
+    assert json.dumps(schema, ensure_ascii=False).count(rendered) == 0
     assert [item["name"] for item in json.loads(rendered)] == list(names)
 
 
@@ -199,7 +292,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         ],
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(
             summary="Look up a case and summarize it."
@@ -217,7 +310,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         "Exception: when the Available resources section gives portable resource slot refs"
         in prompt
     )
-    assert "human-readable `flow_name`" in prompt
+    assert "human-readable `flow_name`" not in prompt
     assert "input_schema" not in prompt
     assert "assistant_ref" not in prompt
 
@@ -231,7 +324,7 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
         )
     )
 
-    create_prompt = build_plan_proposal_system_prompt(
+    create_prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(),
         attachment_context=None,
@@ -239,7 +332,7 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
     )
-    edit_prompt = build_plan_proposal_system_prompt(
+    edit_prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(),
         attachment_context=None,
@@ -253,7 +346,7 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
     assert "1-based earlier propose_flow step numbers" not in create_prompt
     assert "Do not author field-level previous-step paths" in create_prompt
     assert "backend-owned refs" in create_prompt
-    assert "raw input bindings" in create_prompt
+    assert "raw input bindings" not in create_prompt
     assert "step refs" in create_prompt
     assert "uses_previous_fields" not in edit_prompt
     assert "uses_previous_outputs" not in edit_prompt
@@ -273,7 +366,7 @@ def test_plan_proposal_prompt_keeps_document_rendering_backend_owned() -> None:
         ),
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(),
         attachment_context=None,
@@ -285,8 +378,8 @@ def test_plan_proposal_prompt_keeps_document_rendering_backend_owned() -> None:
     assert "final text step immediately before the renderer" in prompt
     assert "Do not add a separate final conversion" in prompt
     assert "the backend adds the fixed renderer" in prompt
-    assert "- document -> json (pass_through)" in prompt
-    assert "- text -> pdf (render_verbatim)" in prompt
+    assert "- document -> json (pass_through)" not in prompt
+    assert "- text -> pdf (render_verbatim)" not in prompt
 
 
 def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
@@ -325,7 +418,7 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
         ),
     ]
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(summary="Use the uploaded files."),
         attachment_context=None,
@@ -336,16 +429,15 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
 
     assert "Uploaded file roles:" in prompt
     assert (
-        "- avtalsmall.docx: template (heuristic, medium confidence; "
-        "has_readable_text: true; coverage: fully_seen; "
-        "candidates: template, reference_material; evidence: "
-        "content:template_marker, content:template_placeholder:kundnamn, "
-        "content:template_placeholder:datum)"
+        "- avtalsmall.docx: template (has_readable_text: true; coverage: fully_seen)"
     ) in prompt
     assert (
-        "- lagstod.pdf: reference_material (heuristic, medium confidence; "
-        "has_readable_text: true; coverage: fully_seen)"
+        "- lagstod.pdf: reference_material (has_readable_text: true; "
+        "coverage: fully_seen)"
     ) in prompt
+    assert "heuristic" not in prompt
+    assert "confidence" not in prompt
+    assert "candidates:" not in prompt
 
 
 def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None:
@@ -365,7 +457,7 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
         evidence=["message:msg_schema", "fenced_json_schema"],
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(summary="Return decisions as JSON."),
         attachment_context=None,
@@ -376,8 +468,9 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
 
     assert "Output schema evidence:" in prompt
     assert "decision, next_steps" in prompt
-    assert "declared_schema, high confidence" in prompt
-    assert "Use output_fields consistent with these user-declared fields." in prompt
+    assert "declared output contract fields" in prompt
+    assert "Use output_fields consistent with this declared contract." in prompt
+    assert "confidence" not in prompt
     assert "additionalProperties" not in prompt
 
 
@@ -396,7 +489,7 @@ def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_outp
         evidence=("file:00000000-0000-0000-0000-000000000001:json_schema",),
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(summary="Generate a DOCX report."),
         attachment_context=None,
@@ -439,7 +532,11 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
                         coverage="fully_seen",
                     )
                 ],
-                headings=["Summary", "Decision"],
+                headings=[
+                    "Summary",
+                    "Decision",
+                    *(f"Section {index}" for index in range(1, 10)),
+                ],
                 style_constraints=[
                     ExampleOutputStyleConstraint(
                         category="tone",
@@ -477,7 +574,7 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
         }
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(summary="Follow the selected example."),
         attachment_context=None,
@@ -486,12 +583,14 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
         resource_catalog=_empty_catalog(),
     )
 
-    assert "inferred top-level fields:" in prompt
+    assert "example-hint top-level fields:" in prompt
     assert "showing 8 of 12" in prompt
     assert "not as an explicit or closed contract" in prompt
     assert "Example-output evidence:" in prompt
     assert "- heading: Summary" in prompt
     assert "- heading: Decision" in prompt
+    assert "- heading: Section 9" in prompt
+    assert "additional example headings omitted" not in prompt
     assert "- tone: Formal and concise" in prompt
     assert "it is not a required output topology" in prompt
     assert "Do not promise exact visual layout" in prompt
@@ -514,7 +613,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
         evidence=["file:file_id:content:template_placeholder:kundnamn"],
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(
             summary="Fill the uploaded DOCX template."
@@ -524,7 +623,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
     )
-    edit_prompt = build_plan_proposal_system_prompt(
+    edit_prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(
             summary="Fill the uploaded DOCX template."
@@ -577,7 +676,7 @@ def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> N
         evidence=[f"file:file_id:content:template_placeholder:{long_placeholder}"],
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(),
         attachment_context=None,
@@ -591,7 +690,7 @@ def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> N
 
 
 def test_plan_proposal_prompt_keeps_create_mechanics_backend_owned():
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
             summary="Skapa ett svenskt ljud till DOCX-flöde."
@@ -605,14 +704,14 @@ def test_plan_proposal_prompt_keeps_create_mechanics_backend_owned():
     assert "input_fields" not in prompt
     assert "uses_form_fields" not in prompt
     assert "source-reading JSON output_fields" in prompt
-    assert "folded from the user's own wording" in prompt
-    assert "keep key names the user asked for" in prompt
+    assert "folded from the user's own wording" not in prompt
+    assert "keep key names the user asked for" not in prompt
     assert "Do not leave user-named facts only in instructions" in prompt
     assert "generic facts/notes fields" in prompt
     assert "instead of introducing new source-derived facts only in prose" in prompt
 
 
-def test_plan_proposal_prompt_marks_resolved_slot_decision_strength() -> None:
+def test_plan_proposal_prompt_omits_raw_slots_and_provenance() -> None:
     state = _state_with_slot(
         "runtime_metadata_fields",
         "no_extra_metadata",
@@ -625,7 +724,7 @@ def test_plan_proposal_prompt_marks_resolved_slot_decision_strength() -> None:
         ),
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(
             summary="Ta input JSON och returnera bara JSON enligt output-schemat.",
@@ -636,14 +735,13 @@ def test_plan_proposal_prompt_marks_resolved_slot_decision_strength() -> None:
         resource_catalog=_empty_catalog(),
     )
 
-    assert "- terminal_output: structured_json (confirmed)" in prompt
-    assert (
-        "- runtime_metadata_fields: no_extra_metadata (policy default assumption)"
-    ) in prompt
+    assert "terminal_output" not in prompt
+    assert "runtime_metadata_fields" not in prompt
+    assert "policy default assumption" not in prompt
 
 
 def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
             summary="Översätt en kort mening till engelska.",
@@ -660,7 +758,7 @@ def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
 
 
 def test_plan_proposal_prompt_surfaces_requested_output_sections_once() -> None:
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
             summary="Skapa ett beslutsunderlag från ett Word-dokument.",
@@ -682,12 +780,12 @@ def test_plan_proposal_prompt_surfaces_requested_output_sections_once() -> None:
 
     assert "Requested output sections:" in prompt
     assert "- Problem/nuläge" in prompt
-    assert "preserve those sections as semantic section-writing work" in prompt
+    assert "preserve those sections as semantic section-writing work" not in prompt
     assert prompt.count("Problem/nuläge") == 1
 
 
 def test_plan_proposal_prompt_omits_section_rule_for_simple_transform() -> None:
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
             summary="Översätt en kort mening till engelska.",
@@ -706,7 +804,7 @@ def test_plan_proposal_prompt_omits_section_rule_for_simple_transform() -> None:
 
 
 def test_plan_proposal_prompt_guides_terminal_document_review_shape() -> None:
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=_planning_state_with_architecture(
             StepTriple(
                 input_type="document",
@@ -735,7 +833,7 @@ def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
         state=_state_with_slot("post_processing_goal", "action_followup"),
     )
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
         confirmed_requirements=_requirements(
             summary="Transkribera mötet och plocka ut beslut och nästa steg.",
@@ -747,7 +845,7 @@ def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
     )
 
     assert "Result contract:" in prompt
-    assert "- post_processing_goal: action_followup" in prompt
+    assert "- post_processing_goal: action_followup" not in prompt
     assert "- Decisions" in prompt
     assert "- Owners" in prompt
     assert (
@@ -757,7 +855,7 @@ def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
 
 
 def test_plan_proposal_prompt_renders_machine_readable_result_contract() -> None:
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=_state_with_slot("terminal_output", "structured_json"),
         confirmed_requirements=_requirements(
             summary="Ta input JSON och returnera bara JSON enligt output-schemat.",
@@ -769,14 +867,14 @@ def test_plan_proposal_prompt_renders_machine_readable_result_contract() -> None
     )
 
     assert "Result contract:" in prompt
-    assert "- terminal_output: structured_json" in prompt
+    assert "- terminal_output: structured_json" not in prompt
     assert "Use the requested schema or fields as the output contract" in prompt
     assert "Use null or unspecified placeholders for missing source values" in prompt
     assert "Brief summary" not in prompt
 
 
 def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
             summary="Översätt en kort svensk text till engelska.",
@@ -801,7 +899,7 @@ def test_plan_proposal_prompt_omits_confirmed_requirement_boilerplate():
 
 
 def test_plan_proposal_prompt_does_not_render_requirements_version() -> None:
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
         confirmed_requirements=_requirements(
             requirements_version="d0" * 32,
@@ -819,8 +917,14 @@ def test_plan_proposal_prompt_does_not_render_requirements_version() -> None:
 
 
 def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
-    prompt = build_plan_proposal_system_prompt(
-        planning_state=PlanningState.empty(),
+    prompt = build_authoring_brief(
+        planning_state=_planning_state_with_architecture(
+            StepTriple(
+                input_type="audio",
+                output_type="text",
+                output_mode="pass_through",
+            )
+        ),
         confirmed_requirements=_requirements(
             summary="Skapa ett svenskt ljud till DOCX-flöde."
         ),
@@ -841,7 +945,7 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
 
 
 def test_pure_audio_prompt_requests_one_mechanics_free_transcription_step() -> None:
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=_planning_state_with_architecture(
             StepTriple(
                 input_type="audio",

@@ -7,7 +7,8 @@ content through the create/edit tool schema.
 
 from __future__ import annotations
 
-from typing import assert_never
+from dataclasses import dataclass
+from typing import Literal
 
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     named_result_projection,
@@ -16,14 +17,15 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     render_ai_builder_evidence_value,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from eneo.flows.ai_builder.ai_builder_new_step_models import (
-    MAX_STRUCTURED_FIELD_DEPTH,
-)
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalObligationProjection,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
-    render_confirmed_requirements_proposal_prompt_block,
+    user_relevant_requirement_notes,
+    user_relevant_requirement_text,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
@@ -32,8 +34,8 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     render_resource_reference_block,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
+    ResultObligation,
     derive_result_contract,
-    render_result_contract_prompt_block,
 )
 from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
     ConfirmedRuntimeInputRequirement,
@@ -50,16 +52,268 @@ from eneo.flows.ai_builder.ai_builder_tool_names import (
     PROPOSE_FLOW_TOOL_NAME,
 )
 from eneo.flows.ai_builder.planning_state import (
-    FileRoleEvidence,
+    AttachmentCoverage,
+    ExampleOutputStyleCategory,
+    FileRole,
     PlanningState,
-    ResolvedSlot,
+    SchemaEvidence,
 )
 
-# Keeps the example-output evidence block bounded in the proposal prompt.
-_MAX_VISIBLE_EXAMPLE_EVIDENCE = 8
+
+@dataclass(frozen=True, slots=True)
+class AuthoringKeyDecision:
+    topic: str
+    decision: str
 
 
-def build_plan_proposal_system_prompt(
+@dataclass(frozen=True, slots=True)
+class AuthoringRequirementFacts:
+    summary: str | None = None
+    input_description: str | None = None
+    output_description: str | None = None
+    key_decisions: tuple[AuthoringKeyDecision, ...] = ()
+    named_content_fields: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringFileRole:
+    filename: str
+    role: FileRole
+    has_readable_text: bool
+    coverage: AttachmentCoverage
+
+
+SchemaAuthority = Literal[
+    "declared_input_contract",
+    "declared_output_contract",
+    "example_hint",
+    "template_placeholders",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringSchema:
+    authority: SchemaAuthority
+    fields: tuple[str, ...]
+    total_count: int
+    fields_truncated: bool = False
+    source_total_count: int | None = None
+    source_truncated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringExampleStyle:
+    category: ExampleOutputStyleCategory
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringExampleGuidance:
+    headings: tuple[str, ...] = ()
+    style_constraints: tuple[AuthoringExampleStyle, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringResultContract:
+    secondary_obligations: tuple[ResultObligation, ...] = ()
+    required_sections: tuple[str, ...] = ()
+    result_policies: tuple[str, ...] = ()
+    required_output_fields: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringBrief:
+    requirements: AuthoringRequirementFacts | None = None
+    runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = ()
+    file_roles: tuple[AuthoringFileRole, ...] = ()
+    input_schema: AuthoringSchema | None = None
+    output_schema: AuthoringSchema | None = None
+    example_output: AuthoringExampleGuidance | None = None
+    result_contract: AuthoringResultContract | None = None
+    named_results: ProposalObligationProjection | None = None
+    requested_output_sections: tuple[str, ...] = ()
+    resources: AIBuilderResourceReferenceMaterial | None = None
+    flow_context: str | None = None
+    plan_revision_context: str | None = None
+    attachment_context: str | None = None
+    is_edit_mode: bool = False
+    is_pure_audio_transcription: bool = False
+    has_committed_audio_input: bool = False
+    has_terminal_document: bool = False
+    can_decline: bool = False
+
+
+def project_authoring_brief(
+    *,
+    planning_state: PlanningState,
+    confirmed_requirements: RequirementsSummaryPayload | None,
+    attachment_context: str | None,
+    flow_context: str | None,
+    is_edit_mode: bool,
+    resource_catalog: AIBuilderResourceCatalog,
+    is_pure_audio_transcription: bool = False,
+    plan_revision_context: str | None = None,
+    requested_output_sections: RequestedOutputSections | None = None,
+    confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
+    can_decline: bool = False,
+) -> AuthoringBrief:
+    resource_material = build_ai_builder_resource_reference_material(
+        catalog=resource_catalog,
+    )
+    resources = (
+        resource_material
+        if resource_material.models or resource_material.knowledge_bases
+        else None
+    )
+    commit = planning_state.architecture_commit
+    result_contract = derive_result_contract(planning_state)
+    constraints = planning_state.example_output_constraints
+    return AuthoringBrief(
+        requirements=_project_requirement_facts(confirmed_requirements),
+        runtime_inputs=(confirmed_runtime_inputs if not is_edit_mode else ()),
+        file_roles=tuple(
+            AuthoringFileRole(
+                filename=item.filename,
+                role=item.role,
+                has_readable_text=item.has_readable_text,
+                coverage=item.coverage,
+            )
+            for item in planning_state.file_roles
+        ),
+        input_schema=_project_authoring_schema(
+            planning_state.input_schema_evidence,
+            direction="input",
+        ),
+        output_schema=_project_authoring_schema(
+            planning_state.output_schema_evidence,
+            direction="output",
+            terminal_output=planning_state.commit_grade_slot_value("terminal_output"),
+        ),
+        example_output=(
+            AuthoringExampleGuidance(
+                headings=tuple(constraints.headings),
+                style_constraints=tuple(
+                    AuthoringExampleStyle(
+                        category=item.category,
+                        description=item.description,
+                    )
+                    for item in constraints.style_constraints
+                ),
+            )
+            if constraints is not None
+            else None
+        ),
+        result_contract=(
+            AuthoringResultContract(
+                secondary_obligations=result_contract.secondary_obligations,
+                required_sections=result_contract.required_sections,
+                result_policies=result_contract.result_policies,
+                required_output_fields=tuple(
+                    requirement.canonical_name
+                    for requirement in result_contract.required_output_fields
+                ),
+            )
+            if result_contract is not None
+            else None
+        ),
+        named_results=named_result_projection(
+            planning_state,
+            is_edit_mode=is_edit_mode,
+        ),
+        requested_output_sections=(
+            requested_output_sections.sections
+            if requested_output_sections is not None
+            and requested_output_sections.high_confidence
+            else ()
+        ),
+        resources=resources,
+        flow_context=flow_context,
+        plan_revision_context=plan_revision_context,
+        attachment_context=attachment_context,
+        is_edit_mode=is_edit_mode,
+        is_pure_audio_transcription=is_pure_audio_transcription,
+        has_committed_audio_input=(
+            commit is not None
+            and any(triple.input_type == "audio" for triple in commit.tuples_chain)
+        ),
+        has_terminal_document=(
+            commit is not None
+            and any(
+                triple.output_type in {"docx", "pdf"} for triple in commit.tuples_chain
+            )
+        ),
+        can_decline=can_decline,
+    )
+
+
+def _project_requirement_facts(
+    summary: RequirementsSummaryPayload | None,
+) -> AuthoringRequirementFacts | None:
+    if summary is None:
+        return None
+    facts = AuthoringRequirementFacts(
+        summary=user_relevant_requirement_text(summary.summary),
+        input_description=user_relevant_requirement_text(summary.input_description),
+        output_description=user_relevant_requirement_text(summary.output_description),
+        key_decisions=tuple(
+            AuthoringKeyDecision(topic=item.topic, decision=item.decision)
+            for item in summary.key_decisions
+        ),
+        named_content_fields=tuple(item.label for item in summary.named_content_fields),
+        assumptions=user_relevant_requirement_notes(summary.assumptions),
+    )
+    return (
+        facts
+        if any(
+            (
+                facts.summary,
+                facts.input_description,
+                facts.output_description,
+                facts.key_decisions,
+                facts.named_content_fields,
+                facts.assumptions,
+            )
+        )
+        else None
+    )
+
+
+def _project_authoring_schema(
+    evidence: SchemaEvidence | None,
+    *,
+    direction: Literal["input", "output"],
+    terminal_output: str | None = None,
+) -> AuthoringSchema | None:
+    if evidence is None:
+        return None
+    if (
+        direction == "output"
+        and evidence.source != "template_placeholders"
+        and (terminal_output != "structured_json")
+    ):
+        return None
+    projection = project_schema_fields(evidence.json_schema)
+    authority: SchemaAuthority
+    if evidence.source == "template_placeholders":
+        authority = "template_placeholders"
+    elif direction == "input":
+        authority = "declared_input_contract"
+    elif evidence.source == "inferred_example":
+        authority = "example_hint"
+    else:
+        authority = "declared_output_contract"
+    return AuthoringSchema(
+        authority=authority,
+        fields=projection.fields,
+        total_count=projection.total_count,
+        fields_truncated=projection.truncated,
+        source_total_count=evidence.total_count,
+        source_truncated=evidence.truncated,
+    )
+
+
+def build_authoring_brief(
     *,
     planning_state: PlanningState,
     confirmed_requirements: RequirementsSummaryPayload | None,
@@ -73,15 +327,29 @@ def build_plan_proposal_system_prompt(
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
     can_decline: bool = False,
 ) -> str:
-    submission_tool = PROPOSE_FLOW_TOOL_NAME
-    resource_material = build_ai_builder_resource_reference_material(
-        catalog=resource_catalog,
+    brief = project_authoring_brief(
+        planning_state=planning_state,
+        confirmed_requirements=confirmed_requirements,
+        attachment_context=attachment_context,
+        flow_context=flow_context,
+        is_edit_mode=is_edit_mode,
+        is_pure_audio_transcription=is_pure_audio_transcription,
+        resource_catalog=resource_catalog,
+        plan_revision_context=plan_revision_context,
+        requested_output_sections=requested_output_sections,
+        confirmed_runtime_inputs=confirmed_runtime_inputs,
+        can_decline=can_decline,
     )
+    return _render_authoring_brief(brief)
+
+
+def _render_authoring_brief(brief: AuthoringBrief) -> str:
+    submission_tool = PROPOSE_FLOW_TOOL_NAME
     audio_create_rule = (
         "- For this pure audio transcription flow, propose exactly one semantic "
         "transcription step with only `name` and `instructions`; the backend owns "
         "upload and transcription mechanics."
-        if is_pure_audio_transcription
+        if brief.is_pure_audio_transcription
         else "- For committed audio input, the backend inserts the first "
         "transcription/upload step; start propose_flow steps with the analysis, "
         "structuring, or synthesis work after transcription. Transcript review is "
@@ -90,25 +358,23 @@ def build_plan_proposal_system_prompt(
     create_mode_rules = (
         [
             "- In create mode, describe semantic flow intent in propose_flow; do not choose Flow mechanics.",
-            audio_create_rule,
+            *(
+                [audio_create_rule]
+                if brief.has_committed_audio_input or brief.is_pure_audio_transcription
+                else []
+            ),
             "- Human review checkpoints are compiler-owned in create mode: the backend places confirmed review intents on their producing steps. Do not set review_mode, and do not model human review as a separate AI step or as instruction prose.",
             "- Do not author field-level previous-step paths or text-output refs in create mode; the backend owns those underlag channels from the proposed step outputs and committed architecture.",
             "- The backend compiles step topology, backend-owned refs, underlag/input_bindings, runtime input, step refs, output modes, and document delivery.",
         ]
-        if not is_edit_mode
+        if not brief.is_edit_mode
         else []
     )
-    section_rule = _requested_output_sections_design_rule(requested_output_sections)
-    terminal_document_rule = _terminal_document_design_rule(planning_state)
-    # One owner (named_result_projection) feeds the prompt, admission and
-    # the compiled postcondition, so the names the model is told to declare
-    # are exactly the names verification demands.
-    obligation_projection = named_result_projection(
-        planning_state, is_edit_mode=is_edit_mode
-    )
+    terminal_document_rule = _terminal_document_design_rule(brief)
+    obligation_projection = brief.named_results
     projected_names_rule = (
         (
-            "- The user attested to these named results: "
+            "- The result must contain these exact named results: "
             + ", ".join(
                 (
                     f"`{key.name}` (placement not specified)"
@@ -124,7 +390,7 @@ def build_plan_proposal_system_prompt(
             "an extra wrapper; (2) every placement-not-specified result appears "
             "exactly once anywhere in the final step; (3) spelling is exactly "
             "as written above; (4) each result is declared exactly once at its "
-            "location, with an accurate description; (5) attested results of "
+            "location, with an accurate description; (5) named results of "
             "type object or array are declared with nullable false. Missing, "
             "renamed, duplicated, ambiguously placed or wrongly typed results "
             "are rejected."
@@ -132,9 +398,7 @@ def build_plan_proposal_system_prompt(
         if obligation_projection is not None and obligation_projection.keys
         else None
     )
-    result_contract_block = render_result_contract_prompt_block(
-        derive_result_contract(planning_state)
-    )
+    result_contract_block = _render_result_contract(brief.result_contract)
     lines = [
         "You are drafting an Eneo Flow plan.",
         "",
@@ -144,102 +408,72 @@ def build_plan_proposal_system_prompt(
             f"`{DECLINE_FLOW_CHANGE_TOOL_NAME}` tool when the request is only "
             "for a listed decline reason. Do not ask a question, do not confirm "
             "requirements, and do not return prose only."
-            if can_decline
+            if brief.can_decline
             else f"Call exactly one `{submission_tool}` tool. Do not ask a question, do not confirm requirements, and do not return prose only."
         ),
         "",
         "Design rules:",
-        "- Use a short human-readable `flow_name` with words and spaces; never copy internal pattern ids, capability ids, or snake_case tokens into the name.",
         "- Use as many steps as the requested workflow needs, up to the tool schema "
         "limit. For DOCX template-fill mode, use at most "
         f"{MAX_TEMPLATE_PREPARATION_STAGES} semantic preparation steps before the "
         "backend-owned fill step.",
         "- Direct text transformations such as translation, rewriting, correction, shortening, or summarizing a supplied snippet default to one text step; add JSON, review, or extra steps only when the user explicitly asks for them.",
         "- Prefer a clear multi-step flow for complex work instead of one overloaded step.",
-        "- Use JSON output fields when later steps need specific structured facts. Only primitive fields (string, number, boolean) may be nullable; never mark object or array fields nullable.",
-        "- Name output_fields as ASCII identifiers folded from the user's own wording (å/ä→a, ö→o, spaces and dots→underscores); keep key names the user asked for, and put display wording in descriptions.",
         "- For source-material reports, include every final-report fact or per-item short summary that must come from the source in the source-reading JSON output_fields. Do not leave user-named facts only in instructions or hide them inside generic facts/notes fields; later text or document steps should consume those fields instead of introducing new source-derived facts only in prose.",
         *([projected_names_rule] if projected_names_rule is not None else []),
-        *([section_rule] if section_rule is not None else []),
         *([terminal_document_rule] if terminal_document_rule is not None else []),
         "- Describe each step's semantic work; the backend derives runtime input and final output mechanics from the committed architecture.",
-        "- Do not write template variables, raw JSON Schema, raw input bindings, IDs, hashes, timestamps, step refs, or backend mechanics.",
         "- Exception: when the Available resources section gives portable resource slot refs, use those refs only in their dedicated fields (`model_ref`, `knowledge_refs`).",
         "- The backend will compile, validate, and persist the plan for user approval.",
         *create_mode_rules,
         "",
-        "Committed architecture:",
-        _architecture_block(planning_state),
-        "",
-        "Resolved planning slots:",
-        _resolved_slots_block(planning_state),
-        "",
-        "Confirmed requirements:",
-        render_confirmed_requirements_proposal_prompt_block(confirmed_requirements),
+        "Requirements:",
+        _render_requirement_facts(brief.requirements),
     ]
-    if confirmed_runtime_inputs and not is_edit_mode:
+    if brief.runtime_inputs:
         lines.extend(
             [
                 "",
-                "Confirmed runtime inputs:",
-                render_confirmed_runtime_input_requirements(confirmed_runtime_inputs),
+                "Runtime inputs:",
+                render_confirmed_runtime_input_requirements(brief.runtime_inputs),
                 "- Keep these exact identities as server-owned runtime inputs; "
                 "do not repeat an identity as a source output field. Preserve "
                 "each listed purpose when designing semantic work.",
             ]
         )
-    file_roles_block = _file_roles_block(planning_state)
+    file_roles_block = _file_roles_block(brief.file_roles)
     if file_roles_block is not None:
         lines.extend(["", "Uploaded file roles:", file_roles_block])
-    input_schema_block = _input_schema_evidence_block(planning_state)
+    input_schema_block = _schema_evidence_block(brief.input_schema)
     if input_schema_block is not None:
         lines.extend(["", "Input schema evidence:", input_schema_block])
-    output_schema_block = _output_schema_evidence_block(planning_state)
+    output_schema_block = _schema_evidence_block(brief.output_schema)
     if output_schema_block is not None:
         lines.extend(["", "Output schema evidence:", output_schema_block])
-    example_evidence_block = _example_output_evidence_block(planning_state)
+    example_evidence_block = _example_output_evidence_block(brief.example_output)
     if example_evidence_block is not None:
         lines.extend(["", "Example-output evidence:", example_evidence_block])
     if result_contract_block is not None:
         lines.extend(["", "Result contract:", result_contract_block])
-    section_block = _requested_output_sections_block(requested_output_sections)
+    section_block = _requested_output_sections_block(brief.requested_output_sections)
     if section_block is not None:
         lines.extend(["", "Requested output sections:", section_block])
-    if flow_context:
-        lines.extend(["", "Existing flow context:", flow_context])
-    resource_context = _resource_context_block(resource_material)
+    if brief.flow_context:
+        lines.extend(["", "Existing flow context:", brief.flow_context])
+    resource_context = (
+        _resource_context_block(brief.resources) if brief.resources is not None else ""
+    )
     if resource_context:
         lines.extend(["", "Available resources:", resource_context])
-    if plan_revision_context:
-        lines.extend(["", plan_revision_context])
-    if attachment_context:
-        lines.extend(["", "Attachment context:", attachment_context])
+    if brief.plan_revision_context:
+        lines.extend(["", brief.plan_revision_context])
+    if brief.attachment_context:
+        lines.extend(["", "Attachment context:", brief.attachment_context])
     return "\n".join(lines)
 
 
-def _requested_output_sections_design_rule(
-    requested_output_sections: RequestedOutputSections | None,
-) -> str | None:
-    if (
-        requested_output_sections is None
-        or not requested_output_sections.high_confidence
-        or len(requested_output_sections.sections) < 2
-    ):
-        return None
-    return (
-        "- When the user names multiple output headings/sections for an AI-generated "
-        "report or document, preserve those sections as semantic section-writing "
-        "work and add final assembly before DOCX/PDF delivery. Group only tightly "
-        "related sections when needed; do not apply this to sectioned form intake "
-        "or simple transformations."
-    )
-
-
-def _terminal_document_design_rule(planning_state: PlanningState) -> str | None:
-    commit = planning_state.architecture_commit
-    if commit is None:
-        return None
-    if not any(triple.output_type in {"docx", "pdf"} for triple in commit.tuples_chain):
+def _terminal_document_design_rule(brief: AuthoringBrief) -> str | None:
+    if not brief.has_terminal_document:
         return None
     return (
         "- For DOCX/PDF delivery, the final text step immediately before the "
@@ -253,202 +487,143 @@ def _terminal_document_design_rule(planning_state: PlanningState) -> str | None:
 
 
 def _requested_output_sections_block(
-    requested_output_sections: RequestedOutputSections | None,
+    requested_output_sections: tuple[str, ...],
 ) -> str | None:
-    if (
-        requested_output_sections is None
-        or not requested_output_sections.high_confidence
-    ):
+    if not requested_output_sections:
         return None
-    return "\n".join(f"- {section}" for section in requested_output_sections.sections)
+    return "\n".join(f"- {section}" for section in requested_output_sections)
 
 
-def _architecture_block(planning_state: PlanningState) -> str:
-    commit = planning_state.architecture_commit
-    if commit is None:
-        return "- No committed architecture is present. Create the safest valid plan."
-    tuples = [
-        f"- {triple.input_type.value} -> {triple.output_type.value} "
-        f"({triple.output_mode.value})"
-        for triple in commit.tuples_chain
-    ]
-    return "\n".join(
-        [
-            *tuples,
-            "- implementation_strategy: server-selected capability profile (ids hidden from user-facing text)",
-        ]
-    )
-
-
-def _resolved_slots_block(planning_state: PlanningState) -> str:
-    if not planning_state.resolved_slots:
+def _render_requirement_facts(facts: AuthoringRequirementFacts | None) -> str:
+    if facts is None:
         return "- none"
-    return "\n".join(
-        f"- {name}: {slot.value} ({_resolved_slot_prompt_status(slot)})"
-        for name, slot in sorted(planning_state.resolved_slots.items())
-    )
+    lines: list[str] = []
+    for key, value in (
+        ("summary", facts.summary),
+        ("input_description", facts.input_description),
+        ("output_description", facts.output_description),
+    ):
+        if value is not None:
+            lines.append(f"- {key}: {value}")
+    if facts.key_decisions:
+        lines.append("- key_decisions:")
+        lines.extend(
+            f"  - {decision.topic}: {decision.decision}"
+            for decision in facts.key_decisions
+        )
+    if facts.named_content_fields:
+        lines.append("- named_content_fields:")
+        lines.extend(f"  - {label}" for label in facts.named_content_fields)
+    if facts.assumptions:
+        lines.append("- assumptions:")
+        lines.extend(f"  - {assumption}" for assumption in facts.assumptions)
+    return "\n".join(lines) if lines else "- none"
 
 
-def _resolved_slot_prompt_status(slot: ResolvedSlot) -> str:
-    match slot.source:
-        case "structured_answer" | "requirements_summary":
-            return "confirmed"
-        case "flow_default":
-            return "from existing flow"
-        case "attachment_structure":
-            return "confirmed from attachment structure"
-        case "policy_default":
-            return "policy default assumption"
-        case "heuristic":
-            return f"heuristic inference, {slot.confidence} confidence"
-        case "model":
-            return f"model inference, {slot.confidence} confidence"
-    return assert_never(slot.source)
-
-
-def _file_roles_block(planning_state: PlanningState) -> str | None:
-    if not planning_state.file_roles:
+def _file_roles_block(file_roles: tuple[AuthoringFileRole, ...]) -> str | None:
+    if not file_roles:
         return None
     return "\n".join(
         f"- {render_ai_builder_evidence_value(item.filename)}: {item.role} "
-        f"({item.source}, {item.confidence} confidence"
-        f"{_file_role_detail_prompt_suffix(item)})"
-        for item in planning_state.file_roles
+        f"(has_readable_text: {str(item.has_readable_text).lower()}; "
+        f"coverage: {item.coverage})"
+        for item in file_roles
     )
 
 
-def _file_role_detail_prompt_suffix(item: FileRoleEvidence) -> str:
-    details = [
-        f"has_readable_text: {str(item.has_readable_text).lower()}",
-        f"coverage: {item.coverage}",
-    ]
-    candidate_roles = tuple(item.candidate_roles)
-    if candidate_roles and candidate_roles != (item.role,):
-        details.append("candidates: " + ", ".join(candidate_roles))
-    if item.evidence:
-        details.append(
-            "evidence: "
-            + ", ".join(
-                render_ai_builder_evidence_value(marker) for marker in item.evidence[:6]
-            )
-        )
-    return "; " + "; ".join(details)
-
-
-def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
-    evidence = planning_state.output_schema_evidence
-    if evidence is None:
+def _schema_evidence_block(schema: AuthoringSchema | None) -> str | None:
+    if schema is None:
         return None
-    projection = project_schema_fields(evidence.json_schema)
-    fields = projection.fields
     field_text = (
-        ", ".join(render_ai_builder_evidence_value(field) for field in fields)
-        if fields
+        ", ".join(render_ai_builder_evidence_value(field) for field in schema.fields)
+        if schema.fields
         else "top-level object"
     )
-    if projection.truncated:
+    if schema.fields_truncated:
         field_text = (
-            f"{field_text} "
-            f"(showing {len(projection.fields)} of {projection.total_count})"
+            f"{field_text} (showing {len(schema.fields)} of {schema.total_count})"
         )
-    if evidence.source == "template_placeholders":
+    if schema.authority == "template_placeholders":
         coverage_line = (
-            f"- placeholder coverage: {len(fields)} of {evidence.total_count} unique "
+            f"- placeholder coverage: {len(schema.fields)} of "
+            f"{schema.source_total_count} unique "
             "fields retained (truncated)"
-            if evidence.truncated and evidence.total_count is not None
+            if schema.source_truncated and schema.source_total_count is not None
             else None
         )
         return "\n".join(
             [
-                f"- source: {evidence.source}, {evidence.confidence} confidence",
                 f"- template placeholder fields: {field_text}",
                 *([coverage_line] if coverage_line is not None else []),
                 "- Prefer source-derived output_fields for placeholders that can be "
                 "extracted from uploaded documents; the backend owns runtime values "
                 "that the user must provide.",
-                "- Keep preparation output_fields FLAT: one string field per "
-                "placeholder (source references belong inside the text, not as "
-                f"nested objects). Nesting deeper than {MAX_STRUCTURED_FIELD_DEPTH} "
-                "levels is rejected.",
-                "- Name each preparation field with the placeholder's ASCII "
-                "identifier form: lowercase, diacritics folded (å/ä→a, ö→o), "
-                'dots and spaces replaced with underscores ("sections.ärendet'
-                '.text" → sections_arendet_text). A placeholder whose folded '
-                "name matches a prepared string field is filled automatically; "
-                "placeholders without a match become required runtime form "
-                "fields the user must type in.",
             ]
         )
-    terminal_output = planning_state.resolved_slots.get("terminal_output")
-    if terminal_output is None or terminal_output.value != "structured_json":
-        return None
-    if evidence.source == "inferred_example":
+    if schema.authority == "example_hint":
         return "\n".join(
             [
-                f"- source: {evidence.source}, {evidence.confidence} confidence",
-                f"- inferred top-level fields: {field_text}",
+                f"- example-hint top-level fields: {field_text}",
                 "- Treat this as an open structural hint from a selected example, "
                 "not as an explicit or closed contract. Do not invent required "
                 "fields or validation constraints.",
             ]
         )
+    boundary = "input" if schema.authority == "declared_input_contract" else "output"
     return "\n".join(
         [
-            f"- source: {evidence.source}, {evidence.confidence} confidence",
-            f"- declared top-level fields: {field_text}",
-            "- Use output_fields consistent with these user-declared fields.",
+            f"- declared {boundary} contract fields: {field_text}",
+            *(
+                [
+                    "- This schema describes the Flow input boundary. Do not "
+                    "reinterpret its primary payload fields as independent runtime "
+                    "values."
+                ]
+                if boundary == "input"
+                else ["- Use output_fields consistent with this declared contract."]
+            ),
         ]
     )
 
 
-def _input_schema_evidence_block(planning_state: PlanningState) -> str | None:
-    evidence = planning_state.input_schema_evidence
-    if evidence is None:
+def _render_result_contract(contract: AuthoringResultContract | None) -> str | None:
+    if contract is None:
         return None
-    projection = project_schema_fields(evidence.json_schema)
-    field_text = (
-        ", ".join(
-            render_ai_builder_evidence_value(field) for field in projection.fields
+    lines: list[str] = []
+    if contract.secondary_obligations:
+        lines.append("- secondary_obligations:")
+        lines.extend(
+            f"  - {obligation}" for obligation in contract.secondary_obligations
         )
-        if projection.fields
-        else "top-level object"
-    )
-    if projection.truncated:
-        field_text = (
-            f"{field_text} "
-            f"(showing {len(projection.fields)} of {projection.total_count})"
+    if contract.required_sections:
+        lines.append("- required_sections:")
+        lines.extend(f"  - {section}" for section in contract.required_sections)
+    if contract.required_output_fields:
+        lines.append("- required_output_fields:")
+        lines.extend(f"  - {name}" for name in contract.required_output_fields)
+        lines.append(
+            "- A human-readable outcome for this goal needs a structured extraction "
+            "step declaring these fields, feeding the final writing step."
         )
-    return "\n".join(
-        [
-            f"- source: {evidence.source}, {evidence.confidence} confidence",
-            f"- declared top-level fields: {field_text}",
-            "- This schema describes the Flow input boundary. Do not reinterpret its "
-            "primary payload fields as independent runtime values.",
-        ]
-    )
+    if contract.result_policies:
+        lines.append("- result_policies:")
+        lines.extend(f"  - {policy}" for policy in contract.result_policies)
+    return "\n".join(lines) if lines else None
 
 
 def _example_output_evidence_block(
-    planning_state: PlanningState,
+    constraints: AuthoringExampleGuidance | None,
 ) -> str | None:
-    constraints = planning_state.example_output_constraints
     if constraints is None:
         return None
-    lines: list[str] = []
-    visible_headings = constraints.headings[:_MAX_VISIBLE_EXAMPLE_EVIDENCE]
-    for heading in visible_headings:
-        lines.append(f"- heading: {render_ai_builder_evidence_value(heading)}")
-    omitted_headings = len(constraints.headings) - len(visible_headings)
-    if omitted_headings:
-        lines.append(f"- {omitted_headings} additional example headings omitted")
-    visible_style = constraints.style_constraints[:_MAX_VISIBLE_EXAMPLE_EVIDENCE]
+    lines = [
+        f"- heading: {render_ai_builder_evidence_value(heading)}"
+        for heading in constraints.headings
+    ]
     lines.extend(
         f"- {item.category}: {render_ai_builder_evidence_value(item.description)}"
-        for item in visible_style
+        for item in constraints.style_constraints
     )
-    omitted_style = len(constraints.style_constraints) - len(visible_style)
-    if omitted_style:
-        lines.append(f"- {omitted_style} additional style constraints omitted")
     if not lines:
         return None
     lines.append(
@@ -473,4 +648,15 @@ def _resource_context_block(
     return "\n".join(sections)
 
 
-__all__ = ["build_plan_proposal_system_prompt"]
+__all__ = [
+    "AuthoringBrief",
+    "AuthoringExampleGuidance",
+    "AuthoringExampleStyle",
+    "AuthoringFileRole",
+    "AuthoringKeyDecision",
+    "AuthoringRequirementFacts",
+    "AuthoringResultContract",
+    "AuthoringSchema",
+    "build_authoring_brief",
+    "project_authoring_brief",
+]
