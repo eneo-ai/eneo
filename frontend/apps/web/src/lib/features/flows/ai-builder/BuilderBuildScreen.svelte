@@ -74,7 +74,9 @@
           {m.ai_builder_build_subtitle()}
         </p>
         <p class="text-secondary mt-2.5 text-[0.8125rem]" role="status" aria-live="polite">
-          {narration} …
+          <!-- Each stage fades in rather than snapping: the reader sees the
+               work move on, not the text jump. -->
+          {#key narration}<span class="narration-step">{narration} …</span>{/key}
         </p>
         {#if slow}
           <p class="text-warning-stronger mt-2 text-[0.8125rem]" role="status">
@@ -114,3 +116,25 @@
     </div>
   </div>
 </div>
+
+<style lang="postcss">
+  .narration-step {
+    display: inline-block;
+    animation: narration-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes narration-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .narration-step {
+      animation: none;
+    }
+  }
+</style>

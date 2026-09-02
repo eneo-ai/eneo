@@ -31,10 +31,12 @@
   }: Props = $props();
 </script>
 
+<!-- A step the latest revision touched glows once so the eye lands on what
+     changed; the badge stays as the durable marker. -->
 <div
   class="flex items-start gap-3 rounded-[10px] border px-3.5 py-3 {quiet
     ? 'border-dimmer bg-secondary'
-    : 'border-default bg-primary shadow-sm'}"
+    : 'border-default bg-primary shadow-sm'} {changeBadge === 'updated' ? 'step-updated' : ''}"
 >
   <span
     class="mt-px inline-flex size-[1.625rem] shrink-0 items-center justify-center rounded-[7px] text-xs font-bold tabular-nums
@@ -104,3 +106,22 @@
     {modelLabel}
   </span>
 </div>
+
+<style lang="postcss">
+  .step-updated {
+    animation: step-updated 1.4s ease-out 1;
+  }
+  @keyframes step-updated {
+    from {
+      background-color: var(--accent-dimmer);
+    }
+    to {
+      background-color: var(--background-primary);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .step-updated {
+      animation: none;
+    }
+  }
+</style>
