@@ -26,6 +26,8 @@
     answered: AnsweredQuestion[];
     /** The question being re-answered, if any; the card then shows that one. */
     editingQuestionId?: string | null;
+    editingAnsweredOptionIds?: string[] | null;
+    editingAnsweredCustomValue?: string | null;
     disabled?: boolean;
     onanswer: (payload: StructuredQuestionAnswerPayload) => void;
     /** Hand this question back to Eneo; only offered with a recommendation. */
@@ -41,6 +43,8 @@
     answeredFields = null,
     answered,
     editingQuestionId = null,
+    editingAnsweredOptionIds = null,
+    editingAnsweredCustomValue = null,
     disabled = false,
     onanswer,
     ondelegate,
@@ -119,6 +123,8 @@
           {question}
           {questionNumber}
           {answeredFields}
+          answeredOptionIds={editingQuestionId ? editingAnsweredOptionIds : null}
+          answeredCustomValue={editingQuestionId ? editingAnsweredCustomValue : null}
           plannedRemaining={questionMessage.question?.questions_planned_remaining ?? null}
           {why}
           {disabled}

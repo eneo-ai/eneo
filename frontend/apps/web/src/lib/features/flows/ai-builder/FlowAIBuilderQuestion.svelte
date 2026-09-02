@@ -58,6 +58,11 @@
     /** The fields this question was already answered with. Editing starts from
      *  them: an empty form would let one blank row replace the whole set. */
     answeredFields?: StructuredInputFieldAnswer[] | null;
+    /** Editing an earlier answer: what that answer settled starts selected,
+     *  so the reader sees their current answer instead of an empty form. */
+    answeredOptionIds?: string[] | null;
+    /** The text typed instead of an option, when that is what was answered. */
+    answeredCustomValue?: string | null;
   }
 
   let {
@@ -71,7 +76,9 @@
     ondelegate,
     isEdit = false,
     plannedRemaining = null,
-    answeredFields = null
+    answeredFields = null,
+    answeredOptionIds = null,
+    answeredCustomValue = null
   }: Props = $props();
 
   // Generated once per instance so radiogroup + its label can link without colliding.
@@ -224,13 +231,35 @@
         : m.ai_builder_requirements_runtime_fields_count({ count: String(inputFields.length) })
   );
 
+  const answeredKeys = $derived(
+    (answeredOptionIds ?? []).flatMap((id) => {
+      const option = question.options.find(
+        (candidate) => getStructuredQuestionOptionKey(candidate) === id
+      );
+      return option ? [getStructuredQuestionOptionKey(option)] : [];
+    })
+  );
   let preselectedQuestionId: string | null = null;
   $effect(() => {
     const key = recommendedKey;
     if (preselectedQuestionId === question.question_id) return;
     preselectedQuestionId = question.question_id;
+    if (selectedOptionKeys.size !== 0) return;
+    if (answeredCustomValue) {
+      customSelected = true;
+      customText = answeredCustomValue;
+      return;
+    }
+    if (answeredKeys.length > 0) {
+      for (const answered of question.selection_mode === "single"
+        ? answeredKeys.slice(0, 1)
+        : answeredKeys) {
+        selectedOptionKeys.add(answered);
+      }
+      return;
+    }
     const preselect = currentKey ?? key;
-    if (preselect && question.selection_mode === "single" && selectedOptionKeys.size === 0) {
+    if (preselect && question.selection_mode === "single") {
       selectedOptionKeys.add(preselect);
     }
   });

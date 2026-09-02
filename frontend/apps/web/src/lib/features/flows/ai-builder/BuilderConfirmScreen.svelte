@@ -77,6 +77,8 @@
      *  the questions; the card below it stays visible the whole time. */
     editingQuestion?: ChatMessage | null;
     editingQuestionNumber?: number | null;
+    editingAnsweredOptionIds?: string[] | null;
+    editingAnsweredCustomValue?: string | null;
     /** What the user already answered with, so reopening edits those fields
      *  instead of replacing them with an empty form. */
     editingFields?: StructuredInputFieldAnswer[] | null;
@@ -116,6 +118,8 @@
     disabled = false,
     editingQuestion = null,
     editingQuestionNumber = null,
+    editingAnsweredOptionIds = null,
+    editingAnsweredCustomValue = null,
     editingFields = null,
     onanswer,
     oncanceledit,
@@ -448,6 +452,8 @@
             question={editingQuestion.question}
             questionNumber={editingQuestionNumber}
             answeredFields={editingFields}
+            answeredOptionIds={editingAnsweredOptionIds}
+            answeredCustomValue={editingAnsweredCustomValue}
             {isEdit}
             why={editingQuestion.content.trim() || null}
             {disabled}

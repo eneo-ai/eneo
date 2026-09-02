@@ -112,6 +112,24 @@
     return null;
   });
   const questionMessage = $derived(editingQuestionMessage ?? pendingQuestionMessage);
+  // What the newest answer to the question being edited settled: the
+  // options it selected, or the text the user typed instead. The editor
+  // starts from that, whether the user or Eneo (delegated) settled it.
+  const editingAnswer = $derived.by(() => {
+    if (!editingQuestionId) return null;
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      const answer = service.messages[i]?.questionAnswer;
+      if (answer?.question_id === editingQuestionId) return answer;
+    }
+    return null;
+  });
+  const editingAnsweredOptionIds = $derived.by(() => {
+    const answer = editingAnswer;
+    if (!answer) return null;
+    if (answer.selected_option_ids?.length) return [...answer.selected_option_ids];
+    return answer.selected_option_id ? [answer.selected_option_id] : null;
+  });
+  const editingAnsweredCustomValue = $derived(editingAnswer?.custom_value ?? null);
 
   const askedQuestionIds = $derived.by(() => {
     const ids: string[] = [];
@@ -663,6 +681,8 @@
           answered={answeredQuestions}
           isEdit={targetKind === "edit"}
           {editingQuestionId}
+          {editingAnsweredOptionIds}
+          {editingAnsweredCustomValue}
           disabled={service.isCreating || service.isStreaming}
           onanswer={handleQuestionAnswer}
           ondelegate={handleDelegateQuestion}
@@ -691,6 +711,8 @@
             ? (confirmedFieldAnswer?.fields ?? null)
             : null}
           editingQuestionNumber={questionNumber}
+          {editingAnsweredOptionIds}
+          {editingAnsweredCustomValue}
           onanswer={handleQuestionAnswer}
           oncanceledit={() => (editingQuestionId = null)}
           onconfirm={handleRequirementsConfirm}

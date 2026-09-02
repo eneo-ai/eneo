@@ -1953,6 +1953,85 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(screen.queryByText(m.ai_builder_question_delegated_badge())).toBeNull();
   });
 
+  it("starts an edited answer from the option the user chose before", async () => {
+    // Reopening an answered row must show the current answer selected, not
+    // an empty form the user has to re-read from scratch.
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [{ topic: "Slutresultat", decision: "Som PDF", question_id: "output_format" }]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a3", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Slutresultat" })
+      })
+    );
+
+    const chosen = await screen.findByRole("radio", { name: "Som PDF" });
+    expect(chosen.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Som text" }).getAttribute("aria-checked")).toBe(
+      "false"
+    );
+  });
+
+  it("starts an edited answer from the text the user typed instead of an option", async () => {
+    // A typed answer is a real answer: reopening it must show that text in
+    // the custom lane, not the recommended option.
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [{ topic: "Läsare", decision: "Hela nämnden", question_id: "audience" }]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Vem läser resultatet?", { question: CUSTOM_QUESTION }),
+            userMessage("u2", "Hela nämnden", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "audience",
+                custom_value: "Hela nämnden"
+              }
+            }),
+            assistantMessage("a3", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: m.ai_builder_confirm_change_row_aria({ topic: "Läsare" })
+      })
+    );
+
+    const typed = await screen.findByRole("textbox", { name: m.ai_builder_question_custom() });
+    expect((typed as HTMLTextAreaElement | HTMLInputElement).value).toBe("Hela nämnden");
+  });
+
   it("keeps the option an edited flow runs on today when a question is reopened here", async () => {
     const editQuestion = {
       ...FORMAT_QUESTION,
