@@ -315,8 +315,8 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
             id="json",
             label_sv="JSON",
             label_en="JSON",
-            description_sv="Ta emot en strukturerad JSON-payload vid körning.",
-            description_en="Accept a structured JSON payload at runtime.",
+            description_sv="Ta emot strukturerad JSON-data vid körning.",
+            description_en="Accept structured JSON data at runtime.",
             value="json",
             example_sv="Ett annat system skickar in data; ingen fil laddas upp.",
             example_en="Another system sends in the data; no file is uploaded.",
@@ -352,7 +352,7 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
     worked_examples_sv=(
         "Uppladdning av mötesinspelning för transkribering.",
         "Användaren klistrar in en rapport som text.",
-        "Ett annat system skickar in en JSON-payload.",
+        "Ett annat system skickar in JSON-data.",
     ),
     worked_examples_en=(
         "Uploading a meeting recording for transcription.",
@@ -446,21 +446,21 @@ _TERMINAL_OUTPUT = QuestionTemplate(
 
 _DOCX_OUTPUT_MODE = QuestionTemplate(
     id="docx_output_mode",
-    question_sv="Hur ska DOCX-resultatet skapas?",
-    question_en="How should the DOCX output be created?",
+    question_sv="Hur ska Word-dokumentet skapas?",
+    question_en="How should the Word document be created?",
     help_sv=(
-        "DOCX kan antingen genereras fritt från analysen eller fyllas in i "
-        "en befintlig mall. Välj mall om layouten är fast."
+        "Word-dokumentet kan antingen skapas fritt utifrån analysen eller "
+        "fyllas i i en befintlig mall. Välj mall om layouten är bestämd."
     ),
     help_en=(
-        "DOCX can either be generated freely from the analysis or filled "
-        "into an existing template. Pick template if the layout is fixed."
+        "The Word document can either be generated freely from the analysis "
+        "or filled into an existing template. Pick template if the layout is fixed."
     ),
     options=(
         _option(
             id="generated_docx",
-            label_sv="Genererad DOCX utan mall",
-            label_en="Generated DOCX without template",
+            label_sv="Genererat Word-dokument utan mall",
+            label_en="Generated Word document without a template",
             description_sv="Skapa dokumentinnehållet direkt utan en fast mall.",
             description_en="Generate the document content directly without a fixed template.",
             value="generated_docx",
@@ -474,10 +474,10 @@ _DOCX_OUTPUT_MODE = QuestionTemplate(
         ),
         _option(
             id="template_fill_docx",
-            label_sv="DOCX från mall",
-            label_en="DOCX from template",
-            description_sv="Fyll en befintlig DOCX-mall med strukturerade fält.",
-            description_en="Fill an existing DOCX template with structured fields.",
+            label_sv="Ifylld Word-mall",
+            label_en="Filled-in Word template",
+            description_sv="Fyll i en befintlig Word-mall med strukturerade fält.",
+            description_en="Fill in an existing Word template with structured fields.",
             value="template_fill_docx",
             example_sv=(
                 "Resultatet blir en ifylld version av er mall, med samma layout."
@@ -489,11 +489,11 @@ _DOCX_OUTPUT_MODE = QuestionTemplate(
     ),
     worked_examples_sv=(
         "Genererad rapport utan mall.",
-        "Ifyllning av organisationens DOCX-mall.",
+        "Ifyllning av organisationens Word-mall.",
     ),
     worked_examples_en=(
         "Generated report without a template.",
-        "Filling the organization's DOCX template.",
+        "Filling the organization's Word template.",
     ),
     family="output_artifact",
     priority_base=70,
@@ -901,15 +901,15 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
 
 _STRUCTURED_IO_CONTRACT = QuestionTemplate(
     id="structured_io_contract",
-    question_sv="Vad ska flödet göra mellan input-JSON och output-JSON?",
-    question_en="What should the flow do between input JSON and output JSON?",
+    question_sv="Vad ska flödet göra med JSON-datan?",
+    question_en="What should the flow do with the JSON data?",
     help_sv=(
-        "För maskinläsbara payloads behöver flödet veta om JSON ska mappas, "
-        "valideras, beräknas, normaliseras eller klassificeras."
+        "När indata och resultat är JSON behöver flödet veta om datan ska "
+        "mappas om, valideras, beräknas, normaliseras eller klassificeras."
     ),
     help_en=(
-        "For machine-readable payloads, the flow needs to know whether JSON "
-        "should be mapped, validated, computed, normalized, or classified."
+        "When input and result are JSON, the flow needs to know whether the "
+        "data should be mapped, validated, computed, normalized, or classified."
     ),
     options=(
         _option(
@@ -931,8 +931,8 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
             id="validate_against_schema_or_rules",
             label_sv="Validera mot schema eller regler",
             label_en="Validate against schema or rules",
-            description_sv="Kontrollera payloaden mot ett schema, regler eller krav.",
-            description_en="Check the payload against a schema, rules, or requirements.",
+            description_sv="Kontrollera datan mot ett schema, regler eller krav.",
+            description_en="Check the data against a schema, rules, or requirements.",
             value="validate_against_schema_or_rules",
             example_sv="Körningen rapporterar vad som saknas eller bryter mot reglerna.",
             example_en=(
@@ -1007,16 +1007,16 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
 
 _RUNTIME_METADATA_FIELDS = QuestionTemplate(
     id="runtime_metadata_fields",
-    question_sv="Ska användaren också ange metadata vid körning?",
-    question_en="Should the user also enter metadata at runtime?",
+    question_sv="Ska den som kör flödet också fylla i några extra uppgifter?",
+    question_en="Should the person running the flow also fill in some extra details?",
     help_sv=(
-        "Metadata är återanvändbara fält som användaren fyller i utöver "
-        "själva underlaget — till exempel referensnummer, språk eller "
-        "ansvarig avdelning."
+        "Extra uppgifter är fält som fylls i utöver själva underlaget vid "
+        "varje körning — till exempel referensnummer, språk eller ansvarig "
+        "avdelning."
     ),
     help_en=(
-        "Metadata are reusable fields the user enters beyond the source "
-        "material itself — for example reference number, language, or "
+        "Extra details are fields filled in beyond the source material "
+        "itself at every run — for example a reference number, language, or "
         "responsible department."
     ),
     options=(
@@ -1034,14 +1034,13 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
         ),
         _option(
             id="basic_runtime_metadata",
-            label_sv="Lägg till grundläggande metadata",
-            label_en="Add basic metadata",
-            description_sv="Låt användaren ange några enkla återanvändbara fält.",
-            description_en="Let the user enter a few simple reusable fields.",
+            label_sv="Några grundläggande fält",
+            label_en="A few basic fields",
+            description_sv="Den som kör flödet fyller i några enkla fält före körningen.",
+            description_en="The person running the flow fills in a few simple fields before the run.",
             value="basic_runtime_metadata",
             example_sv=(
-                "Användaren fyller i några fält innan körningen startar, till "
-                "exempel diarienummer."
+                "Några fält fylls i före körningen, till exempel ett referensnummer."
             ),
             example_en=(
                 "The user fills in a few fields before the run starts, for "
@@ -1050,11 +1049,11 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
         ),
         _option(
             id="detailed_runtime_metadata",
-            label_sv="Lägg till rikare metadatafält",
-            label_en="Add richer metadata fields",
+            label_sv="Fler fält",
+            label_en="More fields",
             description_sv=(
-                "Samla flera återanvändbara fält som referenser, språk, "
-                "fokus, datum eller ansvarig avdelning."
+                "Samla in flera uppgifter, som referenser, språk, fokus, "
+                "datum eller ansvarig avdelning."
             ),
             description_en=(
                 "Collect several reusable inputs such as references, "
@@ -1062,18 +1061,18 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
             ),
             value="detailed_runtime_metadata",
             example_sv=(
-                "Formuläret före körning får flera fält, som ärendenummer, "
+                "Formuläret före körning får flera fält, som referensnummer, "
                 "språk och enhet."
             ),
             example_en=(
-                "The form before the run gets several fields, such as case "
-                "number, language, and unit."
+                "The pre-run form gets several fields, such as a reference "
+                "number, language and unit."
             ),
         ),
     ),
     worked_examples_sv=(
         "Fält för referensnummer och ansvarig enhet vid körning.",
-        "Ingen extra metadata — flödet arbetar enbart med det uppladdade materialet.",
+        "Inga extra uppgifter — flödet arbetar enbart med det uppladdade materialet.",
     ),
     worked_examples_en=(
         "Runtime fields for reference number and responsible unit.",
@@ -1087,14 +1086,10 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
 
 _MAPPED_FILE_LIMIT = QuestionTemplate(
     id="mapped_file_limit",
-    question_sv="Hur många uppladdade filer ska ett mappat steg högst behandla?",
-    question_en="How many uploaded files may a mapped step process at most?",
-    help_sv=(
-        "Bekräfta organisationens nuvarande gräns eller ange ett lägre positivt heltal."
-    ),
-    help_en=(
-        "Confirm the organization's current ceiling or enter a lower positive integer."
-    ),
+    question_sv="Hur många filer får en körning högst behandla?",
+    question_en="How many files may one run process at most?",
+    help_sv=("Bekräfta organisationens gräns eller ange ett lägre antal."),
+    help_en=("Confirm the organization's limit or enter a lower number."),
     options=(
         _option(
             id="organization_limit",
@@ -1162,14 +1157,14 @@ _SUMMARY_LABELS_BY_LOCALE: Mapping[Locale, Mapping[str, str]] = MappingProxyType
                 "primary_runtime_input": "Indata vid körning",
                 "mapped_file_limit": "Filgräns för upprepade steg",
                 "terminal_output": "Slutresultat",
-                "docx_output_mode": "DOCX-resultat",
+                "docx_output_mode": "Word-resultat",
                 "pdf_generation_mode": "PDF-resultat",
                 "document_material_scope": "Dokumentunderlag",
                 "comparison_scope": "Jämförelse",
                 "report_disposition": "Rapportupplägg",
                 "post_processing_goal": "Syfte med bearbetningen",
                 "structured_io_contract": "JSON-bearbetning",
-                "runtime_metadata_fields": "Metadata vid körning",
+                "runtime_metadata_fields": "Extra uppgifter vid körning",
             }
         ),
         "en": MappingProxyType(
@@ -1177,14 +1172,14 @@ _SUMMARY_LABELS_BY_LOCALE: Mapping[Locale, Mapping[str, str]] = MappingProxyType
                 "primary_runtime_input": "Runtime input",
                 "mapped_file_limit": "File limit for repeated steps",
                 "terminal_output": "Final output",
-                "docx_output_mode": "DOCX output",
+                "docx_output_mode": "Word output",
                 "pdf_generation_mode": "PDF output",
                 "document_material_scope": "Document source material",
                 "comparison_scope": "Comparison",
                 "report_disposition": "Report structure",
                 "post_processing_goal": "Processing purpose",
                 "structured_io_contract": "JSON processing",
-                "runtime_metadata_fields": "Runtime metadata",
+                "runtime_metadata_fields": "Extra details at runtime",
             }
         ),
     }

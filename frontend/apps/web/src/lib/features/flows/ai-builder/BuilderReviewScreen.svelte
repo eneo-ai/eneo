@@ -953,7 +953,7 @@
                     class="bg-warning-dimmer/60 text-warning-stronger rounded-md px-3 py-2 text-[0.8125rem] leading-relaxed"
                   >
                     {#if warning.step_ref}
-                      <span class="font-mono text-xs font-semibold">{warning.step_ref}</span>
+                      <span class="font-semibold">{executionStepLabel(warning.step_ref)}</span>
                       <span class="text-warning-stronger/60 mx-1" aria-hidden="true">·</span>
                     {/if}
                     {warning.message}

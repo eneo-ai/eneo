@@ -875,6 +875,7 @@ class TestDomainNeutrality:
                 for option in rendered.options:
                     blob_parts.append(option.label)
                     blob_parts.append(option.description)
+                    blob_parts.append(option.example)
                 lowered = "\n".join(blob_parts).casefold()
                 for token in self._BANNED_DEFAULT_RENDER_TOKENS:
                     assert token.casefold() not in lowered, (

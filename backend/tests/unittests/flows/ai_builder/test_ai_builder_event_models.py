@@ -30,7 +30,7 @@ def test_requirements_summary_keeps_one_decision_per_topic() -> None:
             KeyDecisionPayload(topic="PDF-resultat", decision="Vanlig genererad PDF"),
             KeyDecisionPayload(topic="Indata vid körning", decision="Ljud"),
             KeyDecisionPayload(
-                topic="Metadata vid körning", decision="Inga extra fält"
+                topic="Extra uppgifter vid körning", decision="Inga extra fält"
             ),
         ]
     )
@@ -38,7 +38,7 @@ def test_requirements_summary_keeps_one_decision_per_topic() -> None:
     assert [decision.topic for decision in summary.key_decisions] == [
         "PDF-resultat",
         "Indata vid körning",
-        "Metadata vid körning",
+        "Extra uppgifter vid körning",
     ]
 
 

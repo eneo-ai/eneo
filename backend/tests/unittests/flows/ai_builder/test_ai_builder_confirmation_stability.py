@@ -39,6 +39,9 @@ from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     resolve_requirements_state,
 )
+from eneo.flows.ai_builder.ai_builder_result_contract import (
+    RESULT_OBLIGATION_SIGNAL_ID,
+)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
     ClassifiedSlot,
@@ -62,6 +65,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRoleEvidence,
     MappedFileLimit,
     NamedResultEvidence,
+    PlanningSignal,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -1621,3 +1625,45 @@ def test_the_committed_architecture_is_a_derived_decision() -> None:
     assert len(architecture) == 1
     assert architecture[0].is_derived is True
     assert architecture[0].question_id is None
+
+
+def test_result_obligations_are_disclosed_in_the_readers_language() -> None:
+    # The classifier names obligations by identifier; the card must not echo
+    # those to a municipal reader, and the order follows the vocabulary, not
+    # the alphabet.
+    state = _document_state()
+    state.signals = [
+        PlanningSignal(
+            question_id=RESULT_OBLIGATION_SIGNAL_ID,
+            value=value,
+            confidence="high",
+            source="model",
+            provenance=[f"model:{value}"],
+        )
+        for value in ("recommendations", "summary", "open_questions")
+    ]
+
+    swedish = build_requirements_disclosure(state, ui_language="sv")
+    english = build_requirements_disclosure(state, ui_language="en")
+
+    assert (
+        "Resultatet ska också innehålla: sammanfattning, öppna frågor, rekommendationer."
+        in swedish.assumptions
+    )
+    assert (
+        "The result must also include: summary, open questions, recommendations."
+        in english.assumptions
+    )
+    assert not any("recommendations" in line for line in swedish.assumptions)
+
+
+def test_every_result_obligation_has_a_label_in_both_languages() -> None:
+    from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+        _RESULT_OBLIGATION_LABELS,
+    )
+    from eneo.flows.ai_builder.ai_builder_result_contract import (
+        RESULT_OBLIGATION_VALUES,
+    )
+
+    assert set(_RESULT_OBLIGATION_LABELS) == set(RESULT_OBLIGATION_VALUES)
+    assert all(sv and en for sv, en in _RESULT_OBLIGATION_LABELS.values())

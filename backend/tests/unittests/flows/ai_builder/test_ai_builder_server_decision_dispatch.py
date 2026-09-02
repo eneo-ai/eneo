@@ -1779,7 +1779,7 @@ async def test_a_question_outside_the_catalog_names_no_topic() -> None:
 @pytest.mark.asyncio
 async def test_a_field_details_question_is_named_after_the_slot_it_settles() -> None:
     # The runtime-field question is not a catalog slot, but it settles one:
-    # the decision row "Metadata vid körning" must lead back to it.
+    # the decision row "Extra uppgifter vid körning" must lead back to it.
     repo = AsyncMock()
     repo.commit_turn.return_value = 5
     followup = BackendQuestion(

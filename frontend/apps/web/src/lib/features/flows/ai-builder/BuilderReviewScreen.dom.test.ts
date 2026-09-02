@@ -176,6 +176,36 @@ describe("BuilderReviewScreen plan document", () => {
     expect(screen.getByText(m.ai_builder_review_checkpoint_note({ count: 1 }))).toBeTruthy();
   });
 
+  it("names the step a quality warning is about by its number and name", () => {
+    // The critic refers to steps by their plan reference; the reader knows
+    // them by the numbered names on the diagram. An unknown reference still
+    // shows rather than hiding the warning.
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...makeCreateState(),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            lint_warnings: [
+              {
+                step_ref: "step_a",
+                code: "citations_disabled",
+                message: "Källhänvisningar inaktiverades.",
+                field_name: null
+              },
+              { step_ref: "step_zz", code: "unknown", message: "Okänt steg.", field_name: null }
+            ]
+          })
+        })
+      }
+    });
+
+    const firstStepName = makeTranscribeStep().name;
+    expect(screen.getByText(`1. ${firstStepName}`)).toBeTruthy();
+    expect(screen.queryByText("step_a")).toBeNull();
+    expect(screen.getByText("step_zz")).toBeTruthy();
+  });
+
   it("distinguishes the space default model from deterministic steps", async () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),

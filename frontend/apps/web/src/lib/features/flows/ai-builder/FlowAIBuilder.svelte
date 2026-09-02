@@ -135,11 +135,16 @@
     }
     return null;
   });
+  // Only the newest answer to a question says whether Eneo chose it: a
+  // question handed to Eneo and later answered by the user is the user's.
   const delegatedQuestionIds = $derived.by(() => {
     const ids = new SvelteSet<string>();
-    for (const message of service.messages) {
-      const answer = message.questionAnswer;
-      if (answer?.question_id && answer.delegated === true) ids.add(answer.question_id);
+    const seen = new SvelteSet<string>();
+    for (let i = service.messages.length - 1; i >= 0; i -= 1) {
+      const answer = service.messages[i]?.questionAnswer;
+      if (!answer?.question_id || seen.has(answer.question_id)) continue;
+      seen.add(answer.question_id);
+      if (answer.delegated === true) ids.add(answer.question_id);
     }
     return ids;
   });

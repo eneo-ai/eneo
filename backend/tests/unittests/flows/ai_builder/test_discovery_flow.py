@@ -2508,7 +2508,7 @@ class TestExtendedClarificationHints:
         assert analysis.next_issue.issue_id == "structured_io_contract"
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "structured_io_contract"
-        assert "input-JSON" in analysis.next_issue.suggestion.question
+        assert "JSON-datan" in analysis.next_issue.suggestion.question
 
     def test_exact_json_schema_prompt_skips_human_document_purpose_question(
         self,
@@ -3433,7 +3433,7 @@ class TestExtendedClarificationHints:
             ),
             ConversationMessage(
                 role="user",
-                content="Lägg till grundläggande metadata",
+                content="Några grundläggande fält",
                 metadata={
                     "question_answer": {
                         "question_id": "runtime_metadata_fields",

@@ -53,6 +53,8 @@ from eneo.flows.ai_builder.ai_builder_requirements_state import (
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_SIGNAL_ID,
+    RESULT_OBLIGATION_VALUES,
+    ResultObligation,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import project_schema_fields
 from eneo.flows.ai_builder.planning_state import (
@@ -413,6 +415,40 @@ def _mapped_file_limit_assumptions(
     ]
 
 
+# The obligation vocabulary is closed, so the card names each one in the
+# reader's language instead of echoing the classifier's identifiers.
+_RESULT_OBLIGATION_LABELS: dict[ResultObligation, tuple[str, str]] = {
+    "summary": ("sammanfattning", "summary"),
+    "key_facts": ("viktiga fakta", "key facts"),
+    "decisions": ("beslut", "decisions"),
+    "actions": ("åtgärder", "actions"),
+    "owners": ("ansvariga", "owners"),
+    "deadlines": ("tidsfrister", "deadlines"),
+    "open_questions": ("öppna frågor", "open questions"),
+    "risks": ("risker", "risks"),
+    "deviations": ("avvikelser", "deviations"),
+    "comparison_basis": ("jämförelseunderlag", "comparison basis"),
+    "recommendations": ("rekommendationer", "recommendations"),
+    "missing_information_policy": (
+        "hantering av uppgifter som saknas",
+        "handling of missing information",
+    ),
+}
+
+
+def _result_obligation_labels(session_state: PlanningState, locale: Locale) -> str:
+    present = {
+        signal.value
+        for signal in session_state.signals
+        if signal.question_id == RESULT_OBLIGATION_SIGNAL_ID
+    }
+    return ", ".join(
+        _RESULT_OBLIGATION_LABELS[value][0 if locale == "sv" else 1]
+        for value in RESULT_OBLIGATION_VALUES
+        if value in present
+    )
+
+
 def _secondary_obligation_assumptions(
     session_state: PlanningState,
     locale: Locale,
@@ -428,14 +464,12 @@ def _secondary_obligation_assumptions(
     """
 
     assumptions: list[str] = []
-    obligations = _signal_values(
-        session_state, RESULT_OBLIGATION_SIGNAL_ID, render_value=render_value
-    )
+    obligations = _result_obligation_labels(session_state, locale)
     if obligations:
         assumptions.append(
-            f"Ytterligare krav på slutresultatet: {obligations}."
+            f"Resultatet ska också innehålla: {obligations}."
             if locale == "sv"
-            else f"Additional obligations on the final result: {obligations}."
+            else f"The result must also include: {obligations}."
         )
     form_intake = _signal_values(
         session_state, FORM_INTAKE_SIGNAL_ID, render_value=render_value

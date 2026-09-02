@@ -2524,8 +2524,10 @@ class TestSendMessageStructuredQuestion:
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-                    request_snapshot=_test_request_snapshot("Genererad DOCX utan mall"),
-                    message="Genererad DOCX utan mall",
+                    request_snapshot=_test_request_snapshot(
+                        "Genererat Word-dokument utan mall"
+                    ),
+                    message="Genererat Word-dokument utan mall",
                     question_answer={
                         "question_id": "docx_output_mode",
                         "selected_option_ids": ["generated_docx"],

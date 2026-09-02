@@ -784,13 +784,13 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert payload.input_description == "Primär indata vid körning: Dokument."
     assert payload.output_description == "Huvudsakligt slutresultat: DOCX-dokument."
     assert {decision.topic for decision in payload.key_decisions} >= {
-        "DOCX-resultat",
+        "Word-resultat",
         "Indata vid körning",
         "Planerad bearbetning",
         "Slutresultat",
     }
     assert {decision.decision for decision in payload.key_decisions} >= {
-        "Genererad DOCX utan mall",
+        "Genererat Word-dokument utan mall",
         "Ibland ett, ibland flera dokument",
         "Skapa DOCX (ett resultat per underlag)",
     }
@@ -1682,7 +1682,7 @@ def test_server_confirmation_uses_model_evidence_level_for_summary_bucket() -> N
         decision.topic: decision.decision for decision in decision.payload.key_decisions
     }
     assert "Indata vid körning" in decisions
-    assert "Metadata vid körning" in decisions
+    assert "Extra uppgifter vid körning" in decisions
     assert "Planerad bearbetning" in decisions
     assert "Slutresultat" in decisions
     assert "Syfte med bearbetningen" not in decisions

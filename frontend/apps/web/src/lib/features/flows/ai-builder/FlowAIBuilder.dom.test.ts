@@ -1900,15 +1900,56 @@ describe("FlowAIBuilder confirm, build and review", () => {
 
     await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
     expect(screen.getByText(m.ai_builder_requirements_decisions_derived())).toBeTruthy();
-    expect(screen.queryByText(m.ai_builder_requirements_decisions())).toBeNull();
-    // Nothing was answered, so nothing carries a note about following from
-    // answers — and every row still offers a way to correct it.
-    expect(screen.queryByText(m.ai_builder_requirements_derived())).toBeNull();
+    // Nothing was answered, so no row claims to be the user's answer — and
+    // every row still offers a way to correct it.
+    expect(screen.queryByText(m.ai_builder_requirements_answered())).toBeNull();
     for (const topic of ["Syfte med bearbetningen", "Slutresultat"]) {
       expect(
         screen.getByRole("button", { name: m.ai_builder_confirm_change_row_aria({ topic }) })
       ).toBeTruthy();
     }
+  });
+
+  it("marks a question the user answered after handing it to Eneo as the user's own", async () => {
+    // Delegate, reopen, answer: the newest answer decides the provenance the
+    // card shows, so the old delegation must not stick to the row.
+    const summary = {
+      ...SUMMARY,
+      key_decisions: [{ topic: "Slutresultat", decision: "Som PDF", question_id: "output_format" }]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_id: "text",
+                selected_value: "text",
+                delegated: true
+              }
+            }),
+            assistantMessage("a2", "Jag frågar igen.", { question: FORMAT_QUESTION }),
+            userMessage("u3", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a3", "", { requirements_summary: summary })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    expect(screen.getByText(m.ai_builder_requirements_answered())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_question_delegated_badge())).toBeNull();
   });
 
   it("keeps the option an edited flow runs on today when a question is reopened here", async () => {

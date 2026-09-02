@@ -7,9 +7,7 @@
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
-  import IconInfo from "@lucide/svelte/icons/info";
   import IconX from "@lucide/svelte/icons/x";
   import IconCornerDownRight from "@lucide/svelte/icons/corner-down-right";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
@@ -128,11 +126,6 @@
     onreopenassumption
   }: Props = $props();
 
-  // Naming what Eneo derived only means something beside rows the user settled
-  // themselves; on a run with no questions every row would carry it.
-  const hasAnsweredDecision = $derived(
-    summary.key_decisions.some((decision) => decision.question_id != null)
-  );
   const namedContentFields = $derived(summary.named_content_fields ?? []);
   const decisionQuestionIds = $derived(
     new SvelteSet(
@@ -543,9 +536,7 @@
         {#if !savedFlowStepScope}
           <section class="mt-[1.125rem]">
             <h3 class="text-primary text-[0.8125rem] font-bold">
-              {hasAnsweredDecision
-                ? m.ai_builder_requirements_decisions()
-                : m.ai_builder_requirements_decisions_derived()}
+              {m.ai_builder_requirements_decisions_derived()}
             </h3>
             <dl class="mt-1.5 flex flex-col">
               {#each summary.key_decisions as decision (decision.topic)}
@@ -556,34 +547,16 @@
                   <dt class="text-secondary text-[0.8125rem]">{decision.topic}</dt>
                   <dd class="text-primary text-[0.85rem] font-medium">
                     {decision.decision}
-                    <!-- Says where the value came from, so it sits with the
-                         value. Only worth saying beside rows the user did
-                         settle themselves: with no questions asked, every row
-                         follows from the description and the note says nothing. -->
-                    {#if !settledBy && hasAnsweredDecision}
-                      <Tooltip.Provider delayDuration={250}>
-                        <Tooltip.Root>
-                          <Tooltip.Trigger>
-                            {#snippet child({ props })}
-                              <button
-                                {...props}
-                                type="button"
-                                class="text-secondary focus-visible:ring-accent-stronger/40 mt-0.5 flex items-center gap-1 rounded-full text-xs font-normal focus-visible:ring-2 focus-visible:outline-none"
-                                aria-label={m.ai_builder_requirements_derived_explained()}
-                              >
-                                {m.ai_builder_requirements_derived()}
-                                <IconInfo class="size-3.5 shrink-0" aria-hidden="true" />
-                              </button>
-                            {/snippet}
-                          </Tooltip.Trigger>
-                          <Tooltip.Content class="max-w-64 text-xs">
-                            {m.ai_builder_requirements_derived_explained()}
-                          </Tooltip.Content>
-                        </Tooltip.Root>
-                      </Tooltip.Provider>
-                    {:else if settledBy && delegatedQuestionIds.has(settledBy)}
+                    <!-- The heading already says these are Eneo's reading of
+                         the task, so only the rows the user settled themselves
+                         say where they came from. -->
+                    {#if settledBy && delegatedQuestionIds.has(settledBy)}
                       <span class="text-secondary mt-0.5 block text-xs font-normal">
                         {m.ai_builder_question_delegated_badge()}
+                      </span>
+                    {:else if settledBy}
+                      <span class="text-secondary mt-0.5 block text-xs font-normal">
+                        {m.ai_builder_requirements_answered()}
                       </span>
                     {/if}
                   </dd>
@@ -977,42 +950,47 @@
             {#if !assumptionsOpen}
               <p class="text-secondary mt-1 truncate text-[0.8125rem]">{firstAssumption}</p>
             {:else}
-              <ul
-                class="mt-2 flex flex-col"
+              <div
+                class="mt-1.5"
                 transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}
               >
-                {#each assumptionRows as row (row.question_id)}
-                  <li
-                    class="border-dimmer text-secondary flex items-center justify-between gap-3 border-t py-2 text-[0.8125rem] leading-relaxed"
-                  >
-                    <span class="text-pretty">
-                      <span class="text-primary font-semibold">{row.topic}:</span>
-                      {row.label}
-                    </span>
-                    {#if !readOnly && !confirmed && onreopenassumption}
-                      <button
-                        type="button"
-                        class="text-primary hover:bg-secondary shrink-0 rounded-md px-2 py-1 text-[0.78125rem] font-semibold underline-offset-2 hover:underline"
-                        aria-label={m.ai_builder_assumption_change_aria({
-                          topic: row.topic,
-                          label: row.label
-                        })}
-                        onclick={() => onreopenassumption(row.question_id)}
-                        {disabled}
+                <dl class="flex flex-col">
+                  {#each assumptionRows as row (row.question_id)}
+                    <div
+                      class="border-dimmer grid items-baseline gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr_auto]"
+                    >
+                      <dt class="text-secondary text-[0.8125rem]">{row.topic}</dt>
+                      <dd class="text-primary text-[0.85rem] font-medium">{row.label}</dd>
+                      {#if !readOnly && !confirmed && onreopenassumption}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          class="justify-self-start sm:justify-self-end"
+                          aria-label={m.ai_builder_assumption_change_aria({
+                            topic: row.topic,
+                            label: row.label
+                          })}
+                          {disabled}
+                          onclick={() => onreopenassumption(row.question_id)}
+                        >
+                          {m.ai_builder_question_change()}
+                        </Button>
+                      {/if}
+                    </div>
+                  {/each}
+                </dl>
+                {#if assumptions.length > 0}
+                  <ul class="flex list-none flex-col p-0">
+                    {#each assumptions as assumption (assumption)}
+                      <li
+                        class="border-dimmer text-secondary border-t py-2.5 text-[0.8125rem] leading-relaxed text-pretty"
                       >
-                        {m.ai_builder_assumption_change()}
-                      </button>
-                    {/if}
-                  </li>
-                {/each}
-                {#each assumptions as assumption (assumption)}
-                  <li
-                    class="border-dimmer text-secondary border-t py-2 text-[0.8125rem] leading-relaxed text-pretty"
-                  >
-                    {assumption}
-                  </li>
-                {/each}
-              </ul>
+                        {assumption}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </div>
             {/if}
           </section>
         {/if}

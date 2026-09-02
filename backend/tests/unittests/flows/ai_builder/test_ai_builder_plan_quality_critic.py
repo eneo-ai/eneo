@@ -1232,7 +1232,7 @@ def test_flags_template_fill_when_generated_docx_was_explicitly_selected() -> No
         },
         {
             "role": "user",
-            "content": "Genererad DOCX utan mall",
+            "content": "Genererat Word-dokument utan mall",
             "metadata": {
                 "question_answer": {
                     "question_id": "docx_output_mode",
