@@ -103,16 +103,16 @@ async def execute_per_source_reader(
             f"exceeding the effective max_files ceiling of {effective_max_files}.",
             code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
         )
-    if not file_ids:
-        raise TypedIOValidationException(
-            f"Step {step.step_order}: per-source reader received no source files.",
-            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
-        )
     if _documents_item_schema(step.output_contract) is None:
         raise TypedIOValidationException(
             "Per-source document readers require a JSON output contract shaped "
             "as exactly one top-level documents[] array.",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    if not file_ids:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-source reader received no source files.",
+            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
         )
     per_call_step = replace(
         step,

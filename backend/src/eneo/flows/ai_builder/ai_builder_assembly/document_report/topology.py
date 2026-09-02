@@ -25,6 +25,7 @@ from eneo.flows.input_binding_contract_rules import (
     item_template_field_names,
     source_ref_bindings,
 )
+from eneo.flows.source_identity import RUNTIME_SOURCE_IDENTITY_FIELDS
 
 COMPOSE_SECTION_TITLE_KEY = "section_title"
 COMPOSE_SECTION_BODY_KEY = "section_body"
@@ -414,15 +415,11 @@ def _compose_source_record_item_template(
 def _source_record_content_field_names(
     item_properties: Mapping[str, object],
 ) -> tuple[str, ...]:
-    fields = tuple(
+    return tuple(
         field_name
         for field_name in item_properties
-        if field_name not in {COMPOSE_SOURCE_LABEL_KEY, "source_file_id"}
+        if field_name not in RUNTIME_SOURCE_IDENTITY_FIELDS
     )
-    authored_fields = tuple(
-        field_name for field_name in fields if field_name != "source_material"
-    )
-    return authored_fields or fields
 
 
 def _required_section_template_field_names(

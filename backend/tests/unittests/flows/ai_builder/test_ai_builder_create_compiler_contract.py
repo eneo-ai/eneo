@@ -18,7 +18,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
     is_bound_document_report_compose_topology,
+    lower_document_report_topology,
 )
+from eneo.flows.ai_builder.ai_builder_assembly.plan import PlannedStep
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
     create_compile_context_from_planning_state,
@@ -119,7 +121,7 @@ def _compile_report_without_authored_section(
     *,
     report_disposition: ReportDisposition,
     include_nested_reader_field: bool,
-    complete_reader_contract: bool,
+    summary_required_reader_contract: bool,
 ) -> FlowDraftSpecCore:
     reader_children = [
         {
@@ -157,17 +159,6 @@ def _compile_report_without_authored_section(
                     ],
                 },
                 {
-                    "name": "Write overview",
-                    "instructions": "Write a synthesized overview.",
-                    "output_fields": [
-                        {
-                            "name": "overview",
-                            "field_type": "string",
-                            "description": "Synthesized overview.",
-                        }
-                    ],
-                },
-                {
                     "name": "Compose report",
                     "instructions": "Compose the complete report.",
                 },
@@ -181,7 +172,7 @@ def _compile_report_without_authored_section(
                 description="Concise summary grounded in the source material.",
             ),
         )
-        if complete_reader_contract
+        if summary_required_reader_contract
         else ()
     )
     return compile_create_intent_to_spec(
@@ -6634,7 +6625,8 @@ def test_report_disposition_both_composes_typed_reader_without_section_map() -> 
                     "Summary: {summary}\n\n"
                     "Conclusions: {conclusions}\n\n"
                     "Confidence: {confidence}\n\n"
-                    "Verified: {verified}"
+                    "Verified: {verified}\n\n"
+                    "Source material: {source_material}"
                 ),
             },
             {
@@ -6667,7 +6659,7 @@ def test_report_disposition_both_composes_typed_reader_without_section_map() -> 
     (
         "report_disposition",
         "include_nested_reader_field",
-        "complete_reader_contract",
+        "summary_required_reader_contract",
     ),
     [
         ("both", False, False),
@@ -6679,18 +6671,30 @@ def test_report_disposition_both_composes_typed_reader_without_section_map() -> 
 def test_report_without_direct_compose_contract_keeps_mapped_section_writer(
     report_disposition: ReportDisposition,
     include_nested_reader_field: bool,
-    complete_reader_contract: bool,
+    summary_required_reader_contract: bool,
 ) -> None:
     compiled = _compile_report_without_authored_section(
         report_disposition=report_disposition,
         include_nested_reader_field=include_nested_reader_field,
-        complete_reader_contract=complete_reader_contract,
+        summary_required_reader_contract=summary_required_reader_contract,
     )
 
     section_step = next(
         step for step in compiled.steps if step.name == "Build source sections"
     )
     assert section_step.input_config == {"item_map": {"enabled": True, "max_items": 3}}
+    if report_disposition == "both":
+        overview_step = next(
+            step for step in compiled.steps if step.name == "Write overview"
+        )
+        assert (
+            "Write a concise report title and synthesized overview across the "
+            "completed source sections. Use only the supplied section content."
+            in overview_step.assistant_spec.instructions
+        )
+        assert (
+            "supplied source content" not in overview_step.assistant_spec.instructions
+        )
     compose_step = compiled.steps[-2]
     assert compose_step.input_bindings is not None
     assert compose_step.input_bindings["source_refs"][0]["step_ref"] == (
@@ -6702,15 +6706,114 @@ def test_report_without_direct_compose_contract_keeps_mapped_section_writer(
     assert validate_spec(compiled).valid
 
 
+def test_required_summary_missing_from_reader_keeps_mapped_section_writer() -> None:
+    reader = PlannedStep(
+        role="reader",
+        name="Read sources",
+        instructions="Extract source material.",
+        input_source=InputSource.FLOW_INPUT,
+        input_type=InputType.DOCUMENT,
+        output_type=OutputType.JSON,
+        output_mode=OutputMode.PASS_THROUGH,
+        underlag_channel="flow_input",
+        runtime_max_files=3,
+        runtime_input_execution_mode="per_source",
+        output_fields=(
+            StructuredFieldDraft(
+                name="documents",
+                field_type="array",
+                description="One record per source.",
+                item_fields=[
+                    StructuredFieldDraft(
+                        name="source_label",
+                        field_type="string",
+                        description="Runtime-owned source label.",
+                    ),
+                    StructuredFieldDraft(
+                        name="source_file_id",
+                        field_type="string",
+                        description="Runtime-owned source file identifier.",
+                    ),
+                    StructuredFieldDraft(
+                        name="source_material",
+                        field_type="string",
+                        description="Grounded source material.",
+                    ),
+                ],
+            ),
+        ),
+    )
+    body_writer = PlannedStep(
+        role="body_writer",
+        name="Compose report",
+        instructions="Compose the complete report.",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.JSON,
+        output_type=OutputType.TEXT,
+        output_mode=OutputMode.PASS_THROUGH,
+        underlag_channel="implicit_previous",
+    )
+    renderer = PlannedStep(
+        role="renderer",
+        name="Render PDF",
+        instructions="Render the supplied text as PDF.",
+        input_source=InputSource.PREVIOUS_STEP,
+        input_type=InputType.TEXT,
+        output_type=OutputType.PDF,
+        output_mode=OutputMode.RENDER_VERBATIM,
+        underlag_channel="implicit_previous",
+    )
+
+    lowered, section_source = lower_document_report_topology(
+        (reader, body_writer, renderer),
+        source_reader_required_fields=(
+            SourceCaptureField(
+                name="summary",
+                description="Summary grounded in the source material.",
+            ),
+        ),
+        report_disposition="both",
+        runtime_input_type=InputType.DOCUMENT,
+        final_output_type=OutputType.PDF,
+        final_output_mode=OutputMode.PASS_THROUGH,
+        pattern_ids=(),
+        chain_steps=(),
+        semantic_step_count=2,
+        result_contract_output_fields=(),
+        requested_output_section_contracts=(),
+        ui_language="en",
+    )
+
+    assert section_source is not None
+    assert lowered[1].name == "Build source sections"
+    assert lowered[1].previous_item_map_enabled
+    assert (
+        "Write a concise report title and synthesized overview across the "
+        "completed source sections. Use only the supplied section content."
+        in lowered[2].instructions
+    )
+    assert "supplied source content" not in lowered[2].instructions
+    assert section_source.producer_ref == "step_b"
+
+
 def test_direct_report_compose_rejects_missing_source_producer() -> None:
     compiled = _compile_report_without_authored_section(
         report_disposition="both",
         include_nested_reader_field=False,
-        complete_reader_contract=True,
+        summary_required_reader_contract=True,
     )
     compose_index = len(compiled.steps) - 2
     compose_step = compiled.steps[compose_index]
     assert compose_step.input_bindings is not None
+    overview_step = next(
+        step for step in compiled.steps if step.name == "Write overview"
+    )
+    assert (
+        "Write a concise report title and synthesized overview across the "
+        "supplied source content. Use only that content."
+        in overview_step.assistant_spec.instructions
+    )
+    assert "completed source sections" not in overview_step.assistant_spec.instructions
     assert is_bound_document_report_compose_topology(compiled, compose_step)
     source_refs = compose_step.input_bindings["source_refs"]
     assert isinstance(source_refs, list)

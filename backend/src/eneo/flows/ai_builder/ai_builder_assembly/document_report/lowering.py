@@ -50,6 +50,7 @@ from eneo.flows.ai_builder.ai_builder_source_reader_contracts import (
     SourceCaptureField,
     allocate_injected_source_field_name,
     complete_structured_source_reader_fields,
+    source_capture_field_satisfied,
     structured_fields_have_document_items,
 )
 from eneo.flows.ai_builder.planning_state import ReportDisposition
@@ -652,6 +653,7 @@ def lower_document_report_topology(
                 content_steps.append(
                     _document_report_overview_writer(
                         previous_step=previous_step,
+                        reads_reader_records=section_index == reader_index,
                         ui_language=ui_language,
                     )
                 )
@@ -835,14 +837,28 @@ def _reader_satisfies_direct_compose_contract(
     *,
     required_fields: tuple[SourceCaptureField, ...],
 ) -> bool:
-    if not required_fields or len(planned_step.output_fields) != 1:
+    if len(planned_step.output_fields) != 1:
         return False
     source_array = planned_step.output_fields[0]
     if source_array.field_type != "array":
         return False
     item_fields = tuple(source_array.item_fields or ())
-    return bool(item_fields) and all(
+    if not item_fields or not all(
         field.field_type in DIRECT_COMPOSE_SCALAR_FIELD_TYPES for field in item_fields
+    ):
+        return False
+    summary_requirements = tuple(
+        required
+        for required in required_fields
+        if source_capture_field_satisfied(required.name, "summary")
+    )
+    # The required summary is the section narrative; without it a labelled record is not a section.
+    return bool(summary_requirements) and all(
+        any(
+            source_capture_field_satisfied(item.name, required.name)
+            for item in item_fields
+        )
+        for required in required_fields
     )
 
 
@@ -1048,12 +1064,16 @@ def _append_single_call_reader_instruction(
 def _document_report_overview_writer(
     *,
     previous_step: PlannedStep,
+    reads_reader_records: bool,
     ui_language: str | None,
 ) -> PlannedStep:
     return PlannedStep(
         role="transform",
         name=_document_report_overview_writer_name(ui_language),
-        instructions=_document_report_overview_writer_instructions(ui_language),
+        instructions=_document_report_overview_writer_instructions(
+            reads_reader_records=reads_reader_records,
+            ui_language=ui_language,
+        ),
         input_source=InputSource.PREVIOUS_STEP,
         input_type=InputType.JSON,
         output_type=OutputType.JSON,
@@ -1079,15 +1099,29 @@ def _document_report_overview_writer_name(ui_language: str | None) -> str:
     return "Skriv översikt"
 
 
-def _document_report_overview_writer_instructions(ui_language: str | None) -> str:
-    if ui_language == "en":
+def _document_report_overview_writer_instructions(
+    *,
+    reads_reader_records: bool,
+    ui_language: str | None,
+) -> str:
+    if reads_reader_records and ui_language == "en":
         return (
             "Write a concise report title and synthesized overview across the "
             "supplied source content. Use only that content."
         )
+    if reads_reader_records:
+        return (
+            "Skriv en koncis rapporttitel och samlad översikt över det "
+            "tillhandahållna källinnehållet. Använd endast detta innehåll."
+        )
+    if ui_language == "en":
+        return (
+            "Write a concise report title and synthesized overview across the "
+            "completed source sections. Use only the supplied section content."
+        )
     return (
-        "Skriv en koncis rapporttitel och samlad översikt över det tillhandahållna "
-        "källinnehållet. Använd endast detta innehåll."
+        "Skriv en koncis rapporttitel och samlad översikt över de färdiga "
+        "källavsnitten. Använd endast det tillhandahållna avsnittsinnehållet."
     )
 
 
