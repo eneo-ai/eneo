@@ -391,7 +391,10 @@ def test_policy_does_not_force_inferred_metadata_default_into_questions() -> Non
     assert policy.allowed_ask_question_targets == ()
 
 
-def test_policy_does_not_force_heuristic_comparison_scope_into_questions() -> None:
+def test_policy_asks_a_heuristic_comparison_scope_before_committing() -> None:
+    # The aggregation reader commits nothing below commit grade, so a confident
+    # text reading of the comparison must be asked before the architecture is
+    # committed; otherwise the card and the build disagree.
     state = _state_with_resolved_slots(
         "primary_runtime_input",
         "terminal_output",
@@ -403,14 +406,12 @@ def test_policy_does_not_force_heuristic_comparison_scope_into_questions() -> No
         source="heuristic",
         confidence="high",
     )
-
     policy = build_planner_action_policy(
         session_state=state,
-        selected_discovery_question_ids=(),
+        selected_discovery_question_ids=("comparison_scope",),
     )
-
-    assert policy.allowed_action_kinds == ("commit_architecture",)
-    assert policy.allowed_ask_question_targets == ()
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert policy.allowed_ask_question_targets == ("comparison_scope",)
 
 
 def test_policy_keeps_selected_comparison_question_askable() -> None:

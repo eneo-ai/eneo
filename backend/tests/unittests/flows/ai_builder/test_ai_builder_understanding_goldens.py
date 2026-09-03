@@ -147,7 +147,9 @@ def test_generated_docx_without_template_excludes_docx_mode_question() -> None:
 
     question_ids = _question_ids_for(conversation)
 
-    assert "docx_output_mode" not in question_ids
+    assert (
+        "docx_output_mode" in question_ids
+    )  # text-only evidence is below commit grade: the slot is asked, not settled
     assert "final_pdf_type" not in question_ids
 
 
@@ -164,5 +166,7 @@ def test_docx_template_excludes_docx_mode_question() -> None:
 
     question_ids = _question_ids_for(conversation)
 
-    assert "docx_output_mode" not in question_ids
+    assert (
+        "docx_output_mode" in question_ids
+    )  # text-only evidence is below commit grade: the slot is asked, not settled
     assert "pdf_generation_mode" not in question_ids

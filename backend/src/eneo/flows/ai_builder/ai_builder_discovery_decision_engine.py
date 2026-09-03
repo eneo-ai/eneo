@@ -39,17 +39,14 @@ def apply_discovery_decision_engine(
     *,
     issues: list[DiscoveryIssue],
     profile: DiscoveryProfile,
-    slot_questions_allowed: bool,
 ) -> tuple[list[DiscoveryIssue], list[str]]:
     """Select this turn's questions from the issues discovery raised.
 
     Returns the selected issues, ordered, and the question ids among them.
-    Slot questions wait until discovery has something to work with
-    (`slot_questions_allowed`); before that the model runs free discovery and
-    only the gates discovery raised are kept.
     """
 
     slot_issues: dict[str, DiscoveryIssue] = {}
+    asked_by_a_gate: set[str] = set()
     selected: list[DiscoveryIssue] = []
     for issue in issues:
         question_id = _question_id(issue)
@@ -63,18 +60,18 @@ def apply_discovery_decision_engine(
         slot_name = _policy_slot_for(issue.issue_id)
         if slot_name is None:
             # A gate discovery raised is asked as raised: its condition is the
-            # builder's, not a slot's.
+            # builder's, not a slot's. A gate that asks a slot's question (the
+            # comparison contradiction) covers that slot's turn.
             selected.append(issue)
+            if question_id is not None:
+                asked_by_a_gate.add(question_id)
             continue
         slot_issues.setdefault(slot_name, issue)
 
     state = profile.planning_state
-    slot_names = (
-        sorted(SLOT_INTERACTION_POLICIES, key=slot_interaction_order)
-        if slot_questions_allowed
-        else ()
-    )
-    for slot_name in slot_names:
+    for slot_name in sorted(SLOT_INTERACTION_POLICIES, key=slot_interaction_order):
+        if slot_name in asked_by_a_gate:
+            continue
         policy = SLOT_INTERACTION_POLICIES[slot_name]
         if (
             evaluate_slot_interaction(policy, state, freeform_text=profile.text)
