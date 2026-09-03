@@ -381,7 +381,7 @@ class PythonCrawlEngine:
                         and pages_seen + len(pending_pages) < request.limits.max_items
                         and (
                             not follow_page_links
-                            or next_sequence - next_result_sequence
+                            or len(pending_pages) + len(completed_links)
                             < link_reorder_window
                         )
                     ):

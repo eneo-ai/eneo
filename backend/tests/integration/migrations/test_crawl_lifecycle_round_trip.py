@@ -106,6 +106,8 @@ def _seed_legacy_runs(database_url: str) -> LegacyRecords:
         for label in (
             "empty",
             "partial",
+            "invalid_counters",
+            "unknown_counters",
             "failed",
             "failed_without_finished_at",
             "completed_without_finished_at",
@@ -124,6 +126,10 @@ def _seed_legacy_runs(database_url: str) -> LegacyRecords:
         cursor.execute("ALTER TABLE crawl_runs DISABLE TRIGGER ALL")
         try:
             for label, (job_id, run_id) in runs.items():
+                tenant_id, user_id, website_id = _insert_crawl_owner(
+                    cursor,
+                    label=f"Legacy {label}",
+                )
                 if job_id is not None:
                     status = {
                         "failed": "failed",
@@ -152,7 +158,7 @@ def _seed_legacy_runs(database_url: str) -> LegacyRecords:
                         """,
                         (
                             str(job_id),
-                            str(uuid4()),
+                            str(user_id),
                             status,
                             f"Legacy {label} crawl",
                             (
@@ -170,21 +176,25 @@ def _seed_legacy_runs(database_url: str) -> LegacyRecords:
                             finished_at,
                         ),
                     )
+                legacy_counts = {
+                    "partial": (5, 4, 2, 1),
+                    "invalid_counters": (1, 1, 2, 3),
+                    "unknown_counters": (None, None, None, None),
+                }.get(label, (0, 0, 0, 0))
                 cursor.execute(
                     """
                     INSERT INTO crawl_runs (
                         id, tenant_id, website_id, job_id, pages_crawled,
                         files_downloaded, pages_failed, files_failed, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, 0, %s, 0, '2000-01-01 UTC')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '2000-01-01 UTC')
                     """,
                     (
                         str(run_id),
-                        str(uuid4()),
-                        str(uuid4()),
+                        str(tenant_id),
+                        str(website_id),
                         str(job_id) if job_id is not None else None,
-                        2 if label == "partial" else 0,
-                        1 if label == "partial" else 0,
+                        *legacy_counts,
                     ),
                 )
 
@@ -261,6 +271,35 @@ def _job_result_location(database_url: str, job_id: UUID) -> str | None:
         assert row is not None
         result_location = row[0]
         return str(result_location) if result_location is not None else None
+
+
+def _crawl_counters_for_job(
+    database_url: str,
+    job_name: str,
+) -> tuple[int | None, int | None, int | None, int | None]:
+    with (
+        psycopg2.connect(_sync_url(database_url)) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute(
+            """
+            SELECT cr.pages_crawled, cr.files_downloaded,
+                   cr.pages_failed, cr.files_failed
+            FROM crawl_runs AS cr
+            JOIN jobs AS j ON j.id = cr.job_id
+            WHERE j.name = %s
+            """,
+            (job_name,),
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        pages_crawled, files_downloaded, pages_failed, files_failed = row
+        return (
+            int(pages_crawled) if pages_crawled is not None else None,
+            int(files_downloaded) if files_downloaded is not None else None,
+            int(pages_failed) if pages_failed is not None else None,
+            int(files_failed) if files_failed is not None else None,
+        )
 
 
 def _insert_crawl_owner(
@@ -450,6 +489,24 @@ def test_crawl_lifecycle_migration_preserves_and_terminalizes_legacy_history(
     assert empty[:3] == ("terminal", "empty", "legacy")
     assert partial[:3] == ("terminal", "partial", "legacy")
     assert partial[4] == "processing_failed"
+    assert _crawl_counters_for_job(database_url, "Legacy partial crawl") == (
+        3,
+        3,
+        2,
+        1,
+    )
+    assert _crawl_counters_for_job(database_url, "Legacy invalid_counters crawl") == (
+        0,
+        0,
+        2,
+        3,
+    )
+    assert _crawl_counters_for_job(database_url, "Legacy unknown_counters crawl") == (
+        None,
+        None,
+        None,
+        None,
+    )
     assert failed[:3] == ("terminal", "failed", "legacy")
     assert failed[4] == "processing_failed"
     assert failed_without_finished_at == (
@@ -593,6 +650,24 @@ def test_crawl_lifecycle_downgrade_refuses_lossy_state_then_round_trips(
 
     command.downgrade(config, _PREVIOUS_REVISION)
     assert _current_revision(database_url) == _PREVIOUS_REVISION
+    assert _crawl_counters_for_job(database_url, "Legacy partial crawl") == (
+        5,
+        4,
+        2,
+        1,
+    )
+    assert _crawl_counters_for_job(database_url, "Legacy unknown_counters crawl") == (
+        None,
+        None,
+        None,
+        None,
+    )
+    assert _crawl_counters_for_job(database_url, "Legacy invalid_counters crawl") == (
+        2,
+        3,
+        2,
+        3,
+    )
     assert _job_result_location(database_url, failed_job_id) == (
         "Post-upgrade crawl failure"
     )

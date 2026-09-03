@@ -169,6 +169,23 @@ def upgrade() -> None:
         WHERE phase IS NULL
         """
     )
+    # Legacy workers counted every attempted resource and stored failures as a
+    # subset. The authoritative lifecycle stores published successes separately.
+    op.execute(
+        """
+        UPDATE crawl_runs
+        SET pages_crawled = CASE
+                WHEN pages_crawled IS NULL THEN NULL
+                ELSE GREATEST(pages_crawled - COALESCE(pages_failed, 0), 0)
+            END,
+            files_downloaded = CASE
+                WHEN files_downloaded IS NULL THEN NULL
+                ELSE GREATEST(files_downloaded - COALESCE(files_failed, 0), 0)
+            END
+        WHERE COALESCE(pages_failed, 0) > 0
+           OR COALESCE(files_failed, 0) > 0
+        """
+    )
     op.execute(
         """
         UPDATE jobs AS j
@@ -558,10 +575,28 @@ def downgrade() -> None:
           AND cr.phase = 'terminal'
         """
     )
-
     op.execute("DROP TRIGGER crawl_attempts_preserve_current_attempt ON crawl_attempts")
     op.execute("DROP TRIGGER crawl_runs_require_current_attempt ON crawl_runs")
     op.execute("DROP FUNCTION enforce_crawl_run_current_attempt()")
+
+    # Restore the total-attempted representation expected by legacy workers
+    # and UI consumers. This runs after removing the deferred lifecycle triggers
+    # so their pending events do not block the schema teardown below.
+    op.execute(
+        """
+        UPDATE crawl_runs
+        SET pages_crawled = CASE
+                WHEN pages_crawled IS NULL THEN NULL
+                ELSE pages_crawled + COALESCE(pages_failed, 0)
+            END,
+            files_downloaded = CASE
+                WHEN files_downloaded IS NULL THEN NULL
+                ELSE files_downloaded + COALESCE(files_failed, 0)
+            END
+        WHERE COALESCE(pages_failed, 0) > 0
+           OR COALESCE(files_failed, 0) > 0
+        """
+    )
 
     op.drop_index(
         "ix_crawl_attempts_pending_transport_cleanup",
