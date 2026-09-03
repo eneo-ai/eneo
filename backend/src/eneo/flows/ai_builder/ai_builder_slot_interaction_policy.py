@@ -379,6 +379,15 @@ def evaluate_slot_interaction(
             return "commit"
         if resolved.source == "policy_default":
             return "accept"
+        # A weak reading that agrees with the default is the default: nobody
+        # is asked to confirm what would be assumed anyway. Wording that
+        # contradicts that reading still earns the question.
+        if (
+            policy.default_value is not None
+            and resolved.value == policy.default_value
+            and not policy.has_explicit_text(freeform_text)
+        ):
+            return "accept"
         worth_a_question = (
             effective_slot_impact(policy, state) == "architecture"
             or policy.when_unknown == "ask"
