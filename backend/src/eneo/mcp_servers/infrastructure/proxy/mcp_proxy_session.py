@@ -564,15 +564,27 @@ class MCPProxySession:
         so e.g. a large page extraction still yields its head as usable,
         citable content rather than an error.
         """
+        blocks: list[dict[str, Any]] = result.get("content") or []
+        # Image blocks never reach the model as text (they become generated
+        # files), so they are sized separately and excluded from the char
+        # budget; only text-like blocks compete for it.
+        image_blocks, image_notices = self._admit_image_blocks(blocks)
+        text_blocks = [block for block in blocks if block.get("type") != "image"]
+        if image_notices:
+            text_blocks = text_blocks + image_notices
+
         max_chars = _settings.mcp_tool_output_max_chars
-        serialized = json.dumps(result, ensure_ascii=False, default=str)
+        text_result = {**result, "content": text_blocks}
+        serialized = json.dumps(text_result, ensure_ascii=False, default=str)
         if len(serialized) <= max_chars:
-            return result
+            if not image_blocks and not image_notices:
+                return result
+            return {**result, "content": text_blocks + image_blocks}
 
         remaining = max_chars
         kept: list[dict[str, Any]] = []
         dropped = 0
-        blocks: list[dict[str, Any]] = result.get("content") or []
+        blocks = text_blocks
         for block in blocks:
             if remaining <= 0:
                 dropped += 1
@@ -600,7 +612,39 @@ class MCPProxySession:
             "to fit the limit.]"
         )
         kept.append({"type": "text", "text": notice})
-        return {**result, "content": kept}
+        return {**result, "content": kept + image_blocks}
+
+    @staticmethod
+    def _admit_image_blocks(
+        blocks: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Keep image blocks within the decoded-size cap.
+
+        Oversized images are dropped and replaced by a text notice so the model
+        learns the tool produced something it cannot show.
+        """
+        max_bytes = _settings.mcp_tool_image_max_bytes
+        admitted: list[dict[str, Any]] = []
+        notices: list[dict[str, Any]] = []
+        for block in blocks:
+            if block.get("type") != "image":
+                continue
+            encoded = block.get("data") or ""
+            decoded_size = len(encoded) * 3 // 4
+            if decoded_size > max_bytes:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[An image content block of ~{decoded_size / (1024 * 1024):.1f} MB "
+                            f"exceeded the {max_bytes // (1024 * 1024)} MB limit and was "
+                            "dropped.]"
+                        ),
+                    }
+                )
+                continue
+            admitted.append(block)
+        return admitted, notices
 
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
         """

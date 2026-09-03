@@ -456,7 +456,7 @@ class Assistant(Entity):
         files: list["File"] | None = None,
         stream: bool = False,
         version: int = 1,
-        web_search_mcp_server: Optional["MCPServer"] = None,
+        capability_mcp_servers: Sequence["MCPServer"] = (),
         require_tool_approval: bool = False,
         completion_model_override: Optional[CompletionModel] = None,
         model_kwargs_override: ModelKwargs | None = None,
@@ -530,14 +530,14 @@ class Assistant(Entity):
         # tools lead the tool array and, with the proxy's first-registered-wins
         # collision rule, survive a prefixed-name collision with an external
         # server. Knowledge leads because it also steers the knowledge catalog.
-        # The resolved web-search provider follows the internal servers but
-        # precedes the assistant's own / governance servers.
+        # Resolved capability providers (web search, image generation) follow
+        # the internal servers but precede the assistant's own / governance
+        # servers.
         prepended_servers: list["MCPServer"] = []
         if knowledge_mcp_server is not None:
             prepended_servers.append(knowledge_mcp_server)
         prepended_servers.extend(internal_mcp_servers)
-        if web_search_mcp_server is not None:
-            prepended_servers.append(web_search_mcp_server)
+        prepended_servers.extend(capability_mcp_servers)
         if prepended_servers:
             prepended_ids = {server.id for server in prepended_servers}
             effective_mcp_servers = prepended_servers + [
@@ -565,7 +565,6 @@ class Assistant(Entity):
                 else self.completion_model_kwargs
             ),
             version=version,
-            use_image_generation=self.is_default,
             mcp_servers=effective_mcp_servers,
             require_tool_approval=require_tool_approval,
             skill_runtime=skill_runtime,

@@ -10,6 +10,7 @@
   import type { SecurityClassification, components } from "@eneo/eneo-js";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import type { Writable } from "svelte/store";
 
   type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
@@ -21,28 +22,27 @@
     openController: Writable<boolean>;
     mcpServer?: MCPServerSettings | null;
     /** Purpose used when creating a new server. Defaults to "general". */
-    purpose?: "general" | "web_search";
+    purpose?: string;
     onSubmit: (data: Record<string, unknown>, id?: string) => Promise<void>;
   };
 
   const { openController, mcpServer, purpose = "general", onSubmit }: Props = $props();
 
   const isEditMode = $derived(!!mcpServer);
-  const isWebSearch = $derived(purpose === "web_search");
-
-  // Web-search providers get provider wording; the general MCP variant is
-  // unchanged.
+  // Capability providers (web search, image generation) get provider wording
+  // from their descriptor; the general MCP variant is unchanged.
+  const capability = $derived(getCapability(purpose));
   const dialogTitle = $derived(
-    isWebSearch
+    capability
       ? isEditMode
-        ? m.edit_search_provider()
-        : m.add_search_provider()
+        ? capability.editProviderTitle()
+        : capability.addProviderTitle()
       : isEditMode
         ? m.edit_mcp_server()
         : m.add_mcp_server()
   );
   const submitLabel = $derived(
-    isEditMode ? m.save() : isWebSearch ? m.add_search_provider() : m.add_mcp_server()
+    isEditMode ? m.save() : capability ? capability.addProviderTitle() : m.add_mcp_server()
   );
 
   const classifications = getSecurityContext().security_classifications;
@@ -247,11 +247,11 @@
           </div>
         {/if}
 
-        {#if isWebSearch && !isEditMode}
+        {#if capability && !isEditMode}
           <p
             class="border-dimmer bg-secondary/50 text-secondary rounded-lg border px-4 py-3 text-sm"
           >
-            {m.web_search_provider_managed_note()}
+            {capability.providerManagedNote()}
           </p>
         {/if}
 
@@ -273,14 +273,14 @@
               bind:value={name}
               required
               aria-required="true"
-              placeholder={isWebSearch
-                ? m.web_search_provider_name_placeholder()
+              placeholder={capability
+                ? capability.providerNamePlaceholder()
                 : m.mcp_name_placeholder()}
               class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
             />
           </div>
 
-          {#if !isWebSearch}
+          {#if !capability}
             <div>
               <label for="mcp-description" class="text-default mb-1.5 block text-sm font-medium">
                 {m.description()}
@@ -493,7 +493,7 @@
               <span class="text-default text-sm font-medium">{m.mcp_forward_identity()}</span>
             </label>
             <p id="forward-identity-hint" class="text-muted mt-1.5 pl-6.5 text-xs">
-              {isWebSearch ? m.web_search_forward_identity_hint() : m.mcp_forward_identity_hint()}
+              {capability ? capability.forwardIdentityHint() : m.mcp_forward_identity_hint()}
             </p>
           </div>
 

@@ -13,11 +13,13 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    GENERAL_PURPOSE,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
     MCPServer,
     MCPServerTool,
+    is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -114,8 +116,8 @@ class ToolChange:
 
 
 @dataclass
-class WebSearchActivationResult:
-    """Result of activating a web-search provider."""
+class CapabilityActivationResult:
+    """Result of activating a capability provider."""
 
     server: MCPServer
     deactivated_server_ids: list[UUID] = field(default_factory=lambda: [])
@@ -267,7 +269,7 @@ class MCPServerService:
         name: str,
         http_url: str,
         http_auth_type: str = "none",
-        purpose: str = "general",
+        purpose: str = GENERAL_PURPOSE,
         description: str | None = None,
         http_auth_config_schema: dict[str, Any] | None = None,
         forward_identity: bool = False,
@@ -291,16 +293,16 @@ class MCPServerService:
 
         self._validate_auth_config(http_auth_type, http_auth_config_schema)
 
-        # Create domain object (not saved yet). Web-search providers are saved
-        # inactive: at most one may be enabled per tenant, and switching is an
-        # explicit activation step.
+        # Create domain object (not saved yet). Capability providers are saved
+        # inactive: at most one may be enabled per tenant and purpose, and
+        # switching is an explicit activation step.
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
             name=name,
             http_url=http_url,
             http_auth_type=http_auth_type,
             purpose=purpose,
-            is_enabled=purpose != "web_search",
+            is_enabled=not is_capability_purpose(purpose),
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -947,15 +949,16 @@ class MCPServerService:
         ]
 
     @validate_permissions(Permission.ADMIN)
-    async def activate_web_search_server(
+    async def activate_capability_server(
         self, mcp_server_id: UUID
-    ) -> WebSearchActivationResult:
-        """Make this server the tenant's active web-search provider (admin only).
+    ) -> CapabilityActivationResult:
+        """Make this server the tenant's active provider for its capability
+        purpose (admin only).
 
-        Atomic switch: the previously active provider is deactivated in the
-        same transaction, under the partial unique index that allows at most
-        one enabled web-search server per tenant. Rejects servers that are
-        unreachable or have no usable tools.
+        Atomic switch: the previously active provider for the same purpose is
+        deactivated in the same transaction, under the partial unique index
+        that allows at most one enabled server per tenant and capability
+        purpose. Rejects servers that are unreachable or have no usable tools.
         """
         import sqlalchemy as sa
 
@@ -964,17 +967,16 @@ class MCPServerService:
         )
 
         server = await self._get_server_for_tenant(mcp_server_id)
-        if server.purpose != "web_search":
+        if not is_capability_purpose(server.purpose):
             raise BadRequestException(
-                "Only web-search MCP servers can be activated as the "
-                "web-search provider"
+                "Only capability MCP servers can be activated as a provider"
             )
 
         tools = await self.get_tools_with_tenant_settings(mcp_server_id)
         if not self._usable_tools(tools):
             raise BadRequestException(
-                "Web-search provider has no enabled tools. Sync and approve "
-                "its tools before activating."
+                "Provider has no enabled tools. Sync and approve its tools "
+                "before activating."
             )
 
         credentials = self._decrypt_auth_config(server.http_auth_config_schema)
@@ -984,17 +986,17 @@ class MCPServerService:
         if not connection.success:
             raise BadRequestException(
                 connection.error_message
-                or "Web-search provider is unreachable and cannot be activated"
+                or "Provider is unreachable and cannot be activated"
             )
 
         # Deactivate the current provider first so the partial unique index
-        # never sees two enabled web-search servers. Both statements commit
-        # with the request's unit of work — the switch is all-or-nothing.
+        # never sees two enabled servers for this purpose. Both statements
+        # commit with the request's unit of work — the switch is all-or-nothing.
         deactivate_stmt = (
             sa.update(MCPServersTable)
             .where(
                 MCPServersTable.tenant_id == self.user.tenant_id,
-                MCPServersTable.purpose == "web_search",
+                MCPServersTable.purpose == server.purpose,
                 MCPServersTable.is_enabled == True,  # noqa: E712
                 MCPServersTable.id != mcp_server_id,
             )
@@ -1006,17 +1008,18 @@ class MCPServerService:
 
         server.is_enabled = True
         server = await self.repo.update(server)
-        return WebSearchActivationResult(
+        return CapabilityActivationResult(
             server=server, deactivated_server_ids=deactivated_ids
         )
 
     @validate_permissions(Permission.ADMIN)
-    async def deactivate_web_search_server(self, mcp_server_id: UUID) -> MCPServer:
-        """Deactivate a web-search provider, leaving the tenant without one."""
+    async def deactivate_capability_server(self, mcp_server_id: UUID) -> MCPServer:
+        """Deactivate a capability provider, leaving the tenant without one
+        for that purpose."""
         server = await self._get_server_for_tenant(mcp_server_id)
-        if server.purpose != "web_search":
+        if not is_capability_purpose(server.purpose):
             raise BadRequestException(
-                "Only web-search MCP servers can be deactivated here"
+                "Only capability MCP servers can be deactivated here"
             )
         server.is_enabled = False
         return await self.repo.update(server)

@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@eneo/ui";
   import { derived } from "svelte/store";
@@ -49,10 +50,10 @@
 
   const { selectableServers }: Props = $props();
 
-  // This section manages general-purpose servers only; the web-search
-  // capability has its own settings row (WebSearchCapability).
+  // This section manages general-purpose servers only; capabilities (web
+  // search, image generation) have their own settings rows (CapabilityRow).
   const generalServers = $derived(
-    selectableServers.filter((server) => server.purpose !== "web_search")
+    selectableServers.filter((server) => !isCapabilityPurpose(server.purpose))
   );
 
   // Track expanded servers

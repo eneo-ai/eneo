@@ -26,7 +26,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import GENERAL_PURPOSE, MCPServer
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
@@ -342,16 +342,16 @@ class SpaceService:
                 SecurityClassification,
             )
 
-            # Web-search servers are capability markers resolved to the active
-            # provider at ask time, so a deactivated one may legitimately stay
-            # in the space; only general servers must be currently enabled.
+            # Capability servers are markers resolved to the active provider
+            # at ask time, so a deactivated one may legitimately stay in the
+            # space; only general servers must be currently enabled.
             query = (
                 sa.select(MCPServersTable)
                 .where(MCPServersTable.tenant_id == self.user.tenant_id)
                 .where(
                     sa.or_(
                         MCPServersTable.is_enabled == True,  # noqa: E712
-                        MCPServersTable.purpose == "web_search",
+                        MCPServersTable.purpose != GENERAL_PURPOSE,
                     )
                 )
                 .where(MCPServersTable.id.in_(mcp_server_ids))

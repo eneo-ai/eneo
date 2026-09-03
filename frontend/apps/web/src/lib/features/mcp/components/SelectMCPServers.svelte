@@ -11,6 +11,7 @@
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
 
   interface MCPTool {
     id: string;
@@ -70,10 +71,10 @@
     }));
   });
 
-  // This picker manages general-purpose servers only; the web-search
-  // capability has its own settings section (WebSearchCapabilityToggle).
+  // This picker manages general-purpose servers only; capabilities (web
+  // search, image generation) have their own settings section (CapabilityToggle).
   let generalAvailableServers = $derived(
-    availableServers.filter((server) => server.purpose !== "web_search")
+    availableServers.filter((server) => !isCapabilityPurpose(server.purpose))
   );
 
   // Track expanded servers

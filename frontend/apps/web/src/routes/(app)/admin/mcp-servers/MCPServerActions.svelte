@@ -20,8 +20,8 @@
 
   type Props = {
     mcpServer: MCPServerSettings;
-    /** Forwarded to the edit dialog so web-search providers get provider wording. */
-    purpose?: "general" | "web_search";
+    /** Forwarded to the edit dialog so capability providers get provider wording. */
+    purpose?: string;
   };
 
   const { mcpServer, purpose = "general" }: Props = $props();

@@ -456,28 +456,6 @@ class _Prompt:
 
 
 class ContextBuilder:
-    @staticmethod
-    def _functions() -> list[FunctionDefinition]:
-        return [
-            FunctionDefinition(
-                name="generate_image",
-                description=(
-                    "Generate an image based on a text prompt. Will always be JPEG."
-                    "\n\nWhen discussing this ability with users:"
-                    "\n- DO NOT mention 'tools' or the technical name 'generate_image'."
-                    "\n- DO say you can 'create' or 'generate' images based on descriptions."
-                    "\n- Use natural, conversational language about your image capabilities."
-                    "\n- If asked to create Vector-based images, do it in code instead."
-                ),
-                schema={
-                    "type": "object",
-                    "properties": {"prompt": {"type": "string"}},
-                    "required": ["prompt"],
-                    "additionalProperties": False,
-                },
-            )
-        ]
-
     def _build_input(
         self,
         input_str: str,
@@ -604,7 +582,6 @@ class ContextBuilder:
         info_blob_chunks: Sequence[_InfoBlobChunkLike] | None = None,
         session: Optional[SessionInDB] = None,
         version: int = 1,
-        use_image_generation: bool = False,
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
@@ -654,10 +631,7 @@ class ContextBuilder:
         # Tool definitions occupy context space too — count them up front so
         # the history and knowledge budgets shrink accordingly. extra_tool_dicts
         # carries definitions merged later by the adapter (MCP proxy tools).
-        functions: list[FunctionDefinition] = []
-        if use_image_generation:
-            functions.extend(self._functions())
-        functions.extend(mcp_tools)
+        functions: list[FunctionDefinition] = list(mcp_tools)
 
         tool_dicts: list[dict[str, Any]] = [
             function_definition_to_tool(func_def) for func_def in functions

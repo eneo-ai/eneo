@@ -53,10 +53,12 @@ async def test_resolve_for_filters_disabled_mcp_servers_before_resolver():
                     SimpleNamespace(
                         id=enabled_server_id,
                         is_enabled=True,
+                        purpose="general",
                     ),
                     SimpleNamespace(
                         id=disabled_server_id,
                         is_enabled=False,
+                        purpose="general",
                     ),
                 ]
             )

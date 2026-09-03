@@ -242,7 +242,6 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     ovhcloud_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
-    flux_api_key: Optional[str] = None
     vllm_api_key: Optional[str] = None
     eneo_super_api_key: Optional[str] = None
 
@@ -271,6 +270,9 @@ class Settings(BaseSettings):
     mcp_client_list_tools_timeout_seconds: int = 30
     mcp_client_call_timeout_seconds: int = 60
     mcp_tool_output_max_chars: int = 32768
+    # Decoded size cap for a single MCP image content block; larger images
+    # are dropped before they can be persisted as generated files.
+    mcp_tool_image_max_bytes: int = 10 * 1024 * 1024
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
 
@@ -406,7 +408,6 @@ class Settings(BaseSettings):
     # Feature flags
     using_access_management: bool = True
     using_iam: bool = False
-    using_image_generation: bool = False
 
     # Max concurrent embedding API calls across all crawls (module-level semaphore)
     # Controls parallelism during page batch persistence to avoid overwhelming embedding APIs
@@ -829,6 +830,13 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_TOOL_OUTPUT_MAX_CHARS must be greater than zero. Current value: %s",
                 self.mcp_tool_output_max_chars,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_image_max_bytes <= 0:
+            logging.error(
+                "MCP_TOOL_IMAGE_MAX_BYTES must be greater than zero. Current value: %s",
+                self.mcp_tool_image_max_bytes,
             )
             sys.exit(1)
 

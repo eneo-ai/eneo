@@ -1,23 +1,22 @@
 <!--
-    Web search as a space capability. The provider is configured globally by
-    the admin and resolved at ask time, so this is a pure on/off switch with
-    no provider identity. Under the hood it attaches/detaches the active
-    purpose=web_search MCP server:
-    - Checked when the space contains ANY web-search server, including a stale
-      previously-active provider (the backend substitutes the active one at
-      ask time).
+    One capability (web search, image generation) as a space toggle. The
+    provider is configured globally by the admin and resolved at ask time, so
+    this is a pure on/off switch with no provider identity. Under the hood it
+    attaches/detaches the active MCP server with this capability's purpose:
+    - Checked when the space contains ANY server with this purpose, including
+      a stale previously-active provider (the backend substitutes the active
+      one at ask time).
     - Turning ON attaches the currently offered active provider.
-    - Turning OFF detaches EVERY web-search server so the space self-heals
-      after provider switches.
+    - Turning OFF detaches EVERY server with this purpose so the space
+      self-heals after provider switches.
 -->
 
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@eneo/ui";
   import { derived } from "svelte/store";
-  import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
-  import { Globe } from "lucide-svelte";
+  import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import type { components } from "@eneo/eneo-js";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
@@ -38,11 +37,12 @@
   }
 
   type Props = {
+    capability: CapabilityDescriptor;
     /** The tenant-enabled servers offered to this space (all purposes). */
     selectableServers: SelectableMCPServer[];
   };
 
-  const { selectableServers }: Props = $props();
+  const { capability, selectableServers }: Props = $props();
 
   const {
     state: { currentSpace },
@@ -50,26 +50,26 @@
   } = getSpacesManager();
 
   // The offered list only ever contains the active provider (the loader
-  // filters on is_org_enabled, which mirrors activation for web-search).
+  // filters on is_org_enabled, which mirrors activation for capabilities).
   const activeProvider = $derived(
-    selectableServers.find((server) => server.purpose === "web_search")
+    selectableServers.find((server) => server.purpose === capability.purpose)
   );
 
-  // Web-search server ids currently attached to the space. Read from the
-  // SPACE's own list (not the offered list) so the toggle stays ON even when
-  // the attached id is a previously-active provider.
-  const attachedWebSearchIds = derived(currentSpace, ($currentSpace) =>
+  // Server ids with this purpose currently attached to the space. Read from
+  // the SPACE's own list (not the offered list) so the toggle stays ON even
+  // when the attached id is a previously-active provider.
+  const attachedCapabilityIds = derived(currentSpace, ($currentSpace) =>
     (($currentSpace.mcp_servers ?? []) as unknown as SpaceMCPServer[])
-      .filter((server) => server.purpose === "web_search")
+      .filter((server) => server.purpose === capability.purpose)
       .map((server) => server.id)
   );
 
-  const webSearchOn = $derived($attachedWebSearchIds.length > 0);
-  const noProvider = $derived(!activeProvider && !webSearchOn);
+  const capabilityOn = $derived($attachedCapabilityIds.length > 0);
+  const noProvider = $derived(!activeProvider && !capabilityOn);
   // Turning OFF is always allowed; classification only gates attaching the
   // active provider.
   const meetsClassification = $derived.by(() => {
-    if (webSearchOn || !activeProvider) return true;
+    if (capabilityOn || !activeProvider) return true;
     const spaceClassification = $currentSpace.security_classification;
     if (!spaceClassification) return true;
     if (!activeProvider.security_classification) return false;
@@ -80,12 +80,12 @@
 
   let saving = $state(false);
 
-  async function toggleWebSearch() {
+  async function toggleCapability() {
     if (saving) return;
     saving = true;
     try {
       const spaceServers = ($currentSpace.mcp_servers ?? []) as unknown as SpaceMCPServer[];
-      const attached = new Set($attachedWebSearchIds);
+      const attached = new Set($attachedCapabilityIds);
 
       if (attached.size > 0) {
         const newServers = spaceServers
@@ -111,45 +111,41 @@
         });
       }
     } catch (e) {
-      console.error("Failed to toggle web search:", e);
+      console.error(`Failed to toggle ${capability.purpose}:`, e);
     }
     saving = false;
   }
 </script>
 
-<Settings.Row title={m.capabilities()} description={m.capabilities_row_description()}>
-  <Tooltip
-    text={meetsClassification ? undefined : m.mcp_server_does_not_meet_security_classification()}
+<Tooltip
+  text={meetsClassification ? undefined : m.mcp_server_does_not_meet_security_classification()}
+>
+  <div
+    class="border-default border-b last:border-b-0"
+    class:pointer-events-none={noProvider || !meetsClassification || saving}
+    class:opacity-60={noProvider || !meetsClassification}
   >
-    <div
-      class="border-default border-b last:border-b-0"
-      class:pointer-events-none={noProvider || !meetsClassification || saving}
-      class:opacity-60={noProvider || !meetsClassification}
-    >
-      <div class="hover:bg-hover-dimmer flex items-center">
-        <div class="flex w-10 shrink-0 items-center justify-center">
-          <Globe class="text-muted h-4 w-4" aria-hidden="true" />
-        </div>
-        <div class="flex-1 py-4 pr-4">
-          <Input.Switch
-            value={webSearchOn}
-            sideEffect={() => {
-              if (!noProvider && meetsClassification) {
-                toggleWebSearch();
-              }
-            }}
-          >
-            <div class="flex flex-col gap-1">
-              <span class="font-medium">{m.web_search()}</span>
-              <span class="text-muted text-sm">
-                {noProvider
-                  ? m.web_search_no_active_provider_hint()
-                  : m.web_search_space_group_hint()}
-              </span>
-            </div>
-          </Input.Switch>
-        </div>
+    <div class="hover:bg-hover-dimmer flex items-center">
+      <div class="flex w-10 shrink-0 items-center justify-center">
+        <capability.icon class="text-muted h-4 w-4" aria-hidden="true" />
+      </div>
+      <div class="flex-1 py-4 pr-4">
+        <Input.Switch
+          value={capabilityOn}
+          sideEffect={() => {
+            if (!noProvider && meetsClassification) {
+              toggleCapability();
+            }
+          }}
+        >
+          <div class="flex flex-col gap-1">
+            <span class="font-medium">{capability.label()}</span>
+            <span class="text-muted text-sm">
+              {noProvider ? capability.noActiveProviderHint() : capability.spaceHint()}
+            </span>
+          </div>
+        </Input.Switch>
       </div>
     </div>
-  </Tooltip>
-</Settings.Row>
+  </div>
+</Tooltip>

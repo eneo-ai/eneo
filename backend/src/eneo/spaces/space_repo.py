@@ -78,6 +78,7 @@ from eneo.main.exceptions import (
     UniqueException,
 )
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.domain.entities.mcp_server import GENERAL_PURPOSE
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
@@ -1433,7 +1434,7 @@ class SpaceRepository:
             SecurityClassification as SecurityClassificationDBModel,
         )
 
-        # Web-search servers are included even when deactivated: an attached
+        # Capability servers are included even when deactivated: an attached
         # one is a capability marker (resolved to the active provider at ask
         # time), and dropping it here would flip the space's capability toggle
         # off after a provider switch. General servers must be enabled.
@@ -1443,7 +1444,7 @@ class SpaceRepository:
             .where(
                 sa.or_(
                     MCPServersTable.is_enabled == True,  # noqa: E712
-                    MCPServersTable.purpose == "web_search",
+                    MCPServersTable.purpose != GENERAL_PURPOSE,
                 )
             )
             .options(

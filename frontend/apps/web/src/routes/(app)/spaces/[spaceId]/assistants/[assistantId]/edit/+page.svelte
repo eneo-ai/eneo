@@ -16,7 +16,8 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
-  import WebSearchCapabilityToggle from "$lib/features/mcp/components/WebSearchCapabilityToggle.svelte";
+  import CapabilityToggle from "$lib/features/mcp/components/CapabilityToggle.svelte";
+  import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
@@ -690,11 +691,16 @@
               discardChanges("mcp_tools");
             }}
           >
-            <WebSearchCapabilityToggle
-              bind:selectedMCPServers={$update.mcp_servers}
-              bind:selectedMCPTools={$update.mcp_tools}
-              allowedMCPServers={availableMCPServers}
-            />
+            <div class="border-default overflow-hidden rounded-xl border">
+              {#each CAPABILITIES as capability (capability.purpose)}
+                <CapabilityToggle
+                  {capability}
+                  bind:selectedMCPServers={$update.mcp_servers}
+                  bind:selectedMCPTools={$update.mcp_tools}
+                  allowedMCPServers={availableMCPServers}
+                />
+              {/each}
+            </div>
           </Settings.Row>
         </Settings.Group>
       {/if}

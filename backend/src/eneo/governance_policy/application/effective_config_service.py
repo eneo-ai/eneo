@@ -11,6 +11,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     resolve,
     resolve_personal_default,
 )
+from eneo.mcp_servers.domain.entities.mcp_server import is_capability_purpose
 from eneo.skills.domain.skill import PersonalChatPinOverride, SkillRuntimeResolution
 
 if TYPE_CHECKING:
@@ -114,7 +115,15 @@ class EffectiveConfigService:
             if not policy.mcp_restriction_enabled:
                 return []
             servers = await self.mcp_server_settings_service.get_available_mcp_servers()
-            return [server for server in servers if server.is_enabled]
+            # Capability servers stay even when deactivated: the policy holds a
+            # capability marker that the ask path resolves to the active
+            # provider, so dropping it would silently remove the capability
+            # after a provider switch. General servers must be enabled.
+            return [
+                server
+                for server in servers
+                if server.is_enabled or is_capability_purpose(server.purpose)
+            ]
 
         async def _load_prompt_text() -> str | None:
             if policy.default_prompt_library_id is None:

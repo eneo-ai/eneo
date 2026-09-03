@@ -14,7 +14,6 @@
     Cloud,
     Cpu,
     Fingerprint,
-    Globe,
     HardDrive,
     History,
     KeyRound,
@@ -23,6 +22,7 @@
     Lightbulb,
     MessageSquareText,
     Plug,
+    Puzzle,
     ShieldCheck,
     Sparkles,
     UserRound,
@@ -75,7 +75,7 @@
         navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
         navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
         navItem("/admin/mcp-servers", Plug, m.mcp()),
-        navItem("/admin/web-search", Globe, m.web_search()),
+        navItem("/admin/capabilities", Puzzle, m.capabilities()),
         navItem("/admin/integrations", Cloud, m.integrations()),
         ...(user.hasPermission("modules")
           ? [navItem("/admin/modules", Boxes, m.module_admin_title())]

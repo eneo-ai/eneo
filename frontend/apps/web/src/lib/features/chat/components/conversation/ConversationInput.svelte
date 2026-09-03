@@ -28,6 +28,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { AlertTriangle, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
   type McpServerSummary = {
@@ -35,7 +36,7 @@
     name: string;
     description?: string | null;
     icon_url?: string | null;
-    /** "general" for ordinary MCP servers, "web_search" for the tenant's web-search provider. */
+    /** "general" for ordinary MCP servers, otherwise a capability purpose (web search, image generation). */
     purpose?: string | null;
   };
 
@@ -277,13 +278,16 @@
     return [];
   });
 
-  // The tenant's web-search provider flows through the same MCP inheritance
-  // chain as other servers but is presented as a capability, not a server:
-  // split it out of the generic rows and give it its own popover entry.
+  // The tenant's capability providers (web search, image generation) flow
+  // through the same MCP inheritance chain as other servers but are presented
+  // as capabilities, not servers: split them out of the generic rows and give
+  // each its own popover entry.
   const generalMcpServers = $derived(
-    mcpServers.filter((server) => server.purpose !== "web_search")
+    mcpServers.filter((server) => !isCapabilityPurpose(server.purpose))
   );
-  const webSearchServers = $derived(mcpServers.filter((server) => server.purpose === "web_search"));
+  const capabilityServers = $derived(
+    mcpServers.filter((server) => isCapabilityPurpose(server.purpose))
+  );
 
   $effect(() => {
     const validIds = new Set(mcpServers.map((server) => server.id));
@@ -535,7 +539,7 @@
       {#if hasMcpTools || internalMcpServers.length > 0}
         <ChatMcpServers
           servers={generalMcpServers}
-          {webSearchServers}
+          {capabilityServers}
           internalServers={internalMcpServers}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}

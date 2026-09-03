@@ -29,13 +29,15 @@ class MCPServers(BasePublic):
     __tablename__ = "mcp_servers"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_mcp_servers_tenant_name"),
-        # A tenant may save several web-search providers but only one may be
-        # active at a time; activation is an explicit transactional switch.
+        # A tenant may save several providers per capability purpose but only
+        # one may be active at a time; activation is an explicit transactional
+        # switch.
         Index(
-            "uq_mcp_servers_tenant_active_web_search",
+            "uq_mcp_servers_tenant_active_capability",
             "tenant_id",
+            "purpose",
             unique=True,
-            postgresql_where=text("purpose = 'web_search' AND is_enabled = true"),
+            postgresql_where=text("purpose <> 'general' AND is_enabled = true"),
         ),
     )
 
@@ -45,9 +47,10 @@ class MCPServers(BasePublic):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
 
-    # What this server is for: "general" (ordinary assistant tooling) or
-    # "web_search" (the tenant's web-search boundary, driven by the chat
-    # Search toggle rather than per-assistant attachment).
+    # What this server is for: "general" (ordinary assistant tooling) or a
+    # capability purpose ("web_search", "image_generation"): a tenant-wide
+    # provider that spaces and assistants attach as a capability marker and
+    # the ask path resolves to the currently active provider.
     purpose: Mapped[str] = mapped_column(
         String, nullable=False, server_default="general"
     )

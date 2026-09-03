@@ -20,6 +20,19 @@ MCP_TOOL_CATALOG_HARD_MAX_BYTES = 64 * 1024 * 1024
 MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES = 64 * 1024
 MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
 
+# An MCP server's purpose is either "general" (ordinary assistant tooling) or
+# a capability purpose. A capability server is a tenant-wide provider for one
+# capability (web search, image generation): at most one is active per tenant,
+# spaces and assistants attach it as a capability marker rather than a
+# provider pin, and the ask path substitutes the active provider. The tuple
+# order is the order resolved providers are prepended in at ask time.
+GENERAL_PURPOSE = "general"
+CAPABILITY_PURPOSES: tuple[str, ...] = ("web_search", "image_generation")
+
+
+def is_capability_purpose(purpose: str | None) -> bool:
+    return bool(purpose) and purpose != GENERAL_PURPOSE
+
 
 class MCPToolCatalogLimitExceeded(ValueError):
     """A projected persisted tool catalog exceeds its server safety policy."""
@@ -106,7 +119,7 @@ class MCPServer(Entity):
         description: Optional[str] = None,
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict[str, Any]] = None,
-        purpose: str = "general",
+        purpose: str = GENERAL_PURPOSE,
         is_enabled: bool = True,
         forward_identity: bool = False,
         tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,

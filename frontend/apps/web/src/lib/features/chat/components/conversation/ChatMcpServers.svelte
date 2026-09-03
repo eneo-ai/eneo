@@ -9,8 +9,8 @@
     (ConversationInput) so it can be sent with each ask request — this component
     only renders and mutates it. Eneo's own internal (loopback) servers are
     listed too, but they are always active and cannot be toggled. The tenant's
-    web-search provider is a real MCP server under the hood but is presented as
-    a togglable capability row, not a server.
+    capability providers (web search, image generation) are real MCP servers
+    under the hood but are presented as togglable capability rows, not servers.
 -->
 <script lang="ts">
   import { buttonVariants } from "$lib/components/ui/button/index.js";
@@ -20,7 +20,8 @@
   import * as Popover from "$lib/components/ui/popover/index.js";
   import { m } from "$lib/paraglide/messages";
   import { serverDisplayName } from "$lib/features/chat/internalToolLabels";
-  import { BookOpen, Globe, Paperclip, Plug, ShieldCheck } from "lucide-svelte";
+  import { BookOpen, Paperclip, Plug, ShieldCheck } from "lucide-svelte";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import type { SvelteSet } from "svelte/reactivity";
 
   type McpServer = {
@@ -28,6 +29,7 @@
     name: string;
     description?: string | null;
     icon_url?: string | null;
+    purpose?: string | null;
   };
 
   type InternalMcpServer = {
@@ -38,8 +40,8 @@
   type Props = {
     /** General-purpose external MCP servers. */
     servers: McpServer[];
-    /** The tenant's web-search provider(s): rendered as a capability, not a server. */
-    webSearchServers?: McpServer[];
+    /** The tenant's capability providers: rendered as capabilities, not servers. */
+    capabilityServers?: McpServer[];
     /** Eneo's built-in loopback servers active for this partner (not togglable). */
     internalServers?: InternalMcpServer[];
     /** Server ids the user has switched off for this conversation (mutated in place). */
@@ -52,7 +54,7 @@
 
   let {
     servers,
-    webSearchServers = [],
+    capabilityServers = [],
     internalServers = [],
     disabledServerIds,
     onSelectionChange,
@@ -64,15 +66,15 @@
     files: Paperclip
   };
 
-  // Built-ins are always active; web-search and external servers toggle via
+  // Built-ins are always active; capability and external servers toggle via
   // disabledServerIds.
-  const total = $derived(servers.length + webSearchServers.length + internalServers.length);
+  const total = $derived(servers.length + capabilityServers.length + internalServers.length);
   const disabledCount = $derived(
-    [...servers, ...webSearchServers].filter((server) => disabledServerIds.has(server.id)).length
+    [...servers, ...capabilityServers].filter((server) => disabledServerIds.has(server.id)).length
   );
   const activeCount = $derived(total - disabledCount);
   // All-on/all-off only sweeps the general external servers, so its disabled
-  // states must not count the web-search toggle.
+  // states must not count the capability toggles.
   const generalDisabledCount = $derived(
     servers.filter((server) => disabledServerIds.has(server.id)).length
   );
@@ -154,29 +156,30 @@
       </div>
     {/if}
 
-    {#if webSearchServers.length > 0}
-      <div class="border-b p-1" role="group" aria-label={m.web_search()}>
-        {#each webSearchServers as server (server.id)}
+    {#if capabilityServers.length > 0}
+      <div class="border-b p-1" role="group" aria-label={m.capabilities()}>
+        {#each capabilityServers as server (server.id)}
           {@const on = !disabledServerIds.has(server.id)}
-          <!-- Capability framing: Globe + "Web search", deliberately without
+          {@const capability = getCapability(server.purpose)}
+          {@const Icon = capability?.icon ?? Plug}
+          {@const label = capability?.label() ?? server.name}
+          <!-- Capability framing: icon + capability name, deliberately without
                server avatar styling or provider identity. Which provider
-               serves the search is an admin concern. -->
+               serves the capability is an admin concern. -->
           <label
             class="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
           >
-            <Globe
+            <Icon
               class="text-muted-foreground size-5 shrink-0 {on ? '' : 'opacity-50'}"
               aria-hidden="true"
             />
             <span class="min-w-0 flex-1 {on ? '' : 'opacity-60'}">
-              <span class="text-foreground block truncate text-sm font-medium"
-                >{m.web_search()}</span
-              >
+              <span class="text-foreground block truncate text-sm font-medium">{label}</span>
             </span>
             <Switch
               checked={on}
               onCheckedChange={(value) => setServer(server.id, value)}
-              aria-label={m.web_search()}
+              aria-label={label}
             />
           </label>
         {/each}
@@ -228,7 +231,7 @@
       </div>
     {/if}
 
-    {#if servers.length > 0 || webSearchServers.length > 0}
+    {#if servers.length > 0 || capabilityServers.length > 0}
       <Separator />
 
       <div class="p-1">

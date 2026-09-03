@@ -280,7 +280,6 @@ def test_settings(
         # Feature flags
         using_access_management=False,
         using_iam=False,
-        using_image_generation=False,
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,

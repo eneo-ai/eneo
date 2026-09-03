@@ -7,7 +7,7 @@ export function initMCPServers(client) {
      * Lists all MCP servers from the global catalog (admin only).
      * @param {Object} [params]
      * @param {string[]} [params.tags] Optional tags to filter by
-     * @param {"general" | "web_search"} [params.purpose] Optional purpose to filter by
+     * @param {"general" | "web_search" | "image_generation"} [params.purpose] Optional purpose to filter by
      * @throws {EneoError}
      * */
     list: async (params = {}) => {
@@ -45,7 +45,7 @@ export function initMCPServers(client) {
      * @param {string} params.name Name of the MCP server
      * @param {string} params.http_url HTTP URL to the MCP server
      * @param {"none" | "bearer" | "api_key_header"} [params.http_auth_type] Authentication type (default: none)
-     * @param {"general" | "web_search"} [params.purpose] Server purpose (default: general)
+     * @param {"general" | "web_search" | "image_generation"} [params.purpose] Server purpose (default: general)
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
@@ -188,7 +188,7 @@ export function initMCPServers(client) {
      * Get all available MCP servers with tenant enablement status.
      * Shows both enabled and disabled MCPs for the current tenant.
      * @param {Object} [params]
-     * @param {"general" | "web_search"} [params.purpose] Optional purpose to filter by
+     * @param {"general" | "web_search" | "image_generation"} [params.purpose] Optional purpose to filter by
      * @throws {EneoError}
      * */
     listSettings: async (params = {}) => {
@@ -202,14 +202,15 @@ export function initMCPServers(client) {
     },
 
     /**
-     * Activate an MCP server as the tenant's web-search provider (admin only).
-     * Atomic switch: any previously active provider is deactivated.
+     * Activate an MCP server as the tenant's provider for its capability
+     * purpose (web search, image generation; admin only).
+     * Atomic switch: any previously active provider for that purpose is deactivated.
      * @param {Object} params
      * @param {string} params.id The MCP server ID
      * @throws {EneoError}
      * */
-    activateWebSearch: async ({ id }) => {
-      const res = await client.fetch("/api/v1/mcp-servers/{id}/activate-web-search/", {
+    activate: async ({ id }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/activate/", {
         method: "post",
         params: {
           path: { id }
@@ -219,13 +220,13 @@ export function initMCPServers(client) {
     },
 
     /**
-     * Deactivate a web-search provider (admin only).
+     * Deactivate a capability provider (admin only).
      * @param {Object} params
      * @param {string} params.id The MCP server ID
      * @throws {EneoError}
      * */
-    deactivateWebSearch: async ({ id }) => {
-      const res = await client.fetch("/api/v1/mcp-servers/{id}/deactivate-web-search/", {
+    deactivate: async ({ id }) => {
+      const res = await client.fetch("/api/v1/mcp-servers/{id}/deactivate/", {
         method: "post",
         params: {
           path: { id }

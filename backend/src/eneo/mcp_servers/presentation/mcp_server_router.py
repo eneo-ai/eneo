@@ -19,6 +19,7 @@ from eneo.main.exceptions import BadRequestException
 from eneo.main.models import NOT_PROVIDED, NotProvided, PaginatedResponse
 from eneo.mcp_servers.application.mcp_server_service import ToolChange
 from eneo.mcp_servers.presentation.models import (
+    CapabilityActivationResponse,
     MCPConnectionStatus,
     MCPServerCreate,
     MCPServerCreateResponse,
@@ -36,7 +37,6 @@ from eneo.mcp_servers.presentation.models import (
     ToolChangePublic,
     ToolReviewRequest,
     ToolReviewResponse,
-    WebSearchActivationResponse,
 )
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -498,30 +498,34 @@ async def delete_mcp_server(
 
 
 # ============================================================================
-# Web-Search Provider Activation Endpoints
+# Capability Provider Activation Endpoints
 # ============================================================================
 
 
 @router.post(
-    "/{id}/activate-web-search/",
-    description="Activate this server as the tenant's web-search provider (admin only).",
-    response_model=WebSearchActivationResponse,
+    "/{id}/activate/",
+    description=(
+        "Activate this server as the tenant's provider for its capability "
+        "purpose (admin only)."
+    ),
+    response_model=CapabilityActivationResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
-async def activate_web_search(
+async def activate_capability_provider(
     id: UUID,
     container: Container = _WITH_USER,
 ):
-    """Activate this server as the tenant's web-search provider (admin only).
+    """Activate this server as the tenant's provider for its capability
+    purpose (admin only).
 
-    Atomic switch: deactivates the previously active provider in the same
-    transaction. Rejects servers that are not purpose=web_search, are
-    unreachable, or have no enabled tools.
+    Atomic switch: deactivates the previously active provider for the same
+    purpose in the same transaction. Rejects general-purpose servers and
+    servers that are unreachable or have no enabled tools.
     """
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
-    result = await service.activate_web_search_server(id)
+    result = await service.activate_capability_server(id)
 
     user = container.user()
     audit_service = container.audit_service()
@@ -531,12 +535,14 @@ async def activate_web_search(
         action=ActionType.MCP_SERVER_ENABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=result.server.id,
-        description=f"Activated web-search provider '{result.server.name}'",
+        description=(
+            f"Activated {result.server.purpose} provider '{result.server.name}'"
+        ),
         metadata=AuditMetadata.standard(
             actor=user,
             target=result.server,
             extra={
-                "purpose": "web_search",
+                "purpose": result.server.purpose,
                 "deactivated_server_ids": [
                     str(server_id) for server_id in result.deactivated_server_ids
                 ],
@@ -544,27 +550,28 @@ async def activate_web_search(
         ),
     )
 
-    return WebSearchActivationResponse(
+    return CapabilityActivationResponse(
         server=assembler.from_domain_to_model(result.server),
         deactivated_server_ids=result.deactivated_server_ids,
     )
 
 
 @router.post(
-    "/{id}/deactivate-web-search/",
-    description="Deactivate this web-search provider (admin only).",
+    "/{id}/deactivate/",
+    description="Deactivate this capability provider (admin only).",
     response_model=MCPServerPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
-async def deactivate_web_search(
+async def deactivate_capability_provider(
     id: UUID,
     container: Container = _WITH_USER,
 ):
-    """Deactivate this web-search provider, leaving the tenant without one."""
+    """Deactivate this capability provider, leaving the tenant without one
+    for its purpose."""
     service = container.mcp_server_service()
     assembler = container.mcp_server_assembler()
 
-    server = await service.deactivate_web_search_server(id)
+    server = await service.deactivate_capability_server(id)
 
     user = container.user()
     audit_service = container.audit_service()
@@ -574,11 +581,11 @@ async def deactivate_web_search(
         action=ActionType.MCP_SERVER_DISABLED,
         entity_type=EntityType.MCP_SERVER,
         entity_id=server.id,
-        description=f"Deactivated web-search provider '{server.name}'",
+        description=f"Deactivated {server.purpose} provider '{server.name}'",
         metadata=AuditMetadata.standard(
             actor=user,
             target=server,
-            extra={"purpose": "web_search"},
+            extra={"purpose": server.purpose},
         ),
     )
 

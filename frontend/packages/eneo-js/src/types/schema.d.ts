@@ -5715,7 +5715,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/mcp-servers/{id}/activate-web-search/": {
+  "/api/v1/mcp-servers/{id}/activate/": {
     parameters: {
       query?: never;
       header?: never;
@@ -5725,17 +5725,17 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Activate Web Search
-     * @description Activate this server as the tenant's web-search provider (admin only).
+     * Activate Capability Provider
+     * @description Activate this server as the tenant's provider for its capability purpose (admin only).
      */
-    post: operations["activate_web_search_api_v1_mcp_servers__id__activate_web_search__post"];
+    post: operations["activate_capability_provider_api_v1_mcp_servers__id__activate__post"];
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/mcp-servers/{id}/deactivate-web-search/": {
+  "/api/v1/mcp-servers/{id}/deactivate/": {
     parameters: {
       query?: never;
       header?: never;
@@ -5745,10 +5745,10 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Deactivate Web Search
-     * @description Deactivate this web-search provider (admin only).
+     * Deactivate Capability Provider
+     * @description Deactivate this capability provider (admin only).
      */
-    post: operations["deactivate_web_search_api_v1_mcp_servers__id__deactivate_web_search__post"];
+    post: operations["deactivate_capability_provider_api_v1_mcp_servers__id__deactivate__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -10427,6 +10427,18 @@ export interface components {
       /** Code Verifier */
       code_verifier?: string | null;
     };
+    /**
+     * CapabilityActivationResponse
+     * @description Response after activating a capability provider.
+     */
+    CapabilityActivationResponse: {
+      server: components["schemas"]["MCPServerPublic"];
+      /**
+       * Deactivated Server Ids
+       * @default []
+       */
+      deactivated_server_ids?: string[];
+    };
     /** CapabilityPublic */
     CapabilityPublic: {
       target: components["schemas"]["StorageKind"];
@@ -13479,7 +13491,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search";
+      purpose?: "general" | "web_search" | "image_generation";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -13545,7 +13557,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search";
+      purpose?: "general" | "web_search" | "image_generation";
       /**
        * Is Enabled
        * @default true
@@ -13643,7 +13655,7 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search";
+      purpose?: "general" | "web_search" | "image_generation";
       /**
        * Is Enabled
        * @default true
@@ -20625,18 +20637,6 @@ export interface components {
        * @default 0
        */
       slots_released?: number;
-    };
-    /**
-     * WebSearchActivationResponse
-     * @description Response after activating a web-search provider.
-     */
-    WebSearchActivationResponse: {
-      server: components["schemas"]["MCPServerPublic"];
-      /**
-       * Deactivated Server Ids
-       * @default []
-       */
-      deactivated_server_ids?: string[];
     };
     /** WebsiteCreate */
     WebsiteCreate: {
@@ -40129,7 +40129,7 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
-        purpose?: ("general" | "web_search") | null;
+        purpose?: ("general" | "web_search" | "image_generation") | null;
       };
       header?: never;
       path?: never;
@@ -40229,7 +40229,7 @@ export interface operations {
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
       query?: {
-        purpose?: ("general" | "web_search") | null;
+        purpose?: ("general" | "web_search" | "image_generation") | null;
       };
       header?: never;
       path?: never;
@@ -40648,7 +40648,7 @@ export interface operations {
       };
     };
   };
-  activate_web_search_api_v1_mcp_servers__id__activate_web_search__post: {
+  activate_capability_provider_api_v1_mcp_servers__id__activate__post: {
     parameters: {
       query?: never;
       header?: never;
@@ -40665,7 +40665,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["WebSearchActivationResponse"];
+          "application/json": components["schemas"]["CapabilityActivationResponse"];
         };
       };
       /** @description Bad Request */
@@ -40706,7 +40706,7 @@ export interface operations {
       };
     };
   };
-  deactivate_web_search_api_v1_mcp_servers__id__deactivate_web_search__post: {
+  deactivate_capability_provider_api_v1_mcp_servers__id__deactivate__post: {
     parameters: {
       query?: never;
       header?: never;

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
+    GeneratedImage,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -65,9 +66,12 @@ from eneo.main.models import (
     ResourcePermission,
     is_provided,
 )
-from eneo.mcp_servers.application.web_search_resolver import (
-    get_active_web_search_server,
-    usable_web_search_tools,
+from eneo.mcp_servers.application.capability_resolver import (
+    resolve_capability_servers,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    GENERAL_PURPOSE,
+    is_capability_purpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.prompts.prompt import Prompt
@@ -113,6 +117,18 @@ from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+_IMAGE_EXTENSIONS = {
+    "image/jpeg": "jpeg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+
+
+def _extension_for_mime(mime_type: str) -> str:
+    return _IMAGE_EXTENSIONS.get(mime_type.lower().split(";", 1)[0].strip(), "png")
+
 
 # Personal defaults are validated tenant-wide; pages keep a fleet-sized
 # tenant from being resident in memory all at once.
@@ -336,6 +352,15 @@ class AssistantService:
         self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
+
+    async def _save_generated_image(self, image: "GeneratedImage") -> "File":
+        """Persist a tool-produced image as a generated file."""
+        extension = _extension_for_mime(image.mime_type)
+        return await self.file_service.save_image_from_bytes(
+            image.data,
+            name=f"generated_image.{extension}",
+            mimetype=image.mime_type,
+        )
 
     def validate_space_assistant(
         self,
@@ -1468,8 +1493,8 @@ class AssistantService:
                 MCPServers as MCPServersTable,
             )
 
-            # Web-search servers are capability markers resolved to the active
-            # provider at ask time, so a deactivated one may legitimately stay
+            # Capability servers are markers resolved to the active provider
+            # at ask time, so a deactivated one may legitimately stay
             # attached; only general servers must be currently enabled.
             mcp_servers_query = (
                 sa.select(MCPServersTable.id)
@@ -1477,7 +1502,7 @@ class AssistantService:
                 .where(
                     sa.or_(
                         MCPServersTable.is_enabled == True,  # noqa: E712
-                        MCPServersTable.purpose == "web_search",
+                        MCPServersTable.purpose != GENERAL_PURPOSE,
                     )
                 )
                 .where(MCPServersTable.id.in_(mcp_server_ids))
@@ -2089,11 +2114,11 @@ class AssistantService:
                             )
                             yield chunk
 
-                        if chunk.response_type == ResponseType.FILES:
-                            image_file = await self.file_service.save_image_from_bytes(
-                                chunk.image_data
-                            )
-
+                        if (
+                            chunk.response_type == ResponseType.FILES
+                            and chunk.image is not None
+                        ):
+                            image_file = await self._save_generated_image(chunk.image)
                             generated_files.append(image_file)
                             chunk.generated_file = image_file
                             yield chunk
@@ -2434,6 +2459,11 @@ class AssistantService:
                         for tc in non_streaming_tool_metadata
                     ]
                     final_reasoning = getattr(answer, "reasoning_content", None)
+                    for image in cast(
+                        list[GeneratedImage],
+                        getattr(answer, "generated_images", None) or [],
+                    ):
+                        generated_files.append(await self._save_generated_image(image))
 
             non_streaming_mcp_refs = filter_mcp_tool_references(
                 response_string=final_answer,
@@ -2830,31 +2860,30 @@ class AssistantService:
                 server for server in base_mcp_servers if server.id not in disabled_ids
             ]
 
-        # Web search: an attached purpose=web_search server is a capability
-        # marker, not a provider pin. The tenant's currently ACTIVE provider is
-        # resolved here and attached in its place, so switching providers never
-        # requires reconfiguring spaces or assistants. Attached (possibly
-        # stale or deactivated) web-search servers are stripped from the
-        # ordinary set; if no provider is active or the model cannot call
-        # tools, the capability is silently unavailable this turn.
-        web_search_base = (
+        # Capabilities: an attached capability-purpose server (web search,
+        # image generation) is a capability marker, not a provider pin. The
+        # tenant's currently ACTIVE provider for each requested purpose is
+        # resolved here and attached in its place, so switching providers
+        # never requires reconfiguring spaces or assistants. Attached
+        # (possibly stale or deactivated) capability servers are stripped from
+        # the ordinary set; if no provider is active for a purpose or the
+        # model cannot call tools, that capability is silently unavailable
+        # this turn.
+        capability_base = (
             mcp_servers_override
             if mcp_servers_override is not None
             else list(assistant_to_ask.mcp_servers)
         )
-        web_search_mcp_server: "MCPServer | None" = None
-        if any(server.purpose == "web_search" for server in web_search_base):
-            mcp_servers_override = [
-                server for server in web_search_base if server.purpose != "web_search"
-            ]
-            if effective_completion_model.supports_tool_calling:
-                active_provider = await get_active_web_search_server(
-                    self.repo.session, self.user.tenant_id
-                )
-                if active_provider is not None and usable_web_search_tools(
-                    active_provider
-                ):
-                    web_search_mcp_server = active_provider
+        capability_mcp_servers: list["MCPServer"] = []
+        if any(is_capability_purpose(server.purpose) for server in capability_base):
+            resolution = await resolve_capability_servers(
+                self.repo.session,
+                self.user.tenant_id,
+                capability_base,
+                supports_tool_calling=effective_completion_model.supports_tool_calling,
+            )
+            mcp_servers_override = resolution.general_servers
+            capability_mcp_servers = resolution.capability_servers
 
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
@@ -3044,7 +3073,7 @@ class AssistantService:
                 files=completion_file_inputs.completion_message_files,
                 stream=stream,
                 version=version,
-                web_search_mcp_server=web_search_mcp_server,
+                capability_mcp_servers=capability_mcp_servers,
                 require_tool_approval=require_tool_approval,
                 completion_model_override=completion_model_override,
                 model_kwargs_override=model_kwargs_override,

@@ -8,7 +8,8 @@
   import { Label } from "$lib/components/ui/label/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { AlertCircle, ChevronRight, Globe, Info, Plug } from "lucide-svelte";
+  import { AlertCircle, ChevronRight, Info, Plug } from "lucide-svelte";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import { SvelteSet } from "svelte/reactivity";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
@@ -104,6 +105,7 @@
           {@const hasTools = server.tools.length > 0}
           {@const isExpanded = isSelected && expandedServers.has(server.id)}
           {@const enabledCount = enabledToolCount(server)}
+          {@const capability = getCapability(server.purpose)}
           <div class={isSelected ? "bg-secondary/30" : ""}>
             <div class="flex items-center gap-3 py-2.5 pr-4 pl-1">
               <button
@@ -130,12 +132,12 @@
                   <span class="text-sm font-medium {isSelected ? '' : 'text-secondary'}">
                     {server.name}
                   </span>
-                  {#if server.purpose === "web_search"}
+                  {#if capability}
                     <span
                       class="bg-secondary text-secondary inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
                     >
-                      <Globe class="h-3 w-3" aria-hidden="true" />
-                      {m.web_search()}
+                      <capability.icon class="h-3 w-3" aria-hidden="true" />
+                      {capability.label()}
                     </span>
                   {/if}
                   {#if isSelected && hasTools}

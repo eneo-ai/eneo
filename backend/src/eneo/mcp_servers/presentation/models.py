@@ -18,7 +18,7 @@ from eneo.security_classifications.presentation.security_classification_models i
 
 T = TypeVar("T", bound=BaseModel)
 
-MCPServerPurpose = Literal["general", "web_search"]
+MCPServerPurpose = Literal["general", "web_search", "image_generation"]
 
 # "api_key_header" sends the credential in an admin-chosen header
 # (e.g. X-Api-Key). Header name is validated server-side against HTTP token
@@ -268,8 +268,8 @@ class ToolReviewResponse(BaseModel):
     deleted_count: int = 0
 
 
-class WebSearchActivationResponse(BaseModel):
-    """Response after activating a web-search provider."""
+class CapabilityActivationResponse(BaseModel):
+    """Response after activating a capability provider."""
 
     server: MCPServerPublic
     deactivated_server_ids: list[UUID] = []

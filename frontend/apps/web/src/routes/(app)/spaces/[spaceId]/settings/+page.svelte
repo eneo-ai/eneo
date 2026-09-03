@@ -13,7 +13,8 @@
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
   import SelectCompletionModels from "./SelectCompletionModels.svelte";
   import SelectMCPServers from "./SelectMCPServers.svelte";
-  import WebSearchCapability from "./WebSearchCapability.svelte";
+  import CapabilityRow from "./CapabilityRow.svelte";
+  import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { Page, Settings } from "$lib/components/layout";
   import SpaceStorageOverview from "./SpaceStorageOverview.svelte";
   import SelectTranscriptionModels from "./SelectTranscriptionModels.svelte";
@@ -240,7 +241,13 @@
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
 
-        <WebSearchCapability selectableServers={data.mcpServers}></WebSearchCapability>
+        <Settings.Row title={m.capabilities()} description={m.capabilities_row_description()}>
+          <div>
+            {#each CAPABILITIES as capability (capability.purpose)}
+              <CapabilityRow {capability} selectableServers={data.mcpServers} />
+            {/each}
+          </div>
+        </Settings.Row>
       </Settings.Group>
 
       {#if !isOrgSpace && $currentSpace.permissions?.includes("edit")}
