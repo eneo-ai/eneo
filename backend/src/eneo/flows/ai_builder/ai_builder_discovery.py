@@ -92,12 +92,7 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     has_explicit_structured_answer,
 )
-from eneo.flows.ai_builder.ai_builder_signal_confidence import (
-    has_low_confidence_signals,
-    score_conversation_signals,
-)
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    UNKNOWN_SLOT_VALUE,
     SlotClassificationResult,
     first_user_owned_quoted_text,
 )
@@ -172,38 +167,6 @@ def analyze_discovery(
                 )
             )
 
-    # Confidence gating: when MVS met and no blocking issues, check for
-    # low-confidence inferred signals that need clarification
-    if mvs_met and not any(i.severity == "blocking" for i in raw_issues):
-        scored = score_conversation_signals(conversation, freeform_text=profile.text)
-        if has_low_confidence_signals(scored) and len(profile.answers) < 3:
-            low_signal = next(
-                (s for s in reversed(scored) if s.confidence == "low"), None
-            )
-            if low_signal is not None and not _classifier_resolved_question(
-                question_id=low_signal.question_id,
-                profile=profile,
-                slot_classification_result=slot_classification_result,
-            ):
-                suggestion = question_suggestion_for_id(
-                    low_signal.question_id, language=profile.language
-                )
-                if suggestion is not None and suggestion.exposure == "user_requirement":
-                    raw_issues.append(
-                        DiscoveryIssue(
-                            issue_id=f"low_confidence_{low_signal.question_id}",
-                            category=_question_category(low_signal.question_id),
-                            severity="blocking",
-                            message=localized_text(
-                                profile.language,
-                                f"Signalen för '{low_signal.question_id}' är osäker och behöver bekräftas.",
-                                f"The signal for '{low_signal.question_id}' is ambiguous and needs confirmation.",
-                            ),
-                            suggestion=suggestion,
-                            question_level="blocking",
-                        )
-                    )
-
     selected_issues, selected_question_ids = apply_discovery_decision_engine(
         issues=_dedupe_issues(raw_issues),
         profile=profile,
@@ -237,37 +200,6 @@ def _mapped_file_limit_message(planning_state: PlanningState) -> tuple[str, str]
     return (
         "Bekräfta hur många filer varje mappat steg högst ska behandla.",
         "Confirm the maximum number of files each mapped step may process.",
-    )
-
-
-def _classifier_resolved_question(
-    *,
-    question_id: str,
-    profile: DiscoveryProfile,
-    slot_classification_result: SlotClassificationResult | None,
-) -> bool:
-    if slot_classification_result is None:
-        return False
-    canonical_id = canonical_question_id(question_id)
-    classifier_slot = next(
-        (
-            slot
-            for slot in slot_classification_result.slots
-            if slot.slot_name == canonical_id
-        ),
-        None,
-    )
-    if (
-        classifier_slot is None
-        or classifier_slot.confidence == "low"
-        or classifier_slot.value == UNKNOWN_SLOT_VALUE
-    ):
-        return False
-    resolved_slot = profile.resolved_slot(canonical_id)
-    return (
-        resolved_slot is not None
-        and classifier_slot.value == resolved_slot.value
-        and resolved_slot.confidence != "low"
     )
 
 
