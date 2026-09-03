@@ -431,8 +431,6 @@ async def classify_question_slot_once(
     result = attempt.result
     assert result is not None
     focused_result = SlotClassificationResult(
-        # This legacy slots projection is deleted with the focused reader in commit 3.
-        slots=tuple(slot for slot in result.slots if slot.slot_name == slot_name),
         slot_outcomes={
             slot_name: outcome
             for outcome_name, outcome in result.slot_outcomes.items()
@@ -620,6 +618,8 @@ def _complete_runtime_discovery_context(
     state: PlanningState,
     *,
     freeform_text: str,
+    persisted_planning_state: PlanningState | None = None,
+    attached_file_ids: Collection[UUID] = (),
     attachment_context: AIBuilderAttachmentContext | None,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...],
     schema_direction_pending: bool,
@@ -630,6 +630,12 @@ def _complete_runtime_discovery_context(
     # defaults. Classification can name the terminal output, the template
     # role, or both in this same turn, so the template evidence is only
     # complete now, before defaults fill a mode the attachment already answers.
+    # Persisted evidence (an explicit uncertainty, an earlier file role) is
+    # carried in before the policy assumes anything, so a default never
+    # covers what the user already said in an earlier turn.
+    carry_forward_persisted_planner_state(
+        state, persisted_planning_state, attached_file_ids=attached_file_ids
+    )
     complete_planning_state(state, freeform_text=freeform_text)
     if not schema_direction_pending:
         state = _apply_attachment_output_evidence(state, attachment_context)
@@ -659,6 +665,8 @@ async def build_runtime_discovery_context(
     max_input_tokens: int,
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy | None = None,
+    persisted_planning_state: PlanningState | None = None,
+    attached_file_ids: Collection[UUID] = (),
 ) -> RuntimeDiscoveryContext:
     budget_policy = budget_policy or resolve_ai_builder_budget_policy(None)
     schema_candidates = (
@@ -700,6 +708,8 @@ async def build_runtime_discovery_context(
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
+            persisted_planning_state=persisted_planning_state,
+            attached_file_ids=attached_file_ids,
         )
 
     classification_input = build_slot_classification_input(
@@ -713,6 +723,8 @@ async def build_runtime_discovery_context(
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
+            persisted_planning_state=persisted_planning_state,
+            attached_file_ids=attached_file_ids,
         )
     latest_classification_index = next(
         (
@@ -744,6 +756,8 @@ async def build_runtime_discovery_context(
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
+            persisted_planning_state=persisted_planning_state,
+            attached_file_ids=attached_file_ids,
         )
 
     allowed_values = llm_resolvable_slot_values_for_state(state)
@@ -790,6 +804,8 @@ async def build_runtime_discovery_context(
                 model=completion_model_route.litellm_model,
                 provider=provider,
             ),
+            persisted_planning_state=persisted_planning_state,
+            attached_file_ids=attached_file_ids,
         )
     bias = _targeted_classification_bias(
         conversation,
@@ -871,6 +887,8 @@ async def build_runtime_discovery_context(
                 model=completion_model_route.litellm_model,
                 provider=provider,
             ),
+            persisted_planning_state=persisted_planning_state,
+            attached_file_ids=attached_file_ids,
         )
 
     result = attempt.result
@@ -980,6 +998,8 @@ async def build_runtime_discovery_context(
         schema_direction_pending=schema_direction_pending,
         slot_classification_result=admitted_result,
         slot_classification_metadata=admitted_metadata,
+        persisted_planning_state=persisted_planning_state,
+        attached_file_ids=attached_file_ids,
     )
 
 
@@ -1114,10 +1134,7 @@ async def build_discovery_runtime_result(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         budget_policy=budget_policy,
-    )
-    carry_forward_persisted_planner_state(
-        context.planning_state,
-        persisted_planning_state,
+        persisted_planning_state=persisted_planning_state,
         attached_file_ids=attached_file_ids,
     )
     analysis = analyze_discovery(

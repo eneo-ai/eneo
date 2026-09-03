@@ -51,7 +51,9 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     ClassifiedEvidence,
     ClassifiedSchemaDirection,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationInput,
+    SlotClassificationResult,
     SlotClassificationSource,
     parse_slot_classification_response,
 )
@@ -70,6 +72,16 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
 from eneo.tenants.tenant import TenantInDB
+
+
+def _resolved_slots(
+    result: SlotClassificationResult,
+) -> tuple[tuple[str, ResolvedSlotClassificationOutcome], ...]:
+    return tuple(
+        (name, outcome)
+        for name, outcome in result.slot_outcomes.items()
+        if isinstance(outcome, ResolvedSlotClassificationOutcome)
+    )
 
 
 async def classify_slots(**kwargs: Any):
@@ -2648,7 +2660,7 @@ def test_parse_slot_classification_response_filters_invalid_entries() -> None:
     )
 
     assert result is not None
-    assert result.slots == ()
+    assert _resolved_slots(result) == ()
     assert result.slot_outcomes["terminal_output"].kind == "absent"
     assert result.slot_outcomes["primary_runtime_input"].kind == "absent"
     assert result.diagnostics[0].code == "slot_outcome_duplicate"
@@ -2693,8 +2705,8 @@ def test_parse_slot_classification_response_downgrades_unsupported_claims() -> N
     )
 
     assert result is not None
-    assert result.slots[0].confidence == "low"
-    assert result.slots[0].evidence == ()
+    assert _resolved_slots(result)[0][1].confidence == "low"
+    assert _resolved_slots(result)[0][1].evidence == ()
     assert result.file_roles[0].confidence == "low"
     assert result.file_roles[0].evidence == ()
 
@@ -2760,9 +2772,9 @@ def test_parse_slot_classification_response_rejects_fabricated_quote() -> None:
     )
 
     assert result is not None
-    assert result.slots[0].evidence == ()
-    assert result.slots[0].confidence == "low"
-    assert result.slots[0].evidence_level == "inferred"
+    assert _resolved_slots(result)[0][1].evidence == ()
+    assert _resolved_slots(result)[0][1].confidence == "low"
+    assert _resolved_slots(result)[0][1].evidence_level == "inferred"
 
 
 def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
@@ -2801,7 +2813,7 @@ def test_attachment_only_evidence_cannot_classify_terminal_output() -> None:
     )
 
     assert result is not None
-    assert result.slots == ()
+    assert _resolved_slots(result) == ()
 
 
 def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> None:
@@ -2871,10 +2883,10 @@ def test_question_tied_evidence_is_explicit_only_for_its_canonical_slot() -> Non
     )
 
     assert result is not None
-    assert result.slots[0].slot_name == "report_disposition"
-    assert result.slots[0].evidence_level == "inferred"
-    assert result.slots[1].slot_name == "terminal_output"
-    assert result.slots[1].evidence_level == "explicit"
+    assert _resolved_slots(result)[0][0] == "report_disposition"
+    assert _resolved_slots(result)[0][1].evidence_level == "inferred"
+    assert _resolved_slots(result)[1][0] == "terminal_output"
+    assert _resolved_slots(result)[1][1].evidence_level == "explicit"
 
 
 def test_file_role_rejects_evidence_from_a_different_file() -> None:
@@ -3283,7 +3295,7 @@ def test_parse_slot_classification_response_accepts_typed_explicit_uncertainty()
     )
 
     assert result is not None
-    assert result.slots[0].classification_kind == "explicitly_uncertain"
+    assert result.slot_outcomes["terminal_output"].kind == "explicitly_uncertain"
     outcome = result.slot_outcomes["terminal_output"]
     assert outcome.kind == "explicitly_uncertain"
     assert outcome.quote == ClassifiedEvidence(
@@ -4161,11 +4173,11 @@ async def test_classify_slots_reuses_shared_cache_for_identical_targets() -> Non
     assert second.result is not None
     assert first.result.cached is False
     assert second.result.cached is True
-    assert first.result.slots[0].confidence == "high"
-    assert first.result.slots[0].evidence == (
+    assert _resolved_slots(first.result)[0][1].confidence == "high"
+    assert _resolved_slots(first.result)[0][1].evidence == (
         ClassifiedEvidence(source_id="user_message:user-1", quote=text),
     )
-    assert second.result.slots == first.result.slots
+    assert _resolved_slots(second.result) == _resolved_slots(first.result)
     assert litellm_client.acompletion.await_count == 1
 
 
@@ -4758,7 +4770,7 @@ def test_parser_drops_a_malformed_named_result_delta_but_keeps_slots() -> None:
     )
 
     assert result is not None
-    assert tuple(slot.value for slot in result.slots) == ("pdf_document",)
+    assert tuple(o.value for _, o in _resolved_slots(result)) == ("pdf_document",)
     assert result.named_result_evidence is None
 
 

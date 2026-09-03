@@ -89,7 +89,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFormIntake,
     ClassifiedNamedResultDelta,
     ClassifiedNamedResultEvidence,
-    ClassifiedSlot,
     ExplicitlyUncertainSlotClassificationOutcome,
     ResolvedSlotClassificationOutcome,
     SlotClassificationResult,
@@ -307,7 +306,7 @@ def _replay_persisted_turn_evidence(
     *,
     flow: Flow | None,
 ) -> None:
-    """Replay persisted classifier facts and only then apply derived defaults.
+    """Replay persisted classifier facts into the state.
 
     Two kinds of persisted message state the named-result set: a classifier
     snapshot, and a confirmation-card edit. Both state the whole set, so the
@@ -320,7 +319,6 @@ def _replay_persisted_turn_evidence(
         conversation,
         flow=flow,
     )
-    replayed = False
     for index, message in enumerate(conversation):
         field_edit = named_content_fields_edit_from_metadata(message.metadata)
         if field_edit is not None:
@@ -362,9 +360,6 @@ def _replay_persisted_turn_evidence(
                 state,
                 snapshot=classification.named_result_evidence,
             )
-            replayed = True
-    if replayed:
-        apply_policy_defaults_from_resolved_slots(state, freeform_text=freeform_text)
 
 
 def _reconcile_report_disposition_after_classifier_replay(
@@ -2325,11 +2320,12 @@ def attested_slots_without_newer_evidence(
         message.message_id: index for index, message in enumerate(conversation)
     }
     return frozenset(
-        slot.slot_name
-        for slot in classification_result.slots
-        if slot.slot_name in accepted
+        slot_name
+        for slot_name, outcome in classification_result.slot_outcomes.items()
+        if slot_name in accepted
+        and isinstance(outcome, ResolvedSlotClassificationOutcome)
         and not _cites_evidence_after(
-            slot,
+            outcome,
             attested=attested,
             cited_message_ids_by_source=cited_message_ids_by_source,
             message_order=message_order,
@@ -2338,13 +2334,13 @@ def attested_slots_without_newer_evidence(
 
 
 def _cites_evidence_after(
-    slot: ClassifiedSlot,
+    outcome: ResolvedSlotClassificationOutcome,
     *,
     attested: AttestedDisclosure,
     cited_message_ids_by_source: Mapping[str, str | None],
     message_order: Mapping[str, int],
 ) -> bool:
-    for item in slot.evidence:
+    for item in outcome.evidence:
         message_id = cited_message_ids_by_source.get(item.source_id)
         if message_id is None:
             continue
