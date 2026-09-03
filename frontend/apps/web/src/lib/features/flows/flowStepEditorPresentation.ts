@@ -39,6 +39,30 @@ export interface StepAiWork {
 
 export type FlowStepChapterId = "task" | "input" | "result" | "control" | "technical";
 
+/**
+ * The identity a step's chapters keep their open/closed state under.
+ *
+ * A step's persistence id is not that identity: a step created in the editor
+ * is saved under a temporary id and comes back with a real one, and keying
+ * chapter state on the id throws away everything the user opened or closed
+ * while the first save was in flight. The creation intent's token is stable
+ * across that swap, so it is the identity for as long as the step is the one
+ * being created; every other step is only ever known by its id.
+ */
+export function getStepChapterStateKey({
+  activeStep,
+  newStepOpenIntent
+}: {
+  activeStep: Pick<FlowStep, "id" | "step_order"> | null;
+  newStepOpenIntent: { token: string; stepId: string } | null;
+}): string {
+  if (!activeStep) return "no-step";
+  if (newStepOpenIntent && newStepOpenIntent.stepId === activeStep.id) {
+    return newStepOpenIntent.token;
+  }
+  return activeStep.id ?? `draft:${activeStep.step_order}`;
+}
+
 export function getDefaultOpenStepChapter({
   step,
   hasInputError = false,

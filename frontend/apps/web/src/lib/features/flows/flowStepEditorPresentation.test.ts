@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
-import { getDefaultOpenStepChapter, getStepAiWorkKind } from "./flowStepEditorPresentation";
+import {
+  getDefaultOpenStepChapter,
+  getStepAiWorkKind,
+  getStepChapterStateKey
+} from "./flowStepEditorPresentation";
 import { outputModeUsesCompletionModel } from "./flowStepTypes";
 
 function step(partial: Partial<FlowStep>): FlowStep {
@@ -106,5 +110,41 @@ describe("getDefaultOpenStepChapter", () => {
   it("opens the first section that needs repair", () => {
     expect(getDefaultOpenStepChapter({ step: step({}), hasInputError: true })).toBe("input");
     expect(getDefaultOpenStepChapter({ step: step({}), hasOutputError: true })).toBe("result");
+  });
+});
+
+describe("getStepChapterStateKey", () => {
+  it("keeps one key across the temp-to-real id swap of a step being created", () => {
+    const temp = getStepChapterStateKey({
+      activeStep: { id: "_temp_new", step_order: 2 },
+      newStepOpenIntent: { token: "_temp_new", stepId: "_temp_new" }
+    });
+    const afterSave = getStepChapterStateKey({
+      activeStep: { id: "step-real-2", step_order: 2 },
+      newStepOpenIntent: { token: "_temp_new", stepId: "step-real-2" }
+    });
+
+    // The chapters the user opened while the first save was in flight belong
+    // to the same step afterwards.
+    expect(afterSave).toBe(temp);
+  });
+
+  it("keys every other step by its id", () => {
+    expect(
+      getStepChapterStateKey({
+        activeStep: { id: "step-1", step_order: 1 },
+        newStepOpenIntent: null
+      })
+    ).toBe("step-1");
+    expect(
+      getStepChapterStateKey({
+        activeStep: { id: "step-1", step_order: 1 },
+        newStepOpenIntent: { token: "_temp_new", stepId: "step-real-2" }
+      })
+    ).toBe("step-1");
+  });
+
+  it("has a key when no step is open", () => {
+    expect(getStepChapterStateKey({ activeStep: null, newStepOpenIntent: null })).toBe("no-step");
   });
 });

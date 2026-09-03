@@ -93,7 +93,8 @@
   import { getInputTypeLabel, getInputSourceLabel, getIssueMessage } from "./flowStepEditHelpers";
   import {
     getDefaultOpenStepChapter,
-    getStepAiWork
+    getStepAiWork,
+    getStepChapterStateKey
   } from "$lib/features/flows/flowStepEditorPresentation";
   import {
     getChapterInputStatus,
@@ -225,8 +226,11 @@
 
   const activeIndex = $derived(steps.findIndex((s) => s.id === activeStepId));
   const activeStep = $derived(activeIndex >= 0 ? steps[activeIndex] : null);
+  // Chapter state follows the step the user is working on, not the id it is
+  // saved under: see getStepChapterStateKey.
+  const newStepOpenIntent = flowEditor.state.newStepOpenIntent;
   const activeStepStateKey = $derived(
-    activeStep?.id ?? (activeStep ? `draft:${activeStep.step_order}` : "no-step")
+    getStepChapterStateKey({ activeStep, newStepOpenIntent: $newStepOpenIntent })
   );
   const isAdvancedMode = $derived($mode === "power_user");
   const orderedStepsForNav = $derived([...steps].sort((a, b) => a.step_order - b.step_order));
@@ -687,7 +691,6 @@
   );
   // The first open section follows the step's task. Per-step interaction state
   // is retained by FlowStepChapter for the current page session.
-  const newStepOpenIntent = flowEditor.state.newStepOpenIntent;
   const defaultOpenChapter = $derived.by(() => {
     if (!activeStep) return null;
     const intent = $newStepOpenIntent;
