@@ -18,6 +18,7 @@
   import TranscriptPlayer, { type SignedAudio } from "./TranscriptPlayer.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { parseTranscript, type TranscriptSegment } from "$lib/features/flows/transcriptSegments";
+  import type { SpeakerConfidence } from "$lib/features/flows/speakerMappingReview";
   import type { TranscriptCorrectionsController } from "$lib/features/flows/transcriptCorrectionsController.svelte";
   import {
     isReviewPolicyRunErrorRelevantForStep,
@@ -138,28 +139,51 @@
     if (parsed.length === 0) return null;
     return transcriptContext.segments ?? parsed;
   });
-  const transcriptSpeakerNames = $derived.by(() => {
+  // The mapping the step produced, one row per diarized label. Rendered as a
+  // readable list once the step is done: the review that named the speakers
+  // is gone by then, and the raw JSON below is not an answer to "who is who".
+  type SpeakerMappingEntry = {
+    label: string;
+    name: string | null;
+    confidence: SpeakerConfidence | null;
+    evidence: string;
+  };
+  const speakerMapping = $derived.by((): SpeakerMappingEntry[] => {
     const structured = result.output_payload_json?.structured;
     const speakers =
       structured && typeof structured === "object" && !Array.isArray(structured)
         ? (structured as Record<string, unknown>).speakers
         : null;
-    const names: Record<string, string> = {};
-    if (!Array.isArray(speakers)) return names;
+    if (!Array.isArray(speakers)) return [];
+    const rows: SpeakerMappingEntry[] = [];
     for (const item of speakers) {
-      if (item && typeof item === "object" && !Array.isArray(item)) {
-        const entry = item as Record<string, unknown>;
-        if (
-          typeof entry.label === "string" &&
-          typeof entry.name === "string" &&
-          entry.name.trim()
-        ) {
-          names[entry.label] = entry.name.trim();
-        }
-      }
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const entry = item as Record<string, unknown>;
+      if (typeof entry.label !== "string") continue;
+      const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : null;
+      const confidence =
+        entry.confidence === "low" || entry.confidence === "medium" || entry.confidence === "high"
+          ? entry.confidence
+          : null;
+      rows.push({
+        label: entry.label,
+        name,
+        confidence,
+        evidence: typeof entry.evidence === "string" ? entry.evidence.trim() : ""
+      });
     }
+    return rows;
+  });
+  const transcriptSpeakerNames = $derived.by(() => {
+    const names: Record<string, string> = {};
+    for (const row of speakerMapping) if (row.name) names[row.label] = row.name;
     return names;
   });
+  function confidenceText(confidence: SpeakerConfidence): string {
+    if (confidence === "high") return m.flow_run_review_speakers_confidence_high();
+    if (confidence === "medium") return m.flow_run_review_speakers_confidence_medium();
+    return m.flow_run_review_speakers_confidence_low();
+  }
 </script>
 
 <Card.Root class="overflow-hidden">
@@ -239,6 +263,34 @@
                 {/if}
               </button>
             </div>
+
+            {#if speakerMapping.length > 0}
+              <div class="mt-1">
+                <h4 class="text-muted text-xs font-semibold">
+                  {m.flow_step_speaker_mapping_section()}
+                </h4>
+                <ul class="divide-default mt-1.5 divide-y rounded-lg border p-0">
+                  {#each speakerMapping as row (row.label)}
+                    <li class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-3 py-2">
+                      <span class="text-secondary font-mono text-xs">{row.label}</span>
+                      <span class="text-sm font-medium" class:text-muted={row.name === null}>
+                        {row.name ?? m.flow_run_transcript_unknown_speaker()}
+                      </span>
+                      {#if row.confidence}
+                        <Badge variant="outline" class="text-xs">
+                          {confidenceText(row.confidence)}
+                        </Badge>
+                      {/if}
+                      {#if row.evidence}
+                        <span class="text-muted basis-full text-xs text-pretty sm:basis-auto">
+                          {row.evidence}
+                        </span>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
 
             {#if result.output_payload_json.structured}
               <div class="mt-1">
