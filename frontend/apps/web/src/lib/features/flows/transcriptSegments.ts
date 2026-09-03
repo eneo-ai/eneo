@@ -224,6 +224,21 @@ export function parseTranscript(text: string): TranscriptSegment[] {
   return segments;
 }
 
+/**
+ * True when the text is nothing but a transcript: every non-blank line is a
+ * timestamped line or a part header. A document that merely quotes transcript
+ * lines (a title, notes) is not one.
+ */
+export function isPureTranscript(text: string): boolean {
+  let lines = 0;
+  for (const line of text.split("\n")) {
+    if (line.trim() === "" || PART_HEADER_RE.test(line)) continue;
+    if (!LINE_RE.test(line)) return false;
+    lines += 1;
+  }
+  return lines > 0;
+}
+
 /** Number of audio files the segments span (at least one). */
 export function countFiles(segments: readonly TranscriptSegment[]): number {
   return segments.reduce((max, segment) => Math.max(max, segment.fileIndex + 1), 1);

@@ -8,6 +8,7 @@ import {
   findActiveSegmentIndex,
   findActiveWordIndex,
   formatClock,
+  isPureTranscript,
   locateWords,
   parseTranscript,
   segmentsFromMetadata,
@@ -87,6 +88,31 @@ describe("parseTranscript", () => {
     );
     expect(segments.map((segment) => segment.fileIndex)).toEqual([0, 1]);
     expect(countFiles(segments)).toBe(2);
+  });
+});
+
+describe("isPureTranscript", () => {
+  it("accepts timestamped lines, part headers and blank lines only", () => {
+    expect(
+      isPureTranscript(
+        [
+          "## Del 1",
+          "[00:00:00 - 00:00:04] Handläggare: Hej Gunnar.",
+          "",
+          "[00:00:05 - 00:00:09] Gunnar: Hej."
+        ].join("\n")
+      )
+    ).toBe(true);
+  });
+
+  it("rejects a document that merely quotes transcript lines, and empty text", () => {
+    expect(
+      isPureTranscript(
+        ["# Samtal om hemtjänst", "", "[00:00:00 - 00:00:04] Handläggare: Hej Gunnar."].join("\n")
+      )
+    ).toBe(false);
+    expect(isPureTranscript("")).toBe(false);
+    expect(isPureTranscript("Bara text.")).toBe(false);
   });
 });
 

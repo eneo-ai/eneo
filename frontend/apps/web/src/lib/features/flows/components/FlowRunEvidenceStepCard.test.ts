@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import type { Eneo, FlowRunStep } from "@eneo/eneo-js";
 
-import FlowRunEvidenceStepCard from "./FlowRunEvidenceStepCard.svelte";
+import FlowRunEvidenceStepCard, {
+  type FlowRunTranscriptContext
+} from "./FlowRunEvidenceStepCard.svelte";
 import { m } from "$lib/paraglide/messages";
 
 const result: FlowRunStep = {
@@ -17,10 +19,15 @@ const result: FlowRunStep = {
   updated_at: "2026-07-29T08:00:00Z"
 };
 
-function renderCard(currentEvidenceNotLoaded: boolean, stepResult: FlowRunStep = result): string {
+function renderCard(
+  currentEvidenceNotLoaded: boolean,
+  stepResult: FlowRunStep = result,
+  transcriptContext: FlowRunTranscriptContext | null = null
+): string {
   return render(FlowRunEvidenceStepCard, {
     props: {
       result: stepResult,
+      transcriptContext,
       currentEvidenceNotLoaded,
       stepDef: undefined,
       duration: null,
@@ -86,6 +93,69 @@ describe("FlowRunEvidenceStepCard", () => {
     // An unmatched label is named as such rather than left blank.
     expect(html).toContain(m.flow_run_transcript_unknown_speaker());
     expect(html).toContain(m.flow_run_review_speakers_confidence_low());
+  });
+
+  // The transcription step's stored segments carry raw labels; which card may
+  // render them decides whether names show up downstream.
+  const rawContext: FlowRunTranscriptContext = {
+    fileIds: ["file-1"],
+    stepId: result.step_id,
+    segments: [
+      { index: 0, fileIndex: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej Gunnar." },
+      { index: 1, fileIndex: 0, start: 5, end: 9, speaker: "SPEAKER_01", text: "Jo tack." }
+    ],
+    getAudioUrl: () => Promise.reject(new Error("unused"))
+  };
+
+  it("renders the transcription step from the stored segments", () => {
+    const html = renderCard(
+      false,
+      { ...result, output_payload_json: { text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej Gunnar." } },
+      rawContext
+    );
+    expect(html).toContain("SPEAKER_00");
+    expect(html).toContain("Jo tack.");
+  });
+
+  it("renders a downstream step's own renamed transcript, not the raw segments", () => {
+    const html = renderCard(
+      false,
+      {
+        ...result,
+        step_id: "00000000-0000-0000-0000-000000000009",
+        step_order: 4,
+        output_payload_json: {
+          text: [
+            "[00:00:00 - 00:00:04] Handläggare: Hej Gunnar.",
+            "[00:00:05 - 00:00:09] Gunnar: Jo tack."
+          ].join("\n")
+        }
+      },
+      rawContext
+    );
+    expect(html).toContain("Handläggare");
+    expect(html).not.toContain("SPEAKER_00");
+  });
+
+  it("shows a downstream document as authored when it only quotes transcript lines", () => {
+    const html = renderCard(
+      false,
+      {
+        ...result,
+        step_id: "00000000-0000-0000-0000-000000000009",
+        step_order: 4,
+        output_payload_json: {
+          text: [
+            "# Samtal om hemtjänst",
+            "",
+            "[00:00:00 - 00:00:04] Handläggare: Hej Gunnar."
+          ].join("\n")
+        }
+      },
+      rawContext
+    );
+    expect(html).toContain("Samtal om hemtjänst");
+    expect(html).not.toContain("SPEAKER_00");
   });
 
   it("does not mistake ordinary JSON with a speakers key for a speaker mapping", () => {

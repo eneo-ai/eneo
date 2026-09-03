@@ -17,7 +17,11 @@
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import TranscriptPlayer, { type SignedAudio } from "./TranscriptPlayer.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { parseTranscript, type TranscriptSegment } from "$lib/features/flows/transcriptSegments";
+  import {
+    isPureTranscript,
+    parseTranscript,
+    type TranscriptSegment
+  } from "$lib/features/flows/transcriptSegments";
   import {
     buildSpeakerRows,
     speakerNamesFromRows,
@@ -131,18 +135,9 @@
   let inputOpen = $state(false);
   const hasResultFiles = $derived(resultFiles.length > 0);
 
-  // A step whose text output is the (possibly renamed) transcript gets the
-  // player: the stored segments carry raw labels, and this step's own speaker
-  // mapping, when it has one, supplies the names.
   const outputText = $derived(
     typeof result.output_payload_json?.text === "string" ? result.output_payload_json.text : ""
   );
-  const transcriptSegments = $derived.by(() => {
-    if (!transcriptContext || !outputText) return null;
-    const parsed = parseTranscript(outputText);
-    if (parsed.length === 0) return null;
-    return transcriptContext.segments ?? parsed;
-  });
   // The mapping the step produced, one row per diarized label, read through
   // the same parser the review checkpoint uses (the `speaker_mapping`
   // extension is the discriminator: ordinary JSON with a `speakers` key is
@@ -150,6 +145,24 @@
   // speakers is gone by then, and raw JSON is not an answer to "who is who".
   const speakerMapping = $derived(buildSpeakerRows(result.output_payload_json ?? null));
   const transcriptSpeakerNames = $derived(speakerNamesFromRows(speakerMapping));
+  // The stored segments (word timings, corrections, speaker edits) belong to
+  // the transcription step and to the speaker-mapping step whose text is that
+  // transcript with names; those two cards render them, the mapping supplying
+  // the names. Every other step shows its own output: a player when that
+  // output is a pure transcript (its lines already carry the names), and the
+  // plain text otherwise, so a composed document is shown as authored.
+  const ownsStoredSegments = $derived(
+    transcriptContext !== null &&
+      transcriptContext !== undefined &&
+      (result.step_id === transcriptContext.stepId || speakerMapping.length > 0)
+  );
+  const transcriptSegments = $derived.by(() => {
+    if (!transcriptContext || !outputText) return null;
+    const parsed = parseTranscript(outputText);
+    if (parsed.length === 0) return null;
+    if (ownsStoredSegments) return transcriptContext.segments ?? parsed;
+    return isPureTranscript(outputText) ? parsed : null;
+  });
   function confidenceText(confidence: SpeakerConfidence): string {
     if (confidence === "high") return m.flow_run_review_speakers_confidence_high();
     if (confidence === "medium") return m.flow_run_review_speakers_confidence_medium();
@@ -304,8 +317,8 @@
                 getAudioUrl={transcriptContext.getAudioUrl}
                 speakerNames={transcriptSpeakerNames}
                 textFallback={outputText}
-                corrections={correctionsController?.occurrences ?? []}
-                speakerEdits={correctionsController?.speakerEdits ?? []}
+                corrections={ownsStoredSegments ? (correctionsController?.occurrences ?? []) : []}
+                speakerEdits={ownsStoredSegments ? (correctionsController?.speakerEdits ?? []) : []}
                 class="mt-1"
               />
             {:else if result.output_payload_json.text && !result.output_payload_json.structured && !hasResultFiles}
