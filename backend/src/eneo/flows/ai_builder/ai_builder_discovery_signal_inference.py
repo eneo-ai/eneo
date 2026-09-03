@@ -7,6 +7,7 @@ from eneo.flows.ai_builder.ai_builder_clause_segmenter import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
+    contains_any_token_prefix,
     normalize_discovery_text,
 )
 from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
@@ -106,6 +107,32 @@ _SOURCE_TO_SOURCE_COMPARISON_PHRASES: tuple[str, ...] = (
     "contradictions between sources",
     "compare what the different files say",
 )
+
+
+_COMPARISON_REQUEST_MARKERS = (
+    "compare",
+    "comparison",
+    "jämför",
+    "contradiction",
+    "motsägelser",
+    "skillnader",
+    "validate",
+    "validation",
+    "validera",
+    "validering",
+    "checklista",
+    "checklist",
+)
+
+
+def mentions_comparison_request(text: str) -> bool:
+    """Whether the user's own words ask for a comparison or validation.
+
+    Read by the profile (comparison intent) and by the interaction policy: a
+    brief that speaks of comparing is asked how, never assumed not to.
+    """
+
+    return contains_any_token_prefix(text, _COMPARISON_REQUEST_MARKERS)
 
 
 def is_high_confidence_source_to_source_comparison(text: str) -> bool:

@@ -130,11 +130,11 @@ def test_mapped_file_limit_accepts_catalog_supported_custom_answer() -> None:
 def test_non_catalog_fixed_question_rejects_custom_answer() -> None:
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
         prepare_user_question_metadata(
-            conversation=_pending_question_conversation("processing_scope"),
+            conversation=_pending_question_conversation("flow_input_architecture"),
             message="Process each department separately",
             question_answer={
                 "kind": "structured_question_answer",
-                "question_id": "processing_scope",
+                "question_id": "flow_input_architecture",
                 "custom_value": "separate_departments",
             },
         )

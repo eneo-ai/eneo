@@ -46,11 +46,7 @@ OPTION_ID_ALIASES: dict[str, dict[str, str]] = {
 
 _NON_SLOT_SUPPORTED_STRUCTURED_QUESTION_IDS: frozenset[str] = frozenset(
     {
-        "processing_scope",
-        "final_pdf_type",
         "flow_input_architecture",
-        "output_reader",
-        "final_output_scope",
         "runtime_metadata_field_details",
         "schema_direction",
     }

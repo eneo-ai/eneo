@@ -1928,13 +1928,9 @@ def test_slot_name_answer_signals_drive_input_and_output_resolution() -> None:
 def test_supported_structured_question_ids_partition_catalog_and_policy_ids() -> None:
     non_slot_policy_ids = frozenset(
         {
-            "final_pdf_type",
-            "final_output_scope",
             "flow_input_architecture",
-            "output_reader",
             "runtime_metadata_field_details",
             "schema_direction",
-            "processing_scope",
         }
     )
     slot_question_ids = frozenset(QUESTION_CATALOG)
@@ -1951,13 +1947,9 @@ def test_supported_structured_question_ids_partition_catalog_and_policy_ids() ->
         "primary_runtime_input",
         "terminal_output",
         "flow_input_architecture",
-        "final_pdf_type",
         "post_processing_goal",
-        "processing_scope",
         "comparison_scope",
-        "output_reader",
         "schema_direction",
-        "final_output_scope",
         "structured_io_contract",
     ],
 )

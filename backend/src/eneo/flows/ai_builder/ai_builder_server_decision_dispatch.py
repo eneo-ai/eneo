@@ -125,7 +125,6 @@ class ServerDecisionDispatchRequest:
     attachment_context: AIBuilderAttachmentContext | None
     schema_candidates: tuple[DeclaredSchemaCandidate, ...]
     schema_direction_pending: bool
-    discovery_assumptions: tuple[str, ...] = ()
     focused_classification_runtime: FocusedSlotClassificationRuntime | None = None
 
 
@@ -249,7 +248,6 @@ async def _dispatch_question(
                 requirements_disclosure=build_requirements_disclosure(
                     request.planning_state,
                     ui_language=request.ui_language,
-                    discovery_assumptions=request.discovery_assumptions,
                     is_edit_mode=request.flow is not None,
                 ),
                 confirmed_requirements_version=(request.confirmed_requirements_version),
@@ -497,7 +495,6 @@ async def _dispatch_architecture_commit(
         requirements_disclosure=build_requirements_disclosure(
             session_state,
             ui_language=request.ui_language,
-            discovery_assumptions=request.discovery_assumptions,
             is_edit_mode=request.flow is not None,
         ),
         confirmed_requirements_version=request.confirmed_requirements_version,
@@ -536,7 +533,6 @@ async def _dispatch_architecture_commit(
                     attachment_context=request.attachment_context,
                     schema_candidates=request.schema_candidates,
                     schema_direction_pending=request.schema_direction_pending,
-                    discovery_assumptions=request.discovery_assumptions,
                     focused_classification_runtime=(
                         request.focused_classification_runtime
                     ),

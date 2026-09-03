@@ -22,7 +22,6 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
     NON_LLM_RESOLVABLE_SLOT_NAMES,
     DiscoveryFamily,
-    DiscoveryImpact,
 )
 
 
@@ -77,17 +76,6 @@ class TestSlotVocabularyShape:
             }
         )
 
-    def test_discovery_impact_values_are_pinned(self) -> None:
-        assert frozenset(get_args(DiscoveryImpact)) == frozenset(
-            {
-                "architecture",
-                "quality",
-                "polish",
-            }
-        )
-
-
-class TestLeafPurity:
     def _module_source(self) -> str:
         module_path = pathlib.Path(slot_vocabulary.__file__)
         return module_path.read_text(encoding="utf-8")

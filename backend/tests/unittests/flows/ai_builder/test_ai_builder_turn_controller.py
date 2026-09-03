@@ -114,7 +114,6 @@ def _turn_control(
     selected_discovery_question_ids: tuple[str, ...] = (),
     confirmed_requirements_version: str | None = None,
     ui_language: str | None = None,
-    discovery_assumptions: tuple[str, ...] = (),
     **kwargs: object,
 ) -> BuilderTurnControl:
     """Build the disclosure first, exactly as both production callers do."""
@@ -125,7 +124,6 @@ def _turn_control(
         requirements_disclosure=build_requirements_disclosure(
             session_state,
             ui_language=ui_language,
-            discovery_assumptions=discovery_assumptions,
         ),
         confirmed_requirements_version=confirmed_requirements_version,
         ui_language=ui_language,
@@ -153,13 +151,11 @@ def _decision(
     state: PlanningState,
     ui_language: str | None,
     requirements_confirmed: bool = False,
-    discovery_assumptions: tuple[str, ...] = (),
     selected_discovery_question_ids: tuple[str, ...] = (),
 ) -> object:
     disclosure = build_requirements_disclosure(
         state,
         ui_language=ui_language,
-        discovery_assumptions=discovery_assumptions,
     )
     return resolve_turn_control(
         session_state=state,
@@ -209,8 +205,10 @@ def test_a_planned_remaining_of_zero_is_not_a_promise_the_interview_has_ended() 
     )
 
     assert isinstance(before_decision, AskCanonicalQuestion)
-    assert before_decision.slot_name == "terminal_output"
-    assert before_decision.planned_remaining == 0
+    # The purpose is asked before the output that depends on it; the output
+    # question is what stands behind it, and nothing else is queued yet.
+    assert before_decision.slot_name == "post_processing_goal"
+    assert before_decision.planned_remaining == 1
 
     after = _state(primary_runtime_input="json", terminal_output="structured_json")
     after_decision = _decision(
@@ -1692,37 +1690,6 @@ def test_server_confirmation_uses_model_evidence_level_for_summary_bucket() -> N
     assert ("post_processing_goal", "Sammanfatta eller ge överblick") in {
         (row.question_id, row.label) for row in decision.payload.assumption_rows
     }
-
-
-def test_server_confirmation_includes_discovery_assumptions() -> None:
-    state = PlanningState.empty()
-    state.resolved_slots = {
-        "primary_runtime_input": _slot("primary_runtime_input", "documents"),
-        "terminal_output": _slot("terminal_output", "pdf_document"),
-        "document_material_scope": _slot(
-            "document_material_scope",
-            "multiple_documents_case",
-        ),
-        "pdf_generation_mode": _slot("pdf_generation_mode", "generated_pdf"),
-        "report_disposition": _slot(
-            "report_disposition",
-            "per_source_sections",
-        ),
-        "runtime_metadata_fields": _slot(
-            "runtime_metadata_fields",
-            "no_extra_metadata",
-        ),
-    }
-    state.architecture_commit = _finalized_commit_for_state(state)
-
-    decision = _decision(
-        state=state,
-        ui_language="sv",
-        discovery_assumptions=("Rapporten får ett avsnitt per källa.",),
-    )
-
-    assert isinstance(decision, ConfirmRequirements)
-    assert "Rapporten får ett avsnitt per källa." in decision.payload.assumptions
 
 
 def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:

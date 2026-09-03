@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -83,6 +83,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
+    _fit_replayed_requirements,
     build_proposal_prepared,
     prepare_planner_request,
     validate_preprovider_schema_gate,
@@ -359,13 +360,11 @@ def _discovery_analysis(
     *,
     mvs_met: bool = True,
     selected_question_ids: tuple[str, ...] = (),
-    assumptions: tuple[str, ...] = (),
 ) -> DiscoveryAnalysis:
     return DiscoveryAnalysis(
         issues=(),
         mvs_met=mvs_met,
         selected_question_ids=selected_question_ids,
-        assumptions=assumptions,
     )
 
 
@@ -460,12 +459,10 @@ def _requirements_state_confirmed_for(
     state: PlanningState,
     *,
     ui_language: str | None = "en",
-    discovery_assumptions: tuple[str, ...] = (),
 ) -> RequirementsState:
     disclosure = build_requirements_disclosure(
         state,
         ui_language=ui_language,
-        discovery_assumptions=discovery_assumptions,
     )
     decision = resolve_turn_control(
         session_state=state,
@@ -1329,7 +1326,7 @@ def test_prepare_user_question_metadata_rejects_uningestable_structured_answers(
 
 @pytest.mark.parametrize(
     "question_id",
-    ["flow_input_architecture", "final_pdf_type"],
+    ["flow_input_architecture"],
 )
 def test_prepare_user_question_metadata_keeps_supported_non_slot_questions(
     question_id: str,
@@ -3859,7 +3856,7 @@ async def test_resumed_stale_classification_is_rejected_and_rearms_discovery() -
     planner.litellm_client.acompletion.assert_awaited_once()
     assert isinstance(prepared, ServerOutputPrepared)
     assert isinstance(prepared.server_decision, AskCanonicalQuestion)
-    assert prepared.server_decision.slot_name == "primary_runtime_input"
+    assert prepared.server_decision.slot_name == "post_processing_goal"
     assert prepared.slot_classification_metadata is not None
     assert (
         prepared.slot_classification_metadata.schema_version
@@ -4517,73 +4514,6 @@ async def test_a_confirmation_reuses_state_only_under_the_disclosed_policy(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("max_input_tokens", "replays_every_assumption"),
-    [
-        pytest.param(200_000, True, id="the model can carry the whole disclosure"),
-        pytest.param(7_000, False, id="the model cannot"),
-    ],
-)
-async def test_a_confirmed_disclosure_is_replayed_within_the_model_budget(
-    max_input_tokens: int,
-    replays_every_assumption: bool,
-) -> None:
-    """The disclosure is bounded by evidence; the prompt is bounded by the model.
-
-    A confirmed disclosure lists every assumption the user attested to, and a
-    template alone can contribute thousands. Replaying it whole would let a
-    confirmable session become one that cannot produce a proposal at all, so
-    the same budget that fits attachment text decides how much is replayed.
-    """
-
-    planner = _make_planner()
-    state = _document_architecture_state()
-    assumptions = tuple(
-        f"Antagande {index}: {'redovisa varje beslut i en egen tabellrad. ' * 6}"
-        for index in range(40)
-    )
-    disclosure = build_requirements_disclosure(
-        state,
-        ui_language="en",
-        discovery_assumptions=assumptions,
-    )
-    conversation = _confirmation_conversation(disclosure)
-
-    with patch(
-        "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
-        "build_discovery_runtime_result",
-        new_callable=AsyncMock,
-        return_value=_runtime_result(
-            _discovery_analysis(assumptions=assumptions), state
-        ),
-    ):
-        prepared = await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-            attachment_files=[_make_file()],
-            max_input_tokens=max_input_tokens,
-        )
-
-    assert isinstance(prepared, ProposalPrepared)
-    system_prompt = prepared.message_groups[0].messages[0]["content"]
-    assert isinstance(system_prompt, str)
-    assert ("Antagande 39" in system_prompt) is replays_every_assumption
-    assert "Antagande 0:" in system_prompt
-    budget = prepared.request_budget
-    assert budget is not None
-    assert (
-        count_message_tokens(
-            [{"role": "system", "content": system_prompt}],
-            _route().litellm_model,
-        )
-        <= budget.context_window_tokens
-        - budget.preferred_output_tokens(input_tokens=0)
-        - budget.safety_buffer_tokens
-    )
-
-
 @pytest.mark.asyncio
 async def test_a_confirmed_requirement_core_that_cannot_fit_is_rejected() -> None:
     planner = _make_planner()
@@ -4936,3 +4866,74 @@ async def test_an_unchanged_field_list_leaves_the_requirements_alone() -> None:
     assert isinstance(prepared, ServerOutputPrepared)
     assert isinstance(prepared.server_decision, ConfirmRequirements)
     assert prepared.server_decision.payload == shown
+
+
+def _confirmed_disclosure_with_assumption_rows() -> RequirementsSummaryPayload:
+    """A disclosure with two assumption rows of very different length."""
+
+    state = _document_architecture_state()
+    state.mapped_file_limit = MappedFileLimit(
+        proposed_value=20,
+        accepted_value=10,
+        provenance="authored",
+    )
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                name=f"falt_{index}",
+                label=f"Fält {index}",
+                type="select",
+                options=[
+                    f"Antagande {index}: "
+                    f"{'redovisa varje beslut i en egen tabellrad. ' * 6}"
+                ],
+                provenance="user_confirmed",
+            ),
+            purpose="whole_flow",
+            structured_answer_message_id=f"answer-{index}",
+        )
+        for index in range(20)
+    ]
+    disclosure = build_requirements_disclosure(state, ui_language="en")
+    assert len(disclosure.assumptions) >= 2
+    return disclosure
+
+
+def test_replayed_requirements_keep_the_assumptions_that_fit_the_model() -> None:
+    """The disclosure is bounded by evidence; the prompt is bounded by the model.
+
+    A confirmed disclosure lists every assumption the user attested to, and a
+    runtime form alone can contribute paragraphs. Replaying it whole would let
+    a confirmable session become one that cannot produce a proposal at all, so
+    the budget decides how many confirmed assumptions are replayed while the
+    confirmed decisions always stay.
+    """
+
+    disclosure = _confirmed_disclosure_with_assumption_rows()
+
+    def fits_up_to(limit: int) -> Callable[[RequirementsSummaryPayload | None], bool]:
+        return lambda payload: payload is not None and (
+            sum(len(row) for row in payload.assumptions) <= limit
+        )
+
+    whole = _fit_replayed_requirements(disclosure, fits=fits_up_to(10**9))
+    assert whole is disclosure
+
+    trimmed = _fit_replayed_requirements(
+        disclosure, fits=fits_up_to(len(disclosure.assumptions[0]))
+    )
+    assert trimmed is not None
+    assert trimmed.assumptions == disclosure.assumptions[:1]
+    assert trimmed.key_decisions == disclosure.key_decisions
+
+    bare = _fit_replayed_requirements(disclosure, fits=fits_up_to(0))
+    assert bare is not None
+    assert bare.assumptions == []
+    assert bare.key_decisions == disclosure.key_decisions
+
+
+def test_replayed_requirements_whose_core_cannot_fit_are_rejected() -> None:
+    disclosure = _confirmed_disclosure_with_assumption_rows()
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        _fit_replayed_requirements(disclosure, fits=lambda _payload: False)

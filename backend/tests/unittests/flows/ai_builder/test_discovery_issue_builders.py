@@ -10,8 +10,6 @@ from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
     derive_architecture_commit_draft,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    final_output_scope_is_vague,
-    reader_and_style_is_vague,
     ultra_vague_terminal_output_choice_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
@@ -19,7 +17,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_profile_builder import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_conflict_question,
-    processing_scope_question,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.planning_state import (
@@ -70,34 +67,6 @@ def test_swedish_inflected_summary_request_reaches_terminal_output_clarification
     assert ultra_vague_terminal_output_choice_is_vague(profile) is True
 
 
-def test_swedish_inflected_report_reaches_reader_clarification() -> None:
-    profile = build_discovery_profile(
-        [
-            ConversationMessage(
-                role="user",
-                content="Skapa rapporten som docx.",
-                metadata={"ui_language": "sv"},
-            )
-        ]
-    )
-
-    assert reader_and_style_is_vague(profile) is True
-
-
-def test_swedish_inflected_analysis_reaches_output_scope_clarification() -> None:
-    profile = build_discovery_profile(
-        [
-            ConversationMessage(
-                role="user",
-                content="Skapa analysen som docx.",
-                metadata={"ui_language": "sv"},
-            )
-        ]
-    )
-
-    assert final_output_scope_is_vague(profile) is True
-
-
 def test_json_comparison_request_does_not_ask_document_comparison_scope() -> None:
     state = PlanningState.empty()
     state.resolved_slots = {
@@ -130,7 +99,6 @@ def test_json_comparison_request_does_not_ask_document_comparison_scope() -> Non
 
 
 def test_fixed_discovery_questions_do_not_advertise_custom_answers() -> None:
-    assert processing_scope_question("en").allow_custom is False
     assert comparison_scope_conflict_question("en").allow_custom is False
 
 

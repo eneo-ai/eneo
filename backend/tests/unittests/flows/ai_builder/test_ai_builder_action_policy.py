@@ -435,7 +435,9 @@ def test_policy_keeps_selected_comparison_question_askable() -> None:
     assert policy.allowed_ask_question_targets == ("comparison_scope",)
 
 
-def test_policy_keeps_earlier_discovery_ahead_of_purpose_first_repositioning() -> None:
+def test_policy_orders_every_ask_by_the_interaction_table() -> None:
+    # Discovery's questions and the core gaps share one order: the purpose
+    # before the input and output that depend on it, quality slots last.
     policy = build_planner_action_policy(
         session_state=PlanningState.empty(),
         selected_discovery_question_ids=(
@@ -445,10 +447,10 @@ def test_policy_keeps_earlier_discovery_ahead_of_purpose_first_repositioning() -
     )
 
     assert policy.allowed_ask_question_targets == (
-        "runtime_metadata_fields",
         "post_processing_goal",
         "primary_runtime_input",
         "terminal_output",
+        "runtime_metadata_fields",
     )
 
 
