@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     chosen_input_question_ids,
     chosen_primary_runtime_input,
+    complete_planning_state,
 )
 from eneo.flows.domain.flow import Flow
 
@@ -215,10 +216,12 @@ def build_discovery_profile(
         if active_window is not None and active_window.start_index is not None
         else conversation
     )
-    planning_state = planning_state or build_planning_state_from_conversation(
-        active_conversation,
-        flow=flow,
-    )
+    if planning_state is None:
+        planning_state = build_planning_state_from_conversation(
+            active_conversation,
+            flow=flow,
+        )
+        complete_planning_state(planning_state, freeform_text=full_text)
     canonical_planning_state_answers = answer_signals_from_planning_state(
         planning_state,
         accepted_sources=_ACTIVE_REQUEST_ANSWER_SOURCES,

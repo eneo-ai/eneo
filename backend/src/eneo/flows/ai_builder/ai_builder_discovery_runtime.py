@@ -85,13 +85,12 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     apply_model_blocked_slots,
-    apply_policy_defaults_from_resolved_slots,
     attested_slots_without_newer_evidence,
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
+    complete_planning_state,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
-    resolve_docx_mode_from_template_evidence,
 )
 from eneo.flows.domain.flow import Flow
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
@@ -453,11 +452,7 @@ async def classify_question_slot_once(
         prompt_hash=prompt_hash,
         freeform_text=freeform_text,
     )
-    resolve_docx_mode_from_template_evidence(state)
-    apply_policy_defaults_from_resolved_slots(
-        state,
-        freeform_text=freeform_text,
-    )
+    complete_planning_state(state, freeform_text=freeform_text)
     metadata = slot_classification_metadata_from_attempt(
         SlotClassificationAttempt(outcome="resolved", result=focused_result),
         prompt_hash=prompt_hash,
@@ -635,8 +630,7 @@ def _complete_runtime_discovery_context(
     # defaults. Classification can name the terminal output, the template
     # role, or both in this same turn, so the template evidence is only
     # complete now, before defaults fill a mode the attachment already answers.
-    resolve_docx_mode_from_template_evidence(state)
-    apply_policy_defaults_from_resolved_slots(state, freeform_text=freeform_text)
+    complete_planning_state(state, freeform_text=freeform_text)
     if not schema_direction_pending:
         state = _apply_attachment_output_evidence(state, attachment_context)
     return RuntimeDiscoveryContext(

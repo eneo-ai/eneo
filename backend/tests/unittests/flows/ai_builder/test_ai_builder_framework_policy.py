@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    complete_planning_state,
 )
 from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 from eneo.flows.domain.flow import Flow, FlowStep
@@ -174,7 +175,7 @@ def test_resolve_output_intent_allows_later_freeform_output_clarification() -> N
     )
 
     assert output.terminal_output == "docx_document"
-    assert output.docx_output_mode == "generated_docx"
+    assert output.docx_output_mode is None  # the policy assumes the mode
     assert not terminal_output_uncertainty_is_unresolved(
         text,
         extract_answer_signals(conversation),
@@ -268,38 +269,38 @@ def test_resolve_output_intent_keeps_swedish_artifact_uploads_as_input_only(
         (
             "Användaren laddar upp ett underlag. I slutändan skapas ett worddokument som output.",
             "docx_document",
-            "generated_docx",
+            None,
             None,
         ),
         (
             "Användaren laddar upp ett underlag. I slutändan skapas en wordfil som output.",
             "docx_document",
-            "generated_docx",
+            None,
             None,
         ),
         (
             "Användaren laddar upp ett underlag. I slutändan skapas ett docxdokument som output.",
             "docx_document",
-            "generated_docx",
+            None,
             None,
         ),
         (
             "Användaren laddar upp ett underlag. Slutresultatet ska vara ett pdfdokument.",
             "pdf_document",
             None,
-            "generated_pdf",
+            None,
         ),
         (
             "Användaren laddar upp ett underlag. Slutresultatet ska vara en pdffil.",
             "pdf_document",
             None,
-            "generated_pdf",
+            None,
         ),
         (
             "Användaren laddar upp ett underlag. I slutändan skapas en pdfrapport som output.",
             "pdf_document",
             None,
-            "generated_pdf",
+            None,
         ),
     ],
 )
@@ -332,7 +333,7 @@ def test_resolve_output_intent_handles_exact_swedish_word_input_and_output_promp
     )
 
     assert output.terminal_output == "docx_document"
-    assert output.docx_output_mode == "generated_docx"
+    assert output.docx_output_mode is None  # the policy assumes the mode
     assert output.pdf_generation_mode is None
 
 
@@ -469,7 +470,7 @@ def test_resolve_output_intent_defaults_generic_docx_prompt_to_generated_docx() 
     intent = resolve_output_intent(prompt, signals)
 
     assert intent.terminal_output == "docx_document"
-    assert intent.docx_output_mode == "generated_docx"
+    assert intent.docx_output_mode is None  # the policy assumes the mode
     assert intent.pdf_generation_mode is None
 
 
@@ -606,7 +607,7 @@ def test_resolve_docx_output_mode_defaults_when_docx_is_selected_via_structured_
         explicit_output="docx_document",
     )
 
-    assert mode == "generated_docx"
+    assert mode is None  # nothing stated: the policy assumes generated_docx
 
 
 def test_resolve_output_intent_detects_pdf_template_expectation_without_docx_mode() -> (
@@ -647,7 +648,7 @@ def test_resolve_pdf_generation_mode_defaults_when_pdf_is_selected_via_structure
         explicit_output="pdf_document",
     )
 
-    assert mode == "generated_pdf"
+    assert mode is None  # nothing stated: the policy assumes generated_pdf
 
 
 def test_resolve_output_intent_defaults_generic_pdf_prompt_to_generated_pdf() -> None:
@@ -657,7 +658,7 @@ def test_resolve_output_intent_defaults_generic_pdf_prompt_to_generated_pdf() ->
     intent = resolve_output_intent(prompt, signals)
 
     assert intent.terminal_output == "pdf_document"
-    assert intent.pdf_generation_mode == "generated_pdf"
+    assert intent.pdf_generation_mode is None  # the policy assumes the mode
 
 
 def test_resolve_output_intent_defaults_report_like_prompt_to_structured_text() -> None:
@@ -1374,6 +1375,7 @@ def test_planning_state_marks_explicit_freeform_terminal_output_high_confidence(
             )
         ],
     )
+    complete_planning_state(state, freeform_text="")
 
     terminal_output = state.resolved_slots["terminal_output"]
     docx_output_mode = state.resolved_slots["docx_output_mode"]
@@ -1664,7 +1666,7 @@ def test_swedish_audio_review_docx_request_keeps_docx_despite_intermediate_json(
     )
 
     assert intent.terminal_output == "docx_document"
-    assert intent.docx_output_mode == "generated_docx"
+    assert intent.docx_output_mode is None  # the policy assumes the mode
 
 
 def test_intermediate_json_extraction_with_final_pdf_keeps_pdf() -> None:

@@ -494,7 +494,7 @@ def test_raw_text_fills_missing_docx_submode_below_typed_terminal_output() -> No
 
     assert profile.input_intent.primary_runtime_input == "documents"
     assert profile.output_intent.terminal_output == "docx_document"
-    assert profile.output_intent.docx_output_mode == "generated_docx"
+    assert profile.output_intent.docx_output_mode is None  # the policy assumes the mode
 
 
 def test_typed_docx_submode_overrides_conflicting_raw_generation_detail() -> None:

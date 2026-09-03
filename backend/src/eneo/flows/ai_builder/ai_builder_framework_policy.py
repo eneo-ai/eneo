@@ -795,17 +795,14 @@ def resolve_docx_output_mode(
     if not has_docx_context:
         if _looks_like_docx_template_fill_terminal_output(scoped_text.full_text):
             return "template_fill_docx"
-        return (
-            "generated_docx"
-            if "docx_document" in answer_signals.get("terminal_output", set())
-            else None
-        )
+        return None
 
     if contains_any_phrase(output_text, DOCX_GENERATED_MODE_MARKERS):
         return "generated_docx"
     if contains_any_phrase(output_text, DOCX_TEMPLATE_MODE_MARKERS):
         return "template_fill_docx"
-    return "generated_docx"
+    # Nothing stated: the interaction policy assumes the mode, not this reader.
+    return None
 
 
 def has_explicit_docx_mode_text(text: str) -> bool:
@@ -855,7 +852,8 @@ def resolve_pdf_generation_mode(
         return "generated_pdf"
     if _looks_like_pdf_template_expectation(output_text):
         return "pdf_template_requested"
-    return "generated_pdf"
+    # Nothing stated: the interaction policy assumes the mode, not this reader.
+    return None
 
 
 def resolve_output_intent(

@@ -14,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    complete_planning_state,
 )
 
 
@@ -128,10 +129,19 @@ def test_docx_output_deterministic_slots(
     ]
 
     state = build_planning_state_from_conversation(conversation)
+    complete_planning_state(state, freeform_text=prompt)
 
-    assert [
+    actual = sorted(
         (slot.name, slot.value, slot.source) for slot in state.resolved_slots.values()
-    ] == expected_slots
+    )
+    # Every reading the prompt produced is golden; the defaults the policy
+    # writes beside them are checked by membership, since the writer takes
+    # every assumable slot (comparison scope, runtime metadata) and the
+    # golden names only the ones this prompt is about.
+    assert [row for row in actual if row[2] != "policy_default"] == sorted(
+        row for row in expected_slots if row[2] != "policy_default"
+    )
+    assert {row for row in expected_slots if row[2] == "policy_default"} <= set(actual)
 
 
 def test_generated_docx_without_template_excludes_docx_mode_question() -> None:
