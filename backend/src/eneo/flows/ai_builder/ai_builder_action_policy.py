@@ -307,7 +307,7 @@ def _ordered_ask_targets(
     architecture_required_slots: frozenset[str],
     commit_grade_slot_names: frozenset[str],
 ) -> tuple[str, ...]:
-    """Order hard core gaps and discovery-selected questions in one place."""
+    """Order hard core gaps and discovery-selected questions by one table."""
 
     selected: list[str] = []
     seen: set[str] = set()
@@ -328,38 +328,19 @@ def _ordered_ask_targets(
         selected.append(target)
         seen.add(target)
 
-    missing_core: list[str] = []
-    for raw_target in architecture_required_slots:
+    for raw_target in sorted(architecture_required_slots):
         target = normalized_target(raw_target)
-        if target is not None and target not in seen:
-            missing_core.append(target)
-    missing_core.sort(
+        if target is None or target in seen:
+            continue
+        selected.append(target)
+        seen.add(target)
+    # One order for gaps and discovery questions alike: the interaction policy
+    # table, which puts the purpose before the input and output questions that
+    # depend on it and every hard gate before any slot.
+    ordered = sorted(
+        selected,
         key=lambda target: (discovery_issue_priority(target), target),
     )
-    ordered = missing_core + [
-        target for target in selected if target not in missing_core
-    ]
-    # Purpose-first applies only across the input/output questions whose answer
-    # depends on that purpose. Other earlier discovery questions keep their
-    # position, including blockers ranked ahead of purpose upstream.
-    if "post_processing_goal" in ordered:
-        purpose_index = ordered.index("post_processing_goal")
-        purpose_dependent_before = [
-            target
-            for target in ordered[:purpose_index]
-            if target
-            in {
-                "primary_runtime_input",
-                "terminal_output",
-                "structured_io_contract",
-            }
-        ]
-        if purpose_dependent_before:
-            ordered = [
-                target for target in ordered if target not in purpose_dependent_before
-            ]
-            purpose_index = ordered.index("post_processing_goal")
-            ordered[purpose_index + 1 : purpose_index + 1] = purpose_dependent_before
     return tuple(ordered)
 
 

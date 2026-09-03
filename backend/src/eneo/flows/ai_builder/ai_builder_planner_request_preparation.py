@@ -349,7 +349,6 @@ async def prepare_planner_request(
         requirements_disclosure = build_requirements_disclosure(
             rebuilt_planning_state,
             ui_language=ui_language,
-            discovery_assumptions=discovery_analysis.assumptions,
             is_edit_mode=request.flow is not None,
         )
 

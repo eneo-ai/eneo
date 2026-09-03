@@ -301,7 +301,9 @@ def test_answering_a_reopened_question_replaces_the_assumption_and_moves_version
     apply_policy_defaults_from_resolved_slots(assumed, freeform_text="")
     before = build_requirements_disclosure(assumed, ui_language="en")
     assert [row.question_id for row in before.assumption_rows] == [
-        "document_material_scope"
+        "comparison_scope",
+        "document_material_scope",
+        "runtime_metadata_fields",
     ]
 
     conversation = [
@@ -367,7 +369,9 @@ def test_confirming_the_card_accepts_its_assumptions_as_the_users_answer() -> No
     apply_policy_defaults_from_resolved_slots(assumed, freeform_text="")
     disclosed = build_requirements_disclosure(assumed, ui_language="en")
     assert [row.question_id for row in disclosed.assumption_rows] == [
-        "document_material_scope"
+        "comparison_scope",
+        "document_material_scope",
+        "runtime_metadata_fields",
     ]
 
     confirmed = assumed.model_copy(deep=True)

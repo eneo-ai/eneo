@@ -7,12 +7,6 @@ from typing import Final
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
     comparison_scope_is_relevant,
 )
-from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
-    derive_architecture_commit_draft,
-)
-from eneo.flows.ai_builder.ai_builder_commit_invariance import (
-    architecture_commit_draft_matches_pinned,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
     apply_discovery_decision_engine,
 )
@@ -26,16 +20,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     external_delivery_requested as _external_delivery_requested,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    final_output_scope_is_vague as _final_output_scope_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    final_pdf_type_is_vague as _final_pdf_type_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     has_same_run_comparison_contradiction as _has_same_run_comparison_contradiction,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    looks_like_case_scope_is_vague as _looks_like_case_scope_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     mixed_input_architecture_is_vague as _mixed_input_architecture_is_vague,
@@ -54,9 +39,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     question_category as _question_category,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    reader_and_style_is_vague as _reader_and_style_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     runtime_metadata_is_vague as _runtime_metadata_is_vague,
@@ -93,15 +75,11 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     document_material_scope_question,
     docx_output_mode_question,
     external_delivery_internal_output_question,
-    final_output_scope_question,
-    final_pdf_type_question,
     flow_input_architecture_question,
     localized_text,
-    output_reader_question,
     pdf_generation_mode_question,
     post_processing_goal_question,
     primary_runtime_input_question,
-    processing_scope_question,
     question_suggestion_for_id,
     runtime_metadata_fields_question,
     structured_io_contract_question,
@@ -127,9 +105,12 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationResult,
     first_user_owned_quoted_text,
 )
+from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
+    SLOT_INTERACTION_POLICIES,
+    evaluate_slot_interaction,
+)
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.domain.flow import Flow
-from eneo.flows.enums import FlowAuthoringInputType
 
 DiscoveryIssueBuilder = Callable[
     [list[ConversationMessage], DiscoveryProfile], DiscoveryIssue | None
@@ -154,11 +135,11 @@ def analyze_discovery(
         profile,
         slot_classification_result=slot_classification_result,
     )
-    if (
-        planning_state is not None
-        and _mapped_file_limit_is_relevant(planning_state)
-        and planning_state.mapped_file_limit.proposed_value is not None
-        and planning_state.mapped_file_limit.accepted_value is None
+    if planning_state is not None and (
+        evaluate_slot_interaction(
+            SLOT_INTERACTION_POLICIES["mapped_file_limit"], planning_state
+        )
+        == "ask"
     ):
         suggestion = question_suggestion_for_id(
             "mapped_file_limit", language=profile.language
@@ -227,36 +208,24 @@ def analyze_discovery(
                         )
                     )
 
-    (
-        selected_issues,
-        assumptions,
-        selected_question_ids,
-    ) = _apply_discovery_decision_engine(
+    selected_issues, selected_question_ids = apply_discovery_decision_engine(
         issues=_dedupe_issues(raw_issues),
         profile=profile,
-        conversation=conversation,
-        slot_classification_result=slot_classification_result,
+        # Free discovery until the brief gives discovery anything to work with:
+        # an edit, an answer, a slot the text resolved, or an issue it raised.
+        slot_questions_allowed=(
+            profile.edit_mode
+            or bool(profile.answers)
+            or bool(profile.planning_state.resolved_slots)
+            or bool(raw_issues)
+        ),
     )
 
     return DiscoveryAnalysis(
         issues=tuple(selected_issues),
         mvs_met=mvs_met,
         selected_question_ids=tuple(selected_question_ids),
-        assumptions=tuple(assumptions),
     )
-
-
-def _mapped_file_limit_is_relevant(planning_state: PlanningState) -> bool:
-    current_draft = derive_architecture_commit_draft(planning_state)
-    if current_draft is None or not architecture_commit_draft_matches_pinned(
-        before=planning_state.architecture_commit,
-        after=current_draft,
-    ):
-        return False
-    return current_draft.tuples_chain[0].input_type in {
-        FlowAuthoringInputType.DOCUMENT,
-        FlowAuthoringInputType.FILE,
-    }
 
 
 def _mapped_file_limit_message(planning_state: PlanningState) -> tuple[str, str]:
@@ -358,26 +327,6 @@ def _build_comparison_scope_conflict_issue(
         ),
         suggestion=comparison_scope_conflict_question(profile.language),
         question_level="blocking",
-    )
-
-
-def _build_case_scope_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _looks_like_case_scope_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="case_scope",
-        category="scope",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart vilket omfång varje körning ska ha.",
-            "The flow scope per run is still unclear.",
-        ),
-        suggestion=processing_scope_question(profile.language),
-        question_level="high_value",
     )
 
 
@@ -613,66 +562,6 @@ def _build_pdf_generation_mode_issue(
     )
 
 
-def _build_output_reader_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _reader_and_style_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="output_reader",
-        category="output",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart vem som främst ska läsa slutresultatet och vilken ton det bör ha.",
-            "The main reader and tone of the final output are still unclear.",
-        ),
-        suggestion=output_reader_question(profile.language),
-        question_level="nice_to_have",
-    )
-
-
-def _build_final_output_scope_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _final_output_scope_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="final_output_scope",
-        category="output",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart hur detaljerat slutresultatet ska vara.",
-            "The level of detail in the final output is still unclear.",
-        ),
-        suggestion=final_output_scope_question(profile.language),
-        question_level="nice_to_have",
-    )
-
-
-def _build_final_pdf_type_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _final_pdf_type_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="final_pdf_type",
-        category="output",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart vilken typ av PDF användaren vill ha som slutresultat.",
-            "The style of the final PDF output is still unclear.",
-        ),
-        suggestion=final_pdf_type_question(profile.language),
-        question_level="high_value",
-    )
-
-
 def _build_runtime_metadata_fields_issue(
     conversation: list[ConversationMessage],
     profile: DiscoveryProfile,
@@ -695,7 +584,6 @@ def _build_runtime_metadata_fields_issue(
 
 _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_comparison_scope_conflict_issue,
-    _build_case_scope_issue,
     _build_primary_runtime_input_issue,
     _build_flow_input_architecture_issue,
     _build_document_material_scope_issue,
@@ -705,9 +593,6 @@ _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_terminal_output_issue,
     _build_docx_output_mode_issue,
     _build_pdf_generation_mode_issue,
-    _build_output_reader_issue,
-    _build_final_output_scope_issue,
-    _build_final_pdf_type_issue,
     _build_runtime_metadata_fields_issue,
 )
 
@@ -901,24 +786,6 @@ def build_discovery_followup_text(
             "Jag behöver förstå hur användaren ska lämna underlag vid körning innan jag går vidare.",
             "I need to understand how the user should provide material at runtime before I continue.",
         )
-    if issue.issue_id == "output_reader":
-        return localized_text(
-            language,
-            "Jag behöver förstå vem slutresultatet främst är till för innan jag kan sammanfatta lösningen.",
-            "I need to understand who the final output is primarily for before I can summarize the solution.",
-        )
-    if issue.issue_id == "final_output_scope":
-        return localized_text(
-            language,
-            "Jag behöver förstå hur detaljerat slutresultatet ska vara innan jag kan sammanfatta lösningen.",
-            "I need to understand how detailed the final output should be before I can summarize the solution.",
-        )
-    if issue.issue_id == "final_pdf_type":
-        return localized_text(
-            language,
-            "Jag behöver förstå vilken typ av slut-PDF användaren vill ha innan jag kan sammanfatta lösningen.",
-            "I need to understand what kind of final PDF the user wants before I can summarize the solution.",
-        )
     if issue.issue_id == "post_processing_goal":
         return localized_text(
             language,
@@ -989,22 +856,3 @@ def _has_mvs_output(profile: DiscoveryProfile) -> bool:
 
 def _has_mvs_purpose(profile: DiscoveryProfile) -> bool:
     return profile.comparison_requested or _expresses_task_intent(profile.text)
-
-
-def _apply_discovery_decision_engine(
-    *,
-    issues: list[DiscoveryIssue],
-    profile: DiscoveryProfile,
-    conversation: list[ConversationMessage],
-    slot_classification_result: SlotClassificationResult | None,
-) -> tuple[
-    list[DiscoveryIssue],
-    list[str],
-    list[str],
-]:
-    return apply_discovery_decision_engine(
-        issues=issues,
-        profile=profile,
-        conversation=conversation,
-        slot_classification_result=slot_classification_result,
-    )

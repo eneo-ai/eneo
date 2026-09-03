@@ -2369,15 +2369,17 @@ class TestSendMessageStructuredQuestion:
         ]
         assert len(summary_events) == 1
         summary = json.loads(summary_events[0]["data"])
-        expected_assumption = (
-            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
-            "du kan lägga till dem innan du bekräftar."
-        )
-        assert expected_assumption in summary["assumptions"]
+        # The runtime-form default is a typed assumption row, reopenable on the
+        # card, not a sentence in the prose list.
+        assert [row["question_id"] for row in summary["assumption_rows"]].count(
+            "runtime_metadata_fields"
+        ) == 1
 
         persisted_messages = repo.commit_turn.await_args.kwargs["new_messages"]
         persisted_summary = persisted_messages[-1].metadata["requirements_summary"]
-        assert expected_assumption in persisted_summary["assumptions"]
+        assert "runtime_metadata_fields" in [
+            row["question_id"] for row in persisted_summary["assumption_rows"]
+        ]
 
     @pytest.mark.anyio
     async def test_duplicate_output_question_alias_is_suppressed_without_fallback(

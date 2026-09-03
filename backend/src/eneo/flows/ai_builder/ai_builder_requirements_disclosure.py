@@ -111,7 +111,6 @@ def build_requirements_disclosure(
     session_state: PlanningState,
     *,
     ui_language: str | None,
-    discovery_assumptions: tuple[str, ...] = (),
     is_edit_mode: bool = False,
 ) -> RequirementsSummaryPayload:
     """Render the complete disclosure and stamp the version that hashes it."""
@@ -120,7 +119,6 @@ def build_requirements_disclosure(
     identity = _disclosure_content(
         session_state,
         locale,
-        discovery_assumptions,
         render_value=_whole_evidence_value,
         is_edit_mode=is_edit_mode,
         include_named_content_details=True,
@@ -128,7 +126,6 @@ def build_requirements_disclosure(
     display = _disclosure_content(
         session_state,
         locale,
-        discovery_assumptions,
         render_value=render_ai_builder_evidence_value,
         is_edit_mode=is_edit_mode,
         include_named_content_details=False,
@@ -220,7 +217,6 @@ def _named_content_fields(
 def _disclosure_content(
     session_state: PlanningState,
     locale: Locale,
-    discovery_assumptions: tuple[str, ...],
     *,
     render_value: RenderEvidenceValue,
     is_edit_mode: bool,
@@ -283,7 +279,6 @@ def _disclosure_content(
                 if not _slot_is_key_decision(resolved[slot_name])
                 and slot_name not in QUESTION_CATALOG
             ],
-            *discovery_assumptions,
             *_runtime_input_field_assumptions(
                 session_state, locale, render_value=render_value
             ),

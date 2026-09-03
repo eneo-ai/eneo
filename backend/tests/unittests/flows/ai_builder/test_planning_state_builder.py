@@ -7039,3 +7039,74 @@ def test_only_a_complete_card_edit_reference_carries_card_provenance(
         ).origin
         == "described"
     )
+
+
+class TestModelOfferProjection:
+    """What the classifier is offered is judged against what it may change."""
+
+    def test_a_replaceable_scope_guess_keeps_report_disposition_on_offer(self) -> None:
+        # A heuristic single-document scope would rule the disposition out, but
+        # a high-confidence call may replace that guess, so the disposition is
+        # offered alongside it. This was the observed miss: the classifier was
+        # never asked about a disposition the user had described.
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="structured_answer",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="pdf_document",
+                source="structured_answer",
+            ),
+            "document_material_scope": _slot(
+                name="document_material_scope",
+                value="single_document_case",
+                source="heuristic",
+                confidence="medium",
+            ),
+        }
+
+        assert "report_disposition" in llm_resolvable_slot_values_for_state(state)
+
+    def test_a_protected_audio_answer_keeps_document_slots_off_the_offer(self) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="audio",
+                source="structured_answer",
+            ),
+        }
+
+        offered = llm_resolvable_slot_values_for_state(state)
+
+        assert "comparison_scope" not in offered
+        assert "document_material_scope" not in offered
+        assert "report_disposition" not in offered
+
+    def test_a_template_fill_decision_keeps_report_disposition_off_the_offer(
+        self,
+    ) -> None:
+        state = _state()
+        state.resolved_slots = {
+            "primary_runtime_input": _slot(
+                name="primary_runtime_input",
+                value="documents",
+                source="structured_answer",
+            ),
+            "terminal_output": _slot(
+                name="terminal_output",
+                value="docx_document",
+                source="structured_answer",
+            ),
+            "docx_output_mode": _slot(
+                name="docx_output_mode",
+                value="template_fill_docx",
+                source="attachment_structure",
+            ),
+        }
+
+        assert "report_disposition" not in llm_resolvable_slot_values_for_state(state)

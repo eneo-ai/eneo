@@ -3,10 +3,6 @@ from __future__ import annotations
 import re
 from typing import Final
 
-from eneo.flows.ai_builder.ai_builder_discovery_decision_engine import (
-    implies_single_case,
-    implies_single_primary_document,
-)
 from eneo.flows.ai_builder.ai_builder_discovery_families import (
     family_for_issue,
 )
@@ -38,10 +34,36 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 EXTERNAL_DELIVERY_UNSUPPORTED_ISSUE_ID: Final = "external_delivery_unsupported"
 
 
+def implies_single_primary_document(text: str) -> bool:
+    if contains_any_phrase(
+        text,
+        (
+            "flera dokument",
+            "multiple documents",
+            "several documents",
+            "document package",
+            "dokumentpaket",
+        ),
+    ):
+        return False
+    return contains_any_phrase(
+        text,
+        (
+            "underlag som pdf",
+            "ett huvuddokument",
+            "ett dokument",
+            "en pdf",
+            "one document",
+            "one pdf",
+            "uploaded pdf",
+        ),
+    )
+
+
 def question_category(question_id: str) -> str:
     return {
-        "processing_scope": "scope",
         "primary_runtime_input": "input",
+        "mapped_file_limit": "input",
         "flow_input_architecture": "input",
         "document_material_scope": "input",
         "post_processing_goal": "outcome",
@@ -50,8 +72,7 @@ def question_category(question_id: str) -> str:
         "terminal_output": "output",
         "docx_output_mode": "output",
         "pdf_generation_mode": "output",
-        "output_reader": "output",
-        "final_output_scope": "output",
+        "report_disposition": "output",
         "runtime_metadata_fields": "input",
     }.get(question_id, "output")
 
@@ -96,35 +117,6 @@ def _family_inactive(profile: DiscoveryProfile, question_id: str) -> bool:
     if family is None:
         return False
     return family not in profile.edit_scope.active_families
-
-
-def looks_like_case_scope_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "processing_scope"):
-        return False
-    text = profile.text
-    answers = profile.answers
-    if "processing_scope" in answers:
-        return False
-    if contains_any_phrase(
-        text,
-        ("one case at a time", "en fil per körning", "ett ärende", "single case"),
-    ):
-        return False
-    if implies_single_case(text):
-        return False
-    if contains_any_phrase(text, ("multiple cases", "flera ärenden", "several cases")):
-        return False
-    return contains_any_phrase(
-        text,
-        (
-            "case material",
-            "case package",
-            "official material",
-            "case files",
-            "kommunärende",
-            "municipal case",
-        ),
-    )
 
 
 def primary_runtime_input_is_vague(profile: DiscoveryProfile) -> bool:
@@ -413,8 +405,6 @@ def document_cardinality_is_vague(profile: DiscoveryProfile) -> bool:
         return False
     if "comparison_scope" in answers:
         return False
-    if "processing_scope" in answers and "single_case" in answers["processing_scope"]:
-        return False
     if contains_any_phrase(
         text,
         (
@@ -445,161 +435,6 @@ def mixed_input_architecture_is_vague(profile: DiscoveryProfile) -> bool:
     return profile.input_intent.needs_architecture_clarification
 
 
-def reader_and_style_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "output_reader"):
-        return False
-    if not profile.final_output_text_or_docx:
-        return False
-    answers = profile.answers
-    text = profile.text
-    if any(key in answers for key in ("output_reader", "output_style", "output_tone")):
-        return False
-    if contains_any_phrase(
-        text,
-        (
-            "chef",
-            "manager",
-            "politiker",
-            "politician",
-            "analyst",
-            "analytiker",
-            "specialist",
-            "public",
-            "allmänhet",
-        ),
-    ):
-        return False
-    if profile.edit_mode and not contains_any_phrase(
-        text,
-        (
-            "målgrupp",
-            "audience",
-            "reader",
-            "läsare",
-            "ton",
-            "tone",
-            "formal",
-            "saklig",
-        ),
-    ):
-        return False
-    return contains_any_phrase(
-        text,
-        (
-            "report",
-            "reports",
-            "rapport",
-            "rapporten",
-            "rapporter",
-            "rapporterna",
-            "memo",
-        ),
-    )
-
-
-def final_output_scope_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "final_output_scope"):
-        return False
-    if not profile.final_output_text_or_docx:
-        return False
-    answers = profile.answers
-    text = profile.text
-    if any(
-        key in answers
-        for key in (
-            "final_output_scope",
-            "output_style",
-            "detail_level",
-            "final_pdf_type",
-        )
-    ):
-        return False
-    if contains_any_phrase(
-        text,
-        (
-            "summary only",
-            "sammanfattning",
-            "recommendation",
-            "rekommendation",
-            "assessment",
-            "bedömning",
-            "sections",
-            "sektioner",
-        ),
-    ):
-        return False
-    if profile.edit_mode and not contains_any_phrase(
-        text,
-        (
-            "kortare",
-            "längre",
-            "summary only",
-            "bara sammanfattning",
-            "sections",
-            "sektioner",
-            "more detail",
-            "mer detaljerad",
-            "less detail",
-            "mindre detaljerad",
-            "expand",
-            "shorten",
-        ),
-    ):
-        return False
-    return contains_any_phrase(
-        text,
-        (
-            "report",
-            "reports",
-            "rapport",
-            "rapporten",
-            "rapporter",
-            "rapporterna",
-            "memo",
-            "analys",
-            "analysen",
-            "analyser",
-            "analysera",
-            "analyserar",
-            "analysis",
-            "analyses",
-            "översikt",
-            "overview",
-            "brief",
-            "notat",
-            "utlåtande",
-        ),
-    )
-
-
-def final_pdf_type_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "final_pdf_type"):
-        return False
-    answers = profile.answers
-    text = profile.text
-    if "final_pdf_type" in answers:
-        return False
-    if "terminal_output" in answers:
-        return False
-    output_choice = profile.output_intent.terminal_output
-    if output_choice != "pdf_document":
-        return False
-    if contains_any_phrase(
-        text,
-        (
-            "kort sammanfattning",
-            "structured report",
-            "strukturerad rapport",
-            "faktalista",
-            "punktlista",
-            "key points",
-            "bullet",
-        ),
-    ):
-        return False
-    return True
-
-
 def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
     if _family_inactive(profile, "runtime_metadata_fields"):
         return False
@@ -622,8 +457,6 @@ def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
 
 
 def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
-    if looks_like_case_scope_is_vague(profile):
-        return False
     if primary_runtime_input_is_vague(profile):
         return False
     if profile.input_intent.needs_architecture_clarification:
@@ -644,7 +477,5 @@ def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
     if needs_docx_mode_choice(profile):
         return False
     if needs_pdf_generation_mode_choice(profile):
-        return False
-    if final_pdf_type_is_vague(profile):
         return False
     return True

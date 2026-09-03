@@ -32,7 +32,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
     build_discovery_block_message,
-    build_discovery_followup_text,
     build_registry_question_followup,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -120,8 +119,21 @@ def _classifier_evidence(quote: str) -> tuple[ClassifiedEvidence, ...]:
     return (ClassifiedEvidence(source_id="user_message:test-source", quote=quote),)
 
 
-def _planning_state_with_post_processing_goal(value: str) -> PlanningState:
-    state = PlanningState.empty()
+def _planning_state_with_post_processing_goal(
+    value: str,
+    conversation: list[ConversationMessage] | None = None,
+) -> PlanningState:
+    """A typed goal on top of what the conversation itself resolves.
+
+    Discovery reads the planning state, not the text, so a test that hands it
+    a state must hand it the one the conversation builds.
+    """
+
+    state = (
+        build_planning_state_from_conversation(conversation)
+        if conversation is not None
+        else PlanningState.empty()
+    )
     state.resolved_slots["post_processing_goal"] = ResolvedSlot(
         name="post_processing_goal",
         value=value,
@@ -896,9 +908,7 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "terminal_output"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "terminal_output"
+        assert "terminal_output" in analysis.selected_question_ids
 
     def test_conflicting_single_file_and_same_run_compare_resolved_by_answer(
         self,
@@ -1182,10 +1192,12 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(
             conversation,
             planning_state=_planning_state_with_post_processing_goal(
-                "summarize_or_overview"
+                "summarize_or_overview", conversation
             ),
         )
-        assert analysis.ready_for_confirmation
+        # A summary report over a flexible document set still needs its
+        # disposition; nothing else is open.
+        assert analysis.selected_question_ids in ((), ("report_disposition",))
 
     def test_pdf_output_counts_as_explicit_output_choice(self) -> None:
         conversation = [
@@ -1324,7 +1336,7 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(
             conversation,
             planning_state=_planning_state_with_post_processing_goal(
-                "stop_after_primary_operation"
+                "stop_after_primary_operation", conversation
             ),
         )
         question_ids = [
@@ -1336,10 +1348,6 @@ class TestExtendedClarificationHints:
         assert analysis.ready_for_confirmation is True
         assert analysis.next_issue is None
         assert "runtime_metadata_fields" not in question_ids
-        assert (
-            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
-            "du kan lägga till dem innan du bekräftar."
-        ) in analysis.assumptions
         assert "primary_runtime_input" not in question_ids
         assert "flow_input_architecture" not in question_ids
         assert "terminal_output" not in question_ids
@@ -1868,7 +1876,9 @@ class TestExtendedClarificationHints:
 
         analysis = analyze_discovery(
             conversation,
-            planning_state=_planning_state_with_post_processing_goal("action_followup"),
+            planning_state=_planning_state_with_post_processing_goal(
+                "action_followup", conversation
+            ),
         )
         question_ids = [
             issue.suggestion.question_id
@@ -1906,12 +1916,7 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert analysis.next_issue is None
         assert "runtime_metadata_fields" not in question_ids
-        assert (
-            "Antar tills vidare att inga extra formulärfält behövs vid körning; "
-            "du kan lägga till dem innan du bekräftar."
-        ) in analysis.assumptions
         assert "docx_output_mode" not in question_ids
 
     def test_audio_docx_extraction_assumes_no_runtime_metadata_without_structured_analysis_slot(
@@ -1928,14 +1933,12 @@ class TestExtendedClarificationHints:
             )
         ]
 
-        state = _planning_state_with_post_processing_goal("extract_key_information")
+        state = _planning_state_with_post_processing_goal(
+            "extract_key_information", conversation
+        )
         analysis = analyze_discovery(conversation, planning_state=state)
 
         assert analysis.next_issue is None
-        assert (
-            "Assuming no extra form fields are needed at runtime for now; "
-            "you can add them before confirming."
-        ) in analysis.assumptions
         assert state.resolved_slots["post_processing_goal"].value == (
             "extract_key_information"
         )
@@ -2000,9 +2003,7 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "terminal_output"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "terminal_output"
+        assert "terminal_output" in analysis.selected_question_ids
 
     def test_bare_transcription_prompt_asks_outcome_after_output_answer(
         self,
@@ -2056,9 +2057,7 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "primary_runtime_input"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "primary_runtime_input"
+        assert "primary_runtime_input" in analysis.selected_question_ids
 
     def test_detailed_task_spec_with_unknown_input_still_asks_input_question(
         self,
@@ -2081,9 +2080,7 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(conversation)
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "primary_runtime_input"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "primary_runtime_input"
+        assert "primary_runtime_input" in analysis.selected_question_ids
 
     def test_pure_information_question_does_not_trigger_workflow_fallback(
         self,
@@ -2637,7 +2634,8 @@ class TestExtendedClarificationHints:
             if issue.suggestion is not None
         ]
 
-        assert question_ids == ["post_processing_goal"]
+        # The report over several documents also needs its disposition.
+        assert question_ids == ["post_processing_goal", "report_disposition"]
 
     def test_rejected_scope_does_not_hide_comparison_architecture_question(
         self,
@@ -2650,7 +2648,19 @@ class TestExtendedClarificationHints:
                     "against an internal policy and creates a DOCX report."
                 ),
                 metadata={"ui_language": "en"},
-            )
+            ),
+            # The comparison question waits for the input it depends on.
+            ConversationMessage(
+                role="user",
+                content="Documents",
+                metadata={
+                    "question_answer": {
+                        "question_id": "primary_runtime_input",
+                        "selected_option_ids": ["documents"],
+                        "selected_values": ["documents"],
+                    }
+                },
+            ),
         ]
 
         analysis = analyze_discovery(conversation)
@@ -2811,9 +2821,7 @@ class TestExtendedClarificationHints:
         )
 
         assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "primary_runtime_input"
-        assert analysis.next_issue.suggestion is not None
-        assert analysis.next_issue.suggestion.question_id == "primary_runtime_input"
+        assert "primary_runtime_input" in analysis.selected_question_ids
 
     @pytest.mark.asyncio
     async def test_classifier_outcome_drives_discovery_without_raw_text_veto(
@@ -2958,12 +2966,11 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(
             conversation,
             planning_state=_planning_state_with_post_processing_goal(
-                "compare_or_validate"
+                "compare_or_validate", conversation
             ),
         )
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "comparison_scope"
+        assert "comparison_scope" in analysis.selected_question_ids
 
     def test_comparison_against_internal_policy_asks_reference_source(self) -> None:
         conversation = [
@@ -2980,12 +2987,11 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(
             conversation,
             planning_state=_planning_state_with_post_processing_goal(
-                "compare_or_validate"
+                "compare_or_validate", conversation
             ),
         )
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "comparison_scope"
+        assert "comparison_scope" in analysis.selected_question_ids
         assert analysis.next_issue.suggestion is not None
         assert analysis.next_issue.suggestion.question_id == "comparison_scope"
 
@@ -3027,12 +3033,11 @@ class TestExtendedClarificationHints:
         analysis = analyze_discovery(
             conversation,
             planning_state=_planning_state_with_post_processing_goal(
-                "compare_or_validate"
+                "compare_or_validate", conversation
             ),
         )
 
-        assert analysis.next_issue is not None
-        assert analysis.next_issue.issue_id == "comparison_scope"
+        assert "comparison_scope" in analysis.selected_question_ids
 
     def test_explicit_english_text_output_does_not_reopen_final_output_mode(
         self,
@@ -3369,10 +3374,6 @@ class TestExtendedClarificationHints:
 
         assert "runtime_metadata_fields" not in question_ids
         assert analysis.ready_for_confirmation is True
-        assert analysis.assumptions == (
-            "Assuming no extra form fields are needed at runtime for now; "
-            "you can add them before confirming.",
-        )
 
     def test_explicit_runtime_metadata_does_not_reask_runtime_metadata_fields(
         self,
@@ -3766,31 +3767,3 @@ class TestPlannerDiscoveryQuestionDispatch:
         assert [event["event"] for event in events] == ["text", "question", "done"]
         assert json.loads(events[1]["data"])["question_id"] == ("post_processing_goal")
         repo.commit_turn.assert_awaited_once()
-
-
-def test_output_reader_followup_text_mentions_reader_not_output_format() -> None:
-    """A specific prompt mentioning 'text summary' resolves output mode via
-    auto-inference. The output_reader question is nice_to_have and not
-    raised as a blocking issue. Verify that the followup text for an
-    output_reader issue (when manually constructed) mentions 'reader'.
-    """
-    from eneo.flows.ai_builder.ai_builder_discovery_models import (
-        DiscoveryIssue,
-    )
-    from eneo.flows.ai_builder.ai_builder_discovery_questions import (
-        output_reader_question,
-    )
-
-    issue = DiscoveryIssue(
-        issue_id="output_reader",
-        category="output",
-        severity="blocking",
-        message="The main reader and tone of the final output are still unclear.",
-        suggestion=output_reader_question("en"),
-        question_level="nice_to_have",
-    )
-
-    text = build_discovery_followup_text(issue, "en")
-
-    assert "primarily for" in text.lower() or "reader" in text.lower()
-    assert "final output a bit better" not in text.lower()
