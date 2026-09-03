@@ -32,7 +32,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
-    is_high_confidence_source_to_source_comparison,
     normalize_signal_text,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
@@ -382,12 +381,6 @@ def extract_answer_signals(
         ):
             inferred_signals = infer_answer_signals_from_text(content)
             for inferred_question_id, inferred_values in inferred_signals.items():
-                if (
-                    inferred_question_id == "comparison_scope"
-                    and not is_high_confidence_source_to_source_comparison(content)
-                ):
-                    # Ambiguous compare prompts still need an explicit architecture choice.
-                    continue
                 signals[inferred_question_id] = set(inferred_values)
 
         if answer is None:
