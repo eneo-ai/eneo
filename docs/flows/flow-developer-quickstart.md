@@ -345,12 +345,11 @@ Important builder rules:
   misattribute the reason for the recommendation.
 - A question carries `question_index`, its place among the questions the
   session has actually put to the user; a re-asked question keeps its number.
-  There is deliberately no total. Architecture questions, the budget-exempt
-  quality candidates, and the schema-direction and runtime-field questions are
-  each decided outside the per-turn ask queue, so no owner holds the length of
-  the interview. Do not synthesize one from the question budget or from the ask
-  queue: both undercount, and a wrong total claims a last question that another
-  turn then follows.
+  There is deliberately no total. The interaction policy decides each slot
+  question turn by turn, and the schema-direction and runtime-field questions
+  are decided outside the per-turn ask queue, so no owner holds the length of
+  the interview. Do not synthesize one from the ask queue: it undercounts, and
+  a wrong total claims a last question that another turn then follows.
 - `questions_planned_remaining` says how many further questions the interview
   intends to ask after this one, taken from the ordered ask queue the turn
   decision came from. It is a snapshot of the current plan and not a total: the
