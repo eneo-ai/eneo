@@ -108,6 +108,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
     carry_forward_turn_resolved_planner_state,
+    complete_planning_state,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
     resolve_docx_mode_from_template_evidence,
@@ -1967,6 +1968,8 @@ class TestPolicyDefaults:
             ]
         )
 
+        assert "document_material_scope" not in state.resolved_slots
+        complete_planning_state(state, freeform_text="")
         slot = state.resolved_slots["document_material_scope"]
         assert slot.value == "flexible_document_case"
         assert slot.source == "policy_default"
@@ -2237,7 +2240,7 @@ class TestPolicyDefaults:
 
         assert state.resolved_slots["primary_runtime_input"].value == "audio"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
-        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+        assert "docx_output_mode" not in state.resolved_slots  # the policy assumes it
         assert "runtime_metadata_fields" not in state.resolved_slots
 
     def test_swedish_audio_docx_prompt_with_no_input_fields_keeps_metadata_absent(
@@ -2376,7 +2379,7 @@ class TestPolicyDefaults:
         )
 
         assert state.resolved_slots["terminal_output"].value == "docx_document"
-        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+        assert "docx_output_mode" not in state.resolved_slots  # the policy assumes it
 
 
 class TestRuntimeMetadataClassificationBoundaries:
@@ -2497,7 +2500,7 @@ class TestRuntimeMetadataClassificationBoundaries:
         assert slot.value == "detailed_runtime_metadata"
         assert slot.source == "model"
         assert state.resolved_slots["terminal_output"].value == "docx_document"
-        assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
+        assert "docx_output_mode" not in state.resolved_slots  # the policy assumes it
 
     def test_real_runtime_fields_still_resolve_as_metadata_inputs(
         self,

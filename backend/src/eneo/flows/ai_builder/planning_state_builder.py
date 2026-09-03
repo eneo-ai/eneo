@@ -1600,6 +1600,19 @@ def _clear_nonprotected_model_slot(state: PlanningState, slot_name: str) -> None
         state.resolved_slots.pop(slot_name, None)
 
 
+def complete_planning_state(state: PlanningState, *, freeform_text: str) -> None:
+    """Finish a state built from a conversation the way every reader expects it.
+
+    Attachment evidence answers the template mode first, then the interaction
+    policy assumes what it says to assume. The runtime, the persisted-state
+    rebuild and the offline readers all call this one function, so a state
+    never carries a default that the policy did not write.
+    """
+
+    resolve_docx_mode_from_template_evidence(state)
+    apply_policy_defaults_from_resolved_slots(state, freeform_text=freeform_text)
+
+
 def apply_policy_defaults_from_resolved_slots(
     state: PlanningState,
     *,
@@ -1951,11 +1964,6 @@ def _resolve_slots(
         requirements_summary_values=requirements_summary_values,
         question_id="document_material_scope",
     )
-    if document_material_scope is None and primary_runtime_input in {
-        "documents",
-        "text_and_documents",
-    }:
-        document_material_scope = "flexible_document_case"
     if document_material_scope is not None:
         slots["document_material_scope"] = _build_slot(
             name="document_material_scope",
@@ -2240,17 +2248,6 @@ def _resolve_slot_origin(
             "high",
         )
 
-    if _is_policy_default_slot(
-        question_id=question_id,
-        slot_value=slot_value,
-        freeform_text=freeform_text,
-    ):
-        return (
-            "policy_default",
-            (f"policy_default:{question_id}={slot_value}",),
-            "medium",
-        )
-
     heuristic_evidence = (
         "heuristic:role-aware freeform analysis"
         if freeform_text
@@ -2517,21 +2514,6 @@ def _heuristic_text_signal_confidence(
 ) -> SlotConfidence:
     signals = infer_answer_signals_from_text(freeform_text)
     return "high" if signals.get(question_id) == {slot_value} else "medium"
-
-
-def _is_policy_default_slot(
-    *,
-    question_id: str,
-    slot_value: str,
-    freeform_text: str,
-) -> bool:
-    policy = SLOT_INTERACTION_POLICIES.get(question_id)
-    return (
-        policy is not None
-        and policy.when_unknown == "assume"
-        and slot_value == policy.default_value
-        and not policy.has_explicit_text(freeform_text)
-    )
 
 
 def _single_slot_value(

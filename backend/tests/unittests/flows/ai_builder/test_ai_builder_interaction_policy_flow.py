@@ -221,3 +221,57 @@ def test_same_run_comparison_wording_is_asked_not_read_from_the_text() -> None:
     assert "comparison_scope" not in state.resolved_slots
     analysis = analyze_discovery(conversation, planning_state=state)
     assert "comparison_scope" in analysis.selected_question_ids
+
+
+def test_only_the_policy_writer_produces_defaults_on_the_live_fold() -> None:
+    """Every `policy_default` in a completed state is one the evaluator assumed.
+
+    The state builder used to manufacture a generated DOCX/PDF mode and a
+    flexible document scope on its own and label them `policy_default`; the
+    evaluator then accepted them on sight, so the second path could flip an
+    ask into silence. Now the bare build carries no defaults at all, and the
+    completion writes exactly the evaluator's `assume` outcomes.
+    """
+
+    from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
+        SLOT_INTERACTION_POLICIES,
+        evaluate_slot_interaction,
+    )
+    from eneo.flows.ai_builder.planning_state_builder import (
+        build_planning_state_from_conversation,
+        complete_planning_state,
+    )
+
+    briefs = (
+        "Användaren laddar upp dokument och flödet ska ta fram en PDF-rapport.",
+        "Bygg ett flöde som skriver ett Word-dokument utifrån uppladdade underlag.",
+        "Sammanfatta uppladdade rapporter till strukturerad JSON.",
+    )
+    seen_defaults = 0
+    for text in briefs:
+        conversation = [ConversationMessage(role="user", content=text)]
+        bare = build_planning_state_from_conversation(conversation)
+        assert not [
+            slot.name
+            for slot in bare.resolved_slots.values()
+            if slot.source == "policy_default"
+        ], text
+
+        state = build_planning_state_from_conversation(conversation)
+        complete_planning_state(state, freeform_text=text)
+        defaults = [
+            slot
+            for slot in state.resolved_slots.values()
+            if slot.source == "policy_default"
+        ]
+        seen_defaults += len(defaults)
+        for slot in defaults:
+            policy = SLOT_INTERACTION_POLICIES[slot.name]
+            assert slot.value == policy.default_value, (text, slot.name)
+            without = state.model_copy(deep=True)
+            del without.resolved_slots[slot.name]
+            assert (
+                evaluate_slot_interaction(policy, without, freeform_text=text)
+                == "assume"
+            ), (text, slot.name)
+    assert seen_defaults > 0

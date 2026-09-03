@@ -56,6 +56,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
     AIBuilderPublicError,
 )
+from eneo.flows.ai_builder.ai_builder_framework_policy import (
+    aggregate_unprompted_user_text,
+)
 from eneo.flows.ai_builder.ai_builder_session_transitions import (
     builder_turn_terminal_state_pairs,
     builder_turn_transition_predecessors,
@@ -80,6 +83,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     carry_forward_persisted_planner_state,
     carry_forward_turn_resolved_planner_state,
+    complete_planning_state,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
@@ -1809,6 +1813,9 @@ class AIBuilderRepository:
                 state,
                 prior_state,
                 attached_file_ids=attached_file_ids,
+            )
+            complete_planning_state(
+                state, freeform_text=aggregate_unprompted_user_text(persisted)
             )
             pinned_commit = architecture_commit or (
                 prior_state.architecture_commit if prior_state else None

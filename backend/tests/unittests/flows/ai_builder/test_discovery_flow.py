@@ -101,6 +101,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
+    complete_planning_state,
     merge_llm_resolved_slots,
 )
 from eneo.flows.ai_builder.question_catalog import render_summary_label
@@ -1378,6 +1379,7 @@ class TestExtendedClarificationHints:
             )
         ]
         planning_state = build_planning_state_from_conversation(conversation)
+        complete_planning_state(planning_state, freeform_text="")
         docx_mode_slot = planning_state.resolved_slots["docx_output_mode"]
         assert docx_mode_slot.value == "generated_docx"
         assert docx_mode_slot.source == "policy_default"
