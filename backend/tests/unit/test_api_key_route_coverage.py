@@ -18,6 +18,7 @@ from eneo.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
+    INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
 )
 from eneo.main.config import get_settings
@@ -25,6 +26,7 @@ from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import (
     route_dependency_closures,
     route_has_dependency_named,
+    route_is_session_only,
     runtime_router_routes,
     walk_routes,
 )
@@ -105,7 +107,9 @@ def _get_eneo_src_path() -> pathlib.Path:
 INTENTIONALLY_UNGUARDED = {
     "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
     "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
-    "/admin": "Admin endpoints are mounted with admin scope + admin key guards",
+    "/admin": "Admin endpoints are mounted with admin scope + admin key guards, "
+    "except /admin/modules which is session-only (require_session_auth + "
+    "Permission.MODULES) and rejects API keys outright",
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
     "/limits": "Authenticated limit info (with_user=True)",
@@ -125,7 +129,7 @@ INTENTIONALLY_UNGUARDED = {
     "/token-usage": "Admin scope + admin key permission guards (not resource guard)",
     "/templates": "Read-only discovery endpoints",
     "/sysadmin": "Separate super API key auth, out of scope",
-    "/modules": "Separate auth, out of scope",
+    "/module-auth": "Module auth handoff: ticket issue is session-only; token exchange is registered service-key-bound in ModuleAuthBroker",
     "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
     "/ws": "WebSocket endpoint — separate auth",
@@ -153,7 +157,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/ai-models": "Model listing endpoint",
     "/integrations": "SharePoint webhook routes share /integrations prefix but lack scope guards (external callbacks); main integration_router has TENANT_ADMIN guards",
     "/sysadmin": "Protected by super API key dependency",
-    "/modules": "Protected by super-duper API key dependency",
+    "/module-auth": "Module auth handoff uses bearer-session ticket issue and service API-key token exchange",
     "/auth": "Public federation auth endpoints",
     "/api-docs": "Public API documentation endpoint",
     "/help-assistants": "Helper-run endpoints take the target assistant id in the body, "
@@ -224,6 +228,10 @@ class TestRouteCoverage:
             if not path or path == "/":
                 continue
             if _route_has_scope_check_dep(route):
+                continue
+            if route_is_session_only(route):
+                # Session-only surfaces reject API keys via require_session_auth,
+                # so an API-key scope guard would be a structural no-op.
                 continue
 
             prefix = _extract_path_prefix(path)
@@ -313,6 +321,7 @@ class TestReadOverrideValidity:
             | CONVERSATIONS_READ_OVERRIDES
             | APPS_READ_OVERRIDES
             | FILES_READ_OVERRIDES
+            | INFO_BLOBS_READ_OVERRIDES
             | KNOWLEDGE_READ_OVERRIDES
         )
         stale = all_overrides - all_endpoint_names
@@ -443,6 +452,8 @@ class TestTenantAdminApiKeyGuards:
                 path = getattr(route, "path", "")
                 if any(path.startswith(p) for p in self.INTEGRATION_CALLBACK_PREFIXES):
                     continue  # External callback/auth, intentionally unguarded
+                if route_is_session_only(route):
+                    continue  # Rejects API keys outright; scope guard is moot
                 assert self._has_dependency(route, "_scope_check_dep"), (
                     f"{path} missing _scope_check_dep"
                 )
@@ -823,13 +834,12 @@ MUTATING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Listed here so the walker does not flag them as missing v2 guards.
 MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/sysadmin/": "Gated by the separate super-admin API key dependency, not user API keys",
-    "/modules/": "Gated by the separate super-duper module key dependency",
+    "/module-auth/": "Gated by the module auth broker's session and registered service-key dependencies",
     "/auth/callback": "Public OIDC federation callback — no API key context",
     "/users/login/": "Public login endpoints — no API key context",
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",
     "/integrations/auth/": "External OAuth callback endpoints — no API key context",
     "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
-    "/skills/organization/": "Requires session authentication; OrganizationSkillService enforces tenant-admin authorization for every mutation",
 }
 
 # Specific (method, path) pairs without resource_permission / api_key_permission
@@ -904,6 +914,11 @@ class TestMutatingRoutesArePerRouteGuarded:
             if info.method not in MUTATING_METHODS:
                 continue
             if info.has_resource_perm_dep or info.has_api_key_permission_dep:
+                continue
+            if info.has_session_auth_dep:
+                # Session-only surfaces (e.g. /admin/modules, /skills
+                # organization lifecycle) reject API keys outright, so
+                # API-key-layer mutation guards are structural no-ops.
                 continue
             if any(info.path.startswith(p) for p in MUTATING_ALLOWLIST_PREFIXES):
                 continue
@@ -1056,6 +1071,12 @@ class TestScopeCheckPathParamSafety:
         "via the actor-based space authorization layer; scope=info_blob limits which blobs "
         "a scoped key can resolve.",
         (
+            "POST",
+            "/info-blobs/{id}/original/signed-url/",
+        ): "info_blob_service.ensure_original_available() resolves the blob through "
+        "the actor-based space authorization layer and verifies the retained original "
+        "before a signed URL is minted.",
+        (
             "DELETE",
             "/info-blobs/{id}/",
         ): "info_blob_service.delete() performs space-membership authorization via the "
@@ -1110,6 +1131,7 @@ class TestReadOverrideUniqueness:
             ("CONVERSATIONS_READ_OVERRIDES", CONVERSATIONS_READ_OVERRIDES),
             ("APPS_READ_OVERRIDES", APPS_READ_OVERRIDES),
             ("FILES_READ_OVERRIDES", FILES_READ_OVERRIDES),
+            ("INFO_BLOBS_READ_OVERRIDES", INFO_BLOBS_READ_OVERRIDES),
             ("KNOWLEDGE_READ_OVERRIDES", KNOWLEDGE_READ_OVERRIDES),
         ]
 
@@ -1166,6 +1188,9 @@ class TestReadOverrideSnapshot:
             "generate_original_signed_url",
             "generate_signed_url",
         ],
+        "INFO_BLOBS_READ_OVERRIDES": [
+            "generate_original_signed_url",
+        ],
         "KNOWLEDGE_READ_OVERRIDES": [
             "run_semantic_search",
         ],
@@ -1177,6 +1202,7 @@ class TestReadOverrideSnapshot:
             "CONVERSATIONS_READ_OVERRIDES": sorted(CONVERSATIONS_READ_OVERRIDES),
             "APPS_READ_OVERRIDES": sorted(APPS_READ_OVERRIDES),
             "FILES_READ_OVERRIDES": sorted(FILES_READ_OVERRIDES),
+            "INFO_BLOBS_READ_OVERRIDES": sorted(INFO_BLOBS_READ_OVERRIDES),
             "KNOWLEDGE_READ_OVERRIDES": sorted(KNOWLEDGE_READ_OVERRIDES),
         }
         assert actual == self.EXPECTED_READ_OVERRIDES, (

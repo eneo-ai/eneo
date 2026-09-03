@@ -33,7 +33,15 @@ class ActionType(str, Enum):
     PROMPT_LIBRARY_ENTRY_UPDATED = "prompt_library_entry_updated"
     PROMPT_LIBRARY_ENTRY_DELETED = "prompt_library_entry_deleted"
     MODULE_ADDED = "module_added"
+    # Historical only: emitted by the removed bulk module-set endpoint. Kept
+    # so stored audit rows remain renderable and filterable.
+    MODULE_SET_REPLACED = "module_set_replaced"
     MODULE_ADDED_TO_TENANT = "module_added_to_tenant"
+    MODULE_REMOVED_FROM_TENANT = "module_removed_from_tenant"
+    MODULE_CLIENT_CONFIG_UPDATED = "module_client_config_updated"
+    MODULE_AUTH_TICKET_ISSUED = "module_auth_ticket_issued"
+    MODULE_AUTH_TOKEN_EXCHANGED = "module_auth_token_exchanged"
+    MODULE_AUTH_TOKEN_REFRESHED = "module_auth_token_refreshed"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"
@@ -67,6 +75,9 @@ class ActionType(str, Enum):
     FILE_DELETED = "file_deleted"
     FILE_ORIGINAL_DOWNLOAD_LINK_CREATED = "file_original_download_link_created"
     FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
+    INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED = (
+        "info_blob_original_download_link_created"
+    )
     WEBSITE_CREATED = "website_created"
     WEBSITE_UPDATED = "website_updated"
     WEBSITE_DELETED = "website_deleted"

@@ -73,7 +73,7 @@ class InfoBlobs(BasePublic):
         ForeignKey(EmbeddingModels.id, ondelete="SET NULL"),
     )
     integration_knowledge_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE")
+        ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE"), index=True
     )
     sharepoint_item_id: Mapped[Optional[str]] = mapped_column()
 

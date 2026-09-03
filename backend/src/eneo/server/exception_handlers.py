@@ -9,7 +9,12 @@ from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
 )
-from eneo.main.exceptions import EXCEPTION_MAP, ErrorCodes, UnauthorizedException
+from eneo.info_blobs.info_blob import InfoBlobOriginalUnavailableError
+from eneo.main.exceptions import (
+    EXCEPTION_MAP,
+    ErrorCodes,
+    UnauthorizedException,
+)
 from eneo.main.models import GeneralError
 from eneo.main.request_context import get_request_context
 from eneo.object_content.content import (
@@ -168,6 +173,11 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
     FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
     FileOriginalNotFoundError: (404, None, ErrorCodes.FILE_ORIGINAL_NOT_FOUND),
+    InfoBlobOriginalUnavailableError: (
+        404,
+        None,
+        ErrorCodes.INFO_BLOB_ORIGINAL_UNAVAILABLE,
+    ),
     ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
     InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
     DeploymentPolicyConflict: (409, None, ErrorCodes.DEPLOYMENT_POLICY_CONFLICT),

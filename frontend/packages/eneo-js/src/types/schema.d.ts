@@ -654,6 +654,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/info-blobs/{id}/original/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate a signed URL for an uploaded knowledge original
+     * @description Checks knowledge read access and original availability, then returns a short-lived URL for the exact uploaded bytes.
+     */
+    post: operations["generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/info-blobs/{id}/original/download/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download an uploaded knowledge original
+     * @description Streams the exact uploaded bytes using a short-lived, purpose-separated signed token.
+     */
+    get: operations["download_original_api_v1_info_blobs__id__original_download__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/info-blobs/spaces/{space_id}/info-blobs/": {
     parameters: {
       query?: never;
@@ -2265,7 +2305,7 @@ export interface paths {
     };
     /**
      * Get super API key status
-     * @description Return whether super and super-duper API keys are configured in environment settings.
+     * @description Return whether the sysadmin API key is configured in environment settings.
      */
     get: operations["get_super_api_key_status_api_v1_admin_super_api_key_status_get"];
     put?: never;
@@ -5403,6 +5443,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/integrations/sharepoint/fixtures/{scenario}/preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Sharepoint Fixture Preview
+     * @description Return development-only SharePoint preview fixtures. No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true.
+     */
+    get: operations["get_sharepoint_fixture_preview_api_v1_integrations_sharepoint_fixtures__scenario__preview__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/integrations/sharepoint/fixtures/{scenario}/tree/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Sharepoint Fixture Tree
+     * @description Return a development-only SharePoint folder fixture. No Microsoft Graph request is made. Requires SHAREPOINT_FIXTURE_MODE_ENABLED=true.
+     */
+    get: operations["get_sharepoint_fixture_tree_api_v1_integrations_sharepoint_fixtures__scenario__tree__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/": {
     parameters: {
       query?: never;
@@ -7665,7 +7745,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/": {
+  "/api/v1/admin/modules/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7673,23 +7753,43 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get Modules
-     * @description List all globally registered modules.
+     * List Module Installations
+     * @description List modules installed for the authenticated user's organization. The tenant identity is derived from the session and is never accepted from the client.
      */
-    get: operations["get_modules_api_v1_modules__get"];
+    get: operations["list_module_installations_api_v1_admin_modules__get"];
     put?: never;
-    /**
-     * Add Module
-     * @description Register a new global module.
-     */
-    post: operations["add_module_api_v1_modules__post"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
     trace?: never;
   };
-  "/api/v1/modules/{tenant_id}/": {
+  "/api/v1/admin/modules/{module_key}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Install Module
+     * @description Idempotently register, enable and fully configure one module for the authenticated user's organization. The service key must already exist in that organization and be an active, service-owned sk_ key with write or admin permission. An explicit null service_key_id keeps the module installed but severs ticket exchange until a key is bound again.
+     */
+    put: operations["install_module_api_v1_admin_modules__module_key___put"];
+    post?: never;
+    /**
+     * Uninstall Module
+     * @description Uninstall one module from the authenticated user's organization. Removing the assignment also deletes its callback and service-key binding. A module that is not installed for the organization returns 404 whether or not the key exists elsewhere; concurrent retries are safe and report changed=false.
+     */
+    delete: operations["uninstall_module_api_v1_admin_modules__module_key___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/module-auth/tickets/": {
     parameters: {
       query?: never;
       header?: never;
@@ -7699,10 +7799,70 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Add Module To Tenant
-     * @description Assign a list of modules to a tenant.
+     * Issue Module Ticket
+     * @description Issue a one-time, short-lived login ticket for a module. The request identifies the module by its stable public `module_key`, not its internal database UUID. Requires a session token; the frontend redirects the browser to `redirect_target`, which is the ticket's only carrier - the module exchanges the ticket server-side. A module-supplied `state` value is echoed on `redirect_target` so the module can bind the callback to the browser session that initiated the login (login-CSRF protection).
      */
-    post: operations["add_module_to_tenant_api_v1_modules__tenant_id___post"];
+    post: operations["issue_module_ticket_api_v1_module_auth_tickets__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/module-auth/token/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Exchange Module Ticket
+     * @description Exchange a one-time login ticket for a short-lived, module-scoped user token. Requires the sk_ service key registered for the ticket's module; the ticket is consumed atomically and cannot be reused.
+     */
+    post: operations["exchange_module_ticket_api_v1_module_auth_token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/module-auth/{module_key}/token/refresh/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Refresh Module Token
+     * @description Renew a still-valid module user token inside the session ceiling. Requires the same dual credentials as any module resource call - the bound sk_ service key and the current, unexpired Bearer token - and re-validates live user, tenant and module-assignment state before minting. The new token carries the original handoff time, so refresh slides the token window but can never extend the session past `session_expires_at`; after the ceiling, or once the token has expired, the module must run a new login handoff.
+     */
+    post: operations["refresh_module_token_api_v1_module_auth__module_key__token_refresh__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/module-auth/{module_key}/session/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Validate Module Resource Session
+     * @description Validate a module service key and module-user Bearer token together, including their current tenant, module assignment and user state. Module resource routes must enforce the same dependency directly; calling this diagnostic endpoint first does not authorize a later call.
+     */
+    get: operations["validate_module_resource_session_api_v1_module_auth__module_key__session__get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -8070,6 +8230,8 @@ export interface components {
     AccessTokenResponse: {
       /** Access Token */
       access_token: string;
+      /** Frontend State */
+      frontend_state: string;
     };
     /**
      * ActionConfig
@@ -8178,7 +8340,13 @@ export interface components {
       | "prompt_library_entry_updated"
       | "prompt_library_entry_deleted"
       | "module_added"
+      | "module_set_replaced"
       | "module_added_to_tenant"
+      | "module_removed_from_tenant"
+      | "module_client_config_updated"
+      | "module_auth_ticket_issued"
+      | "module_auth_token_exchanged"
+      | "module_auth_token_refreshed"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -8210,6 +8378,7 @@ export interface components {
       | "file_deleted"
       | "file_original_download_link_created"
       | "file_signed_url_minted"
+      | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -12204,6 +12373,7 @@ export interface components {
       | "app"
       | "skill"
       | "file"
+      | "info_blob"
       | "website"
       | "tenant_settings"
       | "governance_policy"
@@ -12291,7 +12461,8 @@ export interface components {
       | 9055
       | 9056
       | 9057
-      | 9058;
+      | 9058
+      | 9059;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -13007,6 +13178,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
       /** Score */
       score: number;
     };
@@ -13052,6 +13225,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
       /** Text */
       text: string;
     };
@@ -13071,6 +13246,8 @@ export interface components {
       group_id?: string | null;
       /** Website Id */
       website_id?: string | null;
+      /** Original Available */
+      original_available: boolean;
     };
     /** InfoBlobUpdatePublic */
     InfoBlobUpdatePublic: {
@@ -14421,15 +14598,10 @@ export interface components {
       /** Provider Ids */
       provider_ids: string[];
     };
-    /** ModuleBase */
-    ModuleBase: {
-      /** Name */
-      name: components["schemas"]["Modules"] | string;
-    };
     /** ModuleInDB */
     ModuleInDB: {
       /** Name */
-      name: components["schemas"]["Modules"] | string;
+      name: string;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -14441,11 +14613,145 @@ export interface components {
       id: string;
     };
     /**
-     * Modules
-     * @description Any change to these enums will result in database changes
-     * @enum {string}
+     * ModuleInstallation
+     * @description One module installed for the authenticated user's organization.
+     *
+     *     The tenant id is intentionally absent. It is derived from the session and
+     *     remains an internal data-partition key rather than an admin-UI concept.
+     *     Older assignments may be incomplete, so reads retain nullable config while
+     *     the new installation command only accepts a complete configuration.
      */
-    Modules: "eneo-applications";
+    ModuleInstallation: {
+      /**
+       * Module Id
+       * Format: uuid
+       */
+      module_id: string;
+      /** Module Key */
+      module_key: string;
+      /** Redirect Uris */
+      redirect_uris?: string[];
+      /** Service Key Id */
+      service_key_id?: string | null;
+      /** Configured */
+      readonly configured: boolean;
+    };
+    /**
+     * ModuleInstallationChange
+     * @description Tenant-free result for an idempotent installation state change.
+     */
+    ModuleInstallationChange: {
+      /**
+       * Module Id
+       * Format: uuid
+       */
+      module_id: string;
+      /** Module Key */
+      module_key: string;
+      /** Enabled */
+      enabled: boolean;
+      /** Changed */
+      changed: boolean;
+    };
+    /**
+     * ModuleInstallationConfig
+     * @description Complete, tenant-implicit configuration accepted by the admin UI.
+     *
+     *     ``service_key_id`` must be present but may be an explicit ``null``: that
+     *     severs ticket exchange (no key can trade the module's login tickets) while
+     *     keeping the module installed and its callbacks intact — the incident
+     *     response step between "working installation" and "full uninstall".
+     */
+    ModuleInstallationConfig: {
+      /** Redirect Uris */
+      redirect_uris: string[];
+      /** Service Key Id */
+      service_key_id: string | null;
+    };
+    /**
+     * ModuleResourceSessionResponse
+     * @description Public identity returned after both module credentials pass.
+     */
+    ModuleResourceSessionResponse: {
+      /** Module Key */
+      module_key: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      user: components["schemas"]["ModuleTokenUser"];
+    };
+    /** ModuleTicketRequest */
+    ModuleTicketRequest: {
+      /**
+       * Module Key
+       * @description Stable, case-sensitive public module key (the module's unique name), not its database UUID.
+       */
+      module_key: string;
+      /** Redirect Uri */
+      redirect_uri: string;
+      /**
+       * State
+       * @description Opaque login-CSRF correlation value generated by the module before it redirects to Eneo. Echoed unmodified as `state` on `redirect_target`; the module must verify it against the browser session that initiated the login and accept each value once.
+       */
+      state?: string | null;
+    };
+    /**
+     * ModuleTicketResponse
+     * @description The raw ticket travels only inside ``redirect_target`` - a single
+     *     carrier keeps the secret surface minimal and leaves no field to build
+     *     side-flows on.
+     */
+    ModuleTicketResponse: {
+      /** Redirect Target */
+      redirect_target: string;
+      /** Expires In */
+      expires_in: number;
+    };
+    /** ModuleTokenRequest */
+    ModuleTokenRequest: {
+      /** Ticket */
+      ticket: string;
+    };
+    /** ModuleTokenResponse */
+    ModuleTokenResponse: {
+      /** Access Token */
+      access_token: string;
+      /**
+       * Token Type
+       * @default bearer
+       */
+      token_type?: string;
+      /** Expires In */
+      expires_in: number;
+      /**
+       * Session Expires At
+       * Format: date-time
+       * @description Absolute UTC ceiling of this module session, fixed at the original ticket exchange. Refresh can renew the token until this instant but never past it; afterwards a new login handoff is required.
+       */
+      session_expires_at: string;
+      /** Module Key */
+      module_key: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      user: components["schemas"]["ModuleTokenUser"];
+    };
+    /** ModuleTokenUser */
+    ModuleTokenUser: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Email */
+      email: string;
+      /** Username */
+      username?: string | null;
+    };
     /** MovePausePublic */
     MovePausePublic: {
       /** Policy Revision */
@@ -15173,13 +15479,13 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[ModuleInDB] */
-    PaginatedResponse_ModuleInDB_: {
+    /** PaginatedResponse[ModuleInstallation] */
+    PaginatedResponse_ModuleInstallation_: {
       /**
        * Items
        * @description List of items returned in the response
        */
-      items: components["schemas"]["ModuleInDB"][];
+      items: components["schemas"]["ModuleInstallation"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -15824,6 +16130,7 @@ export interface components {
       | "shared_spaces"
       | "api_keys"
       | "storage"
+      | "modules"
       | "assistant_debug";
     /** PermissionPublic */
     PermissionPublic: {
@@ -17130,6 +17437,50 @@ export interface components {
        * @default false
        */
       object_store_configured?: boolean;
+      /**
+       * Sharepoint Fixture Mode Available
+       * @default false
+       */
+      sharepoint_fixture_mode_available?: boolean;
+    };
+    /** SharePointFixturePreviewResponse */
+    SharePointFixturePreviewResponse: {
+      /** Items */
+      items: components["schemas"]["IntegrationPreviewData"][];
+      /**
+       * Fixture
+       * @default true
+       * @constant
+       */
+      fixture?: true;
+      scenario: components["schemas"]["SharePointFixtureScenario"];
+      /** Count */
+      readonly count: number;
+    };
+    /**
+     * SharePointFixtureScenario
+     * @enum {string}
+     */
+    SharePointFixtureScenario: "representative" | "large_tenant" | "empty";
+    /** SharePointFixtureTreeResponse */
+    SharePointFixtureTreeResponse: {
+      /** Items */
+      items: components["schemas"]["SharePointTreeItem"][];
+      /** Current Path */
+      current_path: string;
+      /** Parent Id */
+      parent_id?: string | null;
+      /** Drive Id */
+      drive_id: string;
+      /** Site Id */
+      site_id?: string | null;
+      /**
+       * Fixture
+       * @default true
+       * @constant
+       */
+      fixture?: true;
+      scenario: components["schemas"]["SharePointFixtureScenario"];
     };
     /**
      * SharePointSubscriptionPublic
@@ -18198,8 +18549,6 @@ export interface components {
     SuperApiKeyStatus: {
       /** Super Api Key Configured */
       super_api_key_configured: boolean;
-      /** Super Duper Api Key Configured */
-      super_duper_api_key_configured: boolean;
     };
     /** SupportedModelKwargs */
     SupportedModelKwargs: {
@@ -19764,8 +20113,6 @@ export interface components {
        */
       deleted_at?: string | null;
       access_token?: components["schemas"]["AccessToken"] | null;
-      /** Modules */
-      readonly modules: string[];
       /** User Groups Ids */
       readonly user_groups_ids: string[];
       /** Permissions */
@@ -19938,8 +20285,6 @@ export interface components {
        * @description Timestamp when user was soft-deleted (null for active users)
        */
       deleted_at?: string | null;
-      /** Modules */
-      readonly modules: string[];
       /** User Groups Ids */
       readonly user_groups_ids: string[];
       /** Permissions */
@@ -21981,7 +22326,7 @@ export interface operations {
       query?: {
         /** @description Keys per page */
         limit?: number | null;
-        /** @description Current cursor */
+        /** @description Opaque current cursor */
         cursor?: string | null;
         /** @description Show previous page */
         previous?: boolean;
@@ -22032,11 +22377,20 @@ export interface operations {
            *         }
            *       ],
            *       "limit": 50,
-           *       "next_cursor": "2026-02-05T12:00:00Z",
+           *       "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
            *       "total_count": 1
            *     }
            */
           "application/json": components["schemas"]["ApiKeyListResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
@@ -23623,6 +23977,143 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OriginalSignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_original_api_v1_info_blobs__id__original_download__get: {
+    parameters: {
+      query: {
+        token: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Exact uploaded bytes */
+      200: {
+        headers: {
+          /** @description Requested inline or attachment disposition */
+          "Content-Disposition"?: string;
+          /** @description Original size in bytes */
+          "Content-Length"?: number;
+          /** @description SHA-256 digest of the original representation */
+          "Repr-Digest"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "*/*": string;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -25273,6 +25764,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -25701,6 +26194,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -26576,6 +27071,8 @@ export interface operations {
                     group_id?: string | null;
                     /** Website Id */
                     website_id?: string | null;
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                   };
@@ -27018,6 +27515,8 @@ export interface operations {
                     group_id?: string | null;
                     /** Website Id */
                     website_id?: string | null;
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                   };
@@ -29833,8 +30332,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "super_api_key_configured": true,
-           *       "super_duper_api_key_configured": false
+           *       "super_api_key_configured": true
            *     }
            */
           "application/json": components["schemas"]["SuperApiKeyStatus"];
@@ -29884,6 +30382,9 @@ export interface operations {
         user_relation?: components["schemas"]["ApiKeyUserRelation"];
         search?: string | null;
         expires_within_days?: number | null;
+        ownership?: components["schemas"]["ApiKeyOwnership"] | null;
+        min_permission?: components["schemas"]["ApiKeyPermission"] | null;
+        eligible_for_module_binding?: boolean;
       };
       header?: never;
       path?: never;
@@ -29922,11 +30423,20 @@ export interface operations {
            *         }
            *       ],
            *       "limit": 50,
-           *       "next_cursor": "2026-02-05T12:00:00Z",
+           *       "next_cursor": "v1.eyJjcmVhdGVkX2F0IjoiMjAyNi0wMi0wNVQxMjowMDowMFoiLCJrZXlfaWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEifQ",
            *       "total_count": 1
            *     }
            */
           "application/json": components["schemas"]["CursorPaginatedResponse_ApiKeyV2_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApiKeyErrorResponse"];
         };
       };
       /** @description Unauthorized */
@@ -39486,6 +39996,100 @@ export interface operations {
       };
     };
   };
+  get_sharepoint_fixture_preview_api_v1_integrations_sharepoint_fixtures__scenario__preview__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        scenario: components["schemas"]["SharePointFixtureScenario"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointFixturePreviewResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_sharepoint_fixture_tree_api_v1_integrations_sharepoint_fixtures__scenario__tree__get: {
+    parameters: {
+      query?: {
+        site_id?: string | null;
+        drive_id?: string | null;
+        folder_id?: string | null;
+        folder_path?: string;
+      };
+      header?: never;
+      path: {
+        scenario: components["schemas"]["SharePointFixtureScenario"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SharePointFixtureTreeResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_integrations_api_v1_integrations__get: {
     parameters: {
       query?: never;
@@ -44315,6 +44919,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -44467,6 +45073,8 @@ export interface operations {
                 group_id?: string | null;
                 /** Website Id */
                 website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
               };
@@ -47065,7 +47673,7 @@ export interface operations {
       };
     };
   };
-  get_modules_api_v1_modules__get: {
+  list_module_installations_api_v1_admin_modules__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -47080,7 +47688,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_ModuleInDB_"];
+          "application/json": components["schemas"]["PaginatedResponse_ModuleInstallation_"];
         };
       };
       /** @description Unauthorized */
@@ -47092,18 +47700,29 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
-  add_module_api_v1_modules__post: {
+  install_module_api_v1_admin_modules__module_key___put: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        module_key: string;
+      };
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ModuleBase"];
+        "application/json": components["schemas"]["ModuleInstallationConfig"];
       };
     };
     responses: {
@@ -47113,11 +47732,29 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ModuleInDB"];
+          "application/json": components["schemas"]["ModuleInstallation"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -47136,18 +47773,143 @@ export interface operations {
       };
     };
   };
-  add_module_to_tenant_api_v1_modules__tenant_id___post: {
+  uninstall_module_api_v1_admin_modules__module_key___delete: {
     parameters: {
       query?: never;
       header?: never;
       path: {
-        tenant_id: string;
+        module_key: string;
       };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleInstallationChange"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  issue_module_ticket_api_v1_module_auth_tickets__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ModelId"][];
+        "application/json": components["schemas"]["ModuleTicketRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleTicketResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  exchange_module_ticket_api_v1_module_auth_token__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ModuleTokenRequest"];
       };
     };
     responses: {
@@ -47157,11 +47919,127 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["TenantInDB"];
+          "application/json": components["schemas"]["ModuleTokenResponse"];
         };
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  refresh_module_token_api_v1_module_auth__module_key__token_refresh__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        module_key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleTokenResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  validate_module_resource_session_api_v1_module_auth__module_key__session__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        module_key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModuleResourceSessionResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

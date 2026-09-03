@@ -40,6 +40,17 @@ JWT_SECRET=
 JWT_TOKEN_PREFIX=Bearer
 URL_SIGNING_KEY=
 
+# Module auth broker (optional module applications, see MODULES.md)
+# Ticket: one-time login handoff carrier; only needs to cover one redirect.
+#MODULE_AUTH_TICKET_TTL_SECONDS=30
+# Module user token: must comfortably exceed a module's longest single
+# request. Modules refresh proactively, so keep this short.
+#MODULE_AUTH_TOKEN_EXPIRY_MINUTES=60
+# Hard ceiling on one module session measured from login handoff. Refresh
+# slides the token window but never extends past this; afterwards the module
+# re-runs the login handoff (transparent while the Eneo session is alive).
+#MODULE_AUTH_MAX_SESSION_HOURS=8
+
 # ----------------------------------------------------------------------------
 # Authentication Configuration
 # ----------------------------------------------------------------------------
@@ -195,7 +206,20 @@ VLLM_API_KEY=
 
 # Super API keys (system administration)
 ENEO_SUPER_API_KEY=
-ENEO_SUPER_DUPER_API_KEY=
+
+# ----------------------------------------------------------------------------
+# Upload Limits (startup requirement on released images, migration seed later)
+# ----------------------------------------------------------------------------
+# Backend images built before the Admin > Storage upload policy existed
+# require all four variables at startup; without them the db-init/migration
+# step exits with a Settings validation error and the stack never comes up.
+# Images that include migration 202607251700 read them exactly once, to seed
+# the initial upload policy, and ignore them afterwards; administrators then
+# manage the limits in Admin > Storage. Values below match the seed defaults.
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
+UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
+UPLOAD_MAX_FILE_SIZE=10485760
+TRANSCRIPTION_MAX_FILE_SIZE=209715200
 
 # ----------------------------------------------------------------------------
 # Durable Object Content (PostgreSQL-inline defaults)

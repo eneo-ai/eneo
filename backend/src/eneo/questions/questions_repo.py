@@ -28,6 +28,7 @@ from eneo.database.tables.web_search_results_table import (
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.skills.domain.skill import (
@@ -75,6 +76,10 @@ class QuestionRepository:
         self,
         questions: list[Question],
     ) -> list[Question]:
+        info_blobs = [
+            info_blob for question in questions for info_blob in question.info_blobs
+        ]
+        await InfoBlobRepository(self.session).hydrate_original_availability(info_blobs)
         if self.file_content_loader is None:
             if any(question.questions_files for question in questions):
                 raise RuntimeError("Question files require FileContentLoader")

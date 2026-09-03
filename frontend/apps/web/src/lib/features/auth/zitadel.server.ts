@@ -4,7 +4,12 @@
 import { dev } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import type { Cookies } from "@sveltejs/kit";
-import { createCodePair, encodeState, setFrontendAuthCookie } from "./auth.server";
+import {
+  createCodePair,
+  encodeState,
+  resolveSafeLoginDestination,
+  setFrontendAuthCookie
+} from "./auth.server";
 import { LoginError } from "./LoginError";
 import { getRequestEvent } from "$app/server";
 
@@ -103,6 +108,7 @@ export async function getZitadelLink(
 
   const scopes = orgId ? getScopeByOrgId(orgId) : await getScopeByOrigin(origin);
   const { codeVerifier, codeChallenge } = await createCodePair();
+  const requestedDestination = searchParams.get("next");
 
   event.cookies.set(ZitadelVerifierCookie, codeVerifier, {
     path: "/",
@@ -117,7 +123,10 @@ export async function getZitadelLink(
     client_id: env.ZITADEL_PROJECT_CLIENT_ID,
     response_type: "code",
     redirect_uri: `${getPublicOrigin()}/login/callback`,
-    state: encodeState({ loginMethod: "zitadel", next: searchParams.get("next") }),
+    state: encodeState({
+      loginMethod: "zitadel",
+      next: requestedDestination === null ? null : resolveSafeLoginDestination(requestedDestination)
+    }),
     code_challenge: codeChallenge,
     code_challenge_method: "S256"
   });

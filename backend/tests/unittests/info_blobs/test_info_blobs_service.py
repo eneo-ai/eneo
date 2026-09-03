@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from eneo.groups_legacy.group_service import GroupService
-from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository, WebsiteInfoBlobPage
 from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.main.exceptions import NameCollisionException, NotFoundException
 
@@ -63,9 +64,62 @@ async def test_delete_info_blob_does_not_exist(setup: Setup):
 
 
 async def test_get_by_user_empty_list_when_no_info_blobs(setup: Setup):
+    setup.repo.get_by_user.return_value = []
+    setup.repo.hydrate_original_availability.return_value = []
+
     info_blobs_by_user = await setup.service.get_by_user()
 
     assert info_blobs_by_user == []
+
+
+async def test_get_by_user_projects_original_availability_after_filtering(setup: Setup):
+    included = MagicMock()
+    included.model_dump.return_value = {"title": "included"}
+    excluded = MagicMock()
+    excluded.model_dump.return_value = {"title": "excluded"}
+    metadata_filter = MagicMock()
+    metadata_filter.model_dump.return_value = {"title": "included"}
+    setup.repo.get_by_user.return_value = [included, excluded]
+    setup.repo.hydrate_original_availability.return_value = [included]
+
+    result = await setup.service.get_by_user(metadata_filter=metadata_filter)
+
+    assert result == [included]
+    setup.repo.hydrate_original_availability.assert_awaited_once_with([included])
+
+
+async def test_get_by_website_page_projects_original_availability(setup: Setup):
+    website_id = uuid4()
+    cursor = uuid4()
+    next_cursor = uuid4()
+    stored = MagicMock(original_available=False)
+    projected = MagicMock(original_available=True)
+    setup.service._authorize_website_info_blobs = AsyncMock()
+    setup.repo.get_by_website_page.return_value = WebsiteInfoBlobPage(
+        items=[stored],
+        total_count=7,
+        next_cursor=next_cursor,
+    )
+    setup.repo.hydrate_original_availability.return_value = [projected]
+
+    result = await setup.service.get_by_website_page(
+        website_id,
+        limit=3,
+        cursor=cursor,
+    )
+
+    assert result == WebsiteInfoBlobPage(
+        items=[projected],
+        total_count=7,
+        next_cursor=next_cursor,
+    )
+    setup.service._authorize_website_info_blobs.assert_awaited_once_with(website_id)
+    setup.repo.get_by_website_page.assert_awaited_once_with(
+        website_id=website_id,
+        limit=3,
+        cursor=cursor,
+    )
+    setup.repo.hydrate_original_availability.assert_awaited_once_with([stored])
 
 
 async def test_update_fails_if_info_blob_with_same_name_exists(setup: Setup):
@@ -73,3 +127,56 @@ async def test_update_fails_if_info_blob_with_same_name_exists(setup: Setup):
 
     with pytest.raises(NameCollisionException):
         await setup.service.update_info_blob(MagicMock())
+
+
+async def test_update_projects_original_availability_before_returning(setup: Setup):
+    current = MagicMock(group_id=None)
+    updated = MagicMock()
+    projected = MagicMock(original_available=True)
+    update = MagicMock(id="blob-id", title=None)
+    setup.repo.get.return_value = current
+    setup.repo.update.return_value = updated
+    setup.repo.hydrate_original_availability.return_value = [projected]
+    setup.service._validate = AsyncMock()
+
+    result = await setup.service.update_info_blob(update)
+
+    assert result is projected
+    setup.repo.hydrate_original_availability.assert_awaited_once_with([updated])
+
+
+async def test_add_info_blobs_projects_original_availability_once(setup: Setup):
+    published = [MagicMock(), MagicMock()]
+    projected = [
+        MagicMock(original_available=False),
+        MagicMock(original_available=False),
+    ]
+    setup.service._can_perform_action = AsyncMock()
+    setup.service.publish_info_blob_without_validation = AsyncMock(
+        side_effect=published
+    )
+    setup.repo.hydrate_original_availability.return_value = projected
+
+    result = await setup.service.add_info_blobs(
+        "group-id",
+        [MagicMock(), MagicMock()],
+        embedding_model=MagicMock(),
+    )
+
+    assert result == projected
+    setup.repo.hydrate_original_availability.assert_awaited_once_with(published)
+
+
+async def test_delete_projects_unavailable_after_reference_removal(setup: Setup):
+    current = MagicMock()
+    deleted = MagicMock()
+    projected = MagicMock(original_available=False)
+    setup.repo.get.return_value = current
+    setup.repo.delete.return_value = deleted
+    setup.repo.hydrate_original_availability.return_value = [projected]
+    setup.service._validate = AsyncMock()
+
+    result = await setup.service.delete("blob-id")
+
+    assert result is projected
+    setup.repo.hydrate_original_availability.assert_awaited_once_with([deleted])

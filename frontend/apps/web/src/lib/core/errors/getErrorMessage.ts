@@ -59,10 +59,11 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
 
   // --- File uploads ---
   9056: () => m.eneo_error_9056(), // INVALID_FILENAME
+  9057: () => m.eneo_error_9057(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
 
   // --- Website crawl lifecycle ---
-  9057: () => m.eneo_error_9057(), // WEBSITE_CRAWL_ACTIVE
-  9058: () => m.eneo_error_9058(), // WEBSITE_CRAWL_CLEANUP_PENDING
+  9058: () => m.eneo_error_9058(), // WEBSITE_CRAWL_ACTIVE
+  9059: () => m.eneo_error_9059(), // WEBSITE_CRAWL_CLEANUP_PENDING
 
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE

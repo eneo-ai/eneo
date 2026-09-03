@@ -33,7 +33,9 @@ from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.worker.analysis_tasks import analyze_conversation_insights_task
 from eneo.worker.crawl_tasks import crawl_task, queue_website_crawls
 from eneo.worker.object_content_tasks import (
+    FileIconBackfillSummary,
     ObjectContentReconciliationSummary,
+    backfill_file_icon_content_task,
     reconcile_object_content_task,
 )
 from eneo.worker.redis.client import mark_crawl_reconciliation_healthy
@@ -58,6 +60,15 @@ async def reconcile_object_content(
     """Converge one bounded object-content batch every minute."""
     del container
     return await reconcile_object_content_task()
+
+
+@worker.cron_job(manages_own_session=True, run_at_startup=True)
+async def backfill_file_icon_content(
+    container: Container,
+) -> FileIconBackfillSummary:
+    """Adopt one bounded legacy File/Icon batch without blocking db-init."""
+    del container
+    return await backfill_file_icon_content_task()
 
 
 class ExportCleanupJobError(TypedDict, total=False):

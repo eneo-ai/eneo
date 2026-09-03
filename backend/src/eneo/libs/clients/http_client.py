@@ -72,19 +72,23 @@ class WrappedAiohttpClient:
         endpoint: str,
         data: Any | None = None,
         headers: RequestHeaders | None = None,
+        *,
+        retryable_status_codes: Collection[int] = THROTTLE_STATUS_CODES,
     ) -> Any:
+        # 503 retry is opt-in: only safe when the POST is idempotent (e.g. a
+        # Graph $batch of GETs).
         url = self._create_url(endpoint=endpoint)
 
         async def _do() -> Any:
             async with self.client.post(url, json=data, headers=headers) as response:
                 return await self._handle_response(
                     response,
-                    retryable_status_codes=THROTTLE_STATUS_CODES,
+                    retryable_status_codes=retryable_status_codes,
                 )
 
         return await retry_on_throttle(
             _do,
-            retryable_status_codes=THROTTLE_STATUS_CODES,
+            retryable_status_codes=retryable_status_codes,
         )
 
     async def request(

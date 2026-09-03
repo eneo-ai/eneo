@@ -543,13 +543,12 @@ server {
 
 ## API Key Hierarchy
 
-Eneo uses a three-tier API key system for different administrative tasks.
+Eneo uses environment and user/service credentials for separate tasks.
 
-| Key                     | Environment Variable       | Purpose                                                            |
-| ----------------------- | -------------------------- | ------------------------------------------------------------------ |
-| **Super API Key**       | `ENEO_SUPER_API_KEY`       | Sysadmin operations: tenants, users, credentials, crawler settings |
-| **Super Duper API Key** | `ENEO_SUPER_DUPER_API_KEY` | Module management: assigning modules to tenants                    |
-| **User API Key**        | Generated per user         | Admin operations within a tenant via `/api/v1/admin/`              |
+| Key               | Source               | Purpose                                                            |
+| ----------------- | -------------------- | ------------------------------------------------------------------ |
+| **Super API Key** | `ENEO_SUPER_API_KEY` | Sysadmin operations: tenants, users, credentials, crawler settings |
+| **User/API key**  | Generated in Eneo    | Organization operations allowed by the user's role and key scope   |
 
 <Callout type="info">
   **Service Account Pattern:** We recommend creating a dedicated admin account
@@ -659,13 +658,12 @@ To use system administration endpoints (tenants, credentials, crawler settings),
 ENEO_SUPER_API_KEY=your-secure-api-key
 ```
 
-### Modules API Access
+### Module administration
 
-To manage module assignments to tenants, set a separate higher-privileged API key:
-
-```bash
-ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
-```
+Configure modules in **Administration → Modules** with an ordinary signed-in
+administrator holding the `modules` permission. The organization is derived
+from the session; module administration does not require a separate environment
+key or a tenant ID.
 
 ---
 
@@ -820,16 +818,6 @@ checksum and skew-recovery checks.
 ### Updating Eneo
 
 <Steps>
-### Back up your data
-
-```bash
-# Database backup (required)
-docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).sql.gz
-```
-
-If object-store rows exist, take the matching endpoint snapshot before resuming
-writes. Inline-only content needs no second backup artifact.
-
 ### Update version tags (if pinned)
 
 Edit `docker-compose.yml` and update version tags (e.g., `v1.2.3` → `v1.2.4`).
@@ -848,12 +836,39 @@ endpoint. If the retained `.env` points to
 `http://object-content:8333`, use the bundled-store overlay and profile on
 every command.
 
+### Drain work and stop old writers
+
+For the release that introduces durable knowledge originals and staged legacy
+File/Icon adoption, do not use a rolling `docker compose up`. Stop all backend
+replicas, let the old worker drain its executable knowledge jobs, then stop all
+old workers before starting `db-init`. The schema expansion installs a database
+write fence because old File/Icon code still changes legacy payload columns.
+
+Follow the [File and Icon storage upgrade
+checklist](/guides/file-icon-storage-upgrade#before-you-upgrade). Keep the API
+closed until the new migration and same-release worker are ready.
+
+### Take the stopped-writer recovery point
+
+After the drain is verified and every old writer is stopped, create the database
+backup:
+
+```bash
+docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).sql.gz
+```
+
+If object-store rows exist, take the matching endpoint snapshot while writers
+remain stopped and label both artifacts as one recovery point. Inline-only
+content needs no second backup artifact.
+
 ### Pull and deploy
 
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
+docker compose stop backend worker
 docker compose pull
+docker compose run --rm db-init
 docker compose up -d
 docker compose ps
 ```
@@ -870,7 +885,17 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
+  stop backend worker
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
   pull
+docker compose \
+  --profile object-content \
+  -f docker-compose.yml \
+  -f docker-compose.object-content.yml \
+  run --rm db-init
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
@@ -891,6 +916,40 @@ while inline content remains available:
 curl -fsS https://eneo.example.eu/api/readyz \
   | jq -e '.detail.object_content.code == "ready"'
 ```
+
+### Check online File and Icon adoption
+
+`db-init` runs two consecutive revisions for this change. The first installs
+the schema and write fence and commits. The second inventories legacy File/Icon
+variants in resumable, idempotent groups without retaining the first revision's
+exclusive table locks. Neither revision copies payload bytes. The new worker
+adopts them online in bounded batches. Follow its state after the deployment:
+
+```bash
+docker compose logs --since=30m worker \
+  | grep "File/Icon legacy backfill"
+```
+
+- `active` needs no operator action beyond capacity and application monitoring.
+  Confirm `complete` with the durable campaign-state query in the storage guide;
+  an empty installation may emit no completion log.
+- `waiting_for_capacity` means Eneo remains available, but the estimated inline
+  copy exceeds the automatic threshold. Confirm payload, WAL, replica, backup,
+  and safety headroom before setting the reported acknowledgement.
+- `waiting_for_object_store` means this release cannot adopt legacy bytes
+  directly to the selected object store. Selecting PostgreSQL inline changes
+  the deployment-wide target for eligible new writes. Keep it selected until
+  adoption is complete, then reselect object storage and queue verified moves,
+  or wait for a compatible release.
+- `halted` means the destination changed, or an invalid, oversized, or
+  retry-exhausted item needs action. Fix the logged cause before increasing the
+  resume revision. The worker retries older failures in bounded scheduled
+  batches; a repeated failure waits for the next higher revision.
+
+Do not edit the ledger or remove the database trigger. Existing legacy content
+remains readable while the worker waits or is stopped. See [Upgrade File & Icon
+Storage](/guides/file-icon-storage-upgrade) for capacity examples, realistic
+duration, state queries, pause behavior, rollback, and cleanup.
 
 ### Clean up old images
 

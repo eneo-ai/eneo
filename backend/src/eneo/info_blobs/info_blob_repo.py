@@ -1,8 +1,10 @@
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any, List, TypeVar
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import defer, selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -34,13 +36,19 @@ from eneo.main.exceptions import (
     InfoBlobPublicationConflictError,
     NotFoundException,
 )
-from eneo.object_content.content import ContentState
+from eneo.object_content.content import ContentAccessClass, ContentState
+
+_InfoBlobNoTextT = TypeVar("_InfoBlobNoTextT", bound=InfoBlobInDBNoText)
 
 
 @dataclass(frozen=True, slots=True)
 class InfoBlobOriginal:
+    content_id: UUID
+    tenant_id: UUID
     sha256: bytes
+    access_class: ContentAccessClass
     state: ContentState
+    original_filename: str
 
     @property
     def usable(self) -> bool:
@@ -115,6 +123,12 @@ class InfoBlobRepository:
         knowledge = await self.session.scalar(stmt)
 
         return knowledge
+
+    async def get_by_ids(self, ids: list[UUID]) -> list[InfoBlobInDB]:
+        unique_ids = list(dict.fromkeys(ids))
+        if not unique_ids:
+            return []
+        return await self.delegate.get_by_ids(unique_ids)
 
     async def add(
         self,
@@ -358,7 +372,11 @@ class InfoBlobRepository:
         row = (
             await self.session.execute(
                 sa.select(
+                    InfoBlobContentReferences.content_id,
+                    InfoBlobContentReferences.original_filename,
+                    ObjectContents.tenant_id,
                     ObjectContents.sha256,
+                    ObjectContents.access_class,
                     ObjectContents.state,
                 )
                 .select_from(InfoBlobContentReferences)
@@ -372,9 +390,53 @@ class InfoBlobRepository:
         if row is None:
             return None
         return InfoBlobOriginal(
+            content_id=row.content_id,
+            tenant_id=row.tenant_id,
             sha256=row.sha256,
+            access_class=ContentAccessClass(row.access_class),
             state=ContentState(row.state),
+            original_filename=row.original_filename,
         )
+
+    async def get_original_availability(self, info_blob_ids: list[UUID]) -> set[UUID]:
+        """Return ids with a referenced, available original in one query."""
+        if not info_blob_ids:
+            return set()
+        unique_ids = list(dict.fromkeys(info_blob_ids))
+        ids_parameter = sa.bindparam(
+            "info_blob_ids",
+            type_=ARRAY(PostgreSQLUUID(as_uuid=True)),
+        )
+        rows = await self.session.scalars(
+            sa.select(InfoBlobContentReferences.info_blob_id)
+            .join(
+                ObjectContents,
+                ObjectContents.id == InfoBlobContentReferences.content_id,
+            )
+            .where(
+                InfoBlobContentReferences.info_blob_id == sa.any_(ids_parameter),
+                ObjectContents.state == ContentState.AVAILABLE.value,
+            ),
+            {"info_blob_ids": unique_ids},
+        )
+        return set(rows)
+
+    async def hydrate_original_availability(
+        self, blobs: list[_InfoBlobNoTextT]
+    ) -> list[_InfoBlobNoTextT]:
+        """Populate the public availability projection in one query.
+
+        Keep this explicit at public read boundaries so internal InfoBlob reads do
+        not pay for a join they do not use.
+        """
+        if not blobs:
+            return blobs
+        available_ids = await self.get_original_availability(
+            [blob.id for blob in blobs]
+        )
+        for blob in blobs:
+            blob.original_available = blob.id in available_ids
+        return blobs
 
     async def add_original_reference(
         self,

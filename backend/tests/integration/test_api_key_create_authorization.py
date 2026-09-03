@@ -9,6 +9,7 @@ the legacy ``ApiKeyPermission.ADMIN``-only guard. Two invariants:
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -114,16 +115,17 @@ async def test_api_key_caller_cannot_mint_new_key(client, default_user_token):
     assert create_response.status_code == 201, create_response.text
     secret = create_response.json()["secret"]
 
-    spawn_response = await client.post(
-        "/api/v1/api-keys",
-        json={
-            "name": "Spawned Key",
-            "key_type": "sk_",
-            "permission": "read",
-            "scope_type": "tenant",
-        },
-        headers={"X-API-Key": secret},
-    )
+    async with asyncio.timeout(30):
+        spawn_response = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": "Spawned Key",
+                "key_type": "sk_",
+                "permission": "read",
+                "scope_type": "tenant",
+            },
+            headers={"X-API-Key": secret},
+        )
     assert spawn_response.status_code == 403, spawn_response.text
     error = spawn_response.json()
     assert error.get("code") == "session_auth_required"

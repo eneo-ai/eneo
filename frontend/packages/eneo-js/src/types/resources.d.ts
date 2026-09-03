@@ -140,6 +140,10 @@ export type ApiKeyStateChangeRequest = components["schemas"]["ApiKeyStateChangeR
 export type ApiKeyCreatedResponse = components["schemas"]["ApiKeyCreatedResponse"];
 export type ApiKeyPolicy = components["schemas"]["ApiKeyPolicyResponse"];
 export type SuperApiKeyStatus = components["schemas"]["SuperApiKeyStatus"];
+export type ModuleInstallation = components["schemas"]["ModuleInstallation"];
+export type ModuleInstallationConfig = components["schemas"]["ModuleInstallationConfig"];
+export type ModuleInstallationChange = components["schemas"]["ModuleInstallationChange"];
+export type ModuleInstallationList = components["schemas"]["PaginatedResponse_ModuleInstallation_"];
 
 export type CursorPaginated<T> = {
   items: T[];
@@ -269,8 +273,4 @@ export type InitiateAuthResponse = {
   state: string;
 };
 
-export type AccessTokenResponse = {
-  access_token: string;
-  token_type: string;
-  expires_in?: number;
-};
+export type AccessTokenResponse = components["schemas"]["AccessTokenResponse"];

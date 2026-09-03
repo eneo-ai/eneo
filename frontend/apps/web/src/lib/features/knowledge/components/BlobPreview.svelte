@@ -1,12 +1,21 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import type { InfoBlob } from "@eneo/eneo-js";
+  import { IconCopy } from "@eneo/icons/copy";
   import { IconDocument } from "@eneo/icons/document";
+  import { IconDownload } from "@eneo/icons/download";
   import { Button, Dialog, Markdown } from "@eneo/ui";
   import { getEneo } from "$lib/core/Eneo";
   import * as m from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
-  export let blob: InfoBlob;
+  type BlobPreviewReference = {
+    id: InfoBlob["id"];
+    metadata: { title?: string | null };
+    text?: InfoBlob["text"];
+    original_available?: InfoBlob["original_available"];
+  };
+
+  export let blob: BlobPreviewReference;
   export let index: number | undefined = undefined;
   export let isTableView = false;
 
@@ -14,16 +23,21 @@
 
   // Use a separate state variable for the loaded text to avoid prop mutation
   let loadedBlobText: string | undefined = blob.text;
+  let originalAvailable: boolean | undefined = blob.original_available;
   let loadingBlob = false;
   let loadError = false;
+  let loadingOriginal = false;
 
   async function loadBlob() {
-    if (!loadedBlobText) {
+    if (!loadedBlobText || originalAvailable === undefined) {
       loadingBlob = true;
       loadError = false;
       try {
         const loadedBlob = await eneo.infoBlobs.get(blob);
         loadedBlobText = loadedBlob.text;
+        if ("original_available" in loadedBlob) {
+          originalAvailable = loadedBlob.original_available;
+        }
       } catch (e) {
         loadError = true;
         console.error("Error retrieving blob content:", e);
@@ -57,6 +71,24 @@
           URL.revokeObjectURL(a.href);
         }, 1500);
       }
+    }
+  }
+
+  async function downloadOriginal() {
+    if (!browser || loadingOriginal || !originalAvailable) return;
+
+    loadingOriginal = true;
+    try {
+      const response = await eneo.infoBlobs.generateOriginalSignedUrl({
+        infoBlobId: blob.id,
+        contentDisposition: "attachment"
+      });
+      window.location.assign(response.url);
+    } catch (e) {
+      console.error("Error generating original download URL:", e);
+      toast.error(m.error_downloading_original());
+    } finally {
+      loadingOriginal = false;
     }
   }
 
@@ -122,41 +154,26 @@
     <Dialog.Controls let:close>
       {#if loadedBlobText}
         <Button variant="simple" on:click={downloadText} padding="icon-leading">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke-width="1.5"
-            stroke="currentColor"
-            class="h-6 w-6"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
-            />
-          </svg>
+          <IconDownload />
           {m.download_extracted_text()}
         </Button>
 
         <Button variant="simple" padding="icon-leading" on:click={copyText}>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke-width="1.5"
-            stroke="currentColor"
-            class="h-6 w-6"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"
-            />
-          </svg>
+          <IconCopy />
           {copyButtonText}</Button
         >
         <div class="flex-grow"></div>
+      {/if}
+      {#if originalAvailable}
+        <Button
+          variant="simple"
+          on:click={downloadOriginal}
+          disabled={loadingOriginal}
+          padding="icon-leading"
+        >
+          <IconDownload />
+          {loadingOriginal ? m.downloading() : m.download_original()}
+        </Button>
       {/if}
       <Button variant="primary" is={close}>{m.done()}</Button>
     </Dialog.Controls>

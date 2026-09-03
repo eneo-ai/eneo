@@ -40,7 +40,6 @@ export function initMCPServers(client) {
      * @param {Object} params
      * @param {string} params.name Name of the MCP server
      * @param {string} params.http_url HTTP URL to the MCP server
-     * @param {"sse" | "streamable_http"} [params.transport_type] Transport type (default: sse)
      * @param {"none" | "bearer"} [params.http_auth_type] Authentication type (default: none)
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
@@ -58,7 +57,6 @@ export function initMCPServers(client) {
     create: async ({
       name,
       http_url,
-      transport_type,
       http_auth_type,
       description,
       http_auth_config_schema,
@@ -76,7 +74,6 @@ export function initMCPServers(client) {
       const body = {
         name,
         http_url,
-        transport_type,
         http_auth_type,
         description,
         http_auth_config_schema,
@@ -105,7 +102,6 @@ export function initMCPServers(client) {
      * @param {string} params.id The MCP server ID
      * @param {string} [params.name] Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server
-     * @param {"sse" | "streamable_http"} [params.transport_type] Transport type
      * @param {"none" | "bearer"} [params.http_auth_type] Authentication type
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
@@ -124,7 +120,6 @@ export function initMCPServers(client) {
       id,
       name,
       http_url,
-      transport_type,
       http_auth_type,
       description,
       http_auth_config_schema,
@@ -142,7 +137,6 @@ export function initMCPServers(client) {
       const body = {
         name,
         http_url,
-        transport_type,
         http_auth_type,
         description,
         http_auth_config_schema,

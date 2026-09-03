@@ -37,6 +37,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 WITH_USER_CONTAINER = get_container(with_user=True)
 USER_CONTAINER = Depends(WITH_USER_CONTAINER)
+API_KEY_REVOKING_CONTAINER = Depends(
+    get_container(with_user=True, transaction_scope="function")
+)
 USER_UPLOAD_ADMISSION_CONTAINER = Depends(
     get_container(with_user=True, with_upload_admission=True)
 )
@@ -387,7 +390,7 @@ async def update_app(
 )
 async def delete_app(
     id: UUID,
-    container: Container = USER_CONTAINER,
+    container: Container = API_KEY_REVOKING_CONTAINER,
 ):
     service = container.app_service()
     current_user = container.user()

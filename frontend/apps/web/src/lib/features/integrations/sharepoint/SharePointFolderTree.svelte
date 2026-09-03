@@ -1,25 +1,44 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getEneo } from "$lib/core/Eneo";
-  import { IconChevronRight } from "@eneo/icons/chevron-right";
-  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { IconWeb } from "@eneo/icons/web";
-  import { IconUploadCloud } from "@eneo/icons/upload-cloud";
+  import { Cloud, Globe2, Info, LoaderCircle, RefreshCw } from "lucide-svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
+  import type { components } from "@eneo/eneo-js";
   import SharePointFolderTreeNode from "./SharePointFolderTreeNode.svelte";
   import { m } from "$lib/paraglide/messages";
   import { buildSharePointSelectionKey } from "./selectionKey";
+  import { fetchSharePointFixtureTree, type SharePointFixtureScenario } from "./fixtureMode";
+  import {
+    createSharePointTreeNode,
+    type SharePointTreeItem,
+    type SharePointTreeNode
+  } from "./treeState";
 
-  type TreeItem = {
-    id: string;
-    name: string;
-    type: "file" | "folder" | "site_root";
-    path: string;
-    web_url?: string;
-    has_children: boolean;
-    size?: number;
-    modified?: string;
+  type ApiTreeItem = components["schemas"]["SharePointTreeItem"];
+
+  type TreeSource = {
+    userIntegrationId: string;
+    spaceId: string;
+    siteId?: string;
+    driveId?: string;
+    fixtureScenario?: SharePointFixtureScenario;
   };
+
+  function normalizeTreeItem(item: ApiTreeItem): SharePointTreeItem | null {
+    if (item.type !== "file" && item.type !== "folder" && item.type !== "site_root") {
+      return null;
+    }
+    return {
+      id: item.id,
+      name: item.name,
+      type: item.type,
+      path: item.path,
+      web_url: item.web_url ?? undefined,
+      has_children: item.has_children,
+      size: item.size ?? undefined,
+      modified: item.modified ?? undefined
+    };
+  }
 
   interface Props {
     userIntegrationId: string;
@@ -28,8 +47,10 @@
     driveId?: string;
     siteName: string;
     isOneDrive: boolean;
+    fixtureScenario?: SharePointFixtureScenario;
     selectedItemKeys?: string[];
-    onToggleSelect: (item: TreeItem) => void;
+    selectedPaths?: string[];
+    onToggleSelect: (item: SharePointTreeItem) => void;
   }
 
   let {
@@ -39,97 +60,119 @@
     driveId,
     siteName,
     isOneDrive,
-    selectedItemKeys,
+    fixtureScenario,
+    selectedItemKeys = [],
+    selectedPaths = [],
     onToggleSelect
   }: Props = $props();
 
   const eneo = getEneo();
-
-  let currentItems = $state<TreeItem[]>([]);
-  let navigationStack = $state<Array<{ folderId: string | null; path: string; name: string }>>(
-    untrack(() => [{ folderId: null, path: "/", name: siteName }])
-  );
-  let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys ?? []));
   const siteRootSelectionKey = buildSharePointSelectionKey({
     id: "",
     type: "site_root",
     path: "/"
   });
 
-  function getItemSelectionKey(item: TreeItem): string {
-    return buildSharePointSelectionKey(item);
+  let rootItems = $state<SharePointTreeNode[]>([]);
+  let rootLoading = $state(false);
+  let rootLoadError = $state(false);
+  let treeGeneration = 0;
+  let selectedItemKeySet = $derived.by(() => new Set(selectedItemKeys));
+  let siteRootSelected = $derived(selectedItemKeySet.has(siteRootSelectionKey));
+  let siteRootIndeterminate = $derived(!siteRootSelected && selectedPaths.length > 0);
+
+  function currentTreeSource(): TreeSource {
+    return { userIntegrationId, spaceId, siteId, driveId, fixtureScenario };
   }
 
-  // Guard against stale responses when navigating quickly
-  let requestId = 0;
+  async function fetchTreeItems(
+    source: TreeSource,
+    folderId?: string,
+    folderPath?: string
+  ): Promise<SharePointTreeNode[]> {
+    const queryParams: {
+      space_id: string;
+      site_id?: string;
+      drive_id?: string;
+      folder_id?: string;
+      folder_path?: string;
+    } = { space_id: source.spaceId };
 
-  const loadFolders = createAsyncState(
-    async (folderId: string | null = null, folderPath: string = "") => {
-      const thisRequest = ++requestId;
-      try {
-        const queryParams: Record<string, string> = {
-          space_id: spaceId
-        };
+    if (source.siteId) queryParams.site_id = source.siteId;
+    if (source.driveId) queryParams.drive_id = source.driveId;
+    if (folderId) queryParams.folder_id = folderId;
+    if (folderPath) queryParams.folder_path = folderPath;
 
-        if (siteId) {
-          queryParams.site_id = siteId;
-        }
-        if (driveId) {
-          queryParams.drive_id = driveId;
-        }
+    const response = source.fixtureScenario
+      ? await fetchSharePointFixtureTree(eneo.client, source.fixtureScenario, {
+          siteId: source.siteId,
+          driveId: source.driveId,
+          folderId,
+          folderPath
+        })
+      : await eneo.client.fetch("/api/v1/integrations/{user_integration_id}/sharepoint/tree/", {
+          method: "get",
+          params: {
+            path: { user_integration_id: source.userIntegrationId },
+            query: queryParams
+          }
+        });
 
-        if (folderId !== null) {
-          queryParams.folder_id = folderId;
-        }
+    return response.items
+      .map(normalizeTreeItem)
+      .filter((item): item is SharePointTreeItem => item !== null)
+      .map(createSharePointTreeNode);
+  }
 
-        if (folderPath) {
-          queryParams.folder_path = folderPath;
-        }
+  async function loadRoot(source: TreeSource) {
+    const generation = ++treeGeneration;
+    rootItems = [];
+    rootLoading = true;
+    rootLoadError = false;
 
-        /* eslint-disable @typescript-eslint/no-explicit-any */
-        const response = (await eneo.client.fetch(
-          `/api/v1/integrations/${userIntegrationId}/sharepoint/tree/` as any,
-          {
-            method: "get",
-            params: {
-              query: queryParams
-            }
-          } as any
-        )) as { items?: TreeItem[] };
-        /* eslint-enable @typescript-eslint/no-explicit-any */
-
-        // Ignore stale responses from earlier navigations
-        if (thisRequest !== requestId) return;
-
-        currentItems = response.items || [];
-      } catch (error) {
-        if (thisRequest !== requestId) return;
-        console.error("Error loading folder tree:", error);
-      }
+    try {
+      const items = await fetchTreeItems(source);
+      if (generation !== treeGeneration) return;
+      rootItems = items;
+    } catch (error) {
+      if (generation !== treeGeneration) return;
+      rootLoadError = true;
+      console.error("Error loading SharePoint tree:", error);
+    } finally {
+      if (generation === treeGeneration) rootLoading = false;
     }
-  );
+  }
 
-  const handleNodeSelect = (item: TreeItem) => {
-    onToggleSelect(item);
-  };
+  async function loadNodeChildren(node: SharePointTreeNode) {
+    const generation = treeGeneration;
+    node.loading = true;
+    node.loadError = false;
 
-  const handleNodeNavigate = (item: TreeItem) => {
-    if (item.type === "folder") {
-      navigationStack.push({ folderId: item.id, path: item.path, name: item.name });
-      loadFolders(item.id, item.path);
+    try {
+      const children = await fetchTreeItems(currentTreeSource(), node.id, node.path);
+      if (generation !== treeGeneration) return;
+      node.children = children;
+    } catch (error) {
+      if (generation !== treeGeneration) return;
+      node.children = null;
+      node.loadError = true;
+      console.error("Error loading SharePoint folder:", error);
+    } finally {
+      if (generation === treeGeneration) node.loading = false;
     }
-  };
+  }
 
-  const navigateTo = (index: number) => {
-    if (index < navigationStack.length - 1) {
-      navigationStack = navigationStack.slice(0, index + 1);
-      const target = navigationStack[index];
-      const targetFolderPath = target.path === "/" ? "" : target.path;
-      loadFolders(target.folderId, targetFolderPath);
-    }
-  };
+  function toggleNodeExpanded(node: SharePointTreeNode) {
+    node.expanded = !node.expanded;
+    if (node.expanded && node.children === null && !node.loading) void loadNodeChildren(node);
+  }
 
-  const handleImportEntireSite = () => {
+  function retryNodeLoad(node: SharePointTreeNode) {
+    node.expanded = true;
+    void loadNodeChildren(node);
+  }
+
+  function handleImportEntireSite() {
     onToggleSelect({
       id: "",
       name: siteName,
@@ -137,98 +180,88 @@
       path: "/",
       has_children: true
     });
-  };
-
-  const handleImportEntireSiteCheckboxClick = (event: MouseEvent) => {
-    event.stopPropagation();
-    handleImportEntireSite();
-  };
+  }
 
   $effect(() => {
-    if (siteId || driveId) {
-      loadFolders();
+    const source = currentTreeSource();
+    if (source.siteId || source.driveId) void loadRoot(source);
+    else {
+      treeGeneration += 1;
+      rootItems = [];
+      rootLoading = false;
+      rootLoadError = false;
     }
   });
 </script>
 
-<div class="flex min-h-0 flex-col gap-2 overflow-hidden p-4">
-  <!-- Breadcrumb -->
-  {#if navigationStack.length > 1}
-    <nav class="flex min-h-[28px] flex-wrap items-center gap-0.5 text-sm">
-      {#each navigationStack as segment, i (i)}
-        {#if i > 0}
-          <IconChevronRight class="text-secondary h-3 w-3 flex-shrink-0" />
-        {/if}
-        {#if i < navigationStack.length - 1}
-          <button
-            type="button"
-            class="text-secondary hover:text-primary max-w-[150px] truncate rounded px-1 py-0.5 hover:underline"
-            onclick={() => navigateTo(i)}
-          >
-            {segment.name}
-          </button>
-        {:else}
-          <span class="text-primary max-w-[200px] truncate px-1 py-0.5 font-medium"
-            >{segment.name}</span
-          >
-        {/if}
-      {/each}
-    </nav>
-  {/if}
+<div class="flex min-h-0 flex-1 flex-col gap-3">
+  <p class="text-muted-foreground flex items-start gap-2 px-1 text-sm">
+    <Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+    {m.sharepoint_tree_selection_description()}
+  </p>
 
   <div
-    class="border-default bg-primary max-h-[42vh] min-h-0 overflow-x-hidden overflow-y-auto rounded-md border"
+    class="border-border bg-card min-h-56 flex-1 overflow-x-hidden overflow-y-auto rounded-lg border"
+    aria-busy={rootLoading}
   >
-    {#if loadFolders.isLoading && currentItems.length === 0}
-      <div class="text-secondary flex items-center gap-2 px-4 py-8">
-        <IconLoadingSpinner class="h-4 w-4 animate-spin" />
-        {m.loading_available_sites()}
+    {#if rootLoading}
+      <div
+        class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
+        role="status"
+      >
+        <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+        {m.sharepoint_loading_content()}
       </div>
-    {:else if currentItems.length === 0}
-      <div class="text-secondary px-4 py-4 text-sm">
+    {:else if rootLoadError}
+      <div class="flex flex-col items-center gap-3 px-4 py-10 text-center" role="alert">
+        <p class="text-destructive text-sm">{m.sharepoint_tree_load_error()}</p>
+        <Button variant="outline" size="sm" onclick={() => loadRoot(currentTreeSource())}>
+          <RefreshCw aria-hidden="true" />
+          {m.retry()}
+        </Button>
+      </div>
+    {:else if rootItems.length === 0}
+      <div class="text-muted-foreground px-4 py-10 text-center text-sm">
         {m.no_items()}
       </div>
     {:else}
-      <div class="flex flex-col">
-        <!-- Import entire site row -->
-        {#if navigationStack.length <= 1}
-          <div
-            class="border-default flex w-full cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-left transition-colors
-              {selectedItemKeySet.has(siteRootSelectionKey)
-              ? 'bg-accent-dimmer border-accent'
-              : 'hover:bg-hover-default'}"
-          >
-            <div class="w-3.5"></div>
-            <input
-              type="checkbox"
-              class="accent-accent-default h-4 w-4 flex-shrink-0"
-              checked={selectedItemKeySet.has(siteRootSelectionKey)}
-              onclick={handleImportEntireSiteCheckboxClick}
-            />
-            {#if isOneDrive}
-              <IconUploadCloud class="text-secondary h-4 w-4 flex-shrink-0" />
-            {:else}
-              <IconWeb class="text-secondary h-4 w-4 flex-shrink-0" />
-            {/if}
-            <button
-              type="button"
-              class="w-full min-w-0 truncate text-left text-sm font-medium"
-              onclick={handleImportEntireSite}
-            >
-              {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
-            </button>
-          </div>
-        {/if}
+      <div
+        class="border-border flex min-h-11 w-full items-center gap-2 border-b px-3 text-left transition-colors
+          {siteRootSelected ? 'bg-accent-dimmer/60' : 'hover:bg-muted/50'}"
+      >
+        <Checkbox
+          id="sharepoint-entire-site"
+          aria-label={isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
+          checked={siteRootSelected}
+          indeterminate={siteRootIndeterminate}
+          onCheckedChange={handleImportEntireSite}
+        />
+        <label
+          for="sharepoint-entire-site"
+          class="flex h-10 min-w-0 flex-1 cursor-pointer items-center gap-2 px-2 font-medium"
+        >
+          {#if isOneDrive}
+            <Cloud class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+          {:else}
+            <Globe2 class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+          {/if}
+          {isOneDrive ? m.import_entire_onedrive() : m.import_entire_site()}
+        </label>
+      </div>
 
-        {#each currentItems as item (getItemSelectionKey(item))}
+      <ul role="tree" aria-label={siteName} class="flex flex-col">
+        {#each rootItems as item (buildSharePointSelectionKey(item))}
           <SharePointFolderTreeNode
             node={item}
-            isSelected={selectedItemKeySet.has(getItemSelectionKey(item))}
-            onToggleSelect={handleNodeSelect}
-            onNavigate={handleNodeNavigate}
+            {selectedItemKeySet}
+            {selectedPaths}
+            ancestorSelected={siteRootSelected}
+            {onToggleSelect}
+            onToggleExpanded={toggleNodeExpanded}
+            onRetryLoad={retryNodeLoad}
           />
         {/each}
-      </div>
+      </ul>
     {/if}
   </div>
 </div>

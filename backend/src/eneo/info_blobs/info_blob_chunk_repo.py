@@ -209,6 +209,43 @@ class InfoBlobChunkRepo:
             for row in rows.all()
         ]
 
+    async def get_adjacent_chunks(
+        self,
+        *,
+        info_blob_id: UUID,
+        chunk_no: int,
+        radius: int = 1,
+    ) -> list[InfoBlobChunkExcerpt]:
+        """Read the active document chunks immediately around one anchor."""
+        if radius < 1:
+            return []
+
+        stmt = (
+            sa.select(
+                InfoBlobChunks.info_blob_id,
+                InfoBlobChunks.chunk_no,
+                InfoBlobChunks.text,
+            )
+            .join(InfoBlobs, InfoBlobs.id == InfoBlobChunks.info_blob_id)
+            .where(
+                InfoBlobChunks.info_blob_id == info_blob_id,
+                InfoBlobChunks.chunk_no.between(
+                    max(0, chunk_no - radius), chunk_no + radius
+                ),
+                InfoBlobChunks.chunk_no != chunk_no,
+                active_info_blob_version(),
+            )
+            .order_by(InfoBlobChunks.chunk_no)
+        )
+
+        rows = await self.session.execute(stmt)
+        return [
+            InfoBlobChunkExcerpt(
+                info_blob_id=row.info_blob_id, chunk_no=row.chunk_no, text=row.text
+            )
+            for row in rows.all()
+        ]
+
     async def keyword_search(
         self,
         search_string: str,

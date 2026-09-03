@@ -53,8 +53,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 46, (
-            f"Expected 46 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 49, (
+            f"Expected 49 admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -84,7 +84,10 @@ class TestCategoryMappings:
             ActionType.CREDENTIALS_UPDATED,
             ActionType.FEDERATION_UPDATED,
             ActionType.MODULE_ADDED,
+            ActionType.MODULE_SET_REPLACED,
             ActionType.MODULE_ADDED_TO_TENANT,
+            ActionType.MODULE_REMOVED_FROM_TENANT,
+            ActionType.MODULE_CLIENT_CONFIG_UPDATED,
         ]
 
         for action_type in admin_action_types:
@@ -118,6 +121,9 @@ class TestCategoryMappings:
             ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED,
             ActionType.SECURITY_CLASSIFICATION_ENABLED,
             ActionType.SECURITY_CLASSIFICATION_DISABLED,
+            ActionType.MODULE_AUTH_TICKET_ISSUED,
+            ActionType.MODULE_AUTH_TOKEN_EXCHANGED,
+            ActionType.MODULE_AUTH_TOKEN_REFRESHED,
         ]
 
         for action_type in security_actions:
@@ -255,10 +261,10 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 46,
+            "admin_actions": 49,
             "user_actions": 45,
-            "security_events": 6,
-            "file_operations": 4,
+            "security_events": 9,
+            "file_operations": 5,
             "integration_events": 20,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED

@@ -1,12 +1,13 @@
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterable, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from secrets import token_hex
 from time import monotonic
 from uuid import UUID
 
+from sqlalchemy import Select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,10 +18,12 @@ from eneo.object_content.configuration import (
 from eneo.object_content.content import (
     ByteRange,
     CapturedContent,
+    ContentFacts,
     ContentFailureCode,
     ContentIntent,
     ContentRead,
     ContentReadGrant,
+    ContentTooLargeError,
     ObjectContentBusyError,
     ObjectContentConfigurationError,
     ObjectContentIntegrityError,
@@ -84,6 +87,61 @@ class VerifiedObjectUpload:
     size_bytes: int
     declared_media_type: str
     verified_media_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class DetachedContentRead:
+    chunks: AsyncGenerator[bytes, None]
+    content_length: int
+    media_type: str
+    content_range: str | None
+    _close: Callable[[], Awaitable[None]] = field(repr=False)
+
+    async def aclose(self) -> None:
+        await self._close()
+
+
+async def detach_content_read(
+    read_context: AbstractAsyncContextManager[ContentRead],
+) -> DetachedContentRead:
+    """Keep a content read open until its stream or explicit handle closes."""
+    opened = await read_context.__aenter__()
+    exit_task: asyncio.Task[bool | None] | None = None
+
+    async def exit_read_context(error: BaseException | None = None) -> bool | None:
+        nonlocal exit_task
+        if exit_task is None:
+            exit_task = asyncio.create_task(
+                read_context.__aexit__(None, None, None)
+                if error is None
+                else read_context.__aexit__(
+                    type(error),
+                    error,
+                    error.__traceback__,
+                )
+            )
+        return await asyncio.shield(exit_task)
+
+    async def stream() -> AsyncGenerator[bytes, None]:
+        try:
+            async for chunk in opened.chunks:
+                yield chunk
+        except BaseException as error:
+            if not await exit_read_context(error):
+                raise
+        else:
+            await exit_read_context()
+
+    async def close() -> None:
+        await exit_read_context()
+
+    return DetachedContentRead(
+        chunks=stream(),
+        content_length=opened.content_length,
+        media_type=opened.media_type,
+        content_range=opened.content_range,
+        _close=close,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -495,6 +553,33 @@ class ObjectContentService:
                         object_key=new_object_key(lease.settings),
                         request_fingerprint=request_fingerprint,
                     )
+
+    async def prepare_inline_from_select_in_transaction(
+        self,
+        session: AsyncSession,
+        *,
+        intent: ContentIntent,
+        content: ContentFacts,
+        payload_select: Select[tuple[bytes]],
+    ) -> PreparedContent:
+        """Adopt frozen PostgreSQL bytes without materializing them in Python."""
+        if not session.in_transaction():
+            raise RuntimeError("Inline adoption requires an owning transaction")
+        self.ensure_inline_size(content.size_bytes)
+        return await ObjectContentRepository(session).prepare_inline_from_select(
+            intent=intent,
+            content=content,
+            payload_select=payload_select,
+            request_fingerprint=content_request_fingerprint(
+                intent,
+                content,
+                StorageKind.POSTGRES_INLINE,
+            ),
+        )
+
+    def ensure_inline_size(self, size_bytes: int) -> None:
+        if size_bytes > self._inline_store.maximum_size_bytes:
+            raise ContentTooLargeError(self._inline_store.maximum_size_bytes)
 
     async def store_and_verify(
         self,

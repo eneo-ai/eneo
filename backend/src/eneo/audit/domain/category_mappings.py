@@ -4,7 +4,7 @@ from eneo.audit.domain.action_types import ActionType
 
 # Map all ActionType constants to categories (using string values as keys)
 CATEGORY_MAPPINGS = {
-    # Admin Actions (33 actions)
+    # Admin Actions
     ActionType.USER_CREATED.value: "admin_actions",
     ActionType.USER_DELETED.value: "admin_actions",
     ActionType.USER_UPDATED.value: "admin_actions",
@@ -33,7 +33,10 @@ CATEGORY_MAPPINGS = {
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
+    ActionType.MODULE_SET_REPLACED.value: "admin_actions",
     ActionType.MODULE_ADDED_TO_TENANT.value: "admin_actions",
+    ActionType.MODULE_REMOVED_FROM_TENANT.value: "admin_actions",
+    ActionType.MODULE_CLIENT_CONFIG_UPDATED.value: "admin_actions",
     # SCIM Provisioning Actions (11 actions)
     ActionType.SCIM_USER_PROVISIONED.value: "admin_actions",
     ActionType.SCIM_USER_RECONCILED.value: "admin_actions",
@@ -92,19 +95,23 @@ CATEGORY_MAPPINGS = {
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
-    # Security Events (6 actions)
+    # Security Events
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_DELETED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_LEVELS_UPDATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_ENABLED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_DISABLED.value: "security_events",
-    # File Operations (4 actions)
+    ActionType.MODULE_AUTH_TICKET_ISSUED.value: "security_events",
+    ActionType.MODULE_AUTH_TOKEN_EXCHANGED.value: "security_events",
+    ActionType.MODULE_AUTH_TOKEN_REFRESHED.value: "security_events",
+    # File Operations (5 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
-    # Integration Events
+    ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
+    # Integration Events (20 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",
     ActionType.INTEGRATION_CONNECTED.value: "integration_events",

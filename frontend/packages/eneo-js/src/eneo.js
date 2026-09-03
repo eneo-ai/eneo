@@ -39,12 +39,14 @@ import { initHelpAssistants } from "./endpoints/helpAssistants.js";
 import { initSkills } from "./endpoints/skills.js";
 import { initObjectContentPolicy } from "./endpoints/object-content-policy.js";
 import { initObjectStoreConnection } from "./endpoints/object-store-connection.js";
+import { initModules } from "./endpoints/modules.js";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
- * Requires either an api key or a user token to authenticate requests.
+ * Accepts an API key, a user token, or both when an endpoint requires dual credentials.
  * @param {Object} args
  * @param  {string} [args.apiKey] Eneo API key
+ * @param  {string} [args.apiKeyHeaderName] API-key header configured by the backend, defaults to X-API-Key
  * @param  {string} [args.token] Eneo auth token obtained through logging in
  * @param  {string} args.baseUrl Base URL of the Eneo backend
  * @param {(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>} [args.fetch] Alternative fetch function to use, defaults to native fetch
@@ -92,6 +94,7 @@ export function createEneo(args) {
     skills: initSkills(client),
     objectContentPolicy: initObjectContentPolicy(client),
     objectStoreConnection: initObjectStoreConnection(client),
+    modules: initModules(client),
     client
   };
 }
