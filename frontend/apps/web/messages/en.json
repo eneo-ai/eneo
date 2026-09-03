@@ -6533,6 +6533,7 @@
   "ai_builder_approve_dialog_confirm": "Create the flow",
   "ai_builder_approve_dialog_pending_hint": "This usually takes a few seconds. The flow opens as soon as it is ready.",
   "ai_builder_approve_dialog_created": "The flow is created. Opening it…",
+  "ai_builder_approve_dialog_created_action": "Created",
   "ai_builder_approve_dialog_confirm_edit": "Update the flow",
   "ai_builder_conflict_elsewhere_title": "The draft changed somewhere else",
   "ai_builder_conflict_stale_revision": "The flow has changed since this plan was written. Fetch the latest before you approve.",

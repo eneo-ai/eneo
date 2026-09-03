@@ -87,13 +87,14 @@
         {m.ai_builder_approve_dialog_cancel()}
       </Button>
       <Button disabled={busy} onclick={onconfirm}>
-        {#if busy}
+        {#if phase === "created"}
+          <IconCheck class="size-3.5" aria-hidden="true" />
+          {m.ai_builder_approve_dialog_created_action()}
+        {:else if phase === "pending"}
           <IconLoaderCircle
             class="size-3.5 animate-spin motion-reduce:animate-none"
             aria-hidden="true"
           />
-        {/if}
-        {#if busy}
           {isCreate ? m.ai_builder_creating() : m.ai_builder_applying()}
         {:else}
           {isCreate

@@ -530,6 +530,9 @@
         const result = await service.createFlowFromPlan();
         await new Promise((resolve) => setTimeout(resolve, OPEN_AFTER_CREATE_MS));
         if (!mounted) return;
+        // Closed here, not by navigation: a callback that does not leave the
+        // screen must not leave a modal behind.
+        approveDialogOpen = false;
         onapplied?.({ flow_id: result.flow_id, focusStepIndex });
       } catch {
         // Surfaced through service.applyError / service.createFailureOutcome.
@@ -542,6 +545,9 @@
     }
     try {
       const result = await service.applyPlan();
+      // The edit host stays mounted behind the Builder tab, so the dialog
+      // must close itself before the screen hands over.
+      approveDialogOpen = false;
       onapplied?.({ flow_id: result.flow_id, focusStepIndex });
     } catch {
       // Surfaced through service state.

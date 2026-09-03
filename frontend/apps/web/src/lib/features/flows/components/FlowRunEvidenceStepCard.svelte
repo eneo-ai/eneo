@@ -18,7 +18,11 @@
   import TranscriptPlayer, { type SignedAudio } from "./TranscriptPlayer.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { parseTranscript, type TranscriptSegment } from "$lib/features/flows/transcriptSegments";
-  import type { SpeakerConfidence } from "$lib/features/flows/speakerMappingReview";
+  import {
+    buildSpeakerRows,
+    speakerNamesFromRows,
+    type SpeakerConfidence
+  } from "$lib/features/flows/speakerMappingReview";
   import type { TranscriptCorrectionsController } from "$lib/features/flows/transcriptCorrectionsController.svelte";
   import {
     isReviewPolicyRunErrorRelevantForStep,
@@ -139,46 +143,13 @@
     if (parsed.length === 0) return null;
     return transcriptContext.segments ?? parsed;
   });
-  // The mapping the step produced, one row per diarized label. Rendered as a
-  // readable list once the step is done: the review that named the speakers
-  // is gone by then, and the raw JSON below is not an answer to "who is who".
-  type SpeakerMappingEntry = {
-    label: string;
-    name: string | null;
-    confidence: SpeakerConfidence | null;
-    evidence: string;
-  };
-  const speakerMapping = $derived.by((): SpeakerMappingEntry[] => {
-    const structured = result.output_payload_json?.structured;
-    const speakers =
-      structured && typeof structured === "object" && !Array.isArray(structured)
-        ? (structured as Record<string, unknown>).speakers
-        : null;
-    if (!Array.isArray(speakers)) return [];
-    const rows: SpeakerMappingEntry[] = [];
-    for (const item of speakers) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-      const entry = item as Record<string, unknown>;
-      if (typeof entry.label !== "string") continue;
-      const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : null;
-      const confidence =
-        entry.confidence === "low" || entry.confidence === "medium" || entry.confidence === "high"
-          ? entry.confidence
-          : null;
-      rows.push({
-        label: entry.label,
-        name,
-        confidence,
-        evidence: typeof entry.evidence === "string" ? entry.evidence.trim() : ""
-      });
-    }
-    return rows;
-  });
-  const transcriptSpeakerNames = $derived.by(() => {
-    const names: Record<string, string> = {};
-    for (const row of speakerMapping) if (row.name) names[row.label] = row.name;
-    return names;
-  });
+  // The mapping the step produced, one row per diarized label, read through
+  // the same parser the review checkpoint uses (the `speaker_mapping`
+  // extension is the discriminator: ordinary JSON with a `speakers` key is
+  // not a mapping). Rendered once the step is done: the review that named the
+  // speakers is gone by then, and raw JSON is not an answer to "who is who".
+  const speakerMapping = $derived(buildSpeakerRows(result.output_payload_json ?? null));
+  const transcriptSpeakerNames = $derived(speakerNamesFromRows(speakerMapping));
   function confidenceText(confidence: SpeakerConfidence): string {
     if (confidence === "high") return m.flow_run_review_speakers_confidence_high();
     if (confidence === "medium") return m.flow_run_review_speakers_confidence_medium();
@@ -276,11 +247,9 @@
                       <span class="text-sm font-medium" class:text-muted={row.name === null}>
                         {row.name ?? m.flow_run_transcript_unknown_speaker()}
                       </span>
-                      {#if row.confidence}
-                        <Badge variant="outline" class="text-xs">
-                          {confidenceText(row.confidence)}
-                        </Badge>
-                      {/if}
+                      <Badge variant="outline" class="text-xs">
+                        {confidenceText(row.confidence)}
+                      </Badge>
                       {#if row.evidence}
                         <span class="text-muted basis-full text-xs text-pretty sm:basis-auto">
                           {row.evidence}

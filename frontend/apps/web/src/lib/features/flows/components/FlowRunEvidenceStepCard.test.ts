@@ -58,6 +58,12 @@ describe("FlowRunEvidenceStepCard", () => {
       ...result,
       output_payload_json: {
         text: "Fredrik: Hej och välkomna.",
+        speaker_mapping: {
+          inventory: [
+            { label: "SPEAKER_00", line_count: 12, samples: ["Hej och välkomna."] },
+            { label: "SPEAKER_01", line_count: 3, samples: ["Tack."] }
+          ]
+        },
         structured: {
           speakers: [
             {
@@ -69,15 +75,28 @@ describe("FlowRunEvidenceStepCard", () => {
             { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
           ]
         }
-      }
+        // The `speaker_mapping` extension is the step's persisted payload
+        // contract; the generated type only names the common keys.
+      } as unknown as FlowRunStep["output_payload_json"]
     });
-    expect(html).toContain("SPEAKER_00");
+    expect(html).toContain(m.flow_step_speaker_mapping_section());
     expect(html).toContain("Fredrik Birging");
     expect(html).toContain(m.flow_run_review_speakers_confidence_high());
     expect(html).toContain("Presenterar sig i första repliken.");
     // An unmatched label is named as such rather than left blank.
     expect(html).toContain(m.flow_run_transcript_unknown_speaker());
     expect(html).toContain(m.flow_run_review_speakers_confidence_low());
+  });
+
+  it("does not mistake ordinary JSON with a speakers key for a speaker mapping", () => {
+    const html = renderCard(false, {
+      ...result,
+      output_payload_json: {
+        text: "{}",
+        structured: { speakers: [{ label: "SPEAKER_00", name: "Anna" }] }
+      }
+    });
+    expect(html).not.toContain(m.flow_step_speaker_mapping_section());
   });
 
   it("renders the attached citation summary for the step result", () => {

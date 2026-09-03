@@ -106,14 +106,45 @@ describe("BuilderReviewScreen approval", () => {
       expect(dialog.getAttribute("aria-busy")).toBe("true");
       expect(onapplied).not.toHaveBeenCalled();
 
-      // Created: the same dialog shows the moment, then the flow opens.
+      // Created: the same dialog shows the moment (no longer "creating"),
+      // then closes and the flow opens.
       finishCreate();
       await vi.advanceTimersByTimeAsync(0);
       expect(within(dialog).getByText(m.ai_builder_approve_dialog_created())).toBeTruthy();
+      expect(within(dialog).queryByRole("button", { name: m.ai_builder_creating() })).toBeNull();
+      expect(
+        within(dialog).getByRole("button", { name: m.ai_builder_approve_dialog_created_action() })
+      ).toBeTruthy();
       await vi.advanceTimersByTimeAsync(899);
       expect(onapplied).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
       expect(onapplied).toHaveBeenCalledWith(expect.objectContaining({ flow_id: "flow-1" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes the dialog after the beat even when nothing navigates away", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const createFlowFromPlan = vi.fn().mockResolvedValue(makeApplyResult());
+      const { unmount } = render(BuilderReviewScreenHarness, {
+        currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+        state: makeCreateState(),
+        onservice: (s) => {
+          s.createFlowFromPlan = createFlowFromPlan;
+        }
+      });
+      await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve_create() }));
+      await fireEvent.click(
+        screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm() })
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(screen.getByRole("alertdialog")).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(900);
+      expect(screen.queryByRole("alertdialog")).toBeNull();
       unmount();
     } finally {
       vi.useRealTimers();
@@ -243,6 +274,9 @@ describe("BuilderReviewScreen approval", () => {
       screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm_edit() })
     );
     await waitFor(() => expect(applyPlan).toHaveBeenCalledOnce());
+    // The edit host stays mounted behind the Builder tab: the dialog must
+    // have closed itself, not waited for a navigation.
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 
   it("makes no persistence claim and blocks mutation on an unknown create outcome", () => {
