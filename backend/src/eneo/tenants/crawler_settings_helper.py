@@ -92,7 +92,9 @@ CRAWLER_SETTING_SPECS: dict[str, dict[str, Any]] = {
         "min": 100,
         "max": 100000,
         "env_attr": "closespider_itemcount",
-        "description": "Maximum pages to crawl before stopping (100 to 100k)",
+        "description": (
+            "Maximum pages and linked files to process per crawl (100 to 100k)"
+        ),
     },
     "obey_robots": {
         "type": bool,

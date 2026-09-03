@@ -685,6 +685,19 @@ async def test_non_clean_finish_preserves_recorded_progress_when_omitted(
         )
         assert created is True
         assert next_run.id != run.id
+        next_job = await _job(session, admin_user)
+        next_attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=next_run.id,
+            attempt_id=next_attempt_id,
+            dispatch_id=next_job.id,
+            task=_task(
+                website=website,
+                run_id=next_run.id,
+                attempt_id=next_attempt_id,
+                job=next_job,
+            ),
+        )
 
 
 async def test_expired_lease_becomes_a_terminal_interruption(

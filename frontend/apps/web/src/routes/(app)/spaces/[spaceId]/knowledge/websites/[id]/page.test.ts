@@ -25,7 +25,7 @@ describe("Website detail loader", () => {
           websites: {
             get: getWebsite,
             crawlRuns: { list: listCrawlRuns },
-            indexedBlobs: { list: listInfoBlobs }
+            indexedBlobs: { listPage: listInfoBlobs }
           }
         }
       })

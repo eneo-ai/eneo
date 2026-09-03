@@ -26,7 +26,31 @@ test("cancel crawl run uses the typed crawl lifecycle endpoint", async () => {
   ]);
 });
 
-test("indexed content listing preserves its bounded cursor page", async () => {
+test("indexed content listing preserves its array response", async () => {
+  const calls = [];
+  const items = [{ id: "blob-1" }, { id: "blob-2" }];
+  const websites = initWebsites({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return { items, count: items.length };
+    }
+  });
+
+  const result = await websites.indexedBlobs.list({ id: "website-id" });
+
+  assert.equal(result, items);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/websites/{id}/info-blobs/",
+      request: {
+        method: "get",
+        params: { path: { id: "website-id" } }
+      }
+    }
+  ]);
+});
+
+test("indexed content page exposes its bounded cursor response", async () => {
   const calls = [];
   const page = {
     items: [{ id: "blob-2" }],
@@ -43,7 +67,7 @@ test("indexed content listing preserves its bounded cursor page", async () => {
     }
   });
 
-  const result = await websites.indexedBlobs.list({
+  const result = await websites.indexedBlobs.listPage({
     id: "website-id",
     limit: 2,
     cursor: "blob-1"
@@ -52,7 +76,7 @@ test("indexed content listing preserves its bounded cursor page", async () => {
   assert.equal(result, page);
   assert.deepEqual(calls, [
     {
-      endpoint: "/api/v1/websites/{id}/info-blobs/",
+      endpoint: "/api/v1/websites/{id}/info-blobs/page/",
       request: {
         method: "get",
         params: {

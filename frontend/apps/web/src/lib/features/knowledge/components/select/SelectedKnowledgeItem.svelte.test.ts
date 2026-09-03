@@ -8,7 +8,7 @@ const listInfoBlobs = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
-    websites: { indexedBlobs: { list: listInfoBlobs } }
+    websites: { indexedBlobs: { listPage: listInfoBlobs } }
   })
 }));
 

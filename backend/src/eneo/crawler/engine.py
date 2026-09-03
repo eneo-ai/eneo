@@ -16,7 +16,7 @@ from eneo.websites.domain.crawl_run import CrawlType
 
 @dataclass(frozen=True, slots=True)
 class CrawlLimits:
-    max_pages: int
+    max_items: int
     max_seconds: float
     request_timeout_seconds: float
     max_response_bytes: int
@@ -28,7 +28,7 @@ class CrawlLimits:
 
     def __post_init__(self) -> None:
         positive = {
-            "max_pages": self.max_pages,
+            "max_items": self.max_items,
             "max_seconds": self.max_seconds,
             "request_timeout_seconds": self.request_timeout_seconds,
             "max_response_bytes": self.max_response_bytes,
@@ -55,6 +55,7 @@ class CrawlRequest:
     http_user: str | None = None
     http_pass: str | None = field(default=None, repr=False)
     conditional_gets: tuple["ConditionalGet", ...] = ()
+    conditional_gets_truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)

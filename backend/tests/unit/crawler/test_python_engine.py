@@ -39,12 +39,13 @@ def _request(
     obey_robots: bool = False,
     max_response_bytes: int = 100_000,
     max_file_bytes: int = 10 * 1024 * 1024,
-    max_pages: int = 10,
+    max_items: int = 10,
     max_seconds: float = 10,
     download_files: bool = True,
     concurrency: int = 2,
     request_delay_seconds: float = 0,
     conditional_gets: tuple[ConditionalGet, ...] = (),
+    conditional_gets_truncated: bool = False,
 ) -> CrawlRequest:
     return CrawlRequest(
         url=url,
@@ -52,7 +53,7 @@ def _request(
         download_files=download_files,
         obey_robots=obey_robots,
         limits=CrawlLimits(
-            max_pages=max_pages,
+            max_items=max_items,
             max_seconds=max_seconds,
             request_timeout_seconds=2,
             max_response_bytes=max_response_bytes,
@@ -62,6 +63,7 @@ def _request(
             retries=1,
         ),
         conditional_gets=conditional_gets,
+        conditional_gets_truncated=conditional_gets_truncated,
     )
 
 
@@ -167,7 +169,7 @@ async def test_page_fetches_refill_available_slots_before_the_slowest_finishes()
                 async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                     _request(
                         f"{base_url}/start",
-                        max_pages=4,
+                        max_items=4,
                         concurrency=2,
                         download_files=False,
                     )
@@ -228,7 +230,7 @@ async def test_page_refill_applies_one_delay_while_other_requests_finish() -> No
             async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(
                     f"{base_url}/start",
-                    max_pages=5,
+                    max_items=5,
                     concurrency=2,
                     request_delay_seconds=0.05,
                     download_files=False,
@@ -273,7 +275,7 @@ async def test_expired_refill_delay_does_not_spin_at_page_limit(monkeypatch) -> 
             async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(
                     f"{base_url}/start",
-                    max_pages=3,
+                    max_items=3,
                     concurrency=2,
                     request_delay_seconds=0.02,
                     download_files=False,
@@ -286,7 +288,7 @@ async def test_expired_refill_delay_does_not_spin_at_page_limit(monkeypatch) -> 
         status="partial",
         pages_crawled=3,
         pages_failed=0,
-        reason="page_limit",
+        reason="item_limit",
     )
 
 
@@ -324,7 +326,7 @@ async def test_page_limit_selection_is_independent_of_response_order() -> None:
                 async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                     _request(
                         f"{base_url}/start",
-                        max_pages=4,
+                        max_items=4,
                         concurrency=2,
                         download_files=False,
                     )
@@ -344,6 +346,98 @@ async def test_page_limit_selection_is_independent_of_response_order() -> None:
     }
     assert len(first_selection) == len(second_selection) == len(expected_selection)
     assert set(first_selection) == set(second_selection) == expected_selection
+
+
+async def test_discovered_page_and_file_work_shares_the_configured_item_budget() -> (
+    None
+):
+    requested_pages: list[str] = []
+    requested_files: list[str] = []
+
+    async def start(_: web.Request) -> web.Response:
+        page_links = "".join(
+            f'<a href="/start/page-{index}">Page {index}</a>' for index in range(2)
+        )
+        file_links = "".join(
+            f'<a href="/files/document-{index}.pdf">Document {index}</a>'
+            for index in range(100)
+        )
+        return web.Response(
+            text=f"<main>{page_links}{file_links}</main>",
+            content_type="text/html",
+        )
+
+    async def page(request: web.Request) -> web.Response:
+        requested_pages.append(request.path)
+        return web.Response(text="<main>Page</main>", content_type="text/html")
+
+    async def file(request: web.Request) -> web.Response:
+        requested_files.append(request.path)
+        return web.Response(body=b"document", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/{name}", page)
+    app.router.add_get("/files/{name}", file)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    max_items=6,
+                    concurrency=2,
+                )
+            )
+        ]
+
+    assert len(requested_pages) == 2
+    assert len(requested_files) == 3
+    assert len([event for event in events if isinstance(event, FileDownloaded)]) == 3
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=3,
+        pages_failed=0,
+        files_downloaded=3,
+        reason="item_limit",
+    )
+
+
+async def test_item_budget_adapts_to_a_page_with_many_files() -> None:
+    requested_files: list[str] = []
+
+    async def start(_: web.Request) -> web.Response:
+        links = "".join(
+            f'<a href="/files/document-{index}.pdf">Document {index}</a>'
+            for index in range(100)
+        )
+        return web.Response(text=f"<main>{links}</main>", content_type="text/html")
+
+    async def file(request: web.Request) -> web.Response:
+        requested_files.append(request.path)
+        return web.Response(body=b"document", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/files/{name}", file)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", max_items=4)
+            )
+        ]
+
+    assert len(requested_files) == 3
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=1,
+        pages_failed=0,
+        files_downloaded=3,
+        reason="item_limit",
+    )
 
 
 async def test_link_reorder_window_stays_bounded_behind_slow_page() -> None:
@@ -384,7 +478,7 @@ async def test_link_reorder_window_stays_bounded_behind_slow_page() -> None:
                 async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                     _request(
                         f"{base_url}/start",
-                        max_pages=21,
+                        max_items=21,
                         concurrency=concurrency,
                         download_files=False,
                     )
@@ -490,6 +584,60 @@ async def test_sitemap_crawl_follows_nested_indexes_but_not_page_links() -> None
     )
 
 
+async def test_sitemap_pages_and_linked_files_share_the_item_budget() -> None:
+    requested_files: list[str] = []
+
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<url><loc>{origin}/page/one</loc></url>"
+                f"<url><loc>{origin}/page/two</loc></url>"
+                "</urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def page(request: web.Request) -> web.Response:
+        name = request.match_info["name"]
+        return web.Response(
+            text=f'<main><a href="/files/{name}.pdf">Document</a></main>',
+            content_type="text/html",
+        )
+
+    async def file(request: web.Request) -> web.Response:
+        requested_files.append(request.path)
+        return web.Response(body=b"document", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/page/{name}", page)
+    app.router.add_get("/files/{name}", file)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/sitemap.xml",
+                    crawl_type=CrawlType.SITEMAP,
+                    max_items=4,
+                )
+            )
+        ]
+
+    assert len(requested_files) == 2
+    assert len([event for event in events if isinstance(event, PageCrawled)]) == 2
+    assert len([event for event in events if isinstance(event, FileDownloaded)]) == 2
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=2,
+        pages_failed=0,
+        files_downloaded=2,
+    )
+
+
 async def test_sitemap_page_limit_ignores_known_non_page_urls() -> None:
     requested: list[str] = []
 
@@ -502,7 +650,7 @@ async def test_sitemap_page_limit_ignores_known_non_page_urls() -> None:
                 f"<url><loc>{origin}/app.webmanifest</loc></url>"
                 f"<url><loc>{origin}/guide.pdf</loc></url>"
                 f"<url><loc>{origin}/asset.jpg</loc></url>"
-                f"<url><loc>{origin}/page</loc></url>"
+                f"<url><loc>{origin}/page</loc><lastmod>2026-09-03</lastmod></url>"
                 "</urlset>"
             ),
             content_type="application/xml",
@@ -528,7 +676,7 @@ async def test_sitemap_page_limit_ignores_known_non_page_urls() -> None:
                 _request(
                     f"{base_url}/sitemap.xml",
                     crawl_type=CrawlType.SITEMAP,
-                    max_pages=1,
+                    max_items=1,
                 )
             )
         ]
@@ -538,6 +686,56 @@ async def test_sitemap_page_limit_ignores_known_non_page_urls() -> None:
         f"{base_url}/page"
     ]
     assert not any(isinstance(event, PageFailed) for event in events)
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=1,
+        pages_failed=0,
+        sitemap_fingerprint=hashlib.sha256(
+            f"{base_url}/page\t2026-09-03".encode()
+        ).hexdigest(),
+        sitemap_entries=1,
+    )
+
+
+async def test_sitemap_marks_only_an_additional_valid_page_as_truncated() -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<url><loc>{origin}/one</loc></url>"
+                f"<url><loc>{origin}/two</loc></url>"
+                "</urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def page(_: web.Request) -> web.Response:
+        return web.Response(text="<main>ok</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/{name}", page)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/sitemap.xml",
+                    crawl_type=CrawlType.SITEMAP,
+                    max_items=1,
+                )
+            )
+        ]
+
+    assert len([event for event in events if isinstance(event, PageCrawled)]) == 1
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=1,
+        pages_failed=0,
+        reason="item_limit",
+    )
 
 
 async def test_conditional_frontier_keeps_known_children_when_seed_is_304() -> None:
@@ -573,6 +771,70 @@ async def test_conditional_frontier_keeps_known_children_when_seed_is_304() -> N
         pages_crawled=0,
         pages_failed=0,
         pages_unchanged=2,
+    )
+
+
+async def test_truncated_conditional_frontier_marks_link_crawl_partial() -> None:
+    async def page(_: web.Request) -> web.Response:
+        return web.Response(text="<main>Known page</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", page)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    download_files=False,
+                    conditional_gets_truncated=True,
+                )
+            )
+        ]
+
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=1,
+        pages_failed=0,
+        reason="item_limit",
+    )
+
+
+async def test_engine_marks_excess_conditional_hints_as_partial() -> None:
+    requested: list[str] = []
+
+    async def not_modified(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        return web.Response(status=304)
+
+    app = web.Application()
+    app.router.add_get("/start", not_modified)
+    app.router.add_get("/start/child", not_modified)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    download_files=False,
+                    max_items=1,
+                    conditional_gets=(
+                        ConditionalGet(f"{base_url}/start", etag='"known"'),
+                        ConditionalGet(f"{base_url}/start/child", etag='"known"'),
+                    ),
+                )
+            )
+        ]
+
+    assert requested == ["/start"]
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=0,
+        pages_failed=0,
+        pages_unchanged=1,
+        reason="item_limit",
     )
 
 
@@ -658,6 +920,42 @@ async def test_empty_sitemap_emits_an_authoritative_snapshot() -> None:
             event
             async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=0,
+        pages_failed=0,
+        sitemap_fingerprint=hashlib.sha256(b"").hexdigest(),
+        sitemap_entries=0,
+    )
+
+
+async def test_discarded_validator_hints_do_not_make_empty_sitemap_partial() -> None:
+    async def sitemap(_: web.Request) -> web.Response:
+        return web.Response(
+            body=b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" />',
+            content_type="application/xml",
+        )
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/sitemap.xml",
+                    crawl_type=CrawlType.SITEMAP,
+                    max_items=1,
+                    conditional_gets=(
+                        ConditionalGet(f"{base_url}/old-1", etag='"old"'),
+                        ConditionalGet(f"{base_url}/old-2", etag='"old"'),
+                    ),
+                    conditional_gets_truncated=True,
+                )
             )
         ]
 
@@ -1513,7 +1811,7 @@ async def test_waiting_crawl_gets_next_global_slot_when_twenty_are_busy(
                 async for event in engine.crawl(
                     _request(
                         f"{base_url}/{path}",
-                        max_pages=6,
+                        max_items=6,
                         concurrency=4,
                         download_files=False,
                     )
@@ -1673,7 +1971,7 @@ async def test_page_limit_marks_crawl_partial() -> None:
         events = [
             event
             async for event in PythonCrawlEngine(allow_private_network=True).crawl(
-                _request(f"{base_url}/start", max_pages=1)
+                _request(f"{base_url}/start", max_items=1)
             )
         ]
 
@@ -1681,7 +1979,7 @@ async def test_page_limit_marks_crawl_partial() -> None:
         status="partial",
         pages_crawled=1,
         pages_failed=0,
-        reason="page_limit",
+        reason="item_limit",
     )
 
 

@@ -263,6 +263,141 @@ def _job_result_location(database_url: str, job_id: UUID) -> str | None:
         return str(result_location) if result_location is not None else None
 
 
+def _insert_crawl_owner(
+    cursor: psycopg2.extensions.cursor,
+    *,
+    label: str,
+) -> tuple[UUID, UUID, UUID]:
+    tenant_id = uuid4()
+    user_id = uuid4()
+    website_id = uuid4()
+    cursor.execute("SELECT id FROM embedding_models ORDER BY id LIMIT 1")
+    model_row = cursor.fetchone()
+    assert model_row is not None
+    embedding_model_id = UUID(str(model_row[0]))
+    cursor.execute(
+        """
+        INSERT INTO tenants (id, name, quota_limit, state)
+        VALUES (%s, %s, 1000000, 'active')
+        """,
+        (str(tenant_id), f"{label}-{tenant_id.hex[:8]}"),
+    )
+    cursor.execute(
+        """
+        INSERT INTO users (id, tenant_id, email, used_tokens, state)
+        VALUES (%s, %s, %s, 0, 'active')
+        """,
+        (str(user_id), str(tenant_id), f"{user_id.hex}@example.test"),
+    )
+    cursor.execute(
+        """
+        INSERT INTO websites (
+            id, name, url, download_files, crawl_type, update_interval, size,
+            tenant_id, user_id, embedding_model_id
+        )
+        VALUES (%s, %s, %s, false, 'CRAWL', 'never', 0, %s, %s, %s)
+        """,
+        (
+            str(website_id),
+            label,
+            f"https://{website_id}.example.test",
+            str(tenant_id),
+            str(user_id),
+            str(embedding_model_id),
+        ),
+    )
+    return tenant_id, user_id, website_id
+
+
+def _assert_active_run_requires_current_attempt(database_url: str) -> None:
+    job_id = uuid4()
+    run_id = uuid4()
+    connection = psycopg2.connect(_sync_url(database_url))
+    try:
+        with connection.cursor() as cursor:
+            tenant_id, user_id, website_id = _insert_crawl_owner(
+                cursor,
+                label="Legacy late admission",
+            )
+            cursor.execute(
+                """
+                INSERT INTO jobs (id, user_id, task, status, name)
+                VALUES (%s, %s, 'crawl', 'queued', 'Legacy late admission')
+                """,
+                (str(job_id), str(user_id)),
+            )
+            cursor.execute(
+                """
+                INSERT INTO crawl_runs (
+                    id, tenant_id, website_id, job_id, pages_crawled,
+                    files_downloaded, pages_failed, files_failed
+                )
+                VALUES (%s, %s, %s, %s, 0, 0, 0, 0)
+                """,
+                (str(run_id), str(tenant_id), str(website_id), str(job_id)),
+            )
+
+        with pytest.raises(
+            psycopg2.errors.CheckViolation,
+            match="active crawl run requires a current unfinished attempt",
+        ):
+            connection.commit()
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def _assert_active_run_with_current_attempt_commits(database_url: str) -> None:
+    job_id = uuid4()
+    run_id = uuid4()
+    attempt_id = uuid4()
+    with (
+        psycopg2.connect(_sync_url(database_url)) as connection,
+        connection.cursor() as cursor,
+    ):
+        tenant_id, user_id, website_id = _insert_crawl_owner(
+            cursor,
+            label="Current admission",
+        )
+        cursor.execute(
+            """
+            INSERT INTO jobs (id, user_id, task, status, name)
+            VALUES (%s, %s, 'crawl', 'queued', 'Current admission')
+            """,
+            (str(job_id), str(user_id)),
+        )
+        cursor.execute(
+            """
+            INSERT INTO crawl_runs (
+                id, tenant_id, website_id, job_id, pages_crawled,
+                files_downloaded, pages_failed, files_failed,
+                phase, origin, attempt_count
+            )
+            VALUES (%s, %s, %s, %s, 0, 0, 0, 0, 'pending_dispatch', 'manual', 1)
+            """,
+            (str(run_id), str(tenant_id), str(website_id), str(job_id)),
+        )
+        cursor.execute(
+            """
+            INSERT INTO crawl_attempts (
+                id, crawl_run_id, attempt_number, dispatch_id, dispatch_payload
+            )
+            VALUES (%s, %s, 1, %s, '{}'::jsonb)
+            """,
+            (str(attempt_id), str(run_id), str(job_id)),
+        )
+
+    with (
+        psycopg2.connect(_sync_url(database_url)) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute("DELETE FROM crawl_runs WHERE id = %s", (str(run_id),))
+        cursor.execute("DELETE FROM jobs WHERE id = %s", (str(job_id),))
+        cursor.execute("DELETE FROM websites WHERE id = %s", (str(website_id),))
+        cursor.execute("DELETE FROM users WHERE id = %s", (str(user_id),))
+        cursor.execute("DELETE FROM tenants WHERE id = %s", (str(tenant_id),))
+
+
 def _upgrade_while_unrelated_job_is_locked(
     database_url: str,
     config: Config,
@@ -379,6 +514,8 @@ def test_crawl_lifecycle_migration_preserves_and_terminalizes_legacy_history(
         "ck_crawl_attempts_dispatch_order",
         "ck_crawl_attempts_transport_cleanup",
     } <= _inspected_names(database_url, CrawlAttempts.__tablename__, "checks")
+    _assert_active_run_requires_current_attempt(database_url)
+    _assert_active_run_with_current_attempt_commits(database_url)
 
 
 def test_crawl_lifecycle_downgrade_refuses_lossy_state_then_round_trips(

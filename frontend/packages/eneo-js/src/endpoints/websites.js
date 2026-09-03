@@ -2,6 +2,7 @@
 /** @typedef {import('../types/resources').Website} Website */
 /** @typedef {import('../types/resources').CrawlRun} CrawlRun */
 /** @typedef {import('../types/resources').EmbeddingModel} EmbeddingModel  */
+/** @typedef {import('../types/resources').InfoBlob} InfoBlob */
 /** @typedef {import('../types/resources').WebsiteInfoBlobPage} WebsiteInfoBlobPage */
 
 /**
@@ -128,14 +129,29 @@ export function initWebsites(client) {
 
     indexedBlobs: {
       /**
+       * List all indexed crawl results for a website.
+       * @param {{id: string} | Website} website Website
+       * @returns {Promise<InfoBlob[]>}
+       * @throws {EneoError}
+       * */
+      list: async (website) => {
+        const { id } = website;
+        const res = await client.fetch("/api/v1/websites/{id}/info-blobs/", {
+          method: "get",
+          params: { path: { id } }
+        });
+        return res.items;
+      },
+
+      /**
        * List one bounded page of indexed crawl results for a website.
        * @param {{id: string, limit?: number, cursor?: string | null}} website Website and page options
        * @returns {Promise<WebsiteInfoBlobPage>}
        * @throws {EneoError}
        * */
-      list: async (website) => {
+      listPage: async (website) => {
         const { id, limit = 100, cursor } = website;
-        const res = await client.fetch("/api/v1/websites/{id}/info-blobs/", {
+        const res = await client.fetch("/api/v1/websites/{id}/info-blobs/page/", {
           method: "get",
           params: {
             path: { id },

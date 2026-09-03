@@ -487,9 +487,13 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
         override_user(container=container, user=user)
         tenant = container.tenant()
+        tenant_crawler_settings = tenant.crawler_settings
+        item_limit = get_crawler_setting(
+            "closespider_itemcount", tenant_crawler_settings
+        )
         heartbeat_interval_seconds = get_crawler_setting(
             "crawl_heartbeat_interval_seconds",
-            tenant.crawler_settings,
+            tenant_crawler_settings,
         )
         lease_duration = timedelta(
             seconds=max(
@@ -535,6 +539,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             existing_titles: list[str] = []
             existing_publications: dict[str, tuple[bytes, UUID]] = {}
             existing_validators: dict[str, tuple[str | None, str | None]] = {}
+            conditional_gets_truncated = False
             website_url: str = ""  # For logging after session closes
 
             start = time.time()
@@ -665,16 +670,23 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
 
                 # Fetch existing titles for stale detection and file hashes for skip optimization
-                stmt = sa.select(
-                    InfoBlobs.title,
-                    InfoBlobs.content_hash,
-                    InfoBlobs.embedding_model_id,
-                    InfoBlobs.http_etag,
-                    InfoBlobs.http_last_modified,
-                ).where(
-                    InfoBlobs.website_id == params.website_id,
-                    InfoBlobs.tenant_id == current_tenant.id,
-                    active_info_blob_version(),
+                # A 304 page carries no file links, so file crawls must re-observe
+                # HTML before stale content can be removed.
+                reuse_page_validators = not params.download_files
+                stmt = (
+                    sa.select(
+                        InfoBlobs.title,
+                        InfoBlobs.content_hash,
+                        InfoBlobs.embedding_model_id,
+                        InfoBlobs.http_etag,
+                        InfoBlobs.http_last_modified,
+                    )
+                    .where(
+                        InfoBlobs.website_id == params.website_id,
+                        InfoBlobs.tenant_id == current_tenant.id,
+                        active_info_blob_version(),
+                    )
+                    .order_by(InfoBlobs.id.asc())
                 )
                 blob_result = await bootstrap_session.execute(stmt)
 
@@ -685,8 +697,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     existing_titles.append(title)
                     if hash_bytes is not None and model_id is not None:
                         existing_publications[title] = (hash_bytes, model_id)
-                    if etag is not None or last_modified is not None:
-                        existing_validators[title] = (etag, last_modified)
+                    if reuse_page_validators and (
+                        etag is not None or last_modified is not None
+                    ):
+                        if (
+                            title in existing_validators
+                            or len(existing_validators) < item_limit
+                        ):
+                            existing_validators[title] = (etag, last_modified)
+                        else:
+                            conditional_gets_truncated = True
 
             finally:
                 # Always close the bootstrap session to return connection to pool
@@ -751,7 +771,6 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 max_failures=settings.crawl_heartbeat_max_failures,
             )
 
-            tenant_crawler_settings = tenant.crawler_settings
             crawl_request = CrawlRequest(
                 url=params.url,
                 crawl_type=params.crawl_type,
@@ -767,10 +786,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     )
                     for url, validators in existing_validators.items()
                 ),
+                conditional_gets_truncated=conditional_gets_truncated,
                 limits=CrawlLimits(
-                    max_pages=get_crawler_setting(
-                        "closespider_itemcount", tenant_crawler_settings
-                    ),
+                    max_items=item_limit,
                     max_seconds=get_crawler_setting(
                         "crawl_max_length", tenant_crawler_settings
                     ),

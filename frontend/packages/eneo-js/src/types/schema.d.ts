@@ -4817,6 +4817,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/websites/{id}/info-blobs/page/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Info Blob Page */
+    get: operations["get_info_blob_page_api_v1_websites__id__info_blobs_page__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/prompts/{id}/": {
     parameters: {
       query?: never;
@@ -11248,7 +11265,7 @@ export interface components {
       retry_times?: number | null;
       /**
        * Closespider Itemcount
-       * @description Maximum pages to crawl before stopping (100 to 100k)
+       * @description Maximum pages and linked files to process per crawl (100 to 100k)
        * @example 20000
        */
       closespider_itemcount?: number | null;
@@ -37753,6 +37770,65 @@ export interface operations {
     };
   };
   get_info_blobs_api_v1_websites__id__info_blobs__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_InfoBlobPublicNoText_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_info_blob_page_api_v1_websites__id__info_blobs_page__get: {
     parameters: {
       query?: {
         limit?: number;

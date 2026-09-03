@@ -730,6 +730,24 @@ class InfoBlobRepository:
     async def get_by_website(
         self,
         website_id: UUID,
+    ) -> list[InfoBlobInDBNoText]:
+        records = await self.session.scalars(
+            sa.select(InfoBlobs)
+            .where(
+                InfoBlobs.website_id == website_id,
+                active_info_blob_version(),
+            )
+            .order_by(InfoBlobs.id.asc())
+            .options(
+                defer(InfoBlobs.text),
+                selectinload(InfoBlobs.website),
+            )
+        )
+        return [InfoBlobInDBNoText.model_validate(record) for record in records]
+
+    async def get_by_website_page(
+        self,
+        website_id: UUID,
         *,
         limit: int,
         cursor: UUID | None = None,

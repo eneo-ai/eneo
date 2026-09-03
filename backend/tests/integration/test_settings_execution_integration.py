@@ -326,10 +326,10 @@ class TestBooleanAndRangeSettings:
             )
             assert batch_size == 250
 
-    async def test_max_pages_setting_propagates(
+    async def test_crawl_item_budget_setting_propagates(
         self, client: AsyncClient, test_tenant, super_admin_token, db_container
     ):
-        """Maximum page count reaches the crawl worker settings."""
+        """The shared page-and-file budget reaches the crawl worker settings."""
         await client.put(
             f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
             json={"closespider_itemcount": 5000},
@@ -340,11 +340,11 @@ class TestBooleanAndRangeSettings:
             tenant_repo = container.tenant_repo()
             tenant = await tenant_repo.get(test_tenant.id)
 
-            max_pages = get_crawler_setting(
+            item_limit = get_crawler_setting(
                 "closespider_itemcount",
                 tenant.crawler_settings,
             )
-            assert max_pages == 5000
+            assert item_limit == 5000
 
 
 @pytest.mark.asyncio

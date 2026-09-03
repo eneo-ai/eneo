@@ -478,20 +478,26 @@ class InfoBlobService:
         group = await self.group_service.get_group(id)
         return await self.repo.get_by_group(group.id)
 
-    async def get_by_website(
-        self,
-        id: UUID,
-        *,
-        limit: int,
-        cursor: UUID | None = None,
-    ) -> WebsiteInfoBlobPage:
+    async def _authorize_website_info_blobs(self, id: UUID) -> None:
         space = await self.space_service.get_space_by_website(website_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_info_blobs():
             raise UnauthorizedException()
 
-        return await self.repo.get_by_website(
+    async def get_by_website(self, id: UUID) -> list[InfoBlobInDBNoText]:
+        await self._authorize_website_info_blobs(id)
+        return await self.repo.get_by_website(website_id=id)
+
+    async def get_by_website_page(
+        self,
+        id: UUID,
+        *,
+        limit: int,
+        cursor: UUID | None = None,
+    ) -> WebsiteInfoBlobPage:
+        await self._authorize_website_info_blobs(id)
+        return await self.repo.get_by_website_page(
             website_id=id,
             limit=limit,
             cursor=cursor,

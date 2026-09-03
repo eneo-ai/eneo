@@ -16,6 +16,7 @@ from eneo.audit.application import audit_service as audit_service_module
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.crawler.engine import (
+    ConditionalGet,
     CrawlEvent,
     CrawlFinished,
     CrawlRequest,
@@ -124,6 +125,47 @@ class _SinglePageCrawlEngine:
             status="completed",
             pages_crawled=1,
             pages_failed=0,
+        )
+
+
+class _ConditionalFileCrawlEngine:
+    def __init__(self, file_path: Path) -> None:
+        self.file_path = file_path
+        self.request: CrawlRequest | None = None
+
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        self.request = request
+        if request.conditional_gets:
+            for validator in request.conditional_gets:
+                yield PageUnchanged(url=validator.url)
+            yield CrawlFinished(
+                status=(
+                    "partial" if request.conditional_gets_truncated else "completed"
+                ),
+                pages_crawled=0,
+                pages_failed=0,
+                pages_unchanged=len(request.conditional_gets),
+                reason=("item_limit" if request.conditional_gets_truncated else None),
+            )
+            return
+
+        yield PageCrawled(
+            url=request.url,
+            title="Page",
+            content="<main>Page content</main>",
+            etag='"page-v1"',
+            last_modified=None,
+        )
+        yield FileDownloaded(
+            url=f"{request.url}/guide.pdf",
+            filename=self.file_path.name,
+            path=self.file_path,
+        )
+        yield CrawlFinished(
+            status="completed",
+            pages_crawled=1,
+            pages_failed=0,
+            files_downloaded=1,
         )
 
 
@@ -260,13 +302,14 @@ async def _persist_website(
     user_id: UUID,
     label: str,
     crawl_type: CrawlType = CrawlType.CRAWL,
+    download_files: bool = False,
 ) -> Website:
     embedding_model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
     assert embedding_model_id is not None
     record = WebsitesTable(
         name=label,
         url=f"https://{label.lower().replace(' ', '-')}.example.com",
-        download_files=False,
+        download_files=download_files,
         crawl_type=crawl_type,
         update_interval=UpdateInterval.NEVER,
         size=0,
@@ -1149,6 +1192,212 @@ async def test_worker_terminalizes_a_zero_page_crawl_as_empty(
         assert job.status == Status.COMPLETE.value
 
 
+async def test_file_crawl_reobserves_linked_files_before_stale_cleanup(
+    db_session,
+    admin_user,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    page_text = "<main>Page content</main>"
+    file_text = "Linked file content"
+    file_path = tmp_path / "guide.pdf"
+    file_path.write_bytes(b"document bytes")
+
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Conditional file crawl",
+            download_files=True,
+        )
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        page_blob = InfoBlobs(
+            text=page_text,
+            title=website.url,
+            url=website.url,
+            size=len(page_text.encode()),
+            content_hash=sha256(page_text.encode()).digest(),
+            http_etag='"page-v1"',
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            embedding_model_id=website_record.embedding_model_id,
+        )
+        file_blob = InfoBlobs(
+            text=file_text,
+            title=file_path.stem,
+            url=f"{website.url}/{file_path.name}",
+            size=len(file_text.encode()),
+            content_hash=sha256(file_text.encode()).digest(),
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            embedding_model_id=website_record.embedding_model_id,
+        )
+        session.add_all((page_blob, file_blob))
+        await session.flush()
+        file_blob_id = file_blob.id
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+
+    monkeypatch.setattr(
+        crawl_tasks_module,
+        "persist_batch",
+        AsyncMock(return_value=(1, 0, [website.url], {})),
+    )
+    engine = _ConditionalFileCrawlEngine(file_path)
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(engine))
+    container.text_extractor.override(
+        providers.Object(SimpleNamespace(extract=Mock(return_value=file_text)))
+    )
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.SUCCEEDED.value
+    assert engine.request is not None
+    assert engine.request.conditional_gets == ()
+    async with db_session() as session:
+        persisted_file = await session.get(InfoBlobs, file_blob_id)
+        assert persisted_file is not None
+        assert persisted_file.version_state == InfoBlobVersionState.ACTIVE.value
+
+
+async def test_page_only_crawl_forwards_conditional_validators(
+    db_session,
+    admin_user,
+    tmp_path: Path,
+) -> None:
+    page_text = "<main>Page content</main>"
+
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Conditional page crawl",
+        )
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        session.add(
+            InfoBlobs(
+                text=page_text,
+                title=website.url,
+                url=website.url,
+                size=len(page_text.encode()),
+                content_hash=sha256(page_text.encode()).digest(),
+                http_etag='"page-v1"',
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.ACTIVE.value,
+                user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                website_id=website.id,
+                embedding_model_id=website_record.embedding_model_id,
+            )
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+
+    engine = _ConditionalFileCrawlEngine(tmp_path / "unused.pdf")
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(engine))
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.UNCHANGED.value
+    assert engine.request is not None
+    assert engine.request.conditional_gets == (
+        ConditionalGet(url=website.url, etag='"page-v1"'),
+    )
+
+
+async def test_truncated_page_validators_preserve_omitted_active_content(
+    db_session,
+    admin_user,
+    tmp_path: Path,
+) -> None:
+    item_limit = 100
+    page_text = "<main>Known municipal page</main>"
+
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == admin_user.tenant_id)
+            .values(crawler_settings={"closespider_itemcount": item_limit})
+        )
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Bounded conditional crawl",
+        )
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        session.add_all(
+            [
+                InfoBlobs(
+                    text=page_text,
+                    title=f"{website.url}/known-{index}",
+                    url=f"{website.url}/known-{index}",
+                    size=len(page_text.encode()),
+                    content_hash=sha256(page_text.encode()).digest(),
+                    http_etag=f'"page-{index}"',
+                    source_id=uuid4(),
+                    version_state=InfoBlobVersionState.ACTIVE.value,
+                    user_id=admin_user.id,
+                    tenant_id=admin_user.tenant_id,
+                    website_id=website.id,
+                    embedding_model_id=website_record.embedding_model_id,
+                )
+                for index in range(item_limit + 1)
+            ]
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+
+    engine = _ConditionalFileCrawlEngine(tmp_path / "unused.pdf")
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(engine))
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.PARTIAL.value
+    assert engine.request is not None
+    assert len(engine.request.conditional_gets) == item_limit
+    assert engine.request.conditional_gets_truncated
+    async with db_session() as session:
+        active_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(
+                InfoBlobs.website_id == website.id,
+                InfoBlobs.version_state == InfoBlobVersionState.ACTIVE.value,
+            )
+        )
+    assert active_count == item_limit + 1
+
+
 @pytest.mark.parametrize(
     ("engine", "expected_blob_count", "expects_sitemap_state"),
     [
@@ -1590,6 +1839,78 @@ async def test_dispatch_capacity_serves_another_tenant_before_one_tenant_backlog
     dispatched_websites = {call.args[2].website_id for call in enqueue.await_args_list}
     assert tenant_b_website.id in dispatched_websites
     assert len(dispatched_websites & {website.id for website in tenant_a_websites}) == 1
+
+
+async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
+    db_session,
+    admin_user,
+) -> None:
+    async with db_session() as session:
+        second_tenant = Tenants(
+            name=f"crawl-fairness-{uuid4()}",
+            quota_limit=1_000_000,
+            state="active",
+        )
+        session.add(second_tenant)
+        await session.flush()
+        second_user = Users(
+            username="crawl-fairness-user",
+            email=f"crawl-fairness-{uuid4()}@example.com",
+            state="active",
+            used_tokens=0,
+            tenant_id=second_tenant.id,
+        )
+        session.add(second_user)
+        await session.flush()
+        tenant_a_websites = [
+            await _persist_website(
+                session,
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                label=f"Tenant A backlog {index}",
+            )
+            for index in range(3)
+        ]
+        tenant_b_website = await _persist_website(
+            session,
+            tenant_id=second_tenant.id,
+            user_id=second_user.id,
+            label="Tenant B crawl",
+        )
+        for website in tenant_a_websites:
+            await _admit(session, website=website, user=admin_user)
+        second_tenant_id = second_tenant.id
+        second_user_id = second_user.id
+
+    initial_enqueue = AsyncMock(return_value=None)
+    initial = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=initial_enqueue,
+        concurrency_limit=2,
+    )
+
+    assert (initial.claimed, initial.dispatched) == (2, 2)
+    assert {call.args[2].website_id for call in initial_enqueue.await_args_list} <= {
+        website.id for website in tenant_a_websites
+    }
+
+    async with db_session() as session:
+        await _admit(
+            session,
+            website=tenant_b_website,
+            user=_user(second_user_id, second_tenant_id),
+        )
+        first_task = initial_enqueue.await_args_list[0].args[2]
+        cancelled = await CrawlRunRepository(session).request_cancel(first_task.run_id)
+        assert cancelled.run.outcome == CrawlOutcome.CANCELLED
+
+    next_enqueue = AsyncMock(return_value=None)
+    next_result = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=next_enqueue,
+        concurrency_limit=2,
+    )
+
+    assert (next_result.claimed, next_result.dispatched) == (1, 1)
+    assert next_enqueue.await_args.args[2].website_id == tenant_b_website.id
 
 
 async def test_stale_redelivery_keeps_ambiguous_slots_reserved(

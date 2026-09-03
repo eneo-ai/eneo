@@ -19,7 +19,7 @@ export async function pollWebsiteDetail(
     return { crawlRuns };
   }
 
-  const infoBlobPage = await eneo.websites.indexedBlobs.list({
+  const infoBlobPage = await eneo.websites.indexedBlobs.listPage({
     id: website.id,
     limit: PAGINATION.PAGE_SIZE
   });

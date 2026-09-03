@@ -8,7 +8,7 @@ export const load = async (event) => {
   const [website, crawlRuns, infoBlobPage] = await Promise.all([
     eneo.websites.get({ id: event.params.id }),
     eneo.websites.crawlRuns.list({ id: event.params.id }),
-    eneo.websites.indexedBlobs.list({ id: event.params.id, limit: PAGINATION.PAGE_SIZE })
+    eneo.websites.indexedBlobs.listPage({ id: event.params.id, limit: PAGINATION.PAGE_SIZE })
   ]);
 
   const isOrgWebsite = organizationSpaceId != null && website.space_id === organizationSpaceId;

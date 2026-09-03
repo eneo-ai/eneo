@@ -17,6 +17,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from itertools import islice
 from pathlib import Path
 from tempfile import TemporaryDirectory, gettempdir
 from time import monotonic
@@ -267,15 +268,22 @@ class PythonCrawlEngine:
         files_downloaded = 0
         files_failed = 0
         file_links: set[str] = set()
+        file_links_truncated = False
         sitemap_snapshot: SitemapSnapshot | None = None
         frontier: deque[str]
         seen: set[str]
         follow_page_links = request.crawl_type == CrawlType.CRAWL
-        validators = {
-            normalized: hint
-            for hint in request.conditional_gets
-            if (normalized := normalize_url(hint.url)) is not None
-        }
+        page_links_truncated = follow_page_links and request.conditional_gets_truncated
+        validators: dict[str, ConditionalGet] = {}
+        for hint in request.conditional_gets:
+            normalized = normalize_url(hint.url)
+            if normalized is None or normalized in validators:
+                continue
+            if len(validators) >= request.limits.max_items:
+                if follow_page_links:
+                    page_links_truncated = True
+                break
+            validators[normalized] = hint
 
         files_dir: TemporaryDirectory[str] | None = None
         try:
@@ -328,16 +336,19 @@ class PythonCrawlEngine:
                     for failure in sitemap_failures:
                         pages_failed += 1
                         yield failure
-                    frontier = deque(sitemap_urls[: request.limits.max_pages])
+                    frontier = deque(sitemap_urls[: request.limits.max_items])
                     seen = set(frontier)
                 else:
-                    known_urls = [
-                        url
-                        for url in validators
-                        if url != seed_url and is_in_scope(url, seed_url)
-                    ]
-                    frontier = deque([seed_url, *known_urls])
-                    seen = set(frontier)
+                    frontier = deque([seed_url])
+                    seen = {seed_url}
+                    for url in validators:
+                        if url == seed_url or not is_in_scope(url, seed_url):
+                            continue
+                        if len(seen) >= request.limits.max_items:
+                            page_links_truncated = True
+                            break
+                        seen.add(url)
+                        frontier.append(url)
 
                 robots_delay = (
                     (robots.crawl_delay(_USER_AGENT) or robots.crawl_delay("*"))
@@ -367,7 +378,7 @@ class PythonCrawlEngine:
                     while (
                         frontier
                         and len(pending_pages) < per_crawl_concurrency
-                        and pages_seen + len(pending_pages) < request.limits.max_pages
+                        and pages_seen + len(pending_pages) < request.limits.max_items
                         and (
                             not follow_page_links
                             or next_sequence - next_result_sequence
@@ -394,14 +405,14 @@ class PythonCrawlEngine:
                 fill_page_capacity()
                 try:
                     while pending_pages or (
-                        frontier and pages_seen < request.limits.max_pages
+                        frontier and pages_seen < request.limits.max_items
                     ):
                         if refill_at is not None and monotonic() >= refill_at:
                             refill_at = None
                         if (
                             frontier
                             and pages_seen + len(pending_pages)
-                            < request.limits.max_pages
+                            < request.limits.max_items
                             and refill_at is None
                         ):
                             fill_page_capacity()
@@ -441,7 +452,13 @@ class PythonCrawlEngine:
                                 completed_links[sequence] = result.links
                             if isinstance(result.event, PageCrawled):
                                 pages_crawled += 1
-                                file_links.update(result.event.file_links)
+                                for file_url in result.event.file_links:
+                                    if file_url in file_links:
+                                        continue
+                                    if len(file_links) >= request.limits.max_items:
+                                        file_links_truncated = True
+                                        break
+                                    file_links.add(file_url)
                             elif isinstance(result.event, PageUnchanged):
                                 pages_unchanged += 1
                             else:
@@ -459,6 +476,9 @@ class PythonCrawlEngine:
                                 if discovered_url not in seen and is_in_scope(
                                     discovered_url, seed_url
                                 ):
+                                    if len(seen) >= request.limits.max_items:
+                                        page_links_truncated = True
+                                        break
                                     seen.add(discovered_url)
                                     frontier.append(discovered_url)
 
@@ -488,11 +508,22 @@ class PythonCrawlEngine:
                     )
                     return
 
-                termination_reason = (
-                    "page_limit" if frontier or sitemap_truncated else None
+                remaining_file_items = max(
+                    request.limits.max_items - pages_seen,
+                    0,
                 )
+                if len(file_links) > remaining_file_items:
+                    file_links_truncated = True
 
-                if request.download_files and file_links:
+                item_limit_reached = (
+                    bool(frontier)
+                    or sitemap_truncated
+                    or page_links_truncated
+                    or file_links_truncated
+                )
+                termination_reason = "item_limit" if item_limit_reached else None
+
+                if request.download_files and file_links and remaining_file_items:
                     files_dir = TemporaryDirectory(prefix=_CRAWL_TEMP_PREFIX)
                     try:
                         async for result in self._download_files(
@@ -503,6 +534,7 @@ class PythonCrawlEngine:
                             directory=Path(files_dir.name),
                             origin_authorization=origin_authorization,
                             started_at=started_at,
+                            max_items=remaining_file_items,
                         ):
                             if isinstance(result, FileDownloaded):
                                 files_downloaded += 1
@@ -730,10 +762,11 @@ class PythonCrawlEngine:
         directory: Path,
         origin_authorization: str | None,
         started_at: float,
+        max_items: int,
     ) -> AsyncIterator[FileDownloaded | FileFailed]:
         """Download files concurrently without creating an unbounded task set."""
 
-        urls = iter(sorted(file_links))
+        urls = iter(islice(sorted(file_links), max_items))
         taken_names: set[str] = set()
         pending: set[asyncio.Task[FileDownloaded | FileFailed]] = set()
 
@@ -998,6 +1031,9 @@ class PythonCrawlEngine:
                     ignored_entries += 1
                     continue
 
+                if len(page_urls) >= request.limits.max_items:
+                    _log_skipped_sitemap_entries(skipped_non_page_entries)
+                    return page_urls, failures, None, True
                 seen_pages.add(normalized)
                 page_urls.append(normalized)
                 sitemap_entries.append(
@@ -1006,9 +1042,6 @@ class PythonCrawlEngine:
                         last_modified=original_entry.last_modified,
                     )
                 )
-                if len(page_urls) >= request.limits.max_pages:
-                    _log_skipped_sitemap_entries(skipped_non_page_entries)
-                    return page_urls, failures, None, True
 
         _log_skipped_sitemap_entries(skipped_non_page_entries)
         # Only page candidates belong in the fingerprint. Asset-only sitemap

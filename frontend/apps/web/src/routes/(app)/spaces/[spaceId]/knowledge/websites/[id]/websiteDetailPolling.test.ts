@@ -40,7 +40,7 @@ describe("website detail polling", () => {
     const eneo = {
       websites: {
         crawlRuns: { list: listCrawlRuns },
-        indexedBlobs: { list: listInfoBlobs }
+        indexedBlobs: { listPage: listInfoBlobs }
       }
     };
 
@@ -58,7 +58,7 @@ describe("website detail polling", () => {
     const eneo = {
       websites: {
         crawlRuns: { list: vi.fn().mockResolvedValue([running]) },
-        indexedBlobs: { list: listInfoBlobs }
+        indexedBlobs: { listPage: listInfoBlobs }
       }
     };
 

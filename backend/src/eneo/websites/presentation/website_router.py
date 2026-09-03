@@ -451,10 +451,27 @@ async def transfer_website_to_space(
 
 @router.get(
     "/{id}/info-blobs/",
-    response_model=CursorPaginatedResponse[InfoBlobPublicNoText],
+    response_model=PaginatedResponse[InfoBlobPublicNoText],
     responses=responses.get_responses([400, 403, 404]),
 )
 async def get_info_blobs(
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
+) -> PaginatedResponse[InfoBlobPublicNoText]:
+    service = container.info_blob_service()
+    info_blobs = await service.get_by_website(id)
+    public_info_blobs = [
+        info_blob_protocol.to_info_blob_public_no_text(blob) for blob in info_blobs
+    ]
+    return to_paginated_response(public_info_blobs)
+
+
+@router.get(
+    "/{id}/info-blobs/page/",
+    response_model=CursorPaginatedResponse[InfoBlobPublicNoText],
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def get_info_blob_page(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
     container: ContainerDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
@@ -462,7 +479,7 @@ async def get_info_blobs(
 ) -> CursorPaginatedResponse[InfoBlobPublicNoText]:
     service = container.info_blob_service()
 
-    page = await service.get_by_website(
+    page = await service.get_by_website_page(
         id,
         limit=limit,
         cursor=cursor,

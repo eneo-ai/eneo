@@ -437,6 +437,68 @@ def upgrade() -> None:
             "failure_code = 'lease_expired' AND transport_cleaned_at IS NULL"
         ),
     )
+    op.execute(
+        """
+        CREATE FUNCTION enforce_crawl_run_current_attempt()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE
+            affected_run_ids uuid[];
+        BEGIN
+            IF TG_TABLE_NAME = 'crawl_runs' THEN
+                IF TG_OP = 'DELETE' THEN
+                    affected_run_ids := ARRAY[OLD.id];
+                ELSE
+                    affected_run_ids := ARRAY[NEW.id];
+                END IF;
+            ELSIF TG_OP = 'DELETE' THEN
+                affected_run_ids := ARRAY[OLD.crawl_run_id];
+            ELSIF TG_OP = 'INSERT' THEN
+                affected_run_ids := ARRAY[NEW.crawl_run_id];
+            ELSE
+                affected_run_ids := ARRAY[OLD.crawl_run_id, NEW.crawl_run_id];
+            END IF;
+
+            IF EXISTS (
+                SELECT 1
+                FROM crawl_runs AS cr
+                WHERE cr.id = ANY(affected_run_ids)
+                  AND cr.phase <> 'terminal'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM crawl_attempts AS ca
+                      WHERE ca.crawl_run_id = cr.id
+                        AND ca.attempt_number = cr.attempt_count
+                        AND ca.finished_at IS NULL
+                  )
+            ) THEN
+                RAISE EXCEPTION USING
+                    ERRCODE = '23514',
+                    MESSAGE = 'active crawl run requires a current unfinished attempt',
+                    CONSTRAINT = 'ck_crawl_runs_current_attempt';
+            END IF;
+            RETURN NULL;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE CONSTRAINT TRIGGER crawl_runs_require_current_attempt
+        AFTER INSERT OR UPDATE OR DELETE ON crawl_runs
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW EXECUTE FUNCTION enforce_crawl_run_current_attempt()
+        """
+    )
+    op.execute(
+        """
+        CREATE CONSTRAINT TRIGGER crawl_attempts_preserve_current_attempt
+        AFTER INSERT OR UPDATE OR DELETE ON crawl_attempts
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW EXECUTE FUNCTION enforce_crawl_run_current_attempt()
+        """
+    )
 
 
 def downgrade() -> None:
@@ -496,6 +558,10 @@ def downgrade() -> None:
           AND cr.phase = 'terminal'
         """
     )
+
+    op.execute("DROP TRIGGER crawl_attempts_preserve_current_attempt ON crawl_attempts")
+    op.execute("DROP TRIGGER crawl_runs_require_current_attempt ON crawl_runs")
+    op.execute("DROP FUNCTION enforce_crawl_run_current_attempt()")
 
     op.drop_index(
         "ix_crawl_attempts_pending_transport_cleanup",

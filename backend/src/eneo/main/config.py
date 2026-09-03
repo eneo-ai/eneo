@@ -432,7 +432,8 @@ class Settings(BaseSettings):
 
     # Crawl - in-process async Python crawler settings
     crawl_max_length: int = 60 * 60 * 10  # 10 hour crawls max (large municipal sites)
-    closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
+    # Shared budget for pages and linked files; the actual mix follows the site.
+    closespider_itemcount: int = 20000
     download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules
     crawl_fetch_concurrency: int = Field(default=4, gt=0, le=32)

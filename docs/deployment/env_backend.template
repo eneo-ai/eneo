@@ -309,7 +309,7 @@ WORKER_MAX_JOBS=15
 # Large municipal websites may need 6-10 hours for full crawl
 CRAWL_MAX_LENGTH=36000
 
-# Maximum pages to crawl per website
+# Maximum combined pages and linked files to process per crawl
 CLOSESPIDER_ITEMCOUNT=20000
 
 # Maximum file size the crawler will download (bytes). Default: 10MB

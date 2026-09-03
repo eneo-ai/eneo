@@ -81,7 +81,7 @@ async def test_website_listing_loads_the_source_without_async_lazy_io(
         blob_id = blob.id
 
     async with db_container() as container:
-        page = await container.info_blob_repo().get_by_website(
+        page = await container.info_blob_repo().get_by_website_page(
             website_id,
             limit=100,
         )
@@ -94,7 +94,7 @@ async def test_website_listing_loads_the_source_without_async_lazy_io(
         assert page.items[0].website.id == website_id
 
 
-async def test_website_info_blob_endpoint_uses_a_stable_bounded_cursor_page(
+async def test_website_info_blob_endpoints_preserve_list_and_cursor_contracts(
     client,
     db_container,
     admin_user,
@@ -145,8 +145,21 @@ async def test_website_info_blob_endpoint_uses_a_stable_bounded_cursor_page(
         website_id = website.id
 
     headers = {"Authorization": f"Bearer {admin_token}"}
+    legacy_response = await client.get(
+        f"/api/v1/websites/{website_id}/info-blobs/",
+        headers=headers,
+    )
+
+    assert legacy_response.status_code == 200, legacy_response.text
+    legacy_page = legacy_response.json()
+    assert set(legacy_page) == {"items", "count"}
+    assert [item["id"] for item in legacy_page["items"]] == [
+        str(blob_id) for blob_id in blob_ids
+    ]
+    assert legacy_page["count"] == 3
+
     first_response = await client.get(
-        f"/api/v1/websites/{website_id}/info-blobs/?limit=2",
+        f"/api/v1/websites/{website_id}/info-blobs/page/?limit=2",
         headers=headers,
     )
 
@@ -163,7 +176,7 @@ async def test_website_info_blob_endpoint_uses_a_stable_bounded_cursor_page(
     assert first_page["next_cursor"] == str(blob_ids[1])
 
     second_response = await client.get(
-        f"/api/v1/websites/{website_id}/info-blobs/",
+        f"/api/v1/websites/{website_id}/info-blobs/page/",
         params={"limit": 2, "cursor": first_page["next_cursor"]},
         headers=headers,
     )

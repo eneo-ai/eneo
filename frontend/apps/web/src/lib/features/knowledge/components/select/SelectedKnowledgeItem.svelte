@@ -60,7 +60,7 @@
       if (kind === "collection") {
         blobs = await eneo.groups.listInfoBlobs(collection);
       } else {
-        const page = await eneo.websites.indexedBlobs.list({
+        const page = await eneo.websites.indexedBlobs.listPage({
           id: website.id,
           limit: PAGINATION.PAGE_SIZE
         });
@@ -81,7 +81,7 @@
 
     loadingMore = true;
     try {
-      const page = await eneo.websites.indexedBlobs.list({
+      const page = await eneo.websites.indexedBlobs.listPage({
         id: website.id,
         limit: PAGINATION.PAGE_SIZE,
         cursor: nextCursor

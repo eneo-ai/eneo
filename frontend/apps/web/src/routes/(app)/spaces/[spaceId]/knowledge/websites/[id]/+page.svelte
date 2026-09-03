@@ -75,7 +75,7 @@
 
     loadingMoreInfoBlobs = true;
     try {
-      const page = await eneo.websites.indexedBlobs.list({
+      const page = await eneo.websites.indexedBlobs.listPage({
         id: data.website.id,
         limit: PAGINATION.PAGE_SIZE,
         cursor: nextInfoBlobCursor
