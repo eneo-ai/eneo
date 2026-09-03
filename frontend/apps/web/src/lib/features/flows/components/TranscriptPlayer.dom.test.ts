@@ -180,11 +180,12 @@ describe("TranscriptPlayer turns", () => {
     expect(words[0].className).not.toContain("decoration-wavy");
     expect(container.querySelector("[data-uncertain-words]")?.textContent).toContain("1");
 
-    // Playback highlights the word, not the whole line.
+    // Playback fills the current word solidly inside the softly washed line.
     audio.currentTime = 12.9;
     await fireEvent(audio, new Event("timeupdate"));
-    await waitFor(() => expect(words[2].className).toContain("bg-accent-dimmer"));
-    expect(part(container, 2).className).not.toContain("bg-accent-dimmer");
+    await waitFor(() => expect(words[2].className).toContain("bg-accent-default"));
+    expect(words[1].className).not.toContain("bg-accent-default");
+    expect(part(container, 2).className).toContain("bg-accent-dimmer");
 
     // Clicking a word positions the playhead at that word.
     await fireEvent.click(words[1]);

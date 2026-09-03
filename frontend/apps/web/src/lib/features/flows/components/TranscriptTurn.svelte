@@ -120,10 +120,10 @@
     );
   }
 
-  /** A part with stored words highlights the word, not the whole line. */
+  /** The part being spoken: a soft wash over the sentence, and, when the
+   * part has stored words, a solid fill on the current word inside it. */
   function partActive(part: TurnPart): boolean {
-    if (part.segmentIndex !== activeSegmentIndex) return false;
-    return !(part.words && part.words.length > 0 && activeWordIndex >= 0);
+    return part.segmentIndex === activeSegmentIndex;
   }
 
   function onPartClick(part: TurnPart, event: MouseEvent) {
@@ -353,7 +353,9 @@
           data-run-text
           data-segment-index={part.segmentIndex}
           data-display-start={part.displayStart}
-          class="rounded-sm transition-colors {partActive(part) ? 'bg-accent-dimmer' : ''}"
+          class="rounded-sm transition-colors {partActive(part)
+            ? 'bg-accent-dimmer text-accent-stronger box-decoration-clone'
+            : ''}"
           title={correctedFrom(part.segmentIndex) !== null
             ? m.flow_run_transcript_corrected_from({
                 original: correctedFrom(part.segmentIndex) ?? ""
@@ -365,8 +367,9 @@
                 >{piece.text}</span
               >{:else if piece.word}<span
                 data-word-start={piece.word.start}
-                class="rounded-sm {isActiveWord(part, piece) ? 'bg-accent-dimmer' : ''} {piece.word
-                  .uncertain
+                class="rounded-sm {isActiveWord(part, piece)
+                  ? 'bg-accent-default text-on-fill'
+                  : ''} {piece.word.uncertain
                   ? 'decoration-warning-default underline decoration-wavy underline-offset-2'
                   : ''}"
                 title={piece.word.uncertain ? m.flow_run_transcript_word_uncertain() : undefined}
