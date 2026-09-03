@@ -268,3 +268,35 @@ def test_weak_architectural_evidence_is_asked_not_accepted() -> None:
         evaluate_slot_interaction(SLOT_INTERACTION_POLICIES["docx_output_mode"], state)
         == "ask"
     )
+
+
+def test_a_weak_reading_that_agrees_with_the_default_is_accepted() -> None:
+    """Nobody is asked to confirm what the policy would assume anyway.
+
+    The offline replay of the commit-1 cohorts showed the classifier reading
+    `no_direct_compare` at medium confidence on plain compilation briefs;
+    asking "how should the documents be compared?" there is a question the
+    old selection never asked and the user never raised. Wording that speaks
+    of comparing still earns the question, because it contradicts the weak
+    reading.
+    """
+
+    state = _document_report_state()
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope", "no_direct_compare", source="heuristic", confidence="medium"
+    )
+    policy = SLOT_INTERACTION_POLICIES["comparison_scope"]
+    assert evaluate_slot_interaction(policy, state) == "accept"
+    assert (
+        evaluate_slot_interaction(
+            policy,
+            state,
+            freeform_text="Flödet ska jämföra rapporterna och visa skillnaderna.",
+        )
+        == "ask"
+    )
+    # A weak reading of a non-default value is still asked.
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope", "same_run_compare", source="heuristic", confidence="medium"
+    )
+    assert evaluate_slot_interaction(policy, state) == "ask"
