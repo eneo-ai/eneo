@@ -84,6 +84,21 @@ async def _serve(app: web.Application) -> AsyncIterator[str]:
         await runner.cleanup()
 
 
+def test_terminal_page_owner_compresses_the_handoff_path() -> None:
+    handoffs = {
+        "first": "second",
+        "second": "third",
+        "third": "terminal",
+    }
+
+    assert python_engine._terminal_page_owner("first", handoffs) == "terminal"
+    assert handoffs == {
+        "first": "terminal",
+        "second": "terminal",
+        "third": "terminal",
+    }
+
+
 async def test_crawl_emits_pages_incrementally_and_follows_scoped_links() -> None:
     async def start(_: web.Request) -> web.Response:
         return web.Response(
@@ -119,6 +134,219 @@ async def test_crawl_emits_pages_incrementally_and_follows_scoped_links() -> Non
     assert "Relevant innehåll" in pages[1].content
     assert events[-1] == CrawlFinished(
         status="completed", pages_crawled=2, pages_failed=0
+    )
+
+
+async def test_redirect_target_is_not_recrawled_or_counted_against_page_limit() -> None:
+    canonical_requests = 0
+    child_requests = 0
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(status=302, headers={"Location": "/start/canonical"})
+
+    async def canonical(_: web.Request) -> web.Response:
+        nonlocal canonical_requests
+        canonical_requests += 1
+        return web.Response(
+            text=(
+                '<main><a href="/start/canonical">Canonical</a>'
+                '<a href="/start/child">Child</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def child(_: web.Request) -> web.Response:
+        nonlocal child_requests
+        child_requests += 1
+        return web.Response(text="<main>Child</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/canonical", canonical)
+    app.router.add_get("/start/child", child)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    max_items=2,
+                    concurrency=1,
+                    download_files=False,
+                )
+            )
+        ]
+
+    assert canonical_requests == 1
+    assert child_requests == 1
+    assert [event.url for event in events if isinstance(event, PageCrawled)] == [
+        f"{base_url}/start/canonical",
+        f"{base_url}/start/child",
+    ]
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=2, pages_failed=0
+    )
+
+
+async def test_concurrent_redirect_target_is_owned_once_without_displacing_child() -> (
+    None
+):
+    canonical_requests = 0
+    child_requests = 0
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=(
+                '<main><a href="/start/alias">Alias</a>'
+                '<a href="/start/canonical">Canonical</a>'
+                '<a href="/start/child">Child</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def alias(_: web.Request) -> web.Response:
+        return web.Response(status=302, headers={"Location": "/start/canonical"})
+
+    async def canonical(_: web.Request) -> web.Response:
+        nonlocal canonical_requests
+        canonical_requests += 1
+        return web.Response(text="<main>Canonical</main>", content_type="text/html")
+
+    async def child(_: web.Request) -> web.Response:
+        nonlocal child_requests
+        child_requests += 1
+        return web.Response(text="<main>Child</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/alias", alias)
+    app.router.add_get("/start/canonical", canonical)
+    app.router.add_get("/start/child", child)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    max_items=3,
+                    concurrency=2,
+                    download_files=False,
+                )
+            )
+        ]
+
+    assert canonical_requests == 1
+    assert child_requests == 1
+    page_urls = [event.url for event in events if isinstance(event, PageCrawled)]
+    assert len(page_urls) == 3
+    assert set(page_urls) == {
+        f"{base_url}/start",
+        f"{base_url}/start/canonical",
+        f"{base_url}/start/child",
+    }
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=3, pages_failed=0
+    )
+
+
+async def test_concurrent_redirect_cycle_emits_one_explicit_failure() -> None:
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=('<main><a href="/start/a">A</a><a href="/start/b">B</a></main>'),
+            content_type="text/html",
+        )
+
+    async def redirect_to_b(_: web.Request) -> web.Response:
+        return web.Response(status=302, headers={"Location": "/start/b"})
+
+    async def redirect_to_a(_: web.Request) -> web.Response:
+        return web.Response(status=302, headers={"Location": "/start/a"})
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/a", redirect_to_b)
+    app.router.add_get("/start/b", redirect_to_a)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    max_items=3,
+                    concurrency=2,
+                    download_files=False,
+                )
+            )
+        ]
+
+    failures = [event for event in events if isinstance(event, PageFailed)]
+    assert len(failures) == 1
+    assert failures[0].reason == "redirect_rejected"
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=1, pages_failed=1
+    )
+
+
+async def test_redirect_handoffs_keep_page_requests_bounded() -> None:
+    max_items = 5
+    concurrency = 2
+    page_requests = 0
+
+    def page_links(page_number: int) -> str:
+        aliases = "".join(
+            f'<a href="/start/aliases/{page_number}/{alias}">Alias</a>'
+            for alias in range(max_items - 1)
+        )
+        next_page = f'<a href="/start/pages/{page_number + 1}">Next</a>'
+        return f"<main>{aliases}{next_page}</main>"
+
+    async def start(_: web.Request) -> web.Response:
+        nonlocal page_requests
+        page_requests += 1
+        return web.Response(text=page_links(0), content_type="text/html")
+
+    async def page(request: web.Request) -> web.Response:
+        nonlocal page_requests
+        page_requests += 1
+        return web.Response(
+            text=page_links(int(request.match_info["page_number"])),
+            content_type="text/html",
+        )
+
+    async def alias(request: web.Request) -> web.Response:
+        nonlocal page_requests
+        page_requests += 1
+        page_number = int(request.match_info["page_number"])
+        target = "/start" if page_number == 0 else f"/start/pages/{page_number}"
+        return web.Response(status=302, headers={"Location": target})
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/pages/{page_number}", page)
+    app.router.add_get("/start/aliases/{page_number}/{alias}", alias)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/start",
+                    max_items=max_items,
+                    concurrency=concurrency,
+                    download_files=False,
+                )
+            )
+        ]
+
+    assert page_requests <= max_items + concurrency
+    assert events[-1] == CrawlFinished(
+        status="partial",
+        pages_crawled=2,
+        pages_failed=0,
+        reason="item_limit",
     )
 
 
@@ -1266,6 +1494,57 @@ async def test_crawl_with_no_file_links_skips_temporary_directory(
         status="completed",
         pages_crawled=1,
         pages_failed=0,
+    )
+
+
+async def test_external_document_link_is_ignored_before_file_budgeting() -> None:
+    local_file_requests = 0
+    external_file_requests = 0
+
+    async def start(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        external_origin = origin.replace("127.0.0.1", "localhost")
+        return web.Response(
+            text=(
+                '<main><a href="/guide.pdf">Local guide</a>'
+                f'<a href="{external_origin}/external.pdf">External guide</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    async def local_file(_: web.Request) -> web.Response:
+        nonlocal local_file_requests
+        local_file_requests += 1
+        return web.Response(body=b"local document", content_type="application/pdf")
+
+    async def external_file(_: web.Request) -> web.Response:
+        nonlocal external_file_requests
+        external_file_requests += 1
+        return web.Response(body=b"external document", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/guide.pdf", local_file)
+    app.router.add_get("/external.pdf", external_file)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", max_items=3)
+            )
+        ]
+
+    pages = [event for event in events if isinstance(event, PageCrawled)]
+    assert pages[0].file_links == (f"{base_url}/guide.pdf",)
+    assert local_file_requests == 1
+    assert external_file_requests == 0
+    assert not any(isinstance(event, FileFailed) for event in events)
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=1,
+        pages_failed=0,
+        files_downloaded=1,
     )
 
 

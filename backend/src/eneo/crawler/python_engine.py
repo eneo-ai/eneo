@@ -104,6 +104,11 @@ class _FetchResult:
     links: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _FetchHandoff:
+    pass
+
+
 class _ResponseTooLarge(Exception):
     pass
 
@@ -114,6 +119,21 @@ class _UnsafeTarget(aiohttp.ClientError):
 
 class _RedirectRejected(aiohttp.ClientError):
     pass
+
+
+class _RedirectHandedOff(Exception):
+    pass
+
+
+def _terminal_page_owner(owner: str, handoffs: dict[str, str]) -> str:
+    """Resolve and compress an acyclic chain of fetch-URL owners."""
+    path: list[str] = []
+    while owner in handoffs:
+        path.append(owner)
+        owner = handoffs[owner]
+    for previous_owner in path:
+        handoffs[previous_owner] = owner
+    return owner
 
 
 def _request_failure_reason(exc: BaseException) -> str:
@@ -271,7 +291,8 @@ class PythonCrawlEngine:
         file_links_truncated = False
         sitemap_snapshot: SitemapSnapshot | None = None
         frontier: deque[str]
-        seen: set[str]
+        page_owners: dict[str, str]
+        owner_handoffs: dict[str, str] = {}
         follow_page_links = request.crawl_type == CrawlType.CRAWL
         page_links_truncated = follow_page_links and request.conditional_gets_truncated
         validators: dict[str, ConditionalGet] = {}
@@ -337,17 +358,17 @@ class PythonCrawlEngine:
                         pages_failed += 1
                         yield failure
                     frontier = deque(sitemap_urls[: request.limits.max_items])
-                    seen = set(frontier)
+                    page_owners = {url: url for url in frontier}
                 else:
                     frontier = deque([seed_url])
-                    seen = {seed_url}
+                    page_owners = {seed_url: seed_url}
                     for url in validators:
                         if url == seed_url or not is_in_scope(url, seed_url):
                             continue
-                        if len(seen) >= request.limits.max_items:
+                        if len(page_owners) >= request.limits.max_items:
                             page_links_truncated = True
                             break
-                        seen.add(url)
+                        page_owners[url] = url
                         frontier.append(url)
 
                 robots_delay = (
@@ -366,19 +387,27 @@ class PythonCrawlEngine:
                     1 if robots_request_delay else request.limits.concurrency
                 )
                 link_reorder_window = per_crawl_concurrency * 2
+                # A redirect alias hands its result slot to the fetch that owns the
+                # target. One extra in-flight window permits useful replacements,
+                # while bounding adversarial alias chains with existing limits.
+                page_task_limit = request.limits.max_items + per_crawl_concurrency
 
-                pending_pages: dict[asyncio.Task[_FetchResult], int] = {}
+                pending_pages: dict[
+                    asyncio.Task[_FetchResult | _FetchHandoff], int
+                ] = {}
                 completed_links: dict[int, tuple[str, ...]] = {}
                 next_sequence = 0
                 next_result_sequence = 0
+                page_tasks_started = 0
                 refill_at: float | None = None
 
                 def fill_page_capacity() -> None:
-                    nonlocal next_sequence
+                    nonlocal next_sequence, page_tasks_started
                     while (
                         frontier
                         and len(pending_pages) < per_crawl_concurrency
                         and pages_seen + len(pending_pages) < request.limits.max_items
+                        and page_tasks_started < page_task_limit
                         and (
                             not follow_page_links
                             or len(pending_pages) + len(completed_links)
@@ -396,16 +425,21 @@ class PythonCrawlEngine:
                                 validators,
                                 origin_authorization,
                                 path_scope=follow_page_links,
+                                page_owners=page_owners,
+                                owner_handoffs=owner_handoffs,
                             )
                         )
                         pending_pages[task] = next_sequence
                         next_sequence += 1
+                        page_tasks_started += 1
 
                 crawl_timed_out = False
                 fill_page_capacity()
                 try:
                     while pending_pages or (
-                        frontier and pages_seen < request.limits.max_items
+                        frontier
+                        and pages_seen < request.limits.max_items
+                        and page_tasks_started < page_task_limit
                     ):
                         if refill_at is not None and monotonic() >= refill_at:
                             refill_at = None
@@ -413,6 +447,7 @@ class PythonCrawlEngine:
                             frontier
                             and pages_seen + len(pending_pages)
                             < request.limits.max_items
+                            and page_tasks_started < page_task_limit
                             and refill_at is None
                         ):
                             fill_page_capacity()
@@ -448,6 +483,10 @@ class PythonCrawlEngine:
                         for task in completed:
                             sequence = pending_pages.pop(task)
                             result = task.result()
+                            if isinstance(result, _FetchHandoff):
+                                if follow_page_links:
+                                    completed_links[sequence] = ()
+                                continue
                             if follow_page_links:
                                 completed_links[sequence] = result.links
                             if isinstance(result.event, PageCrawled):
@@ -473,19 +512,24 @@ class PythonCrawlEngine:
                             links = completed_links.pop(next_result_sequence)
                             next_result_sequence += 1
                             for discovered_url in links:
-                                if discovered_url not in seen and is_in_scope(
+                                if discovered_url in page_owners or not is_in_scope(
                                     discovered_url, seed_url
                                 ):
-                                    if len(seen) >= request.limits.max_items:
-                                        page_links_truncated = True
-                                        break
-                                    seen.add(discovered_url)
-                                    frontier.append(discovered_url)
+                                    continue
+                                if (
+                                    pages_seen + len(pending_pages) + len(frontier)
+                                    >= page_task_limit
+                                ):
+                                    page_links_truncated = True
+                                    break
+                                page_owners[discovered_url] = discovered_url
+                                frontier.append(discovered_url)
 
                         if (
                             request_delay
                             and frontier
                             and len(pending_pages) < per_crawl_concurrency
+                            and page_tasks_started < page_task_limit
                             and refill_at is None
                         ):
                             refill_at = monotonic() + request_delay
@@ -616,6 +660,7 @@ class PythonCrawlEngine:
             [aiohttp.ClientResponse, str], Awaitable[_ResponseResult]
         ],
         headers: dict[str, str] | None = None,
+        claim_redirect_target: Callable[[str], bool] | None = None,
     ) -> _ResponseResult:
         """Consume one response under capacity, retrying transport/status failures.
 
@@ -632,6 +677,7 @@ class PythonCrawlEngine:
                         origin_authorization,
                         path_scope=path_scope,
                         headers=headers,
+                        claim_redirect_target=claim_redirect_target,
                     )
                     async with response:
                         if (
@@ -664,9 +710,32 @@ class PythonCrawlEngine:
         origin_authorization: str | None,
         *,
         path_scope: bool,
-    ) -> _FetchResult:
+        page_owners: dict[str, str],
+        owner_handoffs: dict[str, str],
+    ) -> _FetchResult | _FetchHandoff:
         if robots is not None and not robots.can_fetch(_USER_AGENT, url):
             return _FetchResult(PageFailed(url=url, reason="robots_disallowed"))
+
+        redirect_chain = {url}
+
+        def claim_redirect_target(target_url: str) -> bool:
+            if target_url in redirect_chain:
+                return True
+
+            target_owner = page_owners.get(target_url)
+            if target_owner is None:
+                page_owners[target_url] = url
+                redirect_chain.add(target_url)
+                return True
+
+            target_owner = _terminal_page_owner(target_owner, owner_handoffs)
+            if target_owner == url:
+                page_owners[target_url] = url
+                redirect_chain.add(target_url)
+                return True
+
+            owner_handoffs[url] = target_owner
+            return False
 
         request_headers: dict[str, str] = {}
         validator = validators.get(url)
@@ -714,6 +783,15 @@ class PythonCrawlEngine:
                 )
 
             extracted = extract_html(text, final_url)
+            scoped_file_links = (
+                tuple(
+                    file_url
+                    for file_url in extracted.file_links
+                    if is_same_origin(file_url, scope_url)
+                )
+                if request.download_files
+                else ()
+            )
             return _FetchResult(
                 PageCrawled(
                     url=final_url,
@@ -721,7 +799,7 @@ class PythonCrawlEngine:
                     content=extracted.content,
                     etag=response.headers.get("ETag"),
                     last_modified=response.headers.get("Last-Modified"),
-                    file_links=(extracted.file_links if request.download_files else ()),
+                    file_links=scoped_file_links,
                 ),
                 links=extracted.links,
             )
@@ -736,7 +814,10 @@ class PythonCrawlEngine:
                 path_scope=path_scope,
                 consume_response=consume_response,
                 headers=request_headers,
+                claim_redirect_target=claim_redirect_target,
             )
+        except _RedirectHandedOff:
+            return _FetchHandoff()
         except _ResponseTooLarge:
             return _FetchResult(PageFailed(url=url, reason="response_too_large"))
         except (_UnsafeTarget, _RedirectRejected, LookupError) as exc:
@@ -1064,6 +1145,7 @@ class PythonCrawlEngine:
         *,
         path_scope: bool,
         headers: dict[str, str] | None = None,
+        claim_redirect_target: Callable[[str], bool] | None = None,
     ) -> tuple[aiohttp.ClientResponse, str]:
         current = normalize_url(url)
         if current is None:
@@ -1120,6 +1202,10 @@ class PythonCrawlEngine:
             redirected = normalize_url(location, base_url=current)
             if redirected is None:
                 raise _RedirectRejected("invalid redirect URL")
+            if claim_redirect_target is not None and not claim_redirect_target(
+                redirected
+            ):
+                raise _RedirectHandedOff
             current = redirected
 
         raise AssertionError("redirect loop exhausted without a result")

@@ -62,6 +62,7 @@ async def test_byte_bounded_queue_can_close_while_full() -> None:
         (0, 0, 0, 0, 0, 0, True, CrawlOutcome.FAILED),
         (0, 2, 0, 0, 0, 0, False, CrawlOutcome.UNCHANGED),
         (1, 0, 0, 0, 0, 0, False, CrawlOutcome.SUCCEEDED),
+        (1, 0, 1, 0, 0, 0, False, CrawlOutcome.SUCCEEDED),
         (1, 0, 0, 0, 1, 0, False, CrawlOutcome.PARTIAL),
         (1, 0, 0, 0, 0, 0, True, CrawlOutcome.PARTIAL),
     ],
@@ -93,7 +94,7 @@ def test_crawl_outcomes_are_truthful(
 @pytest.mark.parametrize(
     ("outcome", "useful_items", "failed_items", "expected"),
     [
-        (CrawlOutcome.SUCCEEDED, 1, 0, True),
+        (CrawlOutcome.SUCCEEDED, 2, 0, True),
         (CrawlOutcome.UNCHANGED, 1, 0, True),
         (CrawlOutcome.EMPTY, 0, 0, True),
         (CrawlOutcome.PARTIAL, 2, 1, True),
