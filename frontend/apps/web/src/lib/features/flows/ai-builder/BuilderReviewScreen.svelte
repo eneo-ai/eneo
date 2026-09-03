@@ -11,7 +11,7 @@
   import IconChevronDown from "@lucide/svelte/icons/chevron-down";
   import IconAlertTriangle from "@lucide/svelte/icons/triangle-alert";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import BuilderApproveDialog from "./BuilderApproveDialog.svelte";
+  import BuilderApproveDialog, { type ApprovePhase } from "./BuilderApproveDialog.svelte";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
   import BuilderStepDetails from "./BuilderStepDetails.svelte";
   import BuilderStepNode from "./BuilderStepNode.svelte";
@@ -505,15 +505,26 @@
     mounted = false;
   });
 
-  // Where the reader's focus lands when the dialog closes: the button that
-  // opened it is disabled while the flow is created, so the footer's status
-  // column takes focus and the live region there narrates the rest.
+  // The confirm dialog stays open as the progress surface: it shows the
+  // request in flight, then the created moment, and the flow opens from
+  // there. Only a failure closes it, and then the failure panel takes focus.
+  const approvePhase = $derived<ApprovePhase>(
+    isCreateMode
+      ? service.applyResult
+        ? "created"
+        : service.isCreating
+          ? "pending"
+          : "idle"
+      : service.pendingOperationKind === "applying"
+        ? "pending"
+        : "idle"
+  );
+  let createFailureEl = $state<HTMLDivElement | null>(null);
+  // Where an edit-mode failure leaves the reader: the footer's status column,
+  // whose live region narrates the rest.
   let footerStatusEl = $state<HTMLDivElement | null>(null);
 
   async function handlePrimaryAction() {
-    approveDialogOpen = false;
-    await tick();
-    footerStatusEl?.focus({ preventScroll: true });
     if (isCreateMode) {
       try {
         const result = await service.createFlowFromPlan();
@@ -522,6 +533,10 @@
         onapplied?.({ flow_id: result.flow_id, focusStepIndex });
       } catch {
         // Surfaced through service.applyError / service.createFailureOutcome.
+        approveDialogOpen = false;
+        await tick();
+        createFailureEl?.focus({ preventScroll: true });
+        createFailureEl?.scrollIntoView?.({ block: "nearest" });
       }
       return;
     }
@@ -530,6 +545,9 @@
       onapplied?.({ flow_id: result.flow_id, focusStepIndex });
     } catch {
       // Surfaced through service state.
+      approveDialogOpen = false;
+      await tick();
+      footerStatusEl?.focus({ preventScroll: true });
     }
   }
 
@@ -1282,9 +1300,11 @@
 
         {#if isGeneralApplyError && isCreateMode}
           <div
+            bind:this={createFailureEl}
             class="border-warning-default/40 bg-warning-dimmer mt-3.5 rounded-[9px] border px-3.5 py-3"
             role="status"
             aria-live="polite"
+            tabindex="-1"
           >
             <p class="text-warning-stronger text-[0.8125rem] font-semibold">
               {createOutcomeUnknown
@@ -1461,6 +1481,7 @@
     bind:open={approveDialogOpen}
     mode={isCreateMode ? "create" : "edit"}
     {stepCount}
+    phase={approvePhase}
     onconfirm={() => void handlePrimaryAction()}
   />
 {:else if service.conflict}

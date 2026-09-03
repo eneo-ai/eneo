@@ -6531,6 +6531,8 @@
   "ai_builder_approve_dialog_step_editable": "Du kan ändra varje steg efteråt, inklusive modell per steg",
   "ai_builder_approve_dialog_cancel": "Avbryt",
   "ai_builder_approve_dialog_confirm": "Skapa flödet",
+  "ai_builder_approve_dialog_pending_hint": "Det tar vanligtvis några sekunder. Flödet öppnas så snart det är klart.",
+  "ai_builder_approve_dialog_created": "Flödet är skapat. Öppnar det …",
   "ai_builder_approve_dialog_confirm_edit": "Uppdatera flödet",
   "ai_builder_conflict_elsewhere_title": "Utkastet ändrades någon annanstans",
   "ai_builder_conflict_stale_revision": "Flödet har ändrats sedan planen togs fram. Hämta det senaste innan du godkänner.",

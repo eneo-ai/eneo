@@ -8,11 +8,15 @@ import type {
   AIBuilderError,
   AIBuilderSession,
   AIBuilderTelemetrySummary,
+  ApplyResult,
   ProposedPlan,
   StepSpec
 } from "./protocol";
-import type { AIBuilderClientTransport } from "./FlowAIBuilderDriver";
+import type { AIBuilderClientTransport, PendingPlanOperation } from "./FlowAIBuilderDriver";
+import type { ComponentProps } from "svelte";
 import BuilderReviewScreenHarness from "./test-harnesses/BuilderReviewScreenHarness.svelte";
+
+type HarnessProps = ComponentProps<typeof BuilderReviewScreenHarness>;
 
 afterEach(() => {
   cleanup();
@@ -55,25 +59,31 @@ describe("BuilderReviewScreen approval", () => {
     expect(onapplied).not.toHaveBeenCalled();
   });
 
-  it("shows the creation moment in the footer and opens the flow after a beat", async () => {
-    // Confirming closes the dialog at once, the footer the reader used shows
-    // the success, and the created flow opens after a fixed beat.
+  it("keeps the dialog open as the progress surface and opens the flow after a beat", async () => {
+    // Confirming leaves the dialog in place: it shows the request in flight,
+    // then the created moment, and the flow opens after a fixed beat.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const createFlowFromPlan = vi.fn().mockResolvedValue({
-        flow_id: "flow-1",
-        flow_name: "Ljud till PDF",
-        steps_created: 2,
-        steps_updated: 0,
-        steps_removed: 0
-      });
+      let service!: Parameters<NonNullable<HarnessProps["onservice"]>>[0];
+      let finishCreate!: () => void;
+      const createFlowFromPlan = vi.fn(
+        () =>
+          new Promise<ApplyResult>((resolve) => {
+            service.seedState({ pendingOperation: makePendingOperation("creating") });
+            finishCreate = () => {
+              service.seedState({ pendingOperation: null, applyResult: makeApplyResult() });
+              resolve(makeApplyResult());
+            };
+          })
+      );
       const onapplied = vi.fn();
       const { unmount } = render(BuilderReviewScreenHarness, {
         currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
         state: makeCreateState(),
         screenProps: { onapplied },
-        onservice: (service) => {
-          service.createFlowFromPlan = createFlowFromPlan;
+        onservice: (s) => {
+          service = s;
+          s.createFlowFromPlan = createFlowFromPlan;
         }
       });
 
@@ -81,16 +91,25 @@ describe("BuilderReviewScreen approval", () => {
       await fireEvent.click(
         screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm() })
       );
-      // Let the create call resolve and the beat start.
       await vi.advanceTimersByTimeAsync(0);
       expect(createFlowFromPlan).toHaveBeenCalledOnce();
-      expect(screen.queryByText(m.ai_builder_approve_dialog_title())).toBeNull();
-      // Focus rests on the footer row itself, not on the disabled button it
-      // contains: the wrapper is the focusable element that holds the actions.
-      const active = document.activeElement as HTMLElement;
-      expect(active.getAttribute("tabindex")).toBe("-1");
-      expect(active.querySelector("button")).not.toBeNull();
 
+      // Pending: the dialog stays, says so, and neither button works.
+      const dialog = screen.getByRole("alertdialog");
+      expect(within(dialog).getByText(m.ai_builder_approve_dialog_pending_hint())).toBeTruthy();
+      const creating = within(dialog).getByRole("button", { name: m.ai_builder_creating() });
+      expect((creating as HTMLButtonElement).disabled).toBe(true);
+      const cancel = within(dialog).getByRole("button", {
+        name: m.ai_builder_approve_dialog_cancel()
+      });
+      expect((cancel as HTMLButtonElement).disabled).toBe(true);
+      expect(dialog.getAttribute("aria-busy")).toBe("true");
+      expect(onapplied).not.toHaveBeenCalled();
+
+      // Created: the same dialog shows the moment, then the flow opens.
+      finishCreate();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(within(dialog).getByText(m.ai_builder_approve_dialog_created())).toBeTruthy();
       await vi.advanceTimersByTimeAsync(899);
       expect(onapplied).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
@@ -99,6 +118,38 @@ describe("BuilderReviewScreen approval", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("closes the dialog on a failed create and hands focus to the failure panel", async () => {
+    let service!: Parameters<NonNullable<HarnessProps["onservice"]>>[0];
+    const createFlowFromPlan = vi.fn(async () => {
+      service.seedState({
+        pendingOperation: null,
+        applyError: makeError("internal"),
+        createFailureOutcome: "confirmed_not_applied"
+      });
+      throw new Error("create failed");
+    });
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: makeCreateState(),
+      onservice: (s) => {
+        service = s;
+        s.createFlowFromPlan = createFlowFromPlan;
+      }
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_approve_create() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_approve_dialog_confirm() })
+    );
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    const panel = await screen.findByText(m.ai_builder_create_failed_title());
+    const region = panel.closest('[role="status"]') as HTMLElement;
+    await waitFor(() => expect(document.activeElement).toBe(region));
+    // The primary action offers a retry rather than a dead button.
+    expect(screen.getByRole("button", { name: m.ai_builder_turn_retry() })).toBeTruthy();
   });
 
   it("does not open the flow on behalf of a screen the reader already left", async () => {
@@ -612,6 +663,20 @@ describe("BuilderReviewScreen recovery surfaces", () => {
 });
 
 // ---- fixtures --------------------------------------------------------------
+
+function makePendingOperation(kind: "creating" | "applying"): PendingPlanOperation {
+  return { kind, sessionId: "session-1", planId: "plan-1" };
+}
+
+function makeApplyResult(): ApplyResult {
+  return {
+    flow_id: "flow-1",
+    flow_name: "Ljud till PDF",
+    steps_created: 2,
+    steps_updated: 0,
+    steps_removed: 0
+  };
+}
 
 function makeError(code: string): AIBuilderError {
   return {
