@@ -1119,7 +1119,7 @@ def test_high_confidence_source_comparison_rejects_ambiguous_or_one_sided_prompt
     assert not is_high_confidence_source_to_source_comparison(text)
 
 
-def test_extract_answer_signals_allows_high_confidence_comparison_freeform() -> None:
+def test_extract_answer_signals_leaves_comparison_scope_to_the_evaluator() -> None:
     signals = extract_answer_signals(
         [
             {
@@ -1134,43 +1134,8 @@ def test_extract_answer_signals_allows_high_confidence_comparison_freeform() -> 
     )
 
     assert signals["document_material_scope"] == {"multiple_documents_case"}
-    assert signals["comparison_scope"] == {"same_run_compare"}
-
-
-def test_requirements_summary_does_not_erase_high_confidence_comparison_signal() -> (
-    None
-):
-    signals = extract_answer_signals(
-        [
-            {
-                "role": "user",
-                "content": (
-                    "Användaren laddar upp flera underlagsfiler och flödet ska "
-                    "identifiera motsägelser mellan källorna."
-                ),
-            },
-            {
-                "role": "tool",
-                "content": "",
-                "metadata": {
-                    "requirements_summary": {
-                        "input_description": "Primär indata vid körning: Dokument.",
-                        "output_description": (
-                            "Huvudsakligt slutresultat: Strukturerad JSON."
-                        ),
-                        "key_decisions": [
-                            {
-                                "topic": "Dokumentunderlag",
-                                "decision": "Ibland ett, ibland flera dokument",
-                            }
-                        ],
-                    }
-                },
-            },
-        ]
-    )
-
-    assert signals["comparison_scope"] == {"same_run_compare"}
+    # text-only evidence is below commit grade: the evaluator asks, nothing is settled
+    assert "comparison_scope" not in signals
 
 
 def test_extract_answer_signals_infers_common_runtime_metadata_field_names() -> None:

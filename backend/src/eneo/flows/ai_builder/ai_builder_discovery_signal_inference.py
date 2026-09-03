@@ -46,8 +46,6 @@ def infer_answer_signals_from_text(text: str) -> dict[str, set[str]]:
         "flow_input_architecture",
         _infer_flow_input_architecture(normalized),
     )
-    _add_signal(signals, "comparison_scope", _infer_comparison_scope(normalized))
-    _add_signal(signals, "processing_scope", _infer_processing_scope(normalized))
     _add_signal(
         signals,
         "structured_io_contract",
@@ -275,58 +273,6 @@ def _infer_flow_input_architecture(text: str) -> str | None:
         ),
     ):
         return "audio_primary_input"
-    return None
-
-
-def _infer_comparison_scope(text: str) -> str | None:
-    if _contains_any(
-        text,
-        (
-            "tidigare sparat material",
-            "earlier saved material",
-            "previous material",
-            "tidigare körningar",
-            "stored earlier material",
-        ),
-    ):
-        return "compare_previous_material"
-    if is_high_confidence_source_to_source_comparison(text):
-        return "same_run_compare"
-    if _contains_any(
-        text,
-        (
-            "jämför dem direkt",
-            "compare them directly",
-            "flera dokument i samma körning",
-            "compare documents in the same run",
-            "same run",
-            "samma körning",
-        ),
-    ):
-        return "same_run_compare"
-    return None
-
-
-def _infer_processing_scope(text: str) -> str | None:
-    if _contains_any(
-        text,
-        (
-            "flera ärenden i samma körning",
-            "multiple cases in one run",
-            "several cases together",
-        ),
-    ):
-        return "multiple_cases"
-    if _contains_any(
-        text,
-        (
-            "en körning åt gången",
-            "ett paket åt gången",
-            "one run at a time",
-            "one package per run",
-        ),
-    ):
-        return "single_case"
     return None
 
 

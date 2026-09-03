@@ -64,6 +64,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationSource,
     parse_slot_classification_response,
 )
+from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
+    SLOT_INTERACTION_POLICIES,
+    evaluate_slot_interaction,
+)
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
     FCM_VERSION,
@@ -1967,25 +1971,27 @@ class TestPolicyDefaults:
         assert slot.value == "flexible_document_case"
         assert slot.source == "policy_default"
 
-    def test_multi_source_contradiction_prompt_resolves_compare_slots(self) -> None:
-        state = build_planning_state_from_conversation(
-            [
-                ConversationMessage(
-                    role="user",
-                    content=(
-                        "Användaren laddar upp 2-5 underlagsfiler. Flödet ska "
-                        "extrahera nyckelfakta som strukturerad JSON från varje fil "
-                        "eller från varje dokumentdel, sedan identifiera motsägelser "
-                        "mellan källorna i ett separat analyssteg."
-                    ),
-                )
-            ]
+    def test_multi_source_contradiction_prompt_asks_comparison_scope(self) -> None:
+        text = (
+            "Användaren laddar upp 2-5 underlagsfiler. Flödet ska "
+            "extrahera nyckelfakta som strukturerad JSON från varje fil "
+            "eller från varje dokumentdel, sedan identifiera motsägelser "
+            "mellan källorna i ett separat analyssteg."
         )
-
+        state = build_planning_state_from_conversation(
+            [ConversationMessage(role="user", content=text)]
+        )
         assert state.resolved_slots["document_material_scope"].value == (
             "multiple_documents_case"
         )
-        assert state.resolved_slots["comparison_scope"].value == "same_run_compare"
+        # text-only evidence is below commit grade: the slot is asked, not settled
+        assert "comparison_scope" not in state.resolved_slots
+        assert (
+            evaluate_slot_interaction(
+                SLOT_INTERACTION_POLICIES["comparison_scope"], state, freeform_text=text
+            )
+            == "ask"
+        )
 
     def test_single_document_compare_prompt_does_not_resolve_same_run_compare(
         self,
@@ -5015,12 +5021,18 @@ class TestModelSlotMerge:
             )
         }
 
-        apply_policy_defaults_from_resolved_slots(
-            state,
-            freeform_text="Slutrapporten ska fylla en DOCX-mall.",
-        )
+        text = "Slutrapporten ska fylla en DOCX-mall."
+        apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
 
+        # The wording keeps the default off and turns the slot into a question;
+        # the state carries no hidden "open" mode of its own.
         assert "docx_output_mode" not in state.resolved_slots
+        assert (
+            evaluate_slot_interaction(
+                SLOT_INTERACTION_POLICIES["docx_output_mode"], state, freeform_text=text
+            )
+            == "ask"
+        )
 
     def test_high_model_runtime_metadata_replaces_policy_default_with_text_evidence(
         self,
