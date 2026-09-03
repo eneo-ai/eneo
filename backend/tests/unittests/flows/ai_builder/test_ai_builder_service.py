@@ -2612,7 +2612,7 @@ class TestSendMessageStructuredQuestion:
         assert data["question_id"] != "multi_file_strategy"
 
     @pytest.mark.anyio
-    async def test_repeated_processing_scope_question_after_answer_advances_to_different_backend_question(
+    async def test_repeated_document_scope_question_after_answer_advances_to_different_backend_question(
         self,
     ):
         user = _make_user()
@@ -2630,7 +2630,7 @@ class TestSendMessageStructuredQuestion:
                     role="assistant",
                     content="Jag behöver förstå hur flödet ska arbeta innan jag går vidare.",
                     metadata={
-                        "question_id": "processing_scope",
+                        "question_id": "document_material_scope",
                         "question_index": 1,
                     },
                     tool_calls=[
@@ -2638,14 +2638,17 @@ class TestSendMessageStructuredQuestion:
                             "id": "call_scope_q1",
                             "name": "ask_structured_question",
                             "arguments": {
-                                "question_id": "processing_scope",
+                                "question_id": "document_material_scope",
                                 "question": "Hur ska flödet arbeta?",
                                 "options": [
                                     {
-                                        "id": "single_case",
+                                        "id": "single_document_case",
                                         "label": "Ett ärende åt gången",
                                     },
-                                    {"id": "batch_cases", "label": "Många ärenden"},
+                                    {
+                                        "id": "multiple_documents_case",
+                                        "label": "Många ärenden",
+                                    },
                                 ],
                                 "selection_mode": "single",
                                 "allow_custom": True,
@@ -2669,11 +2672,11 @@ class TestSendMessageStructuredQuestion:
         repeated_question = _make_tool_call(
             name="ask_structured_question",
             arguments={
-                "question_id": "processing_scope",
+                "question_id": "document_material_scope",
                 "question": "Hur ska flödet arbeta?",
                 "options": [
-                    {"id": "single_case", "label": "Ett ärende åt gången"},
-                    {"id": "batch_cases", "label": "Många ärenden"},
+                    {"id": "single_document_case", "label": "Ett ärende åt gången"},
+                    {"id": "multiple_documents_case", "label": "Många ärenden"},
                 ],
                 "selection_mode": "single",
                 "allow_custom": True,
@@ -2700,9 +2703,9 @@ class TestSendMessageStructuredQuestion:
                     request_snapshot=_test_request_snapshot("Ett ärende åt gången"),
                     message="Ett ärende åt gången",
                     question_answer={
-                        "question_id": "processing_scope",
-                        "selected_option_ids": ["single_case"],
-                        "selected_values": ["single_case"],
+                        "question_id": "document_material_scope",
+                        "selected_option_ids": ["single_document_case"],
+                        "selected_values": ["single_document_case"],
                         "ui_language": "sv",
                     },
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
@@ -2716,7 +2719,7 @@ class TestSendMessageStructuredQuestion:
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
         assert len(question_events) == 1
         data = json.loads(question_events[0]["data"])
-        assert data["question_id"] != "processing_scope"
+        assert data["question_id"] != "document_material_scope"
 
     @pytest.mark.anyio
     async def test_invalid_supported_question_without_question_text_uses_generic_fallback(

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
-    build_discovery_block_message,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -181,11 +180,12 @@ class TestMVSGate:
         analysis = analyze_discovery(conversation)
         assert analysis.mvs_met
 
-    def test_mvs_not_met_blocks_confirmation_but_allows_free_discovery(self) -> None:
-        """When MVS not met, ready_for_confirmation is False.
+    def test_a_brief_with_nothing_in_it_starts_with_the_purpose(self) -> None:
+        """No free-discovery mode: the interaction policy asks its first question.
 
-        build_discovery_block_message returns None (no backend-driven question),
-        allowing the planner to enter free discovery mode instead.
+        The action policy adds the unresolved architectural slots regardless,
+        so hiding discovery's questions would only have changed which question
+        came first.
         """
         conversation = [
             ConversationMessage(
@@ -196,9 +196,7 @@ class TestMVSGate:
         analysis = analyze_discovery(conversation)
         assert not analysis.mvs_met
         assert not analysis.ready_for_confirmation
-        # No backend-driven block — free discovery mode handles this
-        block = build_discovery_block_message(conversation)
-        assert block is None
+        assert analysis.selected_question_ids[0] == "post_processing_goal"
 
     def test_advanced_explicit_user_has_mvs_met(self) -> None:
         conversation = [
@@ -284,9 +282,11 @@ class TestQuestionBudget:
         )
 
         # The quality slots are assumed, never asked. What the brief still
-        # leaves open is the comparison it asks for and the disposition of a
-        # report over several documents: both change the flow's shape.
+        # leaves open is what text alone cannot settle: the input, the output,
+        # the comparison it asks for and the disposition of the report.
         assert set(analysis.selected_question_ids) <= {
+            "primary_runtime_input",
+            "terminal_output",
             "comparison_scope",
             "report_disposition",
         }
@@ -363,7 +363,13 @@ class TestQuestionBudget:
         assert "case_scope" not in blocking_ids
         assert "document_material_scope" not in blocking_ids
         assert "final_output_mode" not in blocking_ids
-        assert len(blocking_ids) <= 2
+        # Text alone settles no architecture slot: the input and output are
+        # asked; the quality slots above are not.
+        assert blocking_ids <= {
+            "post_processing_goal",
+            "primary_runtime_input",
+            "terminal_output",
+        }
 
     def test_vague_prompt_allows_high_value_questions(self) -> None:
         """A short vague prompt should still allow high_value questions."""
@@ -400,8 +406,13 @@ class TestQuestionBudget:
         ]
         analysis = analyze_discovery(conversation)
         assert analysis.mvs_met
-        # Advanced (60+ words, mentions steg) → max 1 blocking question
-        assert len(analysis.blocking_issues) <= 1
+        # An explicit step plan no longer buys a smaller budget; what the text
+        # cannot settle is asked, and nothing else is.
+        assert {issue.issue_id for issue in analysis.blocking_issues} <= {
+            "post_processing_goal",
+            "primary_runtime_input",
+            "terminal_output",
+        }
 
 
 class TestMixedArchitectureClarification:

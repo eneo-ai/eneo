@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
     POLICY_COVERED_SLOT_NAMES,
     SLOT_INTERACTION_POLICIES,
@@ -11,7 +9,6 @@ from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
     evaluate_slot_interaction,
     slot_interaction_order,
     slot_is_relevant,
-    slots_to_ask,
 )
 from eneo.flows.ai_builder.planning_state import (
     MappedFileLimit,
@@ -211,31 +208,22 @@ def test_the_mapped_ceiling_is_a_question_only_once_it_has_been_proposed() -> No
     assert evaluate_slot_interaction(policy, state) == "commit"
 
 
-@pytest.mark.parametrize(
-    "slot_name",
-    ["primary_runtime_input", "terminal_output"],
-)
-def test_an_empty_brief_asks_the_architecture_questions_in_order(
-    slot_name: str,
-) -> None:
-    asked = slots_to_ask(PlanningState.empty())
-
-    assert slot_name in asked
-    assert list(asked) == sorted(asked, key=slot_interaction_order)
-
-
-def test_words_about_a_template_keep_the_docx_mode_open_instead_of_defaulting() -> None:
-    state = _document_report_state()
-    state.resolved_slots["terminal_output"] = _slot("terminal_output", "docx_document")
-    policy = SLOT_INTERACTION_POLICIES["docx_output_mode"]
-
-    assert evaluate_slot_interaction(policy, state) == "assume"
-    assert (
-        evaluate_slot_interaction(
-            policy, state, freeform_text="Skapa en Word-fil från en mall."
+def test_an_empty_brief_asks_the_architecture_questions_in_order() -> None:
+    state = PlanningState.empty()
+    asked = [
+        policy.slot_name
+        for policy in sorted(
+            SLOT_INTERACTION_POLICIES.values(), key=lambda item: item.order
         )
-        == "open"
-    )
+        if evaluate_slot_interaction(policy, state) == "ask"
+    ]
+
+    assert asked[:3] == [
+        "post_processing_goal",
+        "primary_runtime_input",
+        "terminal_output",
+    ]
+    assert asked == sorted(asked, key=slot_interaction_order)
 
 
 def test_a_brief_that_asks_for_comparison_is_asked_how() -> None:
@@ -253,3 +241,30 @@ def test_a_brief_that_asks_for_comparison_is_asked_how() -> None:
         "post_processing_goal", "compare_or_validate"
     )
     assert evaluate_slot_interaction(policy, state) == "ask"
+
+
+def test_weak_architectural_evidence_is_asked_not_accepted() -> None:
+    """The architecture readers commit nothing below commit grade.
+
+    Accepting a confident text rule here would disclose a same-run comparison
+    or a template DOCX while the derivation committed a linear flow or a
+    generated DOCX. The question keeps the card and the build in agreement.
+    """
+
+    state = _document_report_state()
+    state.resolved_slots["comparison_scope"] = _slot(
+        "comparison_scope", "same_run_compare", source="heuristic", confidence="high"
+    )
+    assert (
+        evaluate_slot_interaction(SLOT_INTERACTION_POLICIES["comparison_scope"], state)
+        == "ask"
+    )
+
+    state.resolved_slots["terminal_output"] = _slot("terminal_output", "docx_document")
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode", "template_fill_docx", source="heuristic", confidence="high"
+    )
+    assert (
+        evaluate_slot_interaction(SLOT_INTERACTION_POLICIES["docx_output_mode"], state)
+        == "ask"
+    )

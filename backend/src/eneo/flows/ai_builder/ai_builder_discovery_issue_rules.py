@@ -24,7 +24,6 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     canonical_question_id,
     latest_pending_structured_question,
     mentions_output_change,
-    mentions_runtime_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     UNKNOWN_SLOT_VALUE,
@@ -433,49 +432,3 @@ def mixed_input_architecture_is_vague(profile: DiscoveryProfile) -> bool:
     # not a second thing to check — an answer the question never offered must
     # not silence it.
     return profile.input_intent.needs_architecture_clarification
-
-
-def runtime_metadata_is_vague(profile: DiscoveryProfile) -> bool:
-    if _family_inactive(profile, "runtime_metadata_fields"):
-        return False
-    if profile.resolved_slot("runtime_metadata_fields") is not None:
-        return False
-    answers = profile.answers
-    text = profile.text
-    if "runtime_metadata_fields" in answers:
-        return False
-    if (
-        "runtime_metadata_fields" in profile.flow_defaults
-        and not mentions_runtime_metadata(text)
-    ):
-        return False
-    if mentions_runtime_metadata(text):
-        return False
-    if not _runtime_metadata_prerequisites_resolved(profile):
-        return False
-    return True
-
-
-def _runtime_metadata_prerequisites_resolved(profile: DiscoveryProfile) -> bool:
-    if primary_runtime_input_is_vague(profile):
-        return False
-    if profile.input_intent.needs_architecture_clarification:
-        return False
-    if (
-        profile.document_like_input
-        and profile.resolved_slot("document_material_scope") is None
-        and "document_material_scope" not in profile.answers
-        and "document_material_scope" not in profile.flow_defaults
-    ):
-        return False
-    if document_cardinality_is_vague(profile):
-        return False
-    if terminal_output_is_vague(profile):
-        return False
-    if ultra_vague_terminal_output_choice_is_vague(profile):
-        return False
-    if needs_docx_mode_choice(profile):
-        return False
-    if needs_pdf_generation_mode_choice(profile):
-        return False
-    return True

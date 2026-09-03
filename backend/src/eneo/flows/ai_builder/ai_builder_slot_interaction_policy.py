@@ -52,7 +52,7 @@ from eneo.flows.enums import FlowAuthoringInputType
 
 SlotImpact = Literal["architecture", "quality"]
 SlotWhenUnknown = Literal["ask", "assume"]
-SlotInteraction = Literal["not_relevant", "commit", "accept", "ask", "assume", "open"]
+SlotInteraction = Literal["not_relevant", "commit", "accept", "ask", "assume"]
 
 
 def _never_explicit_text(_: str) -> bool:
@@ -81,11 +81,6 @@ class SlotInteractionPolicy:
     order: int
     default_value: str | None = None
     has_explicit_text: Callable[[str], bool] = _never_explicit_text
-    # Whether a confident text rule may settle the slot. A phrase match is
-    # enough for what material comes in or goes out; it is not enough to
-    # refuse a template PDF on the user's behalf. That is settled only by the
-    # user or by cited classifier evidence.
-    settled_by_text_rules: bool = True
 
     def __post_init__(self) -> None:
         if self.when_unknown == "assume" and self.default_value is None:
@@ -172,7 +167,6 @@ _POLICIES: tuple[SlotInteractionPolicy, ...] = (
         order=6,
         default_value="generated_pdf",
         has_explicit_text=has_explicit_pdf_mode_text,
-        settled_by_text_rules=False,
     ),
     SlotInteractionPolicy(
         slot_name="runtime_metadata_fields",
@@ -346,16 +340,15 @@ def evaluate_slot_interaction(
       report's disposition while the input is still open.
     - `commit`: resolved with evidence strong enough to build on.
     - `accept`: resolved below commit grade and kept as an assumption row the
-      user can reopen: a default the policy itself took, confident evidence
-      from the model or a text rule, or weaker evidence for a slot the table
-      would have assumed anyway.
-    - `ask`: the user has to decide. The model said it did not know; the answer
-      is missing and the table says to ask; or the only evidence is weak and
-      the slot is worth a question (architecture impact, or a quality slot the
-      table asks about).
+      user can reopen: a default the policy itself took, or evidence for a
+      quality slot the table would have assumed anyway.
+    - `ask`: the user has to decide. The model said it did not know; the
+      answer is missing and the table says to ask; the brief speaks of a
+      comparison; or the only evidence is below commit grade for a slot worth
+      a question (it shapes the architecture, or the table asks about it).
+      The architecture readers commit nothing weaker, so an accepted guess
+      would disclose one flow and build another.
     - `assume`: the default is taken, silently, as a reopenable row.
-    - `open`: the table would assume, but the user's own words speak to the
-      slot without settling it; no default, no question this turn.
 
     `freeform_text` is the user's own wording, read only through the policy's
     explicit-text guard.
@@ -384,10 +377,6 @@ def evaluate_slot_interaction(
             return "commit"
         if resolved.source == "policy_default":
             return "accept"
-        if resolved.confidence == "high" and (
-            resolved.source != "heuristic" or policy.settled_by_text_rules
-        ):
-            return "accept"
         worth_a_question = (
             effective_slot_impact(policy, state) == "architecture"
             or policy.when_unknown == "ask"
@@ -403,11 +392,6 @@ def evaluate_slot_interaction(
         # A brief that speaks of comparing, in words or through its goal, is
         # asked how; only silence about it takes the no-comparison default.
         return "ask"
-    if policy.has_explicit_text(freeform_text):
-        # The user's own words speak to the slot, so no default is taken, and
-        # the words alone did not settle it: a later reader (an attachment,
-        # the classifier) will.
-        return "open"
     return "assume"
 
 
@@ -418,17 +402,6 @@ def _comparison_is_the_goal(state: PlanningState) -> bool:
 
 def _template_attached(state: PlanningState) -> bool:
     return any(role.role == "template" for role in state.file_roles)
-
-
-def slots_to_ask(state: PlanningState, *, freeform_text: str = "") -> tuple[str, ...]:
-    """Every slot this state needs the user to decide, in the order to ask."""
-
-    return tuple(
-        policy.slot_name
-        for policy in sorted(_POLICIES, key=lambda item: item.order)
-        if evaluate_slot_interaction(policy, state, freeform_text=freeform_text)
-        == "ask"
-    )
 
 
 def slot_interaction_order(slot_name: str) -> int:
@@ -453,5 +426,4 @@ __all__ = [
     "evaluate_slot_interaction",
     "slot_interaction_order",
     "slot_is_relevant",
-    "slots_to_ask",
 ]

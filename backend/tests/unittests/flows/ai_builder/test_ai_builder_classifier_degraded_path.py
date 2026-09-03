@@ -24,6 +24,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationInput,
     SlotClassificationResult,
 )
+from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
+    SLOT_INTERACTION_POLICIES,
+    evaluate_slot_interaction,
+)
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import LLM_RESOLVABLE_SLOT_NAMES
 from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.ai_builder.planning_state_builder import merge_llm_resolved_slots
@@ -211,7 +215,15 @@ async def test_empty_classifier_response_keeps_deterministic_slot_fallbacks(
     assert context.slot_classification_result is None
     for slot_name, expected_value in expected_slots.items():
         assert context.planning_state.resolved_slots[slot_name].value == expected_value
-    assert forbidden_questions.isdisjoint(analysis.selected_question_ids)
+    for slot_name in forbidden_questions:
+        # A keyword fallback is never commit grade. A quality fallback stays an
+        # assumption row; an architectural one is asked when the shape needs
+        # it, because the architecture reader would not build on it.
+        outcome = evaluate_slot_interaction(
+            SLOT_INTERACTION_POLICIES[slot_name], context.planning_state
+        )
+        assert outcome != "commit"
+        assert (slot_name in analysis.selected_question_ids) == (outcome == "ask")
 
 
 @pytest.mark.asyncio

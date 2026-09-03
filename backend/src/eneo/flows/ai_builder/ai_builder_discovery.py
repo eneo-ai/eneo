@@ -41,9 +41,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     question_category as _question_category,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
-    runtime_metadata_is_vague as _runtime_metadata_is_vague,
-)
-from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
     structured_io_contract_is_vague as _structured_io_contract_is_vague,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_issue_rules import (
@@ -81,7 +78,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     post_processing_goal_question,
     primary_runtime_input_question,
     question_suggestion_for_id,
-    runtime_metadata_fields_question,
     structured_io_contract_question,
     terminal_output_question,
 )
@@ -211,14 +207,6 @@ def analyze_discovery(
     selected_issues, selected_question_ids = apply_discovery_decision_engine(
         issues=_dedupe_issues(raw_issues),
         profile=profile,
-        # Free discovery until the brief gives discovery anything to work with:
-        # an edit, an answer, a slot the text resolved, or an issue it raised.
-        slot_questions_allowed=(
-            profile.edit_mode
-            or bool(profile.answers)
-            or bool(profile.planning_state.resolved_slots)
-            or bool(raw_issues)
-        ),
     )
 
     return DiscoveryAnalysis(
@@ -562,26 +550,6 @@ def _build_pdf_generation_mode_issue(
     )
 
 
-def _build_runtime_metadata_fields_issue(
-    conversation: list[ConversationMessage],
-    profile: DiscoveryProfile,
-) -> DiscoveryIssue | None:
-    if not _runtime_metadata_is_vague(profile):
-        return None
-    return DiscoveryIssue(
-        issue_id="runtime_metadata_fields",
-        category="input",
-        severity="blocking",
-        message=localized_text(
-            profile.language,
-            "Det är fortfarande oklart om användaren ska ange extra metadata vid körning.",
-            "It is still unclear whether the user should provide extra runtime metadata.",
-        ),
-        suggestion=runtime_metadata_fields_question(profile.language),
-        question_level="high_value",
-    )
-
-
 _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_comparison_scope_conflict_issue,
     _build_primary_runtime_input_issue,
@@ -593,7 +561,6 @@ _DISCOVERY_ISSUE_BUILDERS: Final[tuple[DiscoveryIssueBuilder, ...]] = (
     _build_terminal_output_issue,
     _build_docx_output_mode_issue,
     _build_pdf_generation_mode_issue,
-    _build_runtime_metadata_fields_issue,
 )
 
 
@@ -746,21 +713,6 @@ def _structured_question_payload_from_suggestion(
             recommended.evidence if recommended is not None else None
         ),
     )
-
-
-def build_discovery_block_message(
-    conversation: list[ConversationMessage],
-    *,
-    flow: Flow | None = None,
-    analysis: DiscoveryAnalysis | None = None,
-) -> str | None:
-    analysis = analysis or analyze_discovery(conversation, flow=flow)
-    if analysis.ready_for_confirmation:
-        return None
-    issue = analysis.next_issue
-    if issue is None:
-        return None
-    return issue.message
 
 
 def build_discovery_followup_text(
