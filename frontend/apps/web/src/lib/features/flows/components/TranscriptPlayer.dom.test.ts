@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import TranscriptPlayer from "./TranscriptPlayer.svelte";
-import { parseTranscript } from "$lib/features/flows/transcriptSegments";
+import { attachWords, parseTranscript } from "$lib/features/flows/transcriptSegments";
 
 const TRANSCRIPT = [
   "[00:00:00 - 00:00:04] SPEAKER_00: Hej och välkomna.",
@@ -152,6 +152,43 @@ describe("TranscriptPlayer turns", () => {
     await fireEvent(audio, new Event("timeupdate"));
 
     await waitFor(() => expect(part(container, 2).className).toContain("bg-accent-dimmer"));
+  });
+
+  it("follows and seeks by word when the segment has stored words", async () => {
+    const segments = attachWords(parseTranscript(TRANSCRIPT), {
+      alignment: "forced",
+      segments: [
+        {
+          segment_index: 2,
+          words: [
+            { word: "Tack", start: 12.1, end: 12.4, probability: 0.9 },
+            { word: "så", start: 12.5, end: 12.7, probability: 0 },
+            { word: "mycket.", start: 12.8, end: 13.4, probability: 0.8 }
+          ]
+        }
+      ]
+    });
+    const getAudioUrl = signed();
+    const { container } = render(TranscriptPlayer, { props: { segments, getAudioUrl } });
+    await waitFor(() => expect(getAudioUrl).toHaveBeenCalled());
+    const audio = container.querySelector("audio") as HTMLAudioElement;
+
+    // The interpolated word is marked and counted for the reviewer.
+    const words = [...part(container, 2).querySelectorAll<HTMLElement>("[data-word-start]")];
+    expect(words.map((word) => word.textContent)).toEqual(["Tack", "så", "mycket."]);
+    expect(words[1].className).toContain("decoration-wavy");
+    expect(words[0].className).not.toContain("decoration-wavy");
+    expect(container.querySelector("[data-uncertain-words]")?.textContent).toContain("1");
+
+    // Playback highlights the word, not the whole line.
+    audio.currentTime = 12.9;
+    await fireEvent(audio, new Event("timeupdate"));
+    await waitFor(() => expect(words[2].className).toContain("bg-accent-dimmer"));
+    expect(part(container, 2).className).not.toContain("bg-accent-dimmer");
+
+    // Clicking a word positions the playhead at that word.
+    await fireEvent.click(words[1]);
+    expect(audio.currentTime).toBe(12.5);
   });
 
   it("keeps the transcript readable when the audio cannot be signed", async () => {

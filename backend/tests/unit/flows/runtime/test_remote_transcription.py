@@ -678,6 +678,36 @@ def test_result_segments_keep_only_well_formed_entries(
     assert remote_transcription._parse_result_segments(raw) == expected
 
 
+def test_result_segments_carry_word_timings_with_probability() -> None:
+    """Words ride along per segment; a malformed word is dropped, not fatal."""
+    parsed = remote_transcription._parse_result_segments(
+        [
+            {
+                "start": 0,
+                "end": 2,
+                "text": "hej du",
+                "speaker": "SPEAKER_00",
+                "words": [
+                    {"word": "hej", "start": 0.1, "end": 0.4, "probability": 0.93},
+                    {"word": "du", "start": 0.5, "end": 0.8, "probability": 0.0},
+                    {"word": "trasig", "start": "x", "end": 1.0},
+                    "garbage",
+                ],
+            },
+            {"start": 2, "end": 3, "text": "utan ord"},
+            {"start": 3, "end": 4, "text": "fel typ", "words": "nej"},
+        ]
+    )
+
+    assert parsed is not None
+    assert parsed[0].words == (
+        TranscriptWord("hej", 0.1, 0.4, probability=0.93),
+        TranscriptWord("du", 0.5, 0.8, probability=0.0),
+    )
+    assert parsed[1].words is None
+    assert parsed[2].words is None
+
+
 def test_result_parsing_defends_against_malformed_payloads() -> None:
     service = ScriptedService()
     client = make_client(service)

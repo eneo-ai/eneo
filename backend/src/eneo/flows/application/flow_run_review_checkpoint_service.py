@@ -11,12 +11,17 @@ from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_transcript_corrections_propagation import (
     TranscriptCorrectionsFoldOutcome,
     build_folded_transcript,
+    skip_folded_transcript,
+)
+from eneo.flows.application.flow_transcript_corrections_service import (
+    extract_transcription_segments,
 )
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunReviewCheckpoint,
     FlowRunStatus,
+    FlowStepResult,
 )
 from eneo.flows.domain.flow_run_exceptions import FlowRunNotFoundError
 from eneo.flows.domain.review_checkpoint_exceptions import (
@@ -45,6 +50,7 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
+from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 from eneo.flows.enums import FlowOutputType, FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -61,6 +67,9 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 )
 from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
     FlowTranscriptCorrectionsRepository,
+)
+from eneo.flows.infrastructure.flow_transcript_words_repo import (
+    FlowTranscriptWordsRepository,
 )
 from eneo.flows.output_processing import (
     StructuredOutputValue,
@@ -482,6 +491,19 @@ def build_edited_review_payload(
     return payload
 
 
+def _inline_step_text(payload: FlowPersistedJsonObject | None) -> str | None:
+    """A step's inline output text, or None when absent, invalid or file-backed."""
+    if payload is None:
+        return None
+    try:
+        step_text = interpret_step_text(payload)
+    except StepOutputMetadataError:
+        return None
+    if isinstance(step_text, FileBackedStepText):
+        return None
+    return step_text.text
+
+
 class FlowRunReviewCheckpointService:
     def __init__(
         self,
@@ -492,6 +514,7 @@ class FlowRunReviewCheckpointService:
         flow_run_terminalizer: FlowRunTerminalizer,
         flow_run_repo: FlowRunRepository | None = None,
         transcript_corrections_repo: FlowTranscriptCorrectionsRepository | None = None,
+        transcript_words_repo: FlowTranscriptWordsRepository | None = None,
     ):
         self.user = user
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
@@ -503,6 +526,9 @@ class FlowRunReviewCheckpointService:
         # Only checkpoint approval folds transcript corrections; the dependency
         # stays optional so other review flows need no corrections repository.
         self.transcript_corrections_repo = transcript_corrections_repo
+        # Word timings only refine the timestamps of a folded split line;
+        # without the repository the segment's window is reused.
+        self.transcript_words_repo = transcript_words_repo
 
     def _principal(self) -> FlowPrincipal:
         return FlowPrincipal.from_user(self.user)
@@ -736,7 +762,12 @@ class FlowRunReviewCheckpointService:
         run: FlowRun,
         checkpoint: FlowRunReviewCheckpoint,
     ) -> TranscriptCorrectionsFoldOutcome | None:
-        """The step's correction set folded into the checkpoint text, if any.
+        """The reviewed transcript's correction set folded into the checkpoint.
+
+        A transcription step's checkpoint folds into its own text. A
+        speaker-mapping checkpoint reviews the *source* transcription step:
+        its corrections fold into that step's label-form output and the
+        names-applied payload is rebuilt from the result.
 
         Never raises for foldability problems: a stale set, a hand-edited
         text, or a file-backed output skips the fold (with a reason) so the
@@ -744,9 +775,16 @@ class FlowRunReviewCheckpointService:
         """
         if self.transcript_corrections_repo is None or self.flow_run_repo is None:
             return None
+        extension = speaker_mapping_extension(checkpoint.current_payload_json)
+        source_step_id = checkpoint.step_id
+        if extension is not None:
+            try:
+                source_step_id = UUID(str(extension.get("source_step_id")))
+            except (TypeError, ValueError):
+                return None
         correction_set = await self.transcript_corrections_repo.get_for_step(
             run_id=run.id,
-            step_id=checkpoint.step_id,
+            step_id=source_step_id,
             tenant_id=run.tenant_id,
         )
         if correction_set is None or (
@@ -756,14 +794,87 @@ class FlowRunReviewCheckpointService:
             return None
         step_result = await self.flow_run_repo.get_step_result(
             run_id=run.id,
-            step_id=checkpoint.step_id,
+            step_id=source_step_id,
             tenant_id=run.tenant_id,
         )
+        words_by_segment = await self._fold_words(
+            run=run,
+            step_id=source_step_id,
+            step_result=step_result,
+            segments_hash=correction_set.segments_hash,
+        )
+        if extension is None:
+            return build_folded_transcript(
+                checkpoint=checkpoint,
+                step_result=step_result,
+                correction_set=correction_set,
+                words_by_segment=words_by_segment,
+            )
+        source_text = _inline_step_text(
+            step_result.output_payload_json if step_result is not None else None
+        )
+        if source_text is None:
+            return skip_folded_transcript(
+                correction_set, "source_transcript_unavailable"
+            )
+        structured = (checkpoint.current_payload_json or {}).get("structured")
+        if not isinstance(structured, dict):
+            return skip_folded_transcript(correction_set, "payload_invalid")
+        mapping = cast(StructuredOutputValue, structured)
+        expected_attempt = extension.get("source_attempt_no")
+
+        def rebuild(folded_source: str) -> FlowPersistedJsonObject:
+            return build_edited_review_payload(
+                checkpoint=checkpoint,
+                edited_value=mapping,
+                source_text=folded_source,
+            )
+
         return build_folded_transcript(
             checkpoint=checkpoint,
             step_result=step_result,
             correction_set=correction_set,
+            source_text=source_text,
+            expected_attempt_no=expected_attempt
+            if isinstance(expected_attempt, int)
+            else None,
+            rebuild_payload=rebuild,
+            words_by_segment=words_by_segment,
         )
+
+    async def _fold_words(
+        self,
+        *,
+        run: FlowRun,
+        step_id: UUID,
+        step_result: FlowStepResult | None,
+        segments_hash: str,
+    ) -> dict[int, list[LocatedWord]] | None:
+        """The step's stored words located in its segments, when they still
+        anchor to the same segment array as the correction set."""
+        if self.transcript_words_repo is None or step_result is None:
+            return None
+        words = await self.transcript_words_repo.get_for_step(
+            run_id=run.id, step_id=step_id, tenant_id=run.tenant_id
+        )
+        if words is None or words.segments_hash != segments_hash:
+            return None
+        segments = extract_transcription_segments(step_result.input_payload_json)
+        if segments is None:
+            return None
+        located: dict[int, list[LocatedWord]] = {}
+        for entry in words.words_json:
+            index = entry.get("segment_index")
+            if not isinstance(index, int) or not 0 <= index < len(segments):
+                continue
+            text = segments[index].get("text")
+            entry_words = entry.get("words")
+            if not isinstance(text, str) or not isinstance(entry_words, list):
+                continue
+            located[index] = locate_words(
+                text, cast("list[dict[str, Any]]", entry_words)
+            )
+        return located
 
     async def reject_review_checkpoint(
         self,

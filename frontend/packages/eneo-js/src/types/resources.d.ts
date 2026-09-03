@@ -330,6 +330,9 @@ export type FlowRunTranscriptCorrections = components["schemas"]["FlowTranscript
 export type FlowTranscriptCorrectionOccurrence =
   components["schemas"]["TranscriptCorrectionOccurrencePublic"];
 export type FlowTranscriptSpeakerEdit = components["schemas"]["TranscriptSpeakerEditPublic"];
+export type FlowRunTranscriptWords = components["schemas"]["FlowTranscriptWordsPublic"];
+export type FlowTranscriptSegmentWords = components["schemas"]["TranscriptSegmentWordsPublic"];
+export type FlowTranscriptWord = components["schemas"]["TranscriptWordPublic"];
 export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
 export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"> & {
   step_results: FlowRunStep[];

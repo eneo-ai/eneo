@@ -56,6 +56,9 @@ FLOW_RUN_TRANSCRIPT_CORRECTIONS_PATH: Final[str] = (
 FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH: Final[str] = (
     "/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/"
 )
+FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH: Final[str] = (
+    "/{id}/runs/{run_id}/steps/{step_id}/transcript-words/"
+)
 
 FLOW_RUN_EVIDENCE_PATH: Final[str] = "/{id}/runs/{run_id}/evidence/"
 FLOW_RUN_PROVIDER_CALLS_PATH: Final[str] = "/{id}/runs/{run_id}/provider-calls/"
@@ -256,6 +259,15 @@ class FlowRuntimePathsPublic(BaseModel):
             "step's corrections."
         )
     )
+    transcript_words_template: str = Field(
+        description=(
+            "GET template for the word timings behind one transcription step's "
+            "structured lines. Replace `{run_id}` and `{step_id}` with values "
+            "from the steps listing. Returns 404 when the step stored no words; "
+            "a response flagged `stale` anchors to a transcript that has since "
+            "been replaced."
+        )
+    )
 
 
 def _flow_runtime_public_schema_extra(schema: JsonDict) -> None:
@@ -403,6 +415,11 @@ def build_flow_runtime_paths(
         ),
         edit_transcript_corrections_template=_flow_path(
             FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH,
+            flow_id=flow_id_value,
+            api_prefix=api_prefix,
+        ),
+        transcript_words_template=_flow_path(
+            FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH,
             flow_id=flow_id_value,
             api_prefix=api_prefix,
         ),

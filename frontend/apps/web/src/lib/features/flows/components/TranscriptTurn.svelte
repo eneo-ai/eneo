@@ -6,6 +6,7 @@
   import { formatClock } from "$lib/features/flows/transcriptSegments";
   import {
     turnEditableText,
+    type PartWord,
     type TranscriptTurn,
     type TurnPart
   } from "$lib/features/flows/transcriptTurns";
@@ -14,6 +15,7 @@
   let {
     turn,
     activeSegmentIndex = -1,
+    activeWordIndex = -1,
     withHours = false,
     editable = false,
     busy = false,
@@ -34,6 +36,8 @@
     turn: TranscriptTurn;
     /** Segment currently spoken; highlights the matching part. */
     activeSegmentIndex?: number;
+    /** Word of that segment currently spoken, when it has stored words. */
+    activeWordIndex?: number;
     withHours?: boolean;
     /** False renders a clean read-only turn (evidence marks only). */
     editable?: boolean;
@@ -46,8 +50,8 @@
     newSpeakerLabel: string;
     /** Raw text before corrections for a segment, or null. */
     correctedFrom: (segmentIndex: number) => string | null;
-    /** Position the playhead at a part, silently (no autoplay). */
-    onSeek: (part: TurnPart) => void;
+    /** Position the playhead at a part (or a time inside it), silently. */
+    onSeek: (part: TurnPart, time?: number) => void;
     onStartEdit: () => void;
     onCancelEdit: () => void;
     /**
@@ -76,29 +80,59 @@
   // selection offsets stay exact.
   const PART_SEPARATOR = " ";
 
-  type Piece = { text: string; corrected: boolean };
+  type Piece = { text: string; corrected: boolean; word: PartWord | null };
 
+  /**
+   * The part's text cut at every corrected-range and word boundary, so each
+   * piece is either plain, a corrected span, or one timed word. Words never
+   * overlap corrections (see `computeTurns`), so a piece is at most one.
+   */
   function pieces(part: TurnPart): Piece[] {
-    if (part.correctedRanges.length === 0) return [{ text: part.text, corrected: false }];
-    const result: Piece[] = [];
-    let cursor = 0;
-    for (const range of part.correctedRanges) {
-      if (cursor < range.start) {
-        result.push({ text: part.text.slice(cursor, range.start), corrected: false });
-      }
-      result.push({ text: part.text.slice(range.start, range.end), corrected: true });
-      cursor = range.end;
+    const words = part.words ?? [];
+    if (part.correctedRanges.length === 0 && words.length === 0) {
+      return [{ text: part.text, corrected: false, word: null }];
     }
-    if (cursor < part.text.length) {
-      result.push({ text: part.text.slice(cursor), corrected: false });
+    const cuts = [0, part.text.length];
+    for (const range of part.correctedRanges) cuts.push(range.start, range.end);
+    for (const word of words) cuts.push(word.displayStart, word.displayEnd);
+    const bounds = cuts
+      .filter((cut, index) => cut >= 0 && cut <= part.text.length && cuts.indexOf(cut) === index)
+      .sort((a, b) => a - b);
+    const result: Piece[] = [];
+    for (let index = 1; index < bounds.length; index += 1) {
+      const from = bounds[index - 1];
+      const to = bounds[index];
+      if (from >= to) continue;
+      result.push({
+        text: part.text.slice(from, to),
+        corrected: part.correctedRanges.some((range) => range.start <= from && to <= range.end),
+        word: words.find((word) => word.displayStart <= from && to <= word.displayEnd) ?? null
+      });
     }
     return result;
   }
 
-  function onPartClick(part: TurnPart) {
+  function isActiveWord(part: TurnPart, piece: Piece): boolean {
+    return (
+      piece.word !== null &&
+      part.segmentIndex === activeSegmentIndex &&
+      piece.word.wordIndex === activeWordIndex
+    );
+  }
+
+  /** A part with stored words highlights the word, not the whole line. */
+  function partActive(part: TurnPart): boolean {
+    if (part.segmentIndex !== activeSegmentIndex) return false;
+    return !(part.words && part.words.length > 0 && activeWordIndex >= 0);
+  }
+
+  function onPartClick(part: TurnPart, event: MouseEvent) {
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return;
-    if (!editing) onSeek(part);
+    if (editing) return;
+    const wordEl = (event.target as HTMLElement | null)?.closest?.("[data-word-start]");
+    const time = wordEl ? Number((wordEl as HTMLElement).dataset.wordStart) : Number.NaN;
+    onSeek(part, Number.isFinite(time) ? time : undefined);
   }
 
   // ---- In-place turn editing --------------------------------------------
@@ -319,17 +353,23 @@
           data-run-text
           data-segment-index={part.segmentIndex}
           data-display-start={part.displayStart}
-          class="rounded-sm transition-colors {part.segmentIndex === activeSegmentIndex
-            ? 'bg-accent-dimmer'
-            : ''}"
+          class="rounded-sm transition-colors {partActive(part) ? 'bg-accent-dimmer' : ''}"
           title={correctedFrom(part.segmentIndex) !== null
             ? m.flow_run_transcript_corrected_from({
                 original: correctedFrom(part.segmentIndex) ?? ""
               })
             : undefined}
-          onclick={() => onPartClick(part)}
+          onclick={(event) => onPartClick(part, event)}
           >{#each pieces(part) as piece, pieceIndex (pieceIndex)}{#if piece.corrected}<span
                 class="decoration-accent-default underline decoration-dotted underline-offset-2"
+                >{piece.text}</span
+              >{:else if piece.word}<span
+                data-word-start={piece.word.start}
+                class="rounded-sm {isActiveWord(part, piece) ? 'bg-accent-dimmer' : ''} {piece.word
+                  .uncertain
+                  ? 'decoration-warning-default underline decoration-wavy underline-offset-2'
+                  : ''}"
+                title={piece.word.uncertain ? m.flow_run_transcript_word_uncertain() : undefined}
                 >{piece.text}</span
               >{:else}{piece.text}{/if}{/each}</span
         >{#if index < turn.parts.length - 1}{PART_SEPARATOR}{/if}

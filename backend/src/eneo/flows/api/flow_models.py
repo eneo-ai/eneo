@@ -2676,3 +2676,94 @@ class FlowTranscriptCorrectionsEditRequest(BaseModel):
             "to clear them."
         ),
     )
+
+
+FLOW_TRANSCRIPT_WORD_EXAMPLE: dict[str, Any] = {
+    "word": "Çagri",
+    "start": 1.42,
+    "end": 1.93,
+    "probability": 0.87,
+}
+
+FLOW_TRANSCRIPT_WORDS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "segments_hash": "3b8f2c0d9e5a4b7c1f6d0e2a9c8b7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c",
+    "alignment": "forced",
+    "stale": False,
+    "segments": [
+        {
+            "segment_index": 4,
+            "words": [
+                {"word": "Vi", "start": 0.12, "end": 0.31, "probability": 0.99},
+                {"word": "frågade", "start": 0.35, "end": 0.9, "probability": 0.97},
+                FLOW_TRANSCRIPT_WORD_EXAMPLE,
+            ],
+        }
+    ],
+    "created_at": "2026-03-17T10:12:00Z",
+    "updated_at": "2026-03-17T10:12:00Z",
+}
+
+
+class TranscriptWordPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_TRANSCRIPT_WORD_EXAMPLE},
+    )
+
+    word: str
+    start: float = Field(
+        description="Seconds from the start of the segment's audio file."
+    )
+    end: float = Field(
+        description="Seconds from the start of the segment's audio file."
+    )
+    probability: float | None = Field(
+        default=None,
+        description=(
+            "Placement confidence as the service reported it, or null. On the "
+            "`forced` alignment rung exactly `0.0` means the word was "
+            "interpolated over its window, not found in the audio."
+        ),
+    )
+
+
+class TranscriptSegmentWordsPublic(BaseModel):
+    segment_index: int = Field(
+        ge=0,
+        description="Index into the step's stored `transcription.segments` array.",
+    )
+    words: list[TranscriptWordPublic]
+
+
+class FlowTranscriptWordsPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_TRANSCRIPT_WORDS_PUBLIC_EXAMPLE},
+    )
+
+    flow_run_id: UUID
+    step_id: UUID
+    segments_hash: str = Field(
+        description="Content hash of the segment array these words anchor to."
+    )
+    alignment: str | None = Field(
+        description=(
+            "How the service placed words in time (`provider_words`, `forced`, "
+            "`segment_split`, `segment_only`), or null when unknown."
+        ),
+    )
+    stale: bool = Field(
+        description=(
+            "True when the step's stored transcript changed after these words "
+            "were written (re-run or re-transcription). Stale words anchor to "
+            "text that no longer exists and must not be used."
+        ),
+    )
+    segments: list[TranscriptSegmentWordsPublic] = Field(
+        description=(
+            "Words per stored segment, in segment order; segments the service "
+            "returned without words are absent."
+        ),
+    )
+    created_at: datetime
+    updated_at: datetime

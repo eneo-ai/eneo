@@ -121,6 +121,9 @@ from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_transcript_corrections_service import (
     FlowTranscriptCorrectionsService,
 )
+from eneo.flows.application.flow_transcript_words_service import (
+    FlowTranscriptWordsService,
+)
 from eneo.flows.flow_run_contract_service import FlowRunContractService
 from eneo.flows.flow_runtime_file_service import FlowRuntimeFileService
 from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
@@ -143,6 +146,9 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
 )
 from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
     FlowTranscriptCorrectionsRepository,
+)
+from eneo.flows.infrastructure.flow_transcript_words_repo import (
+    FlowTranscriptWordsRepository,
 )
 from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
@@ -896,6 +902,10 @@ class Container(containers.DeclarativeContainer):
         FlowTranscriptCorrectionsRepository,
         session=session,
     )
+    flow_transcript_words_repo = providers.Factory(
+        FlowTranscriptWordsRepository,
+        session=session,
+    )
     flow_run_terminalizer = providers.Factory(
         FlowRunTerminalizer,
         flow_run_repo=flow_run_repo,
@@ -1540,11 +1550,19 @@ class Container(containers.DeclarativeContainer):
         flow_run_terminalizer=flow_run_terminalizer,
         flow_run_repo=flow_run_repo,
         transcript_corrections_repo=flow_transcript_corrections_repo,
+        transcript_words_repo=flow_transcript_words_repo,
     )
     flow_transcript_corrections_service = providers.Factory(
         FlowTranscriptCorrectionsService,
         user=user,
         transcript_corrections_repo=flow_transcript_corrections_repo,
+        access_policy=flow_run_access_policy,
+        flow_run_repo=flow_run_repo,
+    )
+    flow_transcript_words_service = providers.Factory(
+        FlowTranscriptWordsService,
+        user=user,
+        transcript_words_repo=flow_transcript_words_repo,
         access_policy=flow_run_access_policy,
         flow_run_repo=flow_run_repo,
     )

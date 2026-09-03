@@ -8,6 +8,7 @@ from uuid import UUID
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
@@ -17,6 +18,7 @@ from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from .transcription import (
     REDUCED_PRECISION_ALIGNMENTS,
     FlowStepTranscriber,
+    FlowTranscriptionResult,
     LoadAudioPayload,
     resolve_and_transcribe_audio_for_step,
 )
@@ -26,6 +28,9 @@ if TYPE_CHECKING:
     from eneo.files.file_models import FileInfo
     from eneo.flows.domain.flow import FlowRun
     from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
     from eneo.model_providers.domain.provider_call_observer import (
         ProviderCallObserver,
     )
@@ -78,6 +83,8 @@ class AudioRuntimeDeps:
     # Reads one already-authorized audio file's bytes at transcription time.
     load_audio_payload: LoadAudioPayload
     transcription_call_observer: "ProviderCallObserver | None" = None
+    # Stores the step's word timings; None leaves word-level data unpersisted.
+    transcript_words_repo: "FlowTranscriptWordsRepository | None" = None
 
 
 def apply_transcription_to_context(*, context: dict[str, Any], transcript: str) -> None:
@@ -101,6 +108,37 @@ async def persist_transcription_on_run_input(
         ),
     )
     run.input_payload_json = updated_payload
+
+
+async def persist_transcript_words(
+    *,
+    transcript_words_repo: "FlowTranscriptWordsRepository | None",
+    run: "FlowRun",
+    step_id: UUID,
+    result: FlowTranscriptionResult,
+) -> None:
+    """Store the step's word timings beside its segments, or clear them.
+
+    Words anchor to the stored segment array by index and carry its content
+    hash. A retry that produced no words removes any earlier row so a reader
+    never pairs stale words with a new transcript.
+    """
+    if transcript_words_repo is None:
+        return
+    if result.words is None or result.segments is None:
+        await transcript_words_repo.delete_for_step(
+            run_id=run.id, step_id=step_id, tenant_id=run.tenant_id
+        )
+        return
+    await transcript_words_repo.upsert(
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        run_id=run.id,
+        step_id=step_id,
+        segments_hash=segments_content_hash(result.segments),
+        alignment=result.alignment,
+        words_json=result.words,
+    )
 
 
 def build_near_limit_message(
@@ -193,6 +231,12 @@ async def resolve_transcribe_and_attach_audio_input(
         flow_run_repo=deps.flow_run_repo,
         run=request.run,
         transcript=transcription_result.text,
+    )
+    await persist_transcript_words(
+        transcript_words_repo=deps.transcript_words_repo,
+        run=request.run,
+        step_id=request.step.step_id,
+        result=transcription_result,
     )
     apply_transcription_to_context(
         context=request.context, transcript=transcription_result.text

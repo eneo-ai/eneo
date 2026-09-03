@@ -2411,3 +2411,48 @@ class FlowTranscriptCorrections(BasePublic):
             name="uq_flow_transcript_corrections_run_step",
         ),
     )
+
+
+class FlowStepTranscriptWords(BasePublic):
+    """Stores per-word timings for one transcription step's stored segments. Writer: FlowTranscriptWordsRepository. Purpose: keep word-level seek and confidence data out of the step result's bounded payload while anchoring it to the same segment array by content hash."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_step_transcript_words_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_step_transcript_words_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    segments_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    alignment: Mapped[Optional[str]] = mapped_column(sa.String(32), nullable=True)
+    words_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_transcript_words_run_tenant",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            name="uq_flow_step_transcript_words_run_step",
+        ),
+    )

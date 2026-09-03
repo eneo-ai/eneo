@@ -891,6 +891,22 @@ describe("flows transcript corrections endpoints", () => {
     });
   });
 
+  it("reads transcript words through the step-level route", async () => {
+    const fetch = vi.fn(async () => ({ segments: [] }));
+    const flows = initFlows({ fetch });
+
+    await flows.runs.transcriptWords.get({ flowId: "flow-1", runId: "run-1", stepId: "step-1" });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/"
+    );
+    expect(fetch.mock.calls[0][1].method).toBe("get");
+    expect(fetch.mock.calls[0][1].params).toEqual({
+      path: { id: "flow-1", run_id: "run-1", step_id: "step-1" }
+    });
+  });
+
   it("saves transcript corrections through the step-level patch route", async () => {
     const fetch = vi.fn(async () => ({ revision: 2 }));
     const flows = initFlows({ fetch });

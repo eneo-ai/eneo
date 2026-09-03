@@ -158,6 +158,11 @@ def _empty_speakers() -> list[dict[str, Any]]:
 # text; the reader falls back to parsing the timestamped lines.
 MAX_SEGMENTS_BYTES = 256 * 1024
 SEGMENTS_OMITTED_TOO_LARGE = "too_large"
+# Word timings live in their own row (see ``FlowStepTranscriptWords``) and
+# anchor to the stored segments by index, so they exist only when the
+# segments do. An hour of speech is a few megabytes of words.
+MAX_WORDS_BYTES = 8 * 1024 * 1024
+WORDS_OMITTED_NO_SEGMENTS = "segments_unavailable"
 
 
 def serialize_segments(
@@ -175,6 +180,33 @@ def serialize_segments(
         }
         for segment in segments
     ]
+
+
+def serialize_segment_words(
+    segments: Sequence["TranscriptSegment"], *, first_segment_index: int
+) -> list[dict[str, Any]]:
+    """Word timings for one file's segments, keyed by the index each segment
+    gets in the stored array (``first_segment_index`` + position). Segments
+    the service returned without words are skipped."""
+    entries: list[dict[str, Any]] = []
+    for position, segment in enumerate(segments):
+        if not segment.words:
+            continue
+        entries.append(
+            {
+                "segment_index": first_segment_index + position,
+                "words": [
+                    {
+                        "word": word.word,
+                        "start": round(word.start, 3),
+                        "end": round(word.end, 3),
+                        "probability": word.probability,
+                    }
+                    for word in segment.words
+                ],
+            }
+        )
+    return entries
 
 
 @dataclass(frozen=True)
@@ -205,6 +237,10 @@ class FlowTranscriptionResult:
     # or None when the engine produced none or they exceeded the size cap.
     segments: list[dict[str, Any]] | None = None
     segments_omitted_reason: str | None = None
+    # Word timings per stored segment (see ``serialize_segment_words``), kept
+    # out of the metadata: they are persisted in their own row.
+    words: list[dict[str, Any]] | None = None
+    words_omitted_reason: str | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -227,6 +263,7 @@ class FlowTranscriptionResult:
             "alignment": self.alignment,
             "segments": self.segments,
             "segments_omitted_reason": self.segments_omitted_reason,
+            "words_omitted_reason": self.words_omitted_reason,
         }
 
 
@@ -337,6 +374,7 @@ async def transcribe_audio_input(
     speakers: list[dict[str, Any]] = []
     alignments: list[str] = []
     segments: list[dict[str, Any]] = []
+    words: list[dict[str, Any]] = []
     every_file_segmented = True
     # Labels are assigned per file by the diarization service; renumber so one
     # label means one speaker across the whole transcript.
@@ -413,6 +451,11 @@ async def transcribe_audio_input(
             )
             label_offset += label_count
         if block_transcript_segments:
+            words.extend(
+                serialize_segment_words(
+                    block_transcript_segments, first_segment_index=len(segments)
+                )
+            )
             segments.extend(
                 serialize_segments(block_transcript_segments, file_index=file_index)
             )
@@ -450,6 +493,9 @@ async def transcribe_audio_input(
     kept_segments, segments_omitted_reason = _cap_segments(
         segments if every_file_segmented else []
     )
+    kept_words, words_omitted_reason = _cap_words(
+        words, segments_kept=kept_segments is not None
+    )
 
     return FlowTranscriptionResult(
         text=combined,
@@ -472,7 +518,22 @@ async def transcribe_audio_input(
         alignment=_coarsest_alignment(alignments),
         segments=kept_segments,
         segments_omitted_reason=segments_omitted_reason,
+        words=kept_words,
+        words_omitted_reason=words_omitted_reason,
     )
+
+
+def _cap_words(
+    words: list[dict[str, Any]], *, segments_kept: bool
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    if not words:
+        return None, None
+    if not segments_kept:
+        return None, WORDS_OMITTED_NO_SEGMENTS
+    size = len(json.dumps(words, ensure_ascii=False).encode("utf-8"))
+    if size > MAX_WORDS_BYTES:
+        return None, SEGMENTS_OMITTED_TOO_LARGE
+    return words, None
 
 
 def _cap_segments(

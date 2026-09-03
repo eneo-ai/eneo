@@ -169,3 +169,16 @@ def parse_participants(value: object) -> list[str]:
         if name and name not in names:
             names.append(name)
     return names
+
+
+def format_clock(seconds: float) -> str:
+    """``HH:MM:SS`` (floored) as the rendered transcript lines carry it."""
+    whole = max(0, int(seconds))
+    hours, remainder = divmod(whole, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def render_line_prefix(start: float, end: float) -> str:
+    """The ``[HH:MM:SS - HH:MM:SS] `` prefix ``SPEAKER_LINE_RE`` recognises."""
+    return f"[{format_clock(start)} - {format_clock(end)}] "

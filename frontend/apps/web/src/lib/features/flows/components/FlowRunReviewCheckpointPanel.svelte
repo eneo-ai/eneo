@@ -26,6 +26,7 @@
     type SpeakerMappingRow
   } from "$lib/features/flows/speakerMappingReview";
   import {
+    attachWords,
     parseTranscript,
     segmentsFromMetadata,
     type TranscriptSegment
@@ -198,8 +199,11 @@
       const fileIds = Array.isArray(transcription?.file_ids)
         ? transcription.file_ids.filter((id): id is string => typeof id === "string")
         : (sourceStep?.runtime_input_file_ids ?? []);
-      storedSegments = segmentsFromMetadata(transcription);
-      transcriptStepId = sourceStep?.step_id ?? null;
+      const segments = segmentsFromMetadata(transcription);
+      const stepId = sourceStep?.step_id ?? null;
+      storedSegments =
+        segments && stepId ? attachWords(segments, await loadTranscriptWords(stepId)) : segments;
+      transcriptStepId = stepId;
       audioFileIds = fileIds;
       setupCorrectionsController();
     } catch (error) {
@@ -210,6 +214,16 @@
       );
     } finally {
       audioContextPending = false;
+    }
+  }
+
+  // Word timings are optional: a step that stored none answers 404 and the
+  // player falls back to segment-level playback.
+  async function loadTranscriptWords(stepId: string) {
+    try {
+      return await eneo.flows.runs.transcriptWords.get({ flowId, runId, stepId });
+    } catch {
+      return null;
     }
   }
 

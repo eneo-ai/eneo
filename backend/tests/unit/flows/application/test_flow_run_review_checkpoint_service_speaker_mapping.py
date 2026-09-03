@@ -16,6 +16,10 @@ from eneo.flows.application.flow_run_review_checkpoint_service import (
 )
 from eneo.flows.domain.flow import FlowRunReviewCheckpoint, FlowStepResult
 from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
+from eneo.flows.domain.transcript_corrections import (
+    FlowTranscriptCorrectionSet,
+    segments_content_hash,
+)
 from eneo.flows.enums import (
     FlowOutputType,
     FlowRunReviewCheckpointState,
@@ -284,3 +288,154 @@ async def test_service_rejects_missing_or_rerun_source_step() -> None:
             expected_checkpoint_revision=1,
             edited_value=EDITED,
         )
+
+
+SOURCE_SEGMENTS = [
+    {
+        "file_index": 0,
+        "start": 0.0,
+        "end": 4.0,
+        "speaker": "SPEAKER_00",
+        "text": "Hej.",
+    },
+    {
+        "file_index": 0,
+        "start": 5.0,
+        "end": 9.0,
+        "speaker": "SPEAKER_01",
+        "text": "Hallå.",
+    },
+]
+
+
+def _correction_set(checkpoint: FlowRunReviewCheckpoint) -> FlowTranscriptCorrectionSet:
+    return FlowTranscriptCorrectionSet(
+        id=uuid4(),
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        flow_run_id=checkpoint.flow_run_id,
+        step_id=SOURCE_STEP_ID,
+        occurrences_json=[
+            {
+                "segment_index": 1,
+                "char_start": 0,
+                "char_end": 6,
+                "original": "Hallå.",
+                "corrected": "Hallå där.",
+            }
+        ],
+        speaker_edits_json=[
+            {
+                "segment_index": 1,
+                "char_start": None,
+                "char_end": None,
+                "original": None,
+                "original_speaker": "SPEAKER_01",
+                "speaker": "SPEAKER_00",
+            }
+        ],
+        revision=1,
+        schema_version=2,
+        segments_hash=segments_content_hash(SOURCE_SEGMENTS),
+        edited_by_user_id=uuid4(),
+        edited_by_service_id=None,
+        edited_by_principal_type=PrincipalType.USER,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
+async def test_approval_folds_source_step_corrections_under_the_names() -> None:
+    mapped = "\n".join(
+        [
+            "[00:00:00 - 00:00:04] Anna: Hej.",
+            "[00:00:05 - 00:00:09] SPEAKER_01: Hallå.",
+        ]
+    )
+    checkpoint = _checkpoint(_payload(mapped))
+    run = SimpleNamespace(
+        id=checkpoint.flow_run_id,
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        input_payload_json={"transkribering": mapped},
+    )
+    source = _source_result(checkpoint, SOURCE).model_copy(
+        update={"input_payload_json": {"transcription": {"segments": SOURCE_SEGMENTS}}}
+    )
+    flow_run_repo = AsyncMock()
+    flow_run_repo.get_step_result = AsyncMock(return_value=source)
+    flow_run_repo.update_input_payload = AsyncMock(return_value={})
+    corrections_repo = AsyncMock()
+    corrections_repo.get_for_step = AsyncMock(return_value=_correction_set(checkpoint))
+    service = _service(checkpoint, run, flow_run_repo)
+    service.transcript_corrections_repo = corrections_repo
+    service.flow_run_review_checkpoint_repo.approve_review_checkpoint = AsyncMock(
+        side_effect=lambda **kwargs: checkpoint.model_copy(
+            update={"current_payload_json": kwargs["current_payload_json"]}
+        )
+    )
+
+    approval = await service.approve_review_checkpoint(
+        flow_id=checkpoint.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=1,
+    )
+
+    # The set is looked up under the source transcription step, folded into
+    # that step's label-form text, and the mapping's names re-applied on top.
+    corrections_repo.get_for_step.assert_awaited_once_with(
+        run_id=run.id, step_id=SOURCE_STEP_ID, tenant_id=run.tenant_id
+    )
+    fold = approval.corrections_fold
+    assert fold is not None and fold.propagated, fold
+    assert fold.folded_payload["text"] == "\n".join(
+        ["[00:00:00 - 00:00:04] Anna: Hej.", "[00:00:05 - 00:00:09] Anna: Hallå där."]
+    )
+    assert fold.folded_payload["structured"] == PROPOSAL
+    assert fold.folded_payload["speaker_mapping"]["source_step_id"] == str(
+        SOURCE_STEP_ID
+    )
+    approved = service.flow_run_review_checkpoint_repo.approve_review_checkpoint
+    assert approved.await_args.kwargs["current_payload_json"] == fold.folded_payload
+    patch = flow_run_repo.update_input_payload.await_args.kwargs["input_payload_patch"]
+    assert patch.to_merge_dict()["transkribering"] == fold.folded_payload["text"]
+
+
+async def test_approval_skips_a_stale_source_set_but_still_approves() -> None:
+    checkpoint = _checkpoint(_payload("[00:00:00 - 00:00:04] Anna: Hej."))
+    run = SimpleNamespace(
+        id=checkpoint.flow_run_id,
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        input_payload_json={},
+    )
+    source = _source_result(checkpoint, SOURCE).model_copy(
+        update={
+            "input_payload_json": {
+                "transcription": {"segments": [dict(SOURCE_SEGMENTS[0])]}
+            }
+        }
+    )
+    flow_run_repo = AsyncMock()
+    flow_run_repo.get_step_result = AsyncMock(return_value=source)
+    corrections_repo = AsyncMock()
+    corrections_repo.get_for_step = AsyncMock(return_value=_correction_set(checkpoint))
+    service = _service(checkpoint, run, flow_run_repo)
+    service.transcript_corrections_repo = corrections_repo
+    service.flow_run_review_checkpoint_repo.approve_review_checkpoint = AsyncMock(
+        return_value=checkpoint
+    )
+
+    approval = await service.approve_review_checkpoint(
+        flow_id=checkpoint.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=1,
+    )
+
+    assert approval.corrections_fold is not None
+    assert approval.corrections_fold.skip_reason == "stale_corrections"
+    approved = service.flow_run_review_checkpoint_repo.approve_review_checkpoint
+    assert approved.await_args.kwargs["current_payload_json"] is None
+    flow_run_repo.update_input_payload.assert_not_awaited()

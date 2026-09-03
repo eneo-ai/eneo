@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
@@ -27,7 +28,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.flows.domain.speaker_labels import SPEAKER_LABEL_RE, SPEAKER_LINE_RE
+from eneo.flows.domain.speaker_labels import (
+    SPEAKER_LABEL_RE,
+    SPEAKER_LINE_RE,
+    render_line_prefix,
+)
+from eneo.flows.domain.transcript_words import LocatedWord
 
 TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION = 2
 SUPPORTED_TRANSCRIPT_CORRECTIONS_SCHEMA_VERSIONS = frozenset({1, 2})
@@ -599,11 +605,51 @@ def apply_corrections(
     return corrected_segments, skipped
 
 
+def speaker_run_windows(
+    raw_text: str,
+    words: Sequence[LocatedWord],
+    occurrences: list[TranscriptCorrectionOccurrence],
+    runs: Sequence[Mapping[str, Any]],
+    fallback: tuple[float, float],
+) -> list[tuple[float, float]]:
+    """A ``(start, end)`` window per speaker run, from the words it covers.
+
+    ``runs`` are in corrected-text space; each located word's raw span is
+    mapped through the segment's applicable corrections so both sides agree.
+    A run no word overlaps (all its words sit inside a replacement, or the
+    words were never located) keeps ``fallback``, the segment's own window.
+    """
+    applicable = _applicable_text_occurrences(raw_text, list(occurrences), [])
+    placed: list[tuple[int, int, LocatedWord]] = []
+    for word in words:
+        if not word.located:
+            continue
+        start = _map_raw_offset(word.char_start, applicable)
+        end = _map_raw_offset(word.char_end, applicable)
+        if start < end:
+            placed.append((start, end, word))
+    windows: list[tuple[float, float]] = []
+    for run in runs:
+        covering = [
+            word
+            for start, end, word in placed
+            if start < int(run["char_end"]) and end > int(run["char_start"])
+        ]
+        if covering:
+            windows.append(
+                (min(w.start for w in covering), max(w.end for w in covering))
+            )
+        else:
+            windows.append(fallback)
+    return windows
+
+
 def apply_to_rendered_transcript(
     rendered_text: str,
     segments: list[dict[str, Any]],
     occurrences: list[TranscriptCorrectionOccurrence],
     speaker_edits: list[TranscriptSpeakerEdit],
+    words_by_segment: Mapping[int, Sequence[LocatedWord]] | None = None,
 ) -> str | None:
     """Patch the rendered transcript lines, or None when they do not align.
 
@@ -612,7 +658,8 @@ def apply_to_rendered_transcript(
     mismatch — a hand-edited line, a drifted render — returns None; callers
     must skip propagation rather than partial-apply. Non-speaker lines (part
     headers, blanks) pass through untouched. A segment attributed to several
-    speakers renders one line per run, reusing the segment's timestamp prefix.
+    speakers renders one line per run: with ``words_by_segment`` each run
+    gets the window of the words it covers, otherwise the segment's prefix.
     """
     lines = rendered_text.split("\n")
     matches: list[tuple[int, re.Match[str]]] = []
@@ -630,19 +677,59 @@ def apply_to_rendered_transcript(
     corrected_segments, _, _ = apply_corrections_and_speaker_edits(
         segments, occurrences, speaker_edits
     )
-    for (line_index, match), corrected in zip(matches, corrected_segments):
+    for segment_index, ((line_index, match), corrected) in enumerate(
+        zip(matches, corrected_segments)
+    ):
         prefix = match.group("prefix")
         text = _segment_text(corrected)
         speaker = _segment_speaker(corrected)
         runs = corrected.get("speaker_runs")
         rendered_runs: list[str] = []
         if isinstance(runs, list):
-            for run in cast("list[dict[str, Any]]", runs):
+            typed_runs = cast("list[dict[str, Any]]", runs)
+            prefixes = _run_prefixes(
+                segments[segment_index],
+                segment_index,
+                typed_runs,
+                occurrences,
+                words_by_segment,
+                default=prefix,
+            )
+            for run, run_prefix in zip(typed_runs, prefixes):
                 run_text = text[run["char_start"] : run["char_end"]].strip()
                 if run_text:
-                    rendered_runs.append(f"{prefix}{run['speaker']}: {run_text}")
+                    rendered_runs.append(f"{run_prefix}{run['speaker']}: {run_text}")
         if rendered_runs:
             lines[line_index] = "\n".join(rendered_runs)
         else:
             lines[line_index] = f"{prefix}{speaker}: {text}"
     return "\n".join(lines)
+
+
+def _run_prefixes(
+    segment: dict[str, Any],
+    segment_index: int,
+    runs: Sequence[Mapping[str, Any]],
+    occurrences: list[TranscriptCorrectionOccurrence],
+    words_by_segment: Mapping[int, Sequence[LocatedWord]] | None,
+    *,
+    default: str,
+) -> list[str]:
+    words = words_by_segment.get(segment_index) if words_by_segment else None
+    if not words:
+        return [default] * len(runs)
+    start = segment.get("start")
+    end = segment.get("end")
+    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+        return [default] * len(runs)
+    windows = speaker_run_windows(
+        _segment_text(segment),
+        words,
+        [item for item in occurrences if item.segment_index == segment_index],
+        runs,
+        (float(start), float(end)),
+    )
+    return [
+        render_line_prefix(window_start, window_end)
+        for window_start, window_end in windows
+    ]

@@ -40,11 +40,19 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class TranscriptWord:
-    """One recognized word with absolute timestamps (seconds from audio start)."""
+    """One recognized word with absolute timestamps (seconds from audio start).
+
+    ``probability`` is the service's confidence in the word's placement when
+    it reports one. Its meaning follows the result's ``alignment``: a decoder
+    posterior for ``provider_words``, the forced-alignment score for
+    ``forced``, where exactly ``0.0`` marks a word the aligner could not fit
+    to the audio and spread evenly over its window instead.
+    """
 
     word: str
     start: float
     end: float
+    probability: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +67,8 @@ class TranscriptSegment:
     start: float
     end: float
     speaker: str | None = None
+    # Word timings inside the segment, when the service produced them.
+    words: tuple[TranscriptWord, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

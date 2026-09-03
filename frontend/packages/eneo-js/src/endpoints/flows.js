@@ -1007,6 +1007,24 @@ export function initFlows(client) {
         }
       },
 
+      transcriptWords: {
+        /**
+         * Word timings behind one transcription step's stored segments,
+         * keyed by segment index. Rejects with 404 when the step stored no
+         * words; a response flagged `stale` anchors to a transcript that
+         * has since been replaced and must not be used.
+         *
+         * @param {{flowId: string, runId: string, stepId: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptWords>}
+         */
+        get: async ({ flowId, runId, stepId }) => {
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/", {
+            method: "get",
+            params: { path: { id: flowId, run_id: runId, step_id: stepId } }
+          });
+        }
+      },
+
       /**
        * Generate signed URL for a flow run artifact download.
        * Uses tenant-scoped access so any user with flow access can download artifacts.

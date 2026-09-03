@@ -7,7 +7,9 @@
   import { m } from "$lib/paraglide/messages";
   import {
     countFiles,
+    countUncertainWords,
     findActiveSegmentIndex,
+    findActiveWordIndex,
     formatClock,
     speakerColorIndex,
     type TranscriptSegment
@@ -108,6 +110,8 @@
   let playbackRate = $state(1);
   let follow = $state(true);
   let activeIndex = $state(-1);
+  // Word within the active segment, when that segment has stored words.
+  let activeWordIndex = $state(-1);
   let loadingAudio = $state(false);
   let audioUnavailable = $state(false);
 
@@ -134,6 +138,8 @@
   const hasSegments = $derived(shown.length > 0);
   const withHours = $derived(duration >= 3600 || shown.some((segment) => segment.end >= 3600));
   const seekable = $derived(!audioUnavailable && hasSegments);
+  // Words the aligner could not place: the reviewer's cue to listen there.
+  const uncertainWords = $derived(countUncertainWords(segments));
 
   const speakerEditingEnabled = $derived(editable && onSaveSpeakerEdits !== undefined);
   const labels = $derived(speakerLabels(segments, speakerEdits));
@@ -195,7 +201,13 @@
 
   function onTimeUpdate() {
     if (!audioEl) return;
-    activeIndex = findActiveSegmentIndex(shown, currentFile, audioEl.currentTime, activeIndex);
+    const time = audioEl.currentTime;
+    const previous = activeIndex;
+    activeIndex = findActiveSegmentIndex(shown, currentFile, time, activeIndex);
+    const words = segments[activeIndex]?.words;
+    activeWordIndex = words
+      ? findActiveWordIndex(words, time, previous === activeIndex ? activeWordIndex : -1)
+      : -1;
   }
 
   function togglePlay() {
@@ -212,6 +224,7 @@
     const bounded = Math.min(Math.max(0, time), Number.isFinite(duration) ? duration : time);
     audioEl.currentTime = bounded;
     activeIndex = findActiveSegmentIndex(shown, currentFile, bounded);
+    activeWordIndex = -1;
   }
 
   function seekBy(delta: number) {
@@ -219,15 +232,20 @@
     seekToTime(audioEl.currentTime + delta);
   }
 
-  /** Positions the playhead silently; playback stays under the transport. */
-  function seekToPart(part: TurnPart) {
+  /**
+   * Positions the playhead silently; playback stays under the transport.
+   * `time` targets a stored word inside the part; otherwise the part's start.
+   */
+  function seekToPart(part: TurnPart, time?: number) {
     if (!seekable) return;
+    const target = time ?? part.start;
     activeIndex = part.segmentIndex;
+    activeWordIndex = -1;
     if (part.fileIndex !== currentFile || !audioEl) {
-      void loadAudio(part.fileIndex, part.start, false);
+      void loadAudio(part.fileIndex, target, false);
       return;
     }
-    audioEl.currentTime = part.start;
+    audioEl.currentTime = target;
   }
 
   // ---- Turn editing -----------------------------------------------------
@@ -656,6 +674,11 @@
           {/each}
         </div>
       {/if}
+      {#if uncertainWords > 0}
+        <p class="text-warning-stronger text-xs" data-uncertain-words={uncertainWords}>
+          {m.flow_run_transcript_uncertain_count({ count: String(uncertainWords) })}
+        </p>
+      {/if}
       <p class="text-muted sr-only">{m.flow_run_transcript_shortcuts()}</p>
     </div>
 
@@ -680,6 +703,7 @@
           <TranscriptTurnBlock
             {turn}
             activeSegmentIndex={activeIndex}
+            {activeWordIndex}
             {withHours}
             {editable}
             {busy}

@@ -29,7 +29,11 @@
   import FlowRunEvidenceStepCard, {
     type FlowRunTranscriptContext
   } from "./FlowRunEvidenceStepCard.svelte";
-  import { segmentsFromMetadata } from "$lib/features/flows/transcriptSegments";
+  import {
+    attachWords,
+    segmentsFromMetadata,
+    type TranscriptWordsPayload
+  } from "$lib/features/flows/transcriptSegments";
   import TranscriptCorrectionReviewDialog from "./TranscriptCorrectionReviewDialog.svelte";
   import {
     createTranscriptCorrectionsController,
@@ -113,8 +117,23 @@
       loadError = true;
     }
     loading = false;
+    await loadTranscriptWords();
     setupCorrectionsController();
   });
+
+  // Word timings are optional evidence: a step that stored none answers 404
+  // and the player falls back to segment-level playback.
+  let transcriptWords = $state<TranscriptWordsPayload | null>(null);
+
+  async function loadTranscriptWords() {
+    const stepId = transcriptContext?.stepId;
+    if (!stepId || !transcriptContext?.segments) return;
+    try {
+      transcriptWords = await eneo.flows.runs.transcriptWords.get({ flowId, runId, stepId });
+    } catch {
+      transcriptWords = null;
+    }
+  }
 
   $effect(() => {
     if (evidence && evidence.step_results.length > 0 && !hasAutoExpanded) {
@@ -280,9 +299,10 @@
         ? transcription.file_ids.filter((id): id is string => typeof id === "string")
         : [];
       if (fileIds.length === 0) continue;
+      const segments = segmentsFromMetadata(transcription as Record<string, unknown>);
       return {
         fileIds,
-        segments: segmentsFromMetadata(transcription as Record<string, unknown>),
+        segments: segments ? attachWords(segments, transcriptWords) : null,
         stepId: result.step_id,
         getAudioUrl: (fileIndex: number) => {
           const fileId = fileIds[fileIndex];

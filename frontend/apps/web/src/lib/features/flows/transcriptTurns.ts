@@ -13,11 +13,24 @@
 import type { CorrectionOccurrence } from "$lib/features/flows/transcriptCorrections";
 import {
   applicableOccurrences,
+  buildOffsetMap,
   computeSegmentDetails,
   type SegmentDetails,
   type SpeakerEdit
 } from "$lib/features/flows/transcriptRuns";
 import type { TranscriptSegment } from "$lib/features/flows/transcriptSegments";
+
+/** A stored word placed inside one part, in the part's own display text. */
+export type PartWord = {
+  /** Index into the segment's `words`, the identity the player highlights. */
+  wordIndex: number;
+  start: number;
+  end: number;
+  /** Display-space span relative to the part's text. */
+  displayStart: number;
+  displayEnd: number;
+  uncertain: boolean;
+};
 
 /** One segment-anchored slice of a turn's text. */
 export type TurnPart = {
@@ -37,6 +50,12 @@ export type TurnPart = {
   overridden: boolean;
   /** Corrected sub-ranges, relative to this part's own text. */
   correctedRanges: { start: number; end: number }[];
+  /**
+   * Stored words inside this part, when the segment has them. A word that
+   * touches a corrected span is left out: its timing belongs to text that
+   * no longer reads the same.
+   */
+  words?: PartWord[];
 };
 
 export type TranscriptTurn = {
@@ -89,18 +108,18 @@ export function computeTurns(
   for (const segment of segments) {
     const detail = bySegment.get(segment.index);
     if (!detail) continue;
-    const segmentRanges = correctedDisplayRanges(
-      segment.text,
-      occurrencesBySegment.get(segment.index) ?? []
-    );
+    const segmentOccurrences = occurrencesBySegment.get(segment.index) ?? [];
+    const segmentRanges = correctedDisplayRanges(segment.text, segmentOccurrences);
+    const segmentWords = segment.words ? locatePartWords(segment, segmentOccurrences) : null;
     for (const run of detail.runs) {
       const effective = run.speaker ?? segment.speaker;
+      const start = runStart(segment, run.rawStart);
       if (!current || current.speaker !== effective || current.fileIndex !== segment.fileIndex) {
         current = {
           index: turns.length,
           speaker: effective,
           fileIndex: segment.fileIndex,
-          start: segment.start,
+          start,
           parts: []
         };
         turns.push(current);
@@ -111,10 +130,10 @@ export function computeTurns(
           end: Math.min(range.end, run.displayEnd) - run.displayStart
         }))
         .filter((range) => range.start < range.end);
-      current.parts.push({
+      const part: TurnPart = {
         segmentIndex: segment.index,
         fileIndex: segment.fileIndex,
-        start: segment.start,
+        start,
         text: run.text,
         rawStart: run.rawStart,
         rawEnd: run.rawEnd,
@@ -122,10 +141,66 @@ export function computeTurns(
         displayEnd: run.displayEnd,
         overridden: run.overridden,
         correctedRanges
-      });
+      };
+      if (segmentWords) {
+        part.words = segmentWords
+          .filter((word) => word.rawStart >= run.rawStart && word.rawEnd <= run.rawEnd)
+          .map(({ rawStart: _rawStart, rawEnd: _rawEnd, ...word }) => ({
+            ...word,
+            displayStart: word.displayStart - run.displayStart,
+            displayEnd: word.displayEnd - run.displayStart
+          }));
+      }
+      current.parts.push(part);
     }
   }
   return turns;
+}
+
+type SegmentWord = PartWord & { rawStart: number; rawEnd: number };
+
+/**
+ * The segment's located words in display space, minus any word that touches
+ * an applied text correction (its timing no longer matches the text shown).
+ */
+function locatePartWords(
+  segment: TranscriptSegment,
+  occurrences: readonly CorrectionOccurrence[]
+): SegmentWord[] {
+  const applicable = applicableOccurrences(segment.text, occurrences);
+  const map = buildOffsetMap(segment.text, occurrences);
+  const words: SegmentWord[] = [];
+  (segment.words ?? []).forEach((word, wordIndex) => {
+    if (word.charStart < 0) return;
+    const corrected = applicable.some(
+      (occurrence) => word.charStart < occurrence.char_end && word.charEnd > occurrence.char_start
+    );
+    if (corrected) return;
+    words.push({
+      wordIndex,
+      start: word.start,
+      end: word.end,
+      uncertain: word.uncertain,
+      rawStart: word.charStart,
+      rawEnd: word.charEnd,
+      displayStart: map.rawToDisplay(word.charStart),
+      displayEnd: map.rawToDisplay(word.charEnd)
+    });
+  });
+  return words;
+}
+
+/**
+ * Where a run starts in the audio: the segment's own start for a run at the
+ * head of the line, otherwise the first stored word the run covers. Without
+ * words a split line keeps the segment's timestamp for both runs.
+ */
+function runStart(segment: TranscriptSegment, rawStart: number): number {
+  if (rawStart <= 0 || !segment.words) return segment.start;
+  for (const word of segment.words) {
+    if (word.charStart >= 0 && word.charEnd > rawStart) return word.start;
+  }
+  return segment.start;
 }
 
 /** The text a whole-turn editor shows: part texts joined by single spaces. */

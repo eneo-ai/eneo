@@ -15,8 +15,10 @@ from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionSet,
     segments_content_hash,
 )
+from eneo.flows.domain.transcript_words import locate_words
 from eneo.flows.enums import FlowOutputType, FlowRunReviewCheckpointState
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.main.exceptions import TypedIOValidationException
 
 SEGMENTS = [
     {
@@ -208,3 +210,120 @@ def test_skips_when_the_checkpoint_has_no_payload() -> None:
 
     assert outcome.propagated is False
     assert outcome.skip_reason == "payload_missing"
+
+
+MAPPING_TEXT = "\n".join(
+    [
+        "[00:00:00 - 00:00:04] Anna: Vi frågade sugary om planen.",
+        "[00:00:04 - 00:00:08] Bo: sugary svarade direkt.",
+    ]
+)
+
+
+def _rename(folded_source: str) -> dict[str, object]:
+    return {
+        "text": folded_source.replace("SPEAKER_00", "Anna").replace(
+            "SPEAKER_03", "Cesar"
+        ),
+        "structured": {"speakers": []},
+    }
+
+
+def test_folds_into_the_source_text_and_rebuilds_the_payload() -> None:
+    outcome = build_folded_transcript(
+        checkpoint=_checkpoint({"text": MAPPING_TEXT, "structured": {}}),
+        step_result=_step_result(),
+        correction_set=_correction_set(
+            occurrences_json=[OCCURRENCE], speaker_edits_json=[SPEAKER_EDIT]
+        ),
+        source_text=RENDERED,
+        expected_attempt_no=1,
+        rebuild_payload=_rename,
+    )
+
+    assert outcome.propagated is True
+    # The sync guard compares against the checkpoint's own previous text.
+    assert outcome.previous_text == MAPPING_TEXT
+    assert outcome.folded_payload == {
+        "text": "\n".join(
+            [
+                "[00:00:00 - 00:00:04] Anna: Vi frågade Çagri om planen.",
+                "[00:00:04 - 00:00:08] Cesar: sugary svarade direkt.",
+            ]
+        ),
+        "structured": {"speakers": []},
+    }
+
+
+def test_source_fold_checks_the_source_step_attempt_not_the_checkpoints() -> None:
+    checkpoint = _checkpoint({"text": MAPPING_TEXT, "structured": {}})
+    assert checkpoint.attempt_no == 1
+
+    outcome = build_folded_transcript(
+        checkpoint=checkpoint,
+        step_result=_step_result(attempt_no=3),
+        correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
+        source_text=RENDERED,
+        expected_attempt_no=3,
+        rebuild_payload=_rename,
+    )
+
+    assert outcome.propagated is True
+
+
+def test_skips_when_the_rebuilt_payload_is_rejected() -> None:
+    def reject(folded_source: str) -> dict[str, object]:
+        raise TypedIOValidationException("bad mapping", code="typed_io_failed")
+
+    outcome = build_folded_transcript(
+        checkpoint=_checkpoint({"text": MAPPING_TEXT, "structured": {}}),
+        step_result=_step_result(),
+        correction_set=_correction_set(occurrences_json=[OCCURRENCE]),
+        source_text=RENDERED,
+        rebuild_payload=reject,
+    )
+
+    assert outcome.propagated is False
+    assert outcome.skip_reason == "payload_rebuild_failed"
+    assert outcome.previous_text == MAPPING_TEXT
+
+
+def test_folds_split_lines_with_word_windows_when_words_are_given() -> None:
+    edit = {
+        "segment_index": 0,
+        "char_start": 18,
+        "char_end": 28,
+        "original": "om planen.",
+        "original_speaker": "SPEAKER_00",
+        "speaker": "SPEAKER_01",
+    }
+    words = {
+        0: locate_words(
+            SEGMENTS[0]["text"],
+            [
+                {"word": "Vi", "start": 0.2, "end": 0.4},
+                {"word": "frågade", "start": 0.5, "end": 1.0},
+                {"word": "sugary", "start": 1.1, "end": 1.6},
+                {"word": "om", "start": 2.4, "end": 2.5},
+                {"word": "planen.", "start": 2.6, "end": 3.3},
+            ],
+        )
+    }
+
+    outcome = build_folded_transcript(
+        checkpoint=_checkpoint({"text": RENDERED}),
+        step_result=_step_result(),
+        correction_set=_correction_set(speaker_edits_json=[edit]),
+        words_by_segment=words,
+    )
+
+    assert outcome.propagated is True
+    assert outcome.folded_payload == {
+        "text": "\n".join(
+            [
+                "[00:00:00 - 00:00:01] SPEAKER_00: Vi frågade sugary",
+                "[00:00:02 - 00:00:03] SPEAKER_01: om planen.",
+                "[00:00:04 - 00:00:08] SPEAKER_01: sugary svarade direkt.",
+            ]
+        )
+    }

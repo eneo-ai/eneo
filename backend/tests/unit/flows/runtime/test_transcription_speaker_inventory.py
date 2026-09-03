@@ -9,6 +9,7 @@ from eneo.flows.runtime import transcription
 from eneo.flows.runtime.transcription import transcribe_audio_input
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     TranscriptSegment,
+    TranscriptWord,
 )
 
 FILE_TEXT = "\n".join(
@@ -165,3 +166,84 @@ async def test_oversized_segments_are_omitted_with_a_reason(
 
     assert result.segments is None
     assert result.to_metadata()["segments_omitted_reason"] == "too_large"
+
+
+FILE_WORDS = (
+    TranscriptWord("Hej.", 0.1, 0.42, probability=0.95),
+    TranscriptWord("Hallå.", 5.2, 5.8, probability=0.0),
+)
+TIMED_SEGMENTS = (
+    TranscriptSegment("Hej.", 0.0, 4.0, speaker="SPEAKER_00", words=FILE_WORDS[:1]),
+    TranscriptSegment("Hallå.", 5.0, 9.5, speaker="SPEAKER_01", words=FILE_WORDS[1:]),
+)
+
+
+async def test_words_are_keyed_to_the_stored_segment_index_across_files() -> None:
+    transcriber = _transcriber(
+        TranscribedAudio(
+            FILE_TEXT, 10.0, diarization="external", transcript_segments=TIMED_SEGMENTS
+        ),
+        TranscribedAudio(
+            FILE_TEXT,
+            10.0,
+            diarization="external",
+            transcript_segments=(
+                TranscriptSegment("Hej.", 0.0, 4.0, speaker="SPEAKER_00"),
+                TIMED_SEGMENTS[1],
+            ),
+        ),
+    )
+
+    result = await _run([_file("a.mp3"), _file("b.mp3")], transcriber)
+
+    # The second file's first segment has no words, so index 2 is skipped and
+    # index 3 (its second segment) keeps its per-file timestamps.
+    assert result.words == [
+        {
+            "segment_index": 0,
+            "words": [{"word": "Hej.", "start": 0.1, "end": 0.42, "probability": 0.95}],
+        },
+        {
+            "segment_index": 1,
+            "words": [{"word": "Hallå.", "start": 5.2, "end": 5.8, "probability": 0.0}],
+        },
+        {
+            "segment_index": 3,
+            "words": [{"word": "Hallå.", "start": 5.2, "end": 5.8, "probability": 0.0}],
+        },
+    ]
+    assert result.words_omitted_reason is None
+    assert "words" not in result.to_metadata()
+    assert result.to_metadata()["words_omitted_reason"] is None
+
+
+async def test_words_are_dropped_with_the_segments_they_anchor_to(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(transcription, "MAX_SEGMENTS_BYTES", 10)
+    transcriber = _transcriber(
+        TranscribedAudio(
+            FILE_TEXT, 10.0, diarization="external", transcript_segments=TIMED_SEGMENTS
+        ),
+    )
+
+    result = await _run([_file("a.mp3")], transcriber)
+
+    assert result.segments is None
+    assert result.words is None
+    assert result.to_metadata()["words_omitted_reason"] == "segments_unavailable"
+
+
+async def test_oversized_words_are_omitted_but_segments_kept(monkeypatch) -> None:
+    monkeypatch.setattr(transcription, "MAX_WORDS_BYTES", 10)
+    transcriber = _transcriber(
+        TranscribedAudio(
+            FILE_TEXT, 10.0, diarization="external", transcript_segments=TIMED_SEGMENTS
+        ),
+    )
+
+    result = await _run([_file("a.mp3")], transcriber)
+
+    assert result.segments is not None
+    assert result.words is None
+    assert result.to_metadata()["words_omitted_reason"] == "too_large"

@@ -6686,5 +6686,7 @@
   "flow_run_transcript_suggestions_skip": "Only this line",
   "flow_run_transcript_match_exact": "Exact match",
   "flow_run_transcript_match_fuzzy": "Similar spelling",
-  "flow_run_transcript_unknown_speaker": "Unknown speaker"
+  "flow_run_transcript_unknown_speaker": "Unknown speaker",
+  "flow_run_transcript_word_uncertain": "Uncertain timing: the word could not be found in the audio. Listen here.",
+  "flow_run_transcript_uncertain_count": "{count} words have uncertain timings and are underlined with a wavy line."
 }

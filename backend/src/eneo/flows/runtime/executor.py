@@ -211,6 +211,9 @@ from eneo.spaces.space_repo import SpaceRepository
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.audit.application.audit_service import AuditService
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
     from eneo.flows.runtime.transcription import FlowStepTranscriber
     from eneo.spaces.space import Space
 
@@ -478,6 +481,7 @@ class FlowRunExecutor:
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
         config: FlowRunExecutorConfig | None = None,
+        transcript_words_repo: "FlowTranscriptWordsRepository | None" = None,
     ) -> None:
         resolved_config = config
         if resolved_config is None:
@@ -496,6 +500,7 @@ class FlowRunExecutor:
         self.session = session
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
+        self.transcript_words_repo = transcript_words_repo
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
         self.flow_run_terminalizer = flow_run_terminalizer
         self.webhook_delivery_repo = (
@@ -2156,6 +2161,7 @@ class FlowRunExecutor:
             logger=logger,
             transcription_call_observer=transcription_call_observer,
             max_speakers_hint=self.max_speakers_hint,
+            transcript_words_repo=self.transcript_words_repo,
         )
         return await resolve_step_input_runtime(
             step=step,

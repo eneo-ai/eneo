@@ -15,9 +15,11 @@ from eneo.flows.domain.transcript_corrections import (
     segments_content_hash,
     sort_occurrences,
     sort_speaker_edits,
+    speaker_run_windows,
     validate_occurrences,
     validate_speaker_edits,
 )
+from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 
 
 def _segment(text: str, *, speaker: str | None = "SPEAKER_00") -> dict:
@@ -568,3 +570,128 @@ class TestSortSpeakerEdits:
             span,
             later_segment,
         ]
+
+
+def _timed_segment(text: str, *, start: float, end: float, speaker: str) -> dict:
+    return {
+        "file_index": 0,
+        "start": start,
+        "end": end,
+        "speaker": speaker,
+        "text": text,
+    }
+
+
+def _words(text: str, timings: list[tuple[str, float, float]]) -> list[LocatedWord]:
+    return locate_words(
+        text, [{"word": w, "start": s, "end": e} for w, s, e in timings]
+    )
+
+
+class TestSpeakerRunWindows:
+    TEXT = "Vi frågade sugary om planen."
+    TIMINGS = [
+        ("Vi", 0.2, 0.4),
+        ("frågade", 0.5, 1.0),
+        ("sugary", 1.1, 1.6),
+        ("om", 2.4, 2.5),
+        ("planen.", 2.6, 3.3),
+    ]
+
+    def test_each_run_takes_the_window_of_the_words_it_covers(self) -> None:
+        runs = [
+            {"char_start": 0, "char_end": 17, "speaker": "SPEAKER_00"},
+            {"char_start": 18, "char_end": 28, "speaker": "SPEAKER_01"},
+        ]
+
+        windows = speaker_run_windows(
+            self.TEXT, _words(self.TEXT, self.TIMINGS), [], runs, (0.0, 4.0)
+        )
+
+        assert windows == [(0.2, 1.6), (2.4, 3.3)]
+
+    def test_runs_are_matched_through_text_corrections(self) -> None:
+        # "sugary" -> "Çagri" shortens the corrected text; the runs are in
+        # corrected space while the words sit in the raw text.
+        occurrences = [
+            _occurrence(
+                char_start=11, char_end=17, original="sugary", corrected="Çagri"
+            )
+        ]
+        runs = [
+            {"char_start": 0, "char_end": 16, "speaker": "SPEAKER_00"},
+            {"char_start": 17, "char_end": 27, "speaker": "SPEAKER_01"},
+        ]
+
+        windows = speaker_run_windows(
+            self.TEXT, _words(self.TEXT, self.TIMINGS), occurrences, runs, (0.0, 4.0)
+        )
+
+        assert windows == [(0.2, 1.6), (2.4, 3.3)]
+
+    def test_a_run_without_words_keeps_the_segment_window(self) -> None:
+        runs = [
+            {"char_start": 0, "char_end": 17, "speaker": "SPEAKER_00"},
+            {"char_start": 18, "char_end": 28, "speaker": "SPEAKER_01"},
+        ]
+        only_first_words = _words(self.TEXT, self.TIMINGS[:3])
+
+        windows = speaker_run_windows(self.TEXT, only_first_words, [], runs, (0.0, 4.0))
+
+        assert windows == [(0.2, 1.6), (0.0, 4.0)]
+
+
+class TestApplyToRenderedTranscriptWithWords:
+    def test_a_split_line_gets_one_window_per_run(self) -> None:
+        text = "Vi frågade sugary om planen."
+        segments = [_timed_segment(text, start=0.0, end=4.0, speaker="SPEAKER_00")]
+        rendered = f"{_PREFIX_1}SPEAKER_00: {text}"
+        edits = [_speaker_edit(char_start=18, char_end=28, original="om planen.")]
+        words = {0: _words(text, TestSpeakerRunWindows.TIMINGS)}
+
+        patched = apply_to_rendered_transcript(rendered, segments, [], edits, words)
+
+        assert patched == "\n".join(
+            [
+                "[00:00:00 - 00:00:01] SPEAKER_00: Vi frågade sugary",
+                "[00:00:02 - 00:00:03] SPEAKER_01: om planen.",
+            ]
+        )
+
+    def test_without_words_the_segment_prefix_is_reused(self) -> None:
+        text = "Vi frågade sugary om planen."
+        segments = [_timed_segment(text, start=0.0, end=4.0, speaker="SPEAKER_00")]
+        rendered = f"{_PREFIX_1}SPEAKER_00: {text}"
+        edits = [_speaker_edit(char_start=18, char_end=28, original="om planen.")]
+
+        patched = apply_to_rendered_transcript(rendered, segments, [], edits, {})
+
+        assert patched == "\n".join(
+            [
+                f"{_PREFIX_1}SPEAKER_00: Vi frågade sugary",
+                f"{_PREFIX_1}SPEAKER_01: om planen.",
+            ]
+        )
+
+
+class TestLocateWords:
+    def test_places_tokens_sequentially_and_retries_bare_of_punctuation(self) -> None:
+        located = locate_words(
+            "Vi ses imorgon.",
+            [
+                {"word": "Vi", "start": 0, "end": 0.2},
+                {"word": "ses,", "start": 0.3, "end": 0.5, "probability": 0.0},
+                {"word": "aldrig", "start": 0.6, "end": 0.8},
+                {"word": "imorgon", "start": 0.9, "end": 1.4, "probability": True},
+            ],
+        )
+
+        assert [(w.char_start, w.char_end) for w in located] == [
+            (0, 2),
+            (3, 6),
+            (-1, -1),
+            (7, 14),
+        ]
+        assert located[1].probability == 0.0
+        assert located[3].probability is None
+        assert located[2].located is False

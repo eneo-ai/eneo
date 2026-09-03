@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { TranscriptSegment } from "./transcriptSegments";
+import { locateWords, type TranscriptSegment } from "./transcriptSegments";
 import {
   computeTurns,
   correctedDisplayRanges,
@@ -84,6 +84,100 @@ describe("computeTurns", () => {
       ["SPEAKER_01", ["Vad bra.", "Precis så."]]
     ]);
     expect(turns[1].parts[0]).toMatchObject({ segmentIndex: 0, rawStart: 9, rawEnd: 17 });
+  });
+
+  it("starts a reassigned tail run at its first word when words are stored", () => {
+    const text = "Vi frågade sugary om planen.";
+    const timed: TranscriptSegment = {
+      ...segment(0, text),
+      words: locateWords(
+        text,
+        [
+          { word: "Vi", start: 0.2, end: 0.4 },
+          { word: "frågade", start: 0.5, end: 1.0 },
+          { word: "sugary", start: 1.1, end: 1.6 },
+          { word: "om", start: 2.4, end: 2.5 },
+          { word: "planen.", start: 2.6, end: 3.3 }
+        ],
+        "forced"
+      )
+    };
+    const edit: SpeakerEdit = {
+      segment_index: 0,
+      char_start: 18,
+      char_end: 28,
+      original: "om planen.",
+      original_speaker: "SPEAKER_00",
+      speaker: "SPEAKER_01"
+    };
+
+    const turns = computeTurns([timed], [], [edit]);
+
+    expect(turns.map((turn) => [turn.speaker, turn.start])).toEqual([
+      ["SPEAKER_00", 0],
+      ["SPEAKER_01", 2.4]
+    ]);
+    expect(turns[1].parts[0].start).toBe(2.4);
+  });
+
+  it("carries a part's words in its own display space and drops corrected ones", () => {
+    const text = "Vi frågade sugary om planen.";
+    const timed: TranscriptSegment = {
+      ...segment(0, text),
+      words: locateWords(
+        text,
+        [
+          { word: "Vi", start: 0.2, end: 0.4 },
+          { word: "frågade", start: 0.5, end: 1.0 },
+          { word: "sugary", start: 1.1, end: 1.6, probability: 0 },
+          { word: "om", start: 2.4, end: 2.5 },
+          { word: "planen.", start: 2.6, end: 3.3 }
+        ],
+        "forced"
+      )
+    };
+    const correction = {
+      segment_index: 0,
+      char_start: 11,
+      char_end: 17,
+      original: "sugary",
+      corrected: "Çagri"
+    };
+    const edit: SpeakerEdit = {
+      segment_index: 0,
+      char_start: 18,
+      char_end: 28,
+      original: "om planen.",
+      original_speaker: "SPEAKER_00",
+      speaker: "SPEAKER_01"
+    };
+
+    const [first, second] = computeTurns([timed], [correction], [edit]);
+
+    // "sugary" was corrected, so its (uncertain) word is not offered.
+    expect(first.parts[0].words).toEqual([
+      { wordIndex: 0, start: 0.2, end: 0.4, displayStart: 0, displayEnd: 2, uncertain: false },
+      { wordIndex: 1, start: 0.5, end: 1.0, displayStart: 3, displayEnd: 10, uncertain: false }
+    ]);
+    expect(second.parts[0].words).toEqual([
+      { wordIndex: 3, start: 2.4, end: 2.5, displayStart: 0, displayEnd: 2, uncertain: false },
+      { wordIndex: 4, start: 2.6, end: 3.3, displayStart: 3, displayEnd: 10, uncertain: false }
+    ]);
+  });
+
+  it("keeps the segment timestamp for a split run without words", () => {
+    const edit: SpeakerEdit = {
+      segment_index: 0,
+      char_start: 18,
+      char_end: 28,
+      original: "om planen.",
+      original_speaker: "SPEAKER_00",
+      speaker: "SPEAKER_01"
+    };
+
+    const turns = computeTurns([segment(0, "Vi frågade sugary om planen.")], [], [edit]);
+
+    expect(turns.map((turn) => turn.start)).toEqual([0, 0]);
   });
 
   it("breaks turns at file boundaries even for the same speaker", () => {

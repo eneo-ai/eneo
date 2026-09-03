@@ -25,6 +25,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_STATUS_CAPABILITIES_PATH,
     FLOW_RUN_STATUS_PATH,
     FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH,
+    FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH,
     FLOW_RUN_STEPS_PATH,
     FLOW_RUN_TRANSCRIPT_CORRECTIONS_PATH,
     FLOW_RUNS_PATH,
@@ -260,6 +261,13 @@ FLOW_RUNTIME_ENDPOINT_CONTRACTS: tuple[FlowRuntimeEndpointContract, ...] = (
         operation_id="edit_flow_run_transcript_corrections",
         success_status=status.HTTP_200_OK,
         runtime_path_fields=(_field("edit_transcript_corrections_template"),),
+    ),
+    FlowRuntimeEndpointContract(
+        route_path=FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH,
+        method="get",
+        operation_id="get_flow_run_transcript_words",
+        success_status=status.HTTP_200_OK,
+        runtime_path_fields=(_field("transcript_words_template"),),
     ),
 )
 

@@ -346,6 +346,7 @@ async def _execute_flow_run_async_traced(
                 transcriber=_build_flow_transcriber(
                     runtime_container.transcriber(file_service=runtime_file_service)
                 ),
+                transcript_words_repo=runtime_container.flow_transcript_words_repo(),
                 config=FlowRunExecutorConfig.from_settings(
                     max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
                     max_audio_files=flow_limits.audio_max_files_per_run,

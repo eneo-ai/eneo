@@ -106,6 +106,7 @@ class StepInputResolutionDeps:
     logger: Any
     transcription_call_observer: "ProviderCallObserver | None" = None
     max_speakers_hint: int | None = None
+    transcript_words_repo: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,7 @@ async def resolve_step_input(
                 actor=deps.actor,
                 load_audio_payload=deps.file_service.get_file_content,
                 transcription_call_observer=deps.transcription_call_observer,
+                transcript_words_repo=deps.transcript_words_repo,
             )
             audio_resolution = await resolve_transcribe_and_attach_audio_input(
                 request=audio_request,

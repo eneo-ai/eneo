@@ -18,7 +18,139 @@ export type TranscriptSegment = {
   /** Diarization label (`SPEAKER_00`) or, in a renamed transcript, a name. */
   speaker: string | null;
   text: string;
+  /** Timed words inside the line, when the service produced them. */
+  words?: TranscriptWord[];
 };
+
+/** One timed word of a segment, located in the segment's RAW text. */
+export type TranscriptWord = {
+  word: string;
+  /** Seconds from the start of the segment's file. */
+  start: number;
+  end: number;
+  probability: number | null;
+  /** Raw-text span within the segment, or -1/-1 when the word was not located. */
+  charStart: number;
+  charEnd: number;
+  /** The aligner interpolated this word's time instead of finding it in the audio. */
+  uncertain: boolean;
+};
+
+/** Wire shape of the transcript-words endpoint (matches the backend API). */
+export type TranscriptWordsPayload = {
+  alignment?: string | null;
+  stale?: boolean;
+  segments: { segment_index: number; words: TranscriptWirePayloadWord[] }[];
+};
+
+type TranscriptWirePayloadWord = {
+  word: string;
+  start: number;
+  end: number;
+  probability?: number | null;
+};
+
+// On the forced-alignment rung a probability of exactly 0 marks a word the
+// aligner spread over its window instead of finding it in the audio.
+const FORCED_ALIGNMENT = "forced";
+
+const EDGE_PUNCTUATION_RE = /^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu;
+
+/**
+ * Place `words` in `text` by sequential search. Tokens usually appear
+ * verbatim; a token the aligner stripped of punctuation is retried bare.
+ * A word that still cannot be found is kept (it still counts, still plays)
+ * but marked unlocated so no text range is highlighted for it.
+ */
+export function locateWords(
+  text: string,
+  words: readonly TranscriptWirePayloadWord[],
+  alignment: string | null | undefined
+): TranscriptWord[] {
+  let cursor = 0;
+  return words.map((word) => {
+    const probability = finite(word.probability) ?? null;
+    const located: TranscriptWord = {
+      word: word.word,
+      start: word.start,
+      end: Math.max(word.start, word.end),
+      probability,
+      charStart: -1,
+      charEnd: -1,
+      uncertain: alignment === FORCED_ALIGNMENT && probability === 0
+    };
+    const candidates = [word.word, word.word.replace(EDGE_PUNCTUATION_RE, "")].filter(
+      (candidate) => candidate.length > 0
+    );
+    for (const candidate of candidates) {
+      const at = text.indexOf(candidate, cursor);
+      if (at < 0) continue;
+      located.charStart = at;
+      located.charEnd = at + candidate.length;
+      cursor = located.charEnd;
+      break;
+    }
+    return located;
+  });
+}
+
+/**
+ * Segments with their stored word timings attached. A stale or missing
+ * payload leaves the segments untouched (segment-level playback only).
+ */
+export function attachWords(
+  segments: readonly TranscriptSegment[],
+  payload: TranscriptWordsPayload | null | undefined
+): TranscriptSegment[] {
+  if (!payload || payload.stale || !Array.isArray(payload.segments)) return [...segments];
+  const bySegment = new Map<number, TranscriptWirePayloadWord[]>();
+  for (const entry of payload.segments) {
+    if (Array.isArray(entry?.words)) bySegment.set(entry.segment_index, entry.words);
+  }
+  return segments.map((segment) => {
+    const words = bySegment.get(segment.index);
+    if (!words || words.length === 0) return segment;
+    return { ...segment, words: locateWords(segment.text, words, payload.alignment) };
+  });
+}
+
+/** How many words across `segments` the aligner could not place. */
+export function countUncertainWords(segments: readonly TranscriptSegment[]): number {
+  let count = 0;
+  for (const segment of segments) {
+    for (const word of segment.words ?? []) if (word.uncertain) count += 1;
+  }
+  return count;
+}
+
+/**
+ * The word playing at `time` within one segment's words, or -1. Between two
+ * words the earlier one stays active so the highlight does not flicker.
+ */
+export function findActiveWordIndex(
+  words: readonly TranscriptWord[],
+  time: number,
+  lastIndex = -1
+): number {
+  const last = words[lastIndex];
+  if (last && last.start <= time) {
+    const next = words[lastIndex + 1];
+    if (!next || time < next.start) return lastIndex;
+  }
+  let result = -1;
+  let low = 0;
+  let high = words.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (words[mid].start <= time) {
+      result = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return result;
+}
 
 type Payload = Record<string, unknown> | null | undefined;
 

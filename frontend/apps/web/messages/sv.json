@@ -6686,5 +6686,7 @@
   "flow_run_transcript_suggestions_skip": "Endast denna rad",
   "flow_run_transcript_match_exact": "Exakt träff",
   "flow_run_transcript_match_fuzzy": "Liknande stavning",
-  "flow_run_transcript_unknown_speaker": "Okänd talare"
+  "flow_run_transcript_unknown_speaker": "Okänd talare",
+  "flow_run_transcript_word_uncertain": "Osäker tidsstämpel: ordet kunde inte hittas i ljudet. Lyssna här.",
+  "flow_run_transcript_uncertain_count": "{count} ord har osäkra tidsstämplar och är vågigt understrukna."
 }

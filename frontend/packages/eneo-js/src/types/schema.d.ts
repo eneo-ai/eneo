@@ -5157,6 +5157,42 @@ export interface paths {
     patch: operations["edit_flow_run_transcript_corrections"];
     trace?: never;
   };
+  "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get flow run transcript word timings
+     * @description Word timings behind one transcription step's structured transcript lines.
+     *
+     *     Each entry addresses a segment by its index in `transcription.segments` (from the
+     *     step's `input_payload_json` in the steps listing) and lists that segment's words in
+     *     order with `start`/`end` seconds relative to the segment's audio file. `probability`
+     *     is the service's placement confidence; its meaning follows `alignment`: on the
+     *     `forced` rung a word scored exactly `0.0` was interpolated over its window rather
+     *     than found in the audio and should be shown as uncertain.
+     *
+     *     Words exist only when the step stored segments and the service produced word
+     *     timings; otherwise the endpoint returns `404`. A response flagged `stale` anchors to
+     *     a transcript that has since been replaced (step re-run) and must not be used.
+     *
+     *     Current content visibility follows run-detail visibility: callers can inspect their own
+     *     runs, tenant admins can inspect runs across the tenant, trusted in-space operators can
+     *     inspect content for runs in their space, and service-key principals can inspect only
+     *     their own runs.
+     */
+    get: operations["get_flow_run_transcript_words"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/": {
     parameters: {
       query?: never;
@@ -21664,6 +21700,11 @@ export interface components {
        */
       transcript_corrections_template: string;
       /**
+       * Transcript Words Template
+       * @description GET template for the word timings behind one transcription step's structured lines. Replace `{run_id}` and `{step_id}` with values from the steps listing. Returns 404 when the step stored no words; a response flagged `stale` anchors to a transcript that has since been replaced.
+       */
+      transcript_words_template: string;
+      /**
        * Upload Step Runtime File Template
        * @description POST template for uploading files for a specific runtime step. Replace `{step_id}` with a step id from the run contract, then send `multipart/form-data` with the binary file in the `upload_file` field. Use the returned file id in `step_inputs[step_id].file_ids`; the same file id may be reused for other compatible runtime steps within this Flow.
        */
@@ -21774,6 +21815,7 @@ export interface components {
      *         },
      *         "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
      *         "transcript_corrections_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/transcript-corrections/",
+     *         "transcript_words_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/{step_id}/transcript-words/",
      *         "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/"
      *       },
      *       "space_id": "00000000-0000-0000-0000-000000000020",
@@ -22693,6 +22735,85 @@ export interface components {
       /**
        * Stale
        * @description True when the step's stored transcript changed after these corrections were written (re-run or re-transcription). Stale corrections anchor to text that no longer exists and must not be applied.
+       */
+      stale: boolean;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FlowTranscriptWordsPublic
+     * @example {
+     *       "alignment": "forced",
+     *       "created_at": "2026-03-17T10:12:00Z",
+     *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *       "segments": [
+     *         {
+     *           "segment_index": 4,
+     *           "words": [
+     *             {
+     *               "end": 0.31,
+     *               "probability": 0.99,
+     *               "start": 0.12,
+     *               "word": "Vi"
+     *             },
+     *             {
+     *               "end": 0.9,
+     *               "probability": 0.97,
+     *               "start": 0.35,
+     *               "word": "frågade"
+     *             },
+     *             {
+     *               "end": 1.93,
+     *               "probability": 0.87,
+     *               "start": 1.42,
+     *               "word": "Çagri"
+     *             }
+     *           ]
+     *         }
+     *       ],
+     *       "segments_hash": "3b8f2c0d9e5a4b7c1f6d0e2a9c8b7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c",
+     *       "stale": false,
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "updated_at": "2026-03-17T10:12:00Z"
+     *     }
+     */
+    FlowTranscriptWordsPublic: {
+      /**
+       * Alignment
+       * @description How the service placed words in time (`provider_words`, `forced`, `segment_split`, `segment_only`), or null when unknown.
+       */
+      alignment: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Segments
+       * @description Words per stored segment, in segment order; segments the service returned without words are absent.
+       */
+      segments: components["schemas"]["TranscriptSegmentWordsPublic"][];
+      /**
+       * Segments Hash
+       * @description Content hash of the segment array these words anchor to.
+       */
+      segments_hash: string;
+      /**
+       * Stale
+       * @description True when the step's stored transcript changed after these words were written (re-run or re-transcription). Stale words anchor to text that no longer exists and must not be used.
        */
       stale: boolean;
       /**
@@ -31781,6 +31902,16 @@ export interface components {
        */
       segment_index: number;
     };
+    /** TranscriptSegmentWordsPublic */
+    TranscriptSegmentWordsPublic: {
+      /**
+       * Segment Index
+       * @description Index into the step's stored `transcription.segments` array.
+       */
+      segment_index: number;
+      /** Words */
+      words: components["schemas"]["TranscriptWordPublic"][];
+    };
     /**
      * TranscriptSpeakerEditPublic
      * @example {
@@ -31820,6 +31951,34 @@ export interface components {
        * @description The label the content is reassigned to. A label not present in the transcript is allowed (splitting a merged speaker); it becomes nameable once the speaker-mapping step sees it.
        */
       speaker: string;
+    };
+    /**
+     * TranscriptWordPublic
+     * @example {
+     *       "end": 1.93,
+     *       "probability": 0.87,
+     *       "start": 1.42,
+     *       "word": "Çagri"
+     *     }
+     */
+    TranscriptWordPublic: {
+      /**
+       * End
+       * @description Seconds from the start of the segment's audio file.
+       */
+      end: number;
+      /**
+       * Probability
+       * @description Placement confidence as the service reported it, or null. On the `forced` alignment rung exactly `0.0` means the word was interpolated over its window, not found in the audio.
+       */
+      probability?: number | null;
+      /**
+       * Start
+       * @description Seconds from the start of the segment's audio file.
+       */
+      start: number;
+      /** Word */
+      word: string;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -52388,6 +52547,77 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow run step result not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_run_transcript_words: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the requested run. */
+        id: string;
+        /** @description Identifier of the run the transcription step ran in. */
+        run_id: string;
+        /** @description Identifier of the transcription step. */
+        step_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTranscriptWordsPublic"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run not found for this flow and tenant, or the step stored no word timings. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow run step transcript words not found."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

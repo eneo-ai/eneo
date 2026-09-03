@@ -911,9 +911,45 @@ def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
                 start=float(start),
                 end=float(end),
                 speaker=speaker if isinstance(speaker, str) and speaker else None,
+                words=_parse_result_words(item.get("words")),
             )
         )
     return tuple(segments)
+
+
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _parse_result_words(raw: object) -> tuple[TranscriptWord, ...] | None:
+    """Word timings from a result segment; malformed words are dropped.
+
+    A segment without a usable word list keeps ``words=None`` so a reader
+    falls back to the segment window rather than trusting partial timings.
+    """
+    if not isinstance(raw, list):
+        return None
+    words: list[TranscriptWord] = []
+    for entry in cast(list[object], raw):
+        if not isinstance(entry, dict):
+            continue
+        item = cast(dict[str, object], entry)
+        word = item.get("word")
+        start = _finite_number(item.get("start"))
+        end = _finite_number(item.get("end"))
+        if not isinstance(word, str) or start is None or end is None:
+            continue
+        words.append(
+            TranscriptWord(
+                word=word,
+                start=start,
+                end=end,
+                probability=_finite_number(item.get("probability")),
+            )
+        )
+    return tuple(words)
 
 
 def _json_object(response: httpx.Response) -> dict[str, object]:
