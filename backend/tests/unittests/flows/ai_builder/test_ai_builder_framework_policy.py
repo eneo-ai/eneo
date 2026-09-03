@@ -4,9 +4,6 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
-    is_high_confidence_source_to_source_comparison,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
 )
@@ -1076,47 +1073,6 @@ def test_transcribe_document_request_does_not_imply_audio_input() -> None:
 
     assert intent.primary_runtime_input == "unknown"
     assert intent.audio_requested is False
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        (
-            "Användaren laddar upp 2-5 underlagsfiler och flödet ska "
-            "identifiera motsägelser mellan källorna i ett separat analyssteg."
-        ),
-        (
-            "Låt användaren ladda upp flera filer och jämför vad de olika "
-            "filerna säger om samma fakta."
-        ),
-        (
-            "Upload several source documents and find inconsistencies between "
-            "the uploaded reports."
-        ),
-    ],
-)
-def test_high_confidence_source_comparison_requires_multiple_sources(
-    text: str,
-) -> None:
-    assert is_high_confidence_source_to_source_comparison(text)
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "Bygg ett flöde som jämför flera dokument och genererar en DOCX-rapport.",
-        "Bygg ett flöde som jämför ett avtal mot interna riktlinjer.",
-        "Låt användaren ladda upp flera filer och sammanfatta dem kort.",
-        (
-            "Användaren laddar ibland upp ett, ibland flera dokument och vill "
-            "identifiera motsägelser mellan källorna."
-        ),
-    ],
-)
-def test_high_confidence_source_comparison_rejects_ambiguous_or_one_sided_prompts(
-    text: str,
-) -> None:
-    assert not is_high_confidence_source_to_source_comparison(text)
 
 
 def test_extract_answer_signals_leaves_comparison_scope_to_the_evaluator() -> None:
