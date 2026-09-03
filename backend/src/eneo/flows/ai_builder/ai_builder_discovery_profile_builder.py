@@ -11,6 +11,9 @@ from eneo.flows.ai_builder.ai_builder_discovery_models import (
     DiscoveryProfile,
     ReferenceSourceResolution,
 )
+from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
+    mentions_comparison_request,
+)
 from eneo.flows.ai_builder.ai_builder_discovery_text_matcher import (
     contains_any_phrase,
     contains_any_token_prefix,
@@ -165,20 +168,6 @@ _DOCUMENT_PACKAGE_PHRASES: tuple[str, ...] = (
     "multiple documents for the same case",
 )
 
-_COMPARISON_REQUEST_MARKERS = (
-    "compare",
-    "comparison",
-    "jämför",
-    "contradiction",
-    "motsägelser",
-    "skillnader",
-    "validate",
-    "validation",
-    "validera",
-    "validering",
-    "checklista",
-    "checklist",
-)
 
 _SAME_RUN_REFERENCE_MARKERS = (
     "same run",
@@ -255,7 +244,6 @@ def build_discovery_profile(
     active_explicit_question_ids = {
         question_id
         for question_id in (
-            "processing_scope",
             "comparison_scope",
             "primary_runtime_input",
             "flow_input_architecture",
@@ -263,9 +251,6 @@ def build_discovery_profile(
             "terminal_output",
             "docx_output_mode",
             "pdf_generation_mode",
-            "final_pdf_type",
-            "output_reader",
-            "final_output_scope",
             "runtime_metadata_fields",
         )
         if has_explicit_structured_answer(active_conversation, question_id)
@@ -361,7 +346,7 @@ def _comparison_requested(
     text: str,
     planning_state: PlanningState,
 ) -> bool:
-    if contains_any_token_prefix(text, _COMPARISON_REQUEST_MARKERS):
+    if mentions_comparison_request(text):
         return True
     goal = planning_state.resolved_slots.get("post_processing_goal")
     return goal is not None and goal.value == "compare_or_validate"

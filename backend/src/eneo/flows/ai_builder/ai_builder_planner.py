@@ -544,9 +544,6 @@ class AIBuilderPlanner:
                                 schema_direction_pending=(
                                     planner_turn_request.schema_direction_pending
                                 ),
-                                discovery_assumptions=(
-                                    planner_turn_request.discovery_analysis.assumptions
-                                ),
                                 focused_classification_runtime=(
                                     FocusedSlotClassificationRuntime(
                                         litellm_client=self.litellm_client,

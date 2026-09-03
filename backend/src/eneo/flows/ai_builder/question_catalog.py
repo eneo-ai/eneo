@@ -33,7 +33,6 @@ from typing import Literal
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
     DiscoveryFamily,
-    DiscoveryImpact,
 )
 
 Locale = Literal["sv", "en"]
@@ -177,9 +176,8 @@ class QuestionTemplate:
     multiple questions per slot would require an explicit key shape and a
     matching catalog build rule.
 
-    `family`, `priority_base`, and `impact` are static discovery metadata
-    for slot-backed questions. Lower priority wins; non-slot gates may
-    interleave between catalog priorities in their own explicit maps.
+    `family` is the edit-scope owner's grouping of slot-backed questions.
+    Impact, order and defaults live in the slot interaction policy.
     """
 
     id: str
@@ -191,8 +189,6 @@ class QuestionTemplate:
     worked_examples_sv: tuple[str, ...]
     worked_examples_en: tuple[str, ...]
     family: DiscoveryFamily
-    priority_base: int
-    impact: DiscoveryImpact
     exposure: QuestionExposure = "user_requirement"
     allow_custom: bool = False
 
@@ -224,10 +220,6 @@ class QuestionTemplate:
             raise ValueError(
                 f"QuestionTemplate {self.id!r}: worked_examples_en must "
                 "contain >=1 entry"
-            )
-        if self.priority_base < 0:
-            raise ValueError(
-                f"QuestionTemplate {self.id!r}: priority_base must be non-negative"
             )
         for example in self.worked_examples_sv:
             if not example.strip():
@@ -360,8 +352,6 @@ _PRIMARY_RUNTIME_INPUT = QuestionTemplate(
         "Another system sends in a JSON payload.",
     ),
     family="input_shape",
-    priority_base=20,
-    impact="architecture",
 )
 
 
@@ -439,8 +429,6 @@ _TERMINAL_OUTPUT = QuestionTemplate(
         "Filled DOCX template delivered to the recipient.",
     ),
     family="output_artifact",
-    priority_base=30,
-    impact="architecture",
 )
 
 
@@ -496,8 +484,6 @@ _DOCX_OUTPUT_MODE = QuestionTemplate(
         "Filling the organization's Word template.",
     ),
     family="output_artifact",
-    priority_base=70,
-    impact="architecture",
 )
 
 
@@ -551,8 +537,6 @@ _PDF_GENERATION_MODE = QuestionTemplate(
         "Requested fixed PDF layout for publication.",
     ),
     family="output_artifact",
-    priority_base=72,
-    impact="architecture",
 )
 
 
@@ -622,8 +606,6 @@ _DOCUMENT_MATERIAL_SCOPE = QuestionTemplate(
         "A document package with primary document, response, and attachments.",
     ),
     family="input_shape",
-    priority_base=50,
-    impact="quality",
 )
 
 
@@ -688,8 +670,6 @@ _COMPARISON_SCOPE = QuestionTemplate(
         "Assess a new document against previously stored guidance.",
     ),
     family="case_scope",
-    priority_base=60,
-    impact="architecture",
 )
 
 
@@ -754,8 +734,6 @@ _REPORT_DISPOSITION = QuestionTemplate(
         "A short overall view without separate document sections.",
     ),
     family="output_style",
-    priority_base=55,
-    impact="quality",
 )
 
 
@@ -894,8 +872,6 @@ _POST_PROCESSING_GOAL = QuestionTemplate(
         "Read JSON and return fields according to a schema.",
     ),
     family="workflow_outcome",
-    priority_base=28,
-    impact="quality",
 )
 
 
@@ -1000,8 +976,6 @@ _STRUCTURED_IO_CONTRACT = QuestionTemplate(
         "Validate the payload against rules and return errors as JSON.",
     ),
     family="workflow_outcome",
-    priority_base=27,
-    impact="architecture",
 )
 
 
@@ -1079,8 +1053,6 @@ _RUNTIME_METADATA_FIELDS = QuestionTemplate(
         "No extra metadata — the flow works only with the uploaded material.",
     ),
     family="runtime_metadata",
-    priority_base=100,
-    impact="quality",
 )
 
 
@@ -1107,8 +1079,6 @@ _MAPPED_FILE_LIMIT = QuestionTemplate(
     worked_examples_sv=("Organisationens gräns", "3 filer per körning"),
     worked_examples_en=("Organization limit", "3 files per run"),
     family="input_shape",
-    priority_base=25,
-    impact="architecture",
     allow_custom=True,
 )
 

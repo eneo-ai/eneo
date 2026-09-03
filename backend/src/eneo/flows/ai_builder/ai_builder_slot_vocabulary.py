@@ -21,7 +21,6 @@ DiscoveryFamily = Literal[
     "runtime_metadata",
 ]
 
-DiscoveryImpact = Literal["architecture", "quality", "polish"]
 
 KNOWN_REQUIREMENT_SLOT_NAMES: frozenset[str] = frozenset(
     {

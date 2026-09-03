@@ -9,16 +9,8 @@ from eneo.flows.ai_builder.question_catalog import QUESTION_CATALOG
 _NON_SLOT_QUESTION_FAMILY: dict[str, DiscoveryFamily] = {
     # Cross-slot contradiction gate; never asked as a catalog slot question.
     "comparison_scope_conflict": "case_scope",
-    # Legacy processing-scope question; not a named architectural slot today.
-    "case_scope": "case_scope",
     # Cross-input architecture conflict; wider than the primary input slot.
     "flow_input_architecture": "input_shape",
-    # PDF style refinement after terminal output is already known.
-    "final_pdf_type": "output_style",
-    # Reader/audience style refinement, not an output artifact slot.
-    "output_reader": "output_style",
-    # Output-scope style refinement, not a terminal artifact choice.
-    "final_output_scope": "output_style",
 }
 
 _CATALOG_QUESTION_FAMILY: dict[str, DiscoveryFamily] = {

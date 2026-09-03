@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -19,9 +19,6 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     DiscoveryFamily as DiscoveryFamily,
-)
-from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
-    DiscoveryImpact,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState, ResolvedSlot
 from eneo.flows.ai_builder.question_catalog import QuestionExposure
@@ -84,18 +81,6 @@ class BackendQuestion:
     issue: DiscoveryIssue | None = None
 
 
-@dataclass(frozen=True)
-class DiscoveryCandidate:
-    issue_id: str
-    question_id: str | None
-    impact: DiscoveryImpact
-    confidence: DiscoveryConfidence
-    assumption_safe: bool
-    family: str
-    resolved_by: DiscoveryResolvedBy
-    evidence: tuple[str, ...] = field(default_factory=tuple)
-
-
 @dataclass(frozen=True, slots=True)
 class ReferenceSourceResolution:
     status: ReferenceSourceStatus
@@ -107,7 +92,6 @@ class DiscoveryAnalysis:
     issues: tuple[DiscoveryIssue, ...]
     mvs_met: bool = True
     selected_question_ids: tuple[str, ...] = ()
-    assumptions: tuple[str, ...] = ()
 
     @property
     def blocking_issues(self) -> tuple[DiscoveryIssue, ...]:

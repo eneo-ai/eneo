@@ -283,8 +283,13 @@ class TestQuestionBudget:
             ),
         )
 
-        assert analysis.ready_for_confirmation
-        assert analysis.blocking_issues == ()
+        # The quality slots are assumed, never asked. What the brief still
+        # leaves open is the comparison it asks for and the disposition of a
+        # report over several documents: both change the flow's shape.
+        assert set(analysis.selected_question_ids) <= {
+            "comparison_scope",
+            "report_disposition",
+        }
         assert {
             "document_material_scope",
             "runtime_metadata_fields",

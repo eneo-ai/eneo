@@ -233,10 +233,7 @@ def resolve_edit_scope(
     ):
         active_families.add("runtime_metadata")
 
-    if _mentions_output_style_change(
-        normalized_text,
-        active_explicit_question_ids or set(),
-    ):
+    if _mentions_output_style_change(normalized_text):
         active_families.add("output_style")
 
     if _mentions_case_scope_change(
@@ -349,23 +346,12 @@ def _mentions_case_scope_change(
     text: str,
     active_explicit_question_ids: set[str],
 ) -> bool:
-    if (
-        "comparison_scope" in active_explicit_question_ids
-        or "processing_scope" in active_explicit_question_ids
-    ):
+    if "comparison_scope" in active_explicit_question_ids:
         return True
     return has_change_semantics(text) and contains_any_phrase(
         text, _CASE_SCOPE_CHANGE_PHRASES
     )
 
 
-def _mentions_output_style_change(
-    text: str,
-    active_explicit_question_ids: set[str],
-) -> bool:
-    if any(
-        key in active_explicit_question_ids
-        for key in ("final_pdf_type", "output_reader", "final_output_scope")
-    ):
-        return True
+def _mentions_output_style_change(text: str) -> bool:
     return has_change_semantics(text) and contains_any_phrase(text, _OUTPUT_STYLE_HINTS)

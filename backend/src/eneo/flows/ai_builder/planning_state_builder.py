@@ -8,14 +8,13 @@ and committed architecture state.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_aggregation_intent import (
-    comparison_scope_is_relevant,
     report_disposition_is_relevant,
     report_disposition_is_relevant_for_state,
 )
@@ -37,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
+    mentions_comparison_request,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -55,7 +55,6 @@ from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
     extract_answer_signals,
-    has_explicit_docx_mode_text,
     has_explicit_pdf_mode_text,
     has_explicit_structured_answer,
     resolve_output_intent,
@@ -95,6 +94,11 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ResolvedSlotClassificationOutcome,
     SlotClassificationResult,
     planning_reference_cites_source,
+)
+from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
+    SLOT_INTERACTION_POLICIES,
+    evaluate_slot_interaction,
+    slot_is_relevant,
 )
 from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     KNOWN_REQUIREMENT_SLOT_NAMES,
@@ -138,32 +142,6 @@ from eneo.flows.domain.mapped_execution_policy import (
     max_mapped_items_per_step,
 )
 from eneo.json_types import JsonObject
-
-
-@dataclass(frozen=True, slots=True)
-class _PolicyDefaultRule:
-    default_value: str
-    has_explicit_text: Callable[[str], bool]
-
-
-def _never_explicit_text(_: str) -> bool:
-    return False
-
-
-_POLICY_DEFAULT_RULES: dict[str, _PolicyDefaultRule] = {
-    "document_material_scope": _PolicyDefaultRule(
-        default_value="flexible_document_case",
-        has_explicit_text=_never_explicit_text,
-    ),
-    "docx_output_mode": _PolicyDefaultRule(
-        default_value="generated_docx",
-        has_explicit_text=has_explicit_docx_mode_text,
-    ),
-    "pdf_generation_mode": _PolicyDefaultRule(
-        default_value="generated_pdf",
-        has_explicit_text=has_explicit_pdf_mode_text,
-    ),
-}
 
 CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
     {
@@ -1627,58 +1605,57 @@ def apply_policy_defaults_from_resolved_slots(
     *,
     freeform_text: str,
 ) -> None:
-    primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
-    if primary_runtime_input is not None:
+    """Take every default the interaction policy says to assume this turn.
+
+    The only writer of policy defaults, for the live fold and a replay alike.
+    The policy decides (`assume` needs the slot relevant with its prerequisites
+    resolved, unresolved, and free of explicit uncertainty); the explicit-text
+    guard keeps a default off a slot the user's own words already speak to.
+    """
+
+    for policy in SLOT_INTERACTION_POLICIES.values():
+        if policy.when_unknown != "assume" or policy.default_value is None:
+            continue
         if (
-            "document_material_scope" not in state.resolved_slots
-            and "document_material_scope" not in state.slot_uncertainties
-            and primary_runtime_input.value in {"documents", "text_and_documents"}
+            evaluate_slot_interaction(policy, state, freeform_text=freeform_text)
+            != "assume"
         ):
-            state.resolved_slots["document_material_scope"] = ResolvedSlot(
-                name="document_material_scope",
-                value="flexible_document_case",
-                source="policy_default",
-                evidence=[
-                    "policy_default:document_material_scope=flexible_document_case",
-                ],
-                confidence="medium",
-            )
-    terminal_output = state.resolved_slots.get("terminal_output")
-    if terminal_output is not None:
-        if (
-            terminal_output.value == "docx_document"
-            and "docx_output_mode" not in state.resolved_slots
-            and not has_explicit_docx_mode_text(freeform_text)
-        ):
-            state.resolved_slots["docx_output_mode"] = ResolvedSlot(
-                name="docx_output_mode",
-                value="generated_docx",
-                source="policy_default",
-                evidence=["policy_default:docx_output_mode=generated_docx"],
-                confidence="medium",
-            )
-        if (
-            terminal_output.value == "pdf_document"
-            and "pdf_generation_mode" not in state.resolved_slots
-            and not has_explicit_pdf_mode_text(freeform_text)
-        ):
-            state.resolved_slots["pdf_generation_mode"] = ResolvedSlot(
-                name="pdf_generation_mode",
-                value="generated_pdf",
-                source="policy_default",
-                evidence=["policy_default:pdf_generation_mode=generated_pdf"],
-                confidence="medium",
-            )
+            continue
+        state.resolved_slots[policy.slot_name] = ResolvedSlot(
+            name=policy.slot_name,
+            value=policy.default_value,
+            source="policy_default",
+            evidence=[f"policy_default:{policy.slot_name}={policy.default_value}"],
+            confidence="medium",
+        )
     _reconcile_dependent_slot_relevance(state)
+
+
+# The slots relevance reads. A prerequisite the model may replace on this call
+# is projected as unresolved before relevance is judged, so a slot that only
+# dropped out through a replaceable guess is still offered to the model.
+_RELEVANCE_PREREQUISITE_SLOTS: tuple[str, ...] = (
+    "primary_runtime_input",
+    "terminal_output",
+    "document_material_scope",
+    "docx_output_mode",
+)
 
 
 def llm_resolvable_slot_values_for_state(
     state: PlanningState,
 ) -> dict[str, frozenset[str]]:
+    projected = state.model_copy(deep=True)
+    for slot_name in _RELEVANCE_PREREQUISITE_SLOTS:
+        if _model_slot_can_replace(
+            existing_slot=projected.resolved_slots.get(slot_name),
+            model_confidence="high",
+        ):
+            projected.resolved_slots.pop(slot_name, None)
     candidate_slots = {
         slot_name
         for slot_name in LLM_RESOLVABLE_SLOT_NAMES
-        if _model_slot_is_relevant(slot_name=slot_name, state=state)
+        if _model_slot_is_relevant(slot_name=slot_name, state=projected)
         if _model_slot_can_replace(
             existing_slot=state.resolved_slots.get(slot_name),
             model_confidence="high",
@@ -1694,7 +1671,7 @@ def _model_slot_is_persistable(slot_name: str) -> bool:
 
 
 def _model_slot_is_relevant(*, slot_name: str, state: PlanningState) -> bool:
-    return _dependent_slot_is_relevant(
+    return slot_is_relevant(
         slot_name=slot_name,
         state=state,
         unresolved_values_are_relevant=True,
@@ -1803,60 +1780,19 @@ def _template_fill_docx_mode(template: FileRoleEvidence) -> ResolvedSlot:
 
 def _reconcile_dependent_slot_relevance(state: PlanningState) -> None:
     for slot_name in tuple(state.resolved_slots):
-        if not _dependent_slot_is_relevant(
+        if not slot_is_relevant(
             slot_name=slot_name,
             state=state,
             unresolved_values_are_relevant=True,
-            require_commit_grade_primary_input=False,
         ):
             state.resolved_slots.pop(slot_name, None)
     for slot_name in tuple(state.slot_uncertainties):
-        if not _dependent_slot_is_relevant(
+        if not slot_is_relevant(
             slot_name=slot_name,
             state=state,
             unresolved_values_are_relevant=True,
-            require_commit_grade_primary_input=False,
         ):
             state.slot_uncertainties.pop(slot_name, None)
-
-
-def _dependent_slot_is_relevant(
-    *,
-    slot_name: str,
-    state: PlanningState,
-    unresolved_values_are_relevant: bool,
-    require_commit_grade_primary_input: bool,
-) -> bool:
-    primary_runtime_input = state.resolved_slots.get("primary_runtime_input")
-    terminal_output = state.resolved_slots.get("terminal_output")
-    primary_value = None
-    if primary_runtime_input is not None and (
-        not require_commit_grade_primary_input or primary_runtime_input.is_commit_grade
-    ):
-        primary_value = primary_runtime_input.value
-    terminal_value = terminal_output.value if terminal_output is not None else None
-
-    if slot_name in {"comparison_scope", "document_material_scope"}:
-        return comparison_scope_is_relevant(
-            primary_runtime_input=primary_value,
-            unresolved_values_are_relevant=unresolved_values_are_relevant,
-        )
-    if slot_name == "report_disposition":
-        return report_disposition_is_relevant_for_state(
-            state,
-            unresolved_values_are_relevant=unresolved_values_are_relevant,
-        )
-    if slot_name == "docx_output_mode":
-        return terminal_value is None or terminal_value == "docx_document"
-    if slot_name == "pdf_generation_mode":
-        return terminal_value is None or terminal_value == "pdf_document"
-    if slot_name != "structured_io_contract":
-        return True
-    input_incompatible = primary_value is not None and primary_value != "json"
-    output_incompatible = (
-        terminal_value is not None and terminal_value != "structured_json"
-    )
-    return not input_incompatible and not output_incompatible
 
 
 def _model_slot_can_replace(
@@ -2065,13 +2001,15 @@ def _resolve_slots(
             slot_value=report_disposition,
         )
 
-    # No policy default: ambiguous comparison prompts must ask for architecture.
+    # Unambiguous wording ("flera dokument i samma körning") settles the scope
+    # as a text rule; anything less leaves it to the interaction policy, which
+    # asks whenever the brief speaks of comparing.
     comparison_scope = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
         requirements_summary_values=requirements_summary_values,
         question_id="comparison_scope",
-    )
+    ) or _comparison_scope_from_text(freeform_text)
     if comparison_scope is not None:
         slots["comparison_scope"] = _build_slot(
             name="comparison_scope",
@@ -2491,6 +2429,35 @@ def _requirements_summary_slot(name: str, value: str) -> ResolvedSlot:
     )
 
 
+def _comparison_scope_from_text(freeform_text: str) -> str | None:
+    """What the wording says about comparing, when it says it clearly.
+
+    "Flera dokument i samma körning" names the scope outright. A brief that
+    compares the documents of a package it has already described as several
+    related documents compares them within the run; only a comparison whose
+    counterpart is unnamed (a policy, earlier material) is left open.
+    """
+
+    signalled = _single_text_signal(freeform_text, question_id="comparison_scope")
+    if signalled is not None:
+        return signalled
+    return "same_run_compare" if _same_run_comparison_implied(freeform_text) else None
+
+
+def _same_run_comparison_implied(freeform_text: str) -> bool:
+    signals = infer_answer_signals_from_text(freeform_text)
+    return signals.get("document_material_scope") == {
+        "multiple_documents_case"
+    } and mentions_comparison_request(freeform_text)
+
+
+def _single_text_signal(freeform_text: str, *, question_id: str) -> str | None:
+    values = infer_answer_signals_from_text(freeform_text).get(question_id)
+    if not values or len(values) != 1:
+        return None
+    return next(iter(values))
+
+
 def _heuristic_slot_confidence(
     *,
     question_id: str,
@@ -2507,6 +2474,7 @@ def _heuristic_slot_confidence(
         "document_material_scope",
         "comparison_scope",
         "report_disposition",
+        "structured_io_contract",
     }:
         return _heuristic_text_signal_confidence(
             question_id=question_id,
@@ -2565,8 +2533,8 @@ def _heuristic_docx_output_mode_confidence(
     slot_value: str,
     freeform_text: str,
 ) -> SlotConfidence:
-    if not has_explicit_docx_mode_text(freeform_text):
-        return "medium"
+    # The output intent resolver owns what the text says about the mode; a
+    # mode it reads the same way is settled wording, marker list or not.
     output_intent = resolve_output_intent(freeform_text, {})
     return "high" if output_intent.docx_output_mode == slot_value else "medium"
 
@@ -2588,7 +2556,15 @@ def _heuristic_text_signal_confidence(
     freeform_text: str,
 ) -> SlotConfidence:
     signals = infer_answer_signals_from_text(freeform_text)
-    return "high" if signals.get(question_id) == {slot_value} else "medium"
+    if signals.get(question_id) == {slot_value}:
+        return "high"
+    if (
+        question_id == "comparison_scope"
+        and slot_value == "same_run_compare"
+        and _same_run_comparison_implied(freeform_text)
+    ):
+        return "high"
+    return "medium"
 
 
 def _is_policy_default_slot(
@@ -2597,11 +2573,12 @@ def _is_policy_default_slot(
     slot_value: str,
     freeform_text: str,
 ) -> bool:
-    rule = _POLICY_DEFAULT_RULES.get(question_id)
+    policy = SLOT_INTERACTION_POLICIES.get(question_id)
     return (
-        rule is not None
-        and slot_value == rule.default_value
-        and not rule.has_explicit_text(freeform_text)
+        policy is not None
+        and policy.when_unknown == "assume"
+        and slot_value == policy.default_value
+        and not policy.has_explicit_text(freeform_text)
     )
 
 

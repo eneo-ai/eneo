@@ -33,14 +33,10 @@ from eneo.flows.ai_builder.ai_builder_discovery_questions import (
     comparison_scope_question,
     document_material_scope_question,
     docx_output_mode_question,
-    final_output_scope_question,
-    final_pdf_type_question,
     flow_input_architecture_question,
-    output_reader_question,
     pdf_generation_mode_question,
     post_processing_goal_question,
     primary_runtime_input_question,
-    processing_scope_question,
     runtime_metadata_fields_question,
     terminal_output_question,
 )
@@ -93,7 +89,6 @@ class TestDiscoveryQuestionsRenderNeutrality:
         (builder, locale) combination in the discovery-questions module.
         """
         builders = (
-            ("processing_scope", processing_scope_question),
             ("primary_runtime_input", primary_runtime_input_question),
             ("flow_input_architecture", flow_input_architecture_question),
             ("document_material_scope", document_material_scope_question),
@@ -102,10 +97,7 @@ class TestDiscoveryQuestionsRenderNeutrality:
             ("comparison_scope", comparison_scope_question),
             ("terminal_output", terminal_output_question),
             ("docx_output_mode", docx_output_mode_question),
-            ("output_reader", output_reader_question),
-            ("final_output_scope", final_output_scope_question),
             ("runtime_metadata_fields", runtime_metadata_fields_question),
-            ("final_pdf_type", final_pdf_type_question),
             ("pdf_generation_mode", pdf_generation_mode_question),
         )
         locales: tuple[DiscoveryLanguage, ...] = ("sv", "en")

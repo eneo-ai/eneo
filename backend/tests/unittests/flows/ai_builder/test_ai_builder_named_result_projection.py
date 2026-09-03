@@ -1209,7 +1209,6 @@ def test_the_user_is_told_that_a_field_they_nested_will_be_top_level(
     disclosure = build_requirements_disclosure(
         state,
         ui_language="sv",
-        discovery_assumptions=(),
     )
     assert "De namngivna delarna byggs på översta nivån" in disclosure.summary
     assert "översta nivån" in disclosure.summary
@@ -1236,7 +1235,6 @@ def test_an_edit_confirmation_shows_no_placement_limitation() -> None:
     disclosure = build_requirements_disclosure(
         state,
         ui_language="sv",
-        discovery_assumptions=(),
         is_edit_mode=True,
     )
 
@@ -1261,7 +1259,6 @@ def test_a_declared_output_schema_shows_no_placement_limitation() -> None:
     disclosure = build_requirements_disclosure(
         state,
         ui_language="sv",
-        discovery_assumptions=(),
     )
 
     assert "översta nivån" not in disclosure.summary
@@ -1284,7 +1281,6 @@ def _refusal_or_confirmation(
     disclosure = build_requirements_disclosure(
         state,
         ui_language="sv",
-        discovery_assumptions=(),
         is_edit_mode=is_edit_mode,
     )
     return resolve_turn_control(

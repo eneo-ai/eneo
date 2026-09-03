@@ -116,7 +116,6 @@ def _request(
     new_messages_start: int = 0,
     planning_state: PlanningState | None = None,
     confirmed_requirements_version: str | None = None,
-    discovery_assumptions: tuple[str, ...] = (),
     flow: object | None = None,
     ui_language: str = "en",
     selected_discovery_question_ids: tuple[str, ...] = (),
@@ -150,7 +149,6 @@ def _request(
         attachment_context=attachment_context,
         schema_candidates=schema_candidates,
         schema_direction_pending=schema_direction_pending,
-        discovery_assumptions=discovery_assumptions,
         focused_classification_runtime=focused_classification_runtime,
     )
 
@@ -1273,7 +1271,6 @@ async def test_architecture_commit_chains_persisted_requirements_confirmation() 
             repo=repo,
             decision=decision,
             conversation=conversation,
-            discovery_assumptions=("The report should keep one section per source.",),
         )
     )
 
@@ -1281,9 +1278,6 @@ async def test_architecture_commit_chains_persisted_requirements_confirmation() 
         "status",
         "requirements_summary",
     ]
-    assert "The report should keep one section per source." in (
-        result.events[1].data.assumptions
-    )
     assert repo.commit_turn.await_count == 2
     first_commit = repo.commit_turn.await_args_list[0].kwargs
     assert first_commit["architecture_commit"] is not None

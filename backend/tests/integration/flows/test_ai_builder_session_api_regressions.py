@@ -5706,7 +5706,6 @@ async def test_classified_output_drift_revises_before_persisting_question(
                 attachment_context=prepared.attachment_context,
                 schema_candidates=prepared.schema_candidates,
                 schema_direction_pending=prepared.schema_direction_pending,
-                discovery_assumptions=prepared.discovery_analysis.assumptions,
             )
         )
         await repo.complete_session_turn(turn=current_turn)

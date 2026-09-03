@@ -937,7 +937,7 @@ def test_slot_classification_input_keeps_parser_shape_invariants() -> None:
 
 
 def test_classifier_diagnostics_never_reach_the_requirements_disclosure() -> None:
-    analysis = analyze_discovery(
+    analyze_discovery(
         [ConversationMessage(role="user", content="Build a document summary flow.")],
         planning_state=_resolved_state(),
         slot_classification_result=slot_classification_result(
@@ -950,8 +950,6 @@ def test_classifier_diagnostics_never_reach_the_requirements_disclosure() -> Non
             ),
         ),
     )
-
-    assert analysis.assumptions == ()
 
 
 @pytest.mark.asyncio
@@ -1578,7 +1576,8 @@ async def test_same_turn_inferred_template_still_asks_docx_mode() -> None:
         evidence_level="inferred",
     )
 
-    assert state.resolved_slots["docx_output_mode"].source == "policy_default"
+    # No generated default while the attached template keeps the mode open.
+    assert "docx_output_mode" not in state.resolved_slots
     analysis = analyze_discovery(conversation, planning_state=state)
     assert "docx_output_mode" in analysis.selected_question_ids
 
@@ -3770,10 +3769,9 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
     assert "final_output_mode" not in question_ids
     assert question_ids == set()
     assert analysis.ready_for_confirmation is True
-    assert (
-        "Antar tills vidare att inga extra formulärfält behövs vid körning; "
-        "du kan lägga till dem innan du bekräftar."
-    ) in analysis.assumptions
+    assert result.planning_state.resolved_slots["runtime_metadata_fields"].source == (
+        "policy_default"
+    )
     assert result.slot_classification_metadata is not None
     assert result.slot_classification_metadata.provider == (
         slot_classification_provider_identity(
@@ -3923,10 +3921,9 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
     assert "final_output_mode" not in question_ids
     assert question_ids == set()
     assert analysis.ready_for_confirmation is True
-    assert (
-        "Antar tills vidare att inga extra formulärfält behövs vid körning; "
-        "du kan lägga till dem innan du bekräftar."
-    ) in analysis.assumptions
+    assert result.planning_state.resolved_slots["runtime_metadata_fields"].source == (
+        "policy_default"
+    )
     assert result.slot_classification_metadata is not None
     assert {
         slot.slot_name: slot.value for slot in result.slot_classification_metadata.slots
@@ -4001,10 +3998,9 @@ async def test_runtime_uses_one_classification_for_state_and_default_assumption(
     assert message is None
     assert result.discovery_analysis.next_issue is None
     assert result.discovery_analysis.ready_for_confirmation is True
-    assert (
-        "Antar tills vidare att inga extra formulärfält behövs vid körning; "
-        "du kan lägga till dem innan du bekräftar."
-    ) in result.discovery_analysis.assumptions
+    assert result.planning_state.resolved_slots["runtime_metadata_fields"].source == (
+        "policy_default"
+    )
     assert result.planning_state.resolved_slots["primary_runtime_input"].source == (
         "model"
     )

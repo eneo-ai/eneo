@@ -624,12 +624,19 @@ def _apply_attachment_output_evidence(
 def _complete_runtime_discovery_context(
     state: PlanningState,
     *,
+    freeform_text: str,
     attachment_context: AIBuilderAttachmentContext | None,
     schema_candidates: tuple[DeclaredSchemaCandidate, ...],
     schema_direction_pending: bool,
     slot_classification_result: SlotClassificationResult | None = None,
     slot_classification_metadata: SlotClassificationMetadata | None = None,
 ) -> RuntimeDiscoveryContext:
+    # Every path ends here, classified or not, so every path takes the policy
+    # defaults. Classification can name the terminal output, the template
+    # role, or both in this same turn, so the template evidence is only
+    # complete now, before defaults fill a mode the attachment already answers.
+    resolve_docx_mode_from_template_evidence(state)
+    apply_policy_defaults_from_resolved_slots(state, freeform_text=freeform_text)
     if not schema_direction_pending:
         state = _apply_attachment_output_evidence(state, attachment_context)
     return RuntimeDiscoveryContext(
@@ -671,6 +678,7 @@ async def build_runtime_discovery_context(
         attachment_file_roles=attachment_file_roles(attachment_context),
         mapped_execution_policy=mapped_execution_policy,
     )
+    text = aggregate_unprompted_user_text(conversation)
     structured_direction = resolve_structured_schema_direction(
         conversation=conversation,
         candidates=schema_candidates,
@@ -694,12 +702,12 @@ async def build_runtime_discovery_context(
     ):
         return _complete_runtime_discovery_context(
             state,
+            freeform_text=text,
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
         )
 
-    text = aggregate_unprompted_user_text(conversation)
     classification_input = build_slot_classification_input(
         conversation,
         attachment_context,
@@ -707,6 +715,7 @@ async def build_runtime_discovery_context(
     if not classification_input.sources:
         return _complete_runtime_discovery_context(
             state,
+            freeform_text=text,
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
@@ -737,6 +746,7 @@ async def build_runtime_discovery_context(
     if not has_unclassified_semantic_text:
         return _complete_runtime_discovery_context(
             state,
+            freeform_text=text,
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
@@ -775,6 +785,7 @@ async def build_runtime_discovery_context(
         )
         return _complete_runtime_discovery_context(
             state,
+            freeform_text=text,
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=False,
@@ -855,6 +866,7 @@ async def build_runtime_discovery_context(
     if attempt.outcome != "resolved":
         return _complete_runtime_discovery_context(
             state,
+            freeform_text=text,
             attachment_context=attachment_context,
             schema_candidates=schema_candidates,
             schema_direction_pending=schema_direction_pending,
@@ -966,13 +978,9 @@ async def build_runtime_discovery_context(
             direction=classified_direction,
         )
         schema_direction_pending = False
-    # Classification can name the terminal output, the template role, or both in
-    # this same turn, so the template evidence is only complete now — before
-    # defaults fill a mode the attachment already answers.
-    resolve_docx_mode_from_template_evidence(state)
-    apply_policy_defaults_from_resolved_slots(state, freeform_text=text)
     return _complete_runtime_discovery_context(
         state,
+        freeform_text=text,
         attachment_context=attachment_context,
         schema_candidates=schema_candidates,
         schema_direction_pending=schema_direction_pending,
