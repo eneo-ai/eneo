@@ -5,10 +5,13 @@ import json
 import pytest
 
 from eneo.flows.runtime.speaker_mapping_runtime import (
+    SPEAKER_MAPPING_INFER_INSTRUCTIONS,
+    SPEAKER_MAPPING_INSTRUCTIONS,
     SpeakerMappingValidationError,
     build_speaker_mapping_question,
     mapping_to_names,
     resolve_participants,
+    speaker_mapping_instructions,
     validate_speaker_mapping,
 )
 
@@ -167,3 +170,29 @@ def test_free_text_names_are_allowed_when_permitted() -> None:
         allow_free_text=True,
     )
     assert mapping_to_names(mapping) == {"SPEAKER_00": "Okänd Person"}
+
+
+def test_question_carries_the_opening_only_when_given() -> None:
+    plain = json.loads(
+        build_speaker_mapping_question(inventory=INVENTORY, participants=PARTICIPANTS)
+    )
+    assert "opening" not in plain
+
+    with_opening = json.loads(
+        build_speaker_mapping_question(
+            inventory=INVENTORY,
+            participants=[],
+            opening=["SPEAKER_00: Hej Gunnar, jag heter Maria."],
+        )
+    )
+    assert with_opening["opening"] == ["SPEAKER_00: Hej Gunnar, jag heter Maria."]
+
+
+def test_instructions_switch_on_name_inference() -> None:
+    fixed = speaker_mapping_instructions(infer_names=False)
+    inferring = speaker_mapping_instructions(infer_names=True)
+    assert fixed == SPEAKER_MAPPING_INSTRUCTIONS
+    assert inferring == SPEAKER_MAPPING_INFER_INSTRUCTIONS
+    assert "Never invent a name" in fixed
+    assert "Never invent a name" not in inferring
+    assert "participant list never" in inferring

@@ -12,17 +12,34 @@
   let {
     rows,
     participants,
+    inferred = false,
     disabled = false,
     onChange
   }: {
     rows: SpeakerMappingRow[];
     participants: string[];
+    /** The proposal may name people the conversation revealed. */
+    inferred?: boolean;
     disabled?: boolean;
     onChange: (rows: SpeakerMappingRow[]) => void;
   } = $props();
 
-  // Rows whose name is not a participant use the free-text input; a reviewer
-  // who picked "someone else" but has not typed yet is tracked separately.
+  // Names the model found in the conversation rather than picked from the
+  // list, so the reviewer knows which proposals to look at twice.
+  const inferredLabels = $derived(
+    new Set(
+      inferred
+        ? rows
+            .filter((row) => row.name !== null && !participants.includes(row.name))
+            .map((row) => row.label)
+        : []
+    )
+  );
+
+  // Rows whose name is not a listed participant (proposed from the
+  // conversation, or typed) keep the free-text input visible so a misspelling
+  // is corrected in place; a reviewer who picked "someone else" but has not
+  // typed yet is tracked separately.
   const forcedOther = new SvelteSet<string>();
   // Names typed for one speaker are offered to the others: diarization often
   // splits one person into several labels.
@@ -39,7 +56,7 @@
       rows
         .filter(
           (row) =>
-            forcedOther.has(row.label) || (row.name !== null && !knownNames.includes(row.name))
+            forcedOther.has(row.label) || (row.name !== null && !participants.includes(row.name))
         )
         .map((row) => row.label)
     )
@@ -64,7 +81,8 @@
   function onSelect(row: SpeakerMappingRow, value: string | undefined) {
     if (value === OTHER) {
       forcedOther.add(row.label);
-      update(row.label, { name: knownNames.includes(row.name ?? "") ? "" : row.name });
+      // A listed participant is replaced by a blank; any other name stays put.
+      update(row.label, { name: participants.includes(row.name ?? "") ? "" : row.name });
       return;
     }
     forcedOther.delete(row.label);
@@ -90,7 +108,14 @@
         <span class="text-muted text-xs">
           {m.flow_run_review_speakers_lines({ count: String(row.lineCount) })}
         </span>
-        <Badge variant="outline" class="ml-auto text-xs">{confidenceText(row.confidence)}</Badge>
+        {#if inferredLabels.has(row.label)}
+          <Badge variant="outline" class="ml-auto text-xs">
+            {m.flow_run_review_speakers_inferred()}
+          </Badge>
+          <Badge variant="outline" class="text-xs">{confidenceText(row.confidence)}</Badge>
+        {:else}
+          <Badge variant="outline" class="ml-auto text-xs">{confidenceText(row.confidence)}</Badge>
+        {/if}
       </div>
       {#if row.samples.length > 0}
         <ul class="text-secondary flex flex-col gap-1 text-xs leading-relaxed">

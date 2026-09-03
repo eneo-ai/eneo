@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildEditedMapping,
   buildSpeakerRows,
+  getSpeakerMappingInferNames,
   getSpeakerMappingParticipants,
   isSpeakerMappingCheckpoint
 } from "./speakerMappingReview";
@@ -29,6 +30,17 @@ describe("speaker mapping review", () => {
     expect(isSpeakerMappingCheckpoint(payload)).toBe(true);
     expect(isSpeakerMappingCheckpoint({ text: "x", structured: {} })).toBe(false);
     expect(isSpeakerMappingCheckpoint(null)).toBe(false);
+  });
+
+  it("reads whether names may come from the conversation, off by default", () => {
+    expect(getSpeakerMappingInferNames(payload)).toBe(false);
+    expect(
+      getSpeakerMappingInferNames({
+        ...payload,
+        speaker_mapping: { ...payload.speaker_mapping, infer_names: true }
+      })
+    ).toBe(true);
+    expect(getSpeakerMappingInferNames(null)).toBe(false);
   });
 
   it("builds one row per inventory speaker with the proposal merged in", () => {

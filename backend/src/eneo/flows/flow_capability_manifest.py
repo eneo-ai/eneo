@@ -373,8 +373,11 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
             (
                 "A completion model proposes which participant each diarized "
                 "speaker label (`SPEAKER_NN`) in the previous step's transcript "
-                "is, using a participant list from a run-time form field. The "
-                "step output is the mapping (structured) plus the transcript "
+                "is, using a participant list from a run-time form field. With "
+                "`output_config.speaker_mapping.infer_names` true the model also "
+                "reads the opening of the conversation and may propose names or "
+                "roles it finds there, so the participant field becomes "
+                "optional. The step output is the mapping (structured) plus the transcript "
                 "with names applied (text), and the run always pauses for an "
                 "edit review so a person confirms the mapping, corrects the "
                 "text and re-attributes speakers."

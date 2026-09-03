@@ -137,5 +137,16 @@ describe("speaker_mapping config validation", () => {
       "p:"
     );
     expect(ok.has("p:speaker_mapping_no_participants_field:2")).toBe(false);
+    // The conversation itself is the name source when inference is on.
+    const inferring = computeStepConfigValidationIssues(
+      [
+        {
+          ...step,
+          output_config: { speaker_mapping: { participants_field: null, infer_names: true } }
+        }
+      ],
+      "p:"
+    );
+    expect(inferring.has("p:speaker_mapping_no_participants_field:2")).toBe(false);
   });
 });

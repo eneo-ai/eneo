@@ -4,7 +4,10 @@ import { getTemplateFillOutputConfig } from "./templateFillConfig";
 import { createDefaultHttpConfig } from "./components/http/httpConfigDefaults";
 import { parseHttpAuthoredConfig } from "./components/http/httpConfigTypes";
 import { getOutputModeCompatibilityIssue } from "./flowStepTypes";
-import { getSpeakerMappingParticipantsField } from "./speakerMappingConfig";
+import {
+  getSpeakerMappingInferNames,
+  getSpeakerMappingParticipantsField
+} from "./speakerMappingConfig";
 
 /** Matches the synthetic token for a reference to a since-deleted step. */
 export const DELETED_STEP_TOKEN = /\{\{step_\d+_deleted/;
@@ -33,9 +36,12 @@ export function computeStepConfigValidationIssues(
         ]);
       }
     }
+    // With name inference on, the conversation is the name source and a
+    // participants field is optional.
     if (
       step.output_mode === "speaker_mapping" &&
-      getSpeakerMappingParticipantsField(step) === null
+      getSpeakerMappingParticipantsField(step) === null &&
+      !getSpeakerMappingInferNames(step)
     ) {
       entries.set(`${prefix}speaker_mapping_no_participants_field:${step.step_order}`, [
         "speaker_mapping_no_participants_field"

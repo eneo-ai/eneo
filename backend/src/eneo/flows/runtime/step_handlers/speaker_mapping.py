@@ -21,9 +21,11 @@ from eneo.flows.domain.runtime import (
 )
 from eneo.flows.domain.speaker_labels import (
     apply_speaker_names,
+    build_opening_excerpt,
     build_speaker_inventory,
 )
 from eneo.flows.domain.speaker_mapping_config import (
+    speaker_mapping_infer_names,
     speaker_mapping_participants_field,
 )
 from eneo.flows.enums import FlowOutputMode
@@ -32,11 +34,11 @@ from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_run_provenance import FlowResolvedInputEdge
 from eneo.flows.output_modes import speaker_mapping_violation
 from eneo.flows.runtime.speaker_mapping_runtime import (
-    SPEAKER_MAPPING_INSTRUCTIONS,
     SpeakerMappingValidationError,
     build_speaker_mapping_question,
     mapping_to_names,
     resolve_participants,
+    speaker_mapping_instructions,
     validate_speaker_mapping,
 )
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
@@ -136,16 +138,21 @@ class SpeakerMappingStepHandler:
             )
         participants_field = speaker_mapping_participants_field(step.output_config)
         participants = resolve_participants(run.input_payload_json, participants_field)
+        infer_names = speaker_mapping_infer_names(step.output_config)
 
-        # The model sees the speaker inventory, not the whole transcript, and a
-        # fixed instruction block; the frozen call is what activation records.
+        # The model sees the speaker inventory (plus the conversation's opening
+        # when it may infer names), not the whole transcript, and a fixed
+        # instruction block; the frozen call is what activation records.
         question = build_speaker_mapping_question(
-            inventory=inventory, participants=participants
+            inventory=inventory,
+            participants=participants,
+            opening=build_opening_excerpt(source_text) if infer_names else None,
         )
+        fixed_instructions = speaker_mapping_instructions(infer_names=infer_names)
         instructions = (
-            f"{prepared.effective_prompt}\n\n{SPEAKER_MAPPING_INSTRUCTIONS}"
+            f"{prepared.effective_prompt}\n\n{fixed_instructions}"
             if prepared.effective_prompt.strip()
-            else SPEAKER_MAPPING_INSTRUCTIONS
+            else fixed_instructions
         )
         call_prepared = replace(
             prepared,
@@ -175,7 +182,7 @@ class SpeakerMappingStepHandler:
                 output.structured_output,
                 inventory=inventory,
                 participants=participants,
-                allow_free_text=not participants,
+                allow_free_text=infer_names or not participants,
             )
         except SpeakerMappingValidationError as exc:
             raise attach_typed_failure_context(
@@ -217,6 +224,7 @@ class SpeakerMappingStepHandler:
                 "source_attempt_no": source_attempt_no,
                 "participants_field": participants_field,
                 "participants": participants,
+                "infer_names": infer_names,
                 "inventory": inventory,
             }
         }

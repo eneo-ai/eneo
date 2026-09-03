@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -294,3 +295,66 @@ async def test_wrong_io_tuple_fails_before_any_model_call(harness) -> None:
             version_metadata=None,
             attempt_no=1,
         )
+
+
+async def test_name_inference_accepts_names_outside_the_list(harness) -> None:
+    calls, activate = harness
+    calls["structured"] = {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": "Maria",
+                "confidence": "high",
+                "evidence": "Presenterar sig som Maria.",
+            },
+            {
+                "label": "SPEAKER_01",
+                "name": "Gunnar",
+                "confidence": "medium",
+                "evidence": "Tilltalas som Gunnar.",
+            },
+        ]
+    }
+    handler, _ = _handler(activate)
+    state, _ = _state()
+    run = SimpleNamespace(id=uuid4(), input_payload_json={"deltagare": "Bo"})
+    step = _step(
+        output_config={
+            "speaker_mapping": {"participants_field": "deltagare", "infer_names": True}
+        }
+    )
+
+    result = await handler.execute(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    output = result.output
+    assert output.full_text.splitlines()[0].startswith("[00:00:00 - 00:00:04] Maria:")
+    assert output.full_text.splitlines()[1].startswith("[00:00:05 - 00:00:09] Gunnar:")
+    extension = output.output_payload_extensions["speaker_mapping"]
+    assert extension["participants"] == ["Bo"]
+    assert extension["infer_names"] is True
+    # The frozen call carries the conversation's opening and the inferring rules.
+    question = json.loads(calls["question"])
+    assert question["opening"] == [
+        "SPEAKER_00: Hej, jag heter Anna.",
+        "SPEAKER_01: Hej Anna, Bo här.",
+    ]
+    assert "Never invent a name" not in calls["prompt"]
+    assert "participant list never" in calls["prompt"]
+
+
+async def test_without_inference_the_call_is_unchanged(harness) -> None:
+    calls, activate = harness
+    handler, _ = _handler(activate)
+    state, _ = _state()
+    run = SimpleNamespace(id=uuid4(), input_payload_json={"deltagare": "Anna, Bo"})
+
+    result = await handler.execute(
+        step=_step(), run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    assert "opening" not in json.loads(calls["question"])
+    assert "Never invent a name" in calls["prompt"]
+    extension = result.output.output_payload_extensions["speaker_mapping"]
+    assert extension["infer_names"] is False

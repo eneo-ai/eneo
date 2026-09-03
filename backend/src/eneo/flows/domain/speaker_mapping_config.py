@@ -30,13 +30,19 @@ def speaker_mapping_speaker_count_field(output_config: object) -> str | None:
 
 def speaker_mapping_participants_field(output_config: object) -> str | None:
     """The configured participants form field name, or None when unset."""
+    return _config_field(output_config, "participants_field")
+
+
+def speaker_mapping_infer_names(output_config: object) -> bool:
+    """Whether the model may propose names and roles it finds in the
+    conversation itself, beyond the participant list. Off unless literally
+    true."""
     if not isinstance(output_config, Mapping):
-        return None
+        return False
     block = cast(Mapping[str, object], output_config).get(SPEAKER_MAPPING_CONFIG_KEY)
     if not isinstance(block, Mapping):
-        return None
-    value = cast(Mapping[str, object], block).get("participants_field")
-    return value if isinstance(value, str) and value.strip() else None
+        return False
+    return cast(Mapping[str, object], block).get("infer_names") is True
 
 
 def validate_speaker_mapping_output_config(
@@ -83,6 +89,13 @@ def validate_speaker_mapping_output_config(
             "must be a non-empty string or null.",
             step_order=step.step_order,
         )
+    raw_infer = cast(Mapping[str, object], block).get("infer_names")
+    if raw_infer is not None and not isinstance(raw_infer, bool):
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: output_config.speaker_mapping.infer_names "
+            "must be true or false.",
+            step_order=step.step_order,
+        )
     if not require_complete_config:
         return
     if (
@@ -96,9 +109,14 @@ def validate_speaker_mapping_output_config(
             step_order=step.step_order,
         )
     if raw_field is None:
+        # With inference on, the conversation itself is the name source and
+        # a participant field is optional.
+        if raw_infer is True:
+            return
         raise FlowStepValidationError(
             f"Step {step.step_order}: output_config.speaker_mapping.participants_field "
-            "must name a form field of type 'text', 'multiselect' or 'list'.",
+            "must name a form field of type 'text', 'multiselect' or 'list', or "
+            "infer_names must be true.",
             step_order=step.step_order,
         )
     field_type = form_field_types.get(raw_field.strip())

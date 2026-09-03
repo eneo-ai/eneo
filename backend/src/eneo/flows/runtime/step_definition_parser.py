@@ -527,6 +527,12 @@ def _parse_output_config(
                     "Speaker mapping output_config.speaker_mapping.speaker_count_field "
                     "must be a non-empty string or null."
                 )
+            infer_names: object = cast(dict[str, object], block).get("infer_names")
+            if infer_names is not None and not isinstance(infer_names, bool):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping.infer_names "
+                    "must be true or false."
+                )
         return output_config
 
     if output_mode == "template_fill":

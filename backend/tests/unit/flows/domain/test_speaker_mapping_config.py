@@ -7,6 +7,7 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationView,
 )
 from eneo.flows.domain.speaker_mapping_config import (
+    speaker_mapping_infer_names,
     speaker_mapping_participants_field,
     validate_speaker_mapping_output_config,
 )
@@ -123,6 +124,66 @@ def test_malformed_block_is_rejected_even_in_drafts(block: object) -> None:
     with pytest.raises(FlowStepValidationError):
         validate_speaker_mapping_output_config(
             step=_step({"speaker_mapping": block}),
+            form_field_types=FIELDS,
+            require_complete_config=False,
+        )
+
+
+def test_infer_names_is_off_unless_literally_true() -> None:
+    assert speaker_mapping_infer_names(None) is False
+    assert speaker_mapping_infer_names({"speaker_mapping": {}}) is False
+    assert speaker_mapping_infer_names({"speaker_mapping": {"infer_names": 1}}) is False
+    assert (
+        speaker_mapping_infer_names({"speaker_mapping": {"infer_names": True}}) is True
+    )
+
+
+def test_publish_allows_no_participants_field_only_with_inference() -> None:
+    validate_speaker_mapping_output_config(
+        step=_step(
+            {"speaker_mapping": {"participants_field": None, "infer_names": True}}
+        ),
+        form_field_types=FIELDS,
+        require_complete_config=True,
+    )
+    with pytest.raises(FlowStepValidationError):
+        validate_speaker_mapping_output_config(
+            step=_step(
+                {"speaker_mapping": {"participants_field": None, "infer_names": False}}
+            ),
+            form_field_types=FIELDS,
+            require_complete_config=True,
+        )
+
+
+def test_inference_still_requires_a_usable_field_when_one_is_named() -> None:
+    with pytest.raises(FlowStepValidationError):
+        validate_speaker_mapping_output_config(
+            step=_step(
+                {
+                    "speaker_mapping": {
+                        "participants_field": "antal",
+                        "infer_names": True,
+                    }
+                }
+            ),
+            form_field_types=FIELDS,
+            require_complete_config=True,
+        )
+
+
+@pytest.mark.parametrize("value", ["yes", 1])
+def test_infer_names_must_be_a_bool_when_present(value: object) -> None:
+    with pytest.raises(FlowStepValidationError):
+        validate_speaker_mapping_output_config(
+            step=_step(
+                {
+                    "speaker_mapping": {
+                        "participants_field": "deltagare",
+                        "infer_names": value,
+                    }
+                }
+            ),
             form_field_types=FIELDS,
             require_complete_config=False,
         )

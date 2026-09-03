@@ -42,6 +42,11 @@ export function getSpeakerMappingParticipants(payload: Payload): string[] {
     : [];
 }
 
+/** Whether the proposal may name people the conversation itself revealed. */
+export function getSpeakerMappingInferNames(payload: Payload): boolean {
+  return record(payload?.speaker_mapping)?.infer_names === true;
+}
+
 /** The transcription step this mapping was proposed from, when recorded. */
 export function getSpeakerMappingSourceStep(payload: Payload): {
   stepId: string | null;

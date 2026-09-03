@@ -26,6 +26,8 @@ SPEAKER_LABEL_RE = re.compile(r"^SPEAKER_\d{2,}$")
 
 INVENTORY_SAMPLE_LINES = 3
 INVENTORY_SAMPLE_CHARS = 160
+OPENING_EXCERPT_LINES = 40
+OPENING_EXCERPT_CHARS = 6000
 
 # Fixed JSON contract for a speaker-mapping step's structured output. Set on
 # the runtime step by the definition parser so typed-output processing, the
@@ -129,6 +131,29 @@ def build_speaker_inventory(
         if sample and len(samples) < INVENTORY_SAMPLE_LINES:
             samples.append(sample[:INVENTORY_SAMPLE_CHARS])
     return list(entries.values())
+
+
+def build_opening_excerpt(text: str) -> list[str]:
+    """The first diarized lines in order as ``LABEL: text`` (no timestamps),
+    where introductions and greetings usually reveal who is who. Bounded by
+    line count and total characters."""
+    lines: list[str] = []
+    total = 0
+    for line in text.split("\n"):
+        if len(lines) >= OPENING_EXCERPT_LINES:
+            break
+        match = SPEAKER_LINE_RE.match(line)
+        if match is None:
+            continue
+        spoken = match.group("text").strip()
+        if not spoken:
+            continue
+        rendered = f"{match.group('label')}: {spoken[:INVENTORY_SAMPLE_CHARS]}"
+        if total + len(rendered) > OPENING_EXCERPT_CHARS:
+            break
+        lines.append(rendered)
+        total += len(rendered)
+    return lines
 
 
 def speaker_labels_in(text: str) -> list[str]:

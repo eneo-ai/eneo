@@ -3,11 +3,13 @@
   import type { FlowStep } from "@eneo/eneo-js";
   import { Settings } from "$lib/components/layout";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { FlowFormField } from "$lib/features/flows/flowFormSchema";
   import {
     getParticipantFieldOptions,
     getSpeakerCountFieldOptions,
+    getSpeakerMappingInferNames,
     getSpeakerMappingParticipantsField,
     getSpeakerMappingSpeakerCountField
   } from "$lib/features/flows/speakerMappingConfig";
@@ -17,14 +19,18 @@
     isPublished,
     formFields = [],
     onParticipantsFieldChange,
-    onSpeakerCountFieldChange
+    onSpeakerCountFieldChange,
+    onInferNamesChange
   }: {
     step: FlowStep;
     isPublished: boolean;
     formFields?: Pick<FlowFormField, "name" | "type" | "label">[];
     onParticipantsFieldChange?: (detail: { value: string | null }) => void;
     onSpeakerCountFieldChange?: (detail: { value: string | null }) => void;
+    onInferNamesChange?: (detail: { value: boolean }) => void;
   } = $props();
+
+  const inferNames = $derived(getSpeakerMappingInferNames(step));
 
   const countOptions = $derived(getSpeakerCountFieldOptions(formFields));
   const countSelected = $derived(getSpeakerMappingSpeakerCountField(step));
@@ -57,6 +63,18 @@
 
 <FlowStepSection title={m.flow_step_speaker_mapping_section()}>
   <Settings.Row
+    title={m.flow_step_speaker_mapping_infer_names()}
+    description={m.flow_step_speaker_mapping_infer_names_desc()}
+    density="compact"
+  >
+    <Switch
+      checked={inferNames}
+      disabled={isPublished}
+      aria-label={m.flow_step_speaker_mapping_infer_names()}
+      onCheckedChange={(checked) => onInferNamesChange?.({ value: checked })}
+    />
+  </Settings.Row>
+  <Settings.Row
     title={m.flow_step_speaker_mapping_participants_field()}
     description={m.flow_step_speaker_mapping_participants_field_desc()}
     fullWidth
@@ -73,7 +91,7 @@
         <Select.Trigger
           class="w-full"
           aria-label={m.flow_step_speaker_mapping_participants_field()}
-          aria-invalid={selected === null || selectedMissing}
+          aria-invalid={(selected === null && !inferNames) || selectedMissing}
         >
           {selectedLabel}
         </Select.Trigger>
@@ -91,16 +109,18 @@
         </Select.Content>
       </Select.Root>
       <p
-        class={options.length === 0 || selectedMissing
+        class={(options.length === 0 && !inferNames) || selectedMissing
           ? "text-warning-stronger text-xs leading-relaxed"
           : "text-muted text-xs leading-relaxed"}
         aria-live="polite"
       >
         {selectedMissing
           ? m.flow_step_speaker_mapping_missing_field_help()
-          : options.length === 0
-            ? m.flow_step_speaker_mapping_no_usable_fields()
-            : m.flow_step_speaker_mapping_help()}
+          : inferNames && selected === null
+            ? m.flow_step_speaker_mapping_participants_field_optional_help()
+            : options.length === 0
+              ? m.flow_step_speaker_mapping_no_usable_fields()
+              : m.flow_step_speaker_mapping_help()}
       </p>
     </div>
   </Settings.Row>

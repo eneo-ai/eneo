@@ -127,7 +127,8 @@
   import FlowStepSpeakerMappingSection from "./FlowStepSpeakerMappingSection.svelte";
   import {
     buildSpeakerMappingOutputConfig,
-    getSpeakerMappingParticipantsField
+    getSpeakerMappingParticipantsField,
+    getSpeakerMappingSpeakerCountField
   } from "$lib/features/flows/speakerMappingConfig";
   import FlowStepOutputSection from "./FlowStepOutputSection.svelte";
   import FlowStepTypedIoBanners from "./FlowStepTypedIoBanners.svelte";
@@ -1263,6 +1264,16 @@
                     buildSpeakerMappingOutputConfig(
                       activeStep?.output_config ?? null,
                       getSpeakerMappingParticipantsField(activeStep),
+                      detail.value
+                    )
+                  )}
+                onInferNamesChange={(detail) =>
+                  updateStep(
+                    "output_config",
+                    buildSpeakerMappingOutputConfig(
+                      activeStep?.output_config ?? null,
+                      getSpeakerMappingParticipantsField(activeStep),
+                      getSpeakerMappingSpeakerCountField(activeStep),
                       detail.value
                     )
                   )}

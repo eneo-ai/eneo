@@ -19,6 +19,7 @@
   import {
     buildEditedMapping,
     buildSpeakerRows,
+    getSpeakerMappingInferNames,
     getSpeakerMappingParticipants,
     getSpeakerMappingSourceStep,
     isSpeakerMappingCheckpoint,
@@ -96,6 +97,9 @@
   const speakerNames = $derived(speakerNamesFromRows(speakerRows));
   const speakerParticipants = $derived(
     getSpeakerMappingParticipants(checkpoint?.current_payload_json)
+  );
+  const speakerNamesInferred = $derived(
+    getSpeakerMappingInferNames(checkpoint?.current_payload_json)
   );
   // Reviewer edits not yet sent to the server.
   const speakerEditsPending = $derived(
@@ -519,6 +523,7 @@
         <SpeakerMappingReviewEditor
           rows={speakerRows}
           participants={speakerParticipants}
+          inferred={speakerNamesInferred}
           disabled={!canEdit || activeAction !== null}
           onChange={(rows) => (speakerRows = rows)}
         />

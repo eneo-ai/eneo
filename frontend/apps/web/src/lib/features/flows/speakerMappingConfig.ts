@@ -33,12 +33,22 @@ export function getSpeakerMappingSpeakerCountField(
   return configField(step, "speaker_count_field");
 }
 
+/** Whether the model may propose names and roles it finds in the conversation. */
+export function getSpeakerMappingInferNames(step: Pick<FlowStep, "output_config">): boolean {
+  const config = step.output_config;
+  if (!config || typeof config !== "object" || Array.isArray(config)) return false;
+  const block = (config as Record<string, unknown>).speaker_mapping;
+  if (!block || typeof block !== "object" || Array.isArray(block)) return false;
+  return (block as Record<string, unknown>).infer_names === true;
+}
+
 export function buildSpeakerMappingOutputConfig(
   outputConfig: FlowStep["output_config"],
   participantsField: string | null,
   speakerCountField: string | null = getSpeakerMappingSpeakerCountField({
     output_config: outputConfig
-  })
+  }),
+  inferNames: boolean = getSpeakerMappingInferNames({ output_config: outputConfig })
 ): Record<string, unknown> {
   const base =
     outputConfig && typeof outputConfig === "object" && !Array.isArray(outputConfig)
@@ -48,7 +58,8 @@ export function buildSpeakerMappingOutputConfig(
     ...base,
     speaker_mapping: {
       participants_field: participantsField,
-      speaker_count_field: speakerCountField
+      speaker_count_field: speakerCountField,
+      infer_names: inferNames
     }
   };
 }

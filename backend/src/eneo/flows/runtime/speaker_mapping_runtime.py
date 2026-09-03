@@ -30,13 +30,57 @@ SPEAKER_MAPPING_INSTRUCTIONS = (
     '"confidence": "low|medium|high", "evidence": "<short reason>"}]}'
 )
 
+# With name inference on, the participant list is a hint rather than a
+# closed set: the conversation itself may name or describe the speakers.
+SPEAKER_MAPPING_INFER_INSTRUCTIONS = (
+    "You identify who each diarized speaker label in a transcript is.\n"
+    "You receive each speaker label with sample lines it spoke, the opening of "
+    "the conversation in order, and a list of participants that may be empty "
+    "or incomplete.\n"
+    "Rules:\n"
+    "- When the evidence matches a participant from the list, use that "
+    "participant's name exactly as listed.\n"
+    "- Otherwise propose the name the conversation reveals: someone "
+    "introducing themselves, or being addressed or referred to by name.\n"
+    "- People are usually named by others, not by themselves. Read the opening "
+    "as a dialogue: when one speaker addresses or hands over to someone by name "
+    "(for example 'Anna, du är på plats' or 'jag står här med Anna'), the "
+    "speaker who answers next, or the person described, is that person. A clue "
+    "in another speaker's lines is as strong as one in the speaker's own.\n"
+    "- When only a role is evident (for example the person who says they work "
+    "as a case officer), propose the role as the transcript words it, in the "
+    "language of the transcript. The reviewer confirms every proposal.\n"
+    "- Use null only when nothing in the conversation identifies the speaker.\n"
+    "- Two labels may map to the same person (for example when the same "
+    "person appears in several recordings).\n"
+    "- Confidence (low, medium, high) reflects how strongly the transcript "
+    "supports the proposal. An empty or incomplete participant list never "
+    "lowers it.\n"
+    "- For every label give one short sentence of evidence in the language of "
+    "the transcript.\n"
+    "Respond with JSON only, exactly in this shape:\n"
+    '{"speakers": [{"label": "SPEAKER_00", "name": "<name, role or null>", '
+    '"confidence": "low|medium|high", "evidence": "<short reason>"}]}'
+)
+
+
+def speaker_mapping_instructions(*, infer_names: bool) -> str:
+    return (
+        SPEAKER_MAPPING_INFER_INSTRUCTIONS
+        if infer_names
+        else SPEAKER_MAPPING_INSTRUCTIONS
+    )
+
 
 def build_speaker_mapping_question(
     *,
     inventory: Sequence[Mapping[str, Any]],
     participants: Sequence[str],
+    opening: Sequence[str] | None = None,
 ) -> str:
-    payload = {
+    """The frozen model input. ``opening`` is included only when given, so a
+    step without name inference sends exactly what it always has."""
+    payload: dict[str, Any] = {
         "participants": list(participants),
         "speakers": [
             {
@@ -48,6 +92,8 @@ def build_speaker_mapping_question(
             for entry in inventory
         ],
     }
+    if opening is not None:
+        payload["opening"] = list(opening)
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 

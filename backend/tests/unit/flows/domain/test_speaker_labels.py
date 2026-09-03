@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from eneo.flows.domain.speaker_labels import (
+    INVENTORY_SAMPLE_CHARS,
+    OPENING_EXCERPT_CHARS,
+    OPENING_EXCERPT_LINES,
     apply_speaker_names,
     build_label_renumbering,
+    build_opening_excerpt,
     build_speaker_inventory,
     parse_participants,
     renumber_segment_speakers,
@@ -99,3 +103,33 @@ def test_label_renumbering_follows_text_order_and_applies_to_segments() -> None:
         None,
         "SPEAKER_09",
     ]
+
+
+def test_opening_excerpt_keeps_order_and_drops_timestamps_and_empty_lines() -> None:
+    assert build_opening_excerpt(TRANSCRIPT) == [
+        "SPEAKER_00: Hej och välkomna.",
+        "SPEAKER_01: Tack så mycket.",
+        "SPEAKER_00: Vi börjar.",
+    ]
+    assert build_opening_excerpt("Bara text.") == []
+
+
+def test_opening_excerpt_is_bounded_by_lines_and_characters() -> None:
+    many = "\n".join(
+        f"[00:00:00 - 00:00:01] SPEAKER_00: rad {index}"
+        for index in range(OPENING_EXCERPT_LINES + 10)
+    )
+    assert len(build_opening_excerpt(many)) == OPENING_EXCERPT_LINES
+
+    long_line = "x" * INVENTORY_SAMPLE_CHARS
+    heavy = "\n".join(
+        f"[00:00:00 - 00:00:01] SPEAKER_00: {long_line}"
+        for _ in range(OPENING_EXCERPT_LINES)
+    )
+    excerpt = build_opening_excerpt(heavy)
+    assert 0 < len(excerpt) < OPENING_EXCERPT_LINES
+    assert sum(len(line) for line in excerpt) <= OPENING_EXCERPT_CHARS
+    # Each line is truncated to the sample length, like inventory samples.
+    assert all(
+        len(line) == len("SPEAKER_00: ") + INVENTORY_SAMPLE_CHARS for line in excerpt
+    )
