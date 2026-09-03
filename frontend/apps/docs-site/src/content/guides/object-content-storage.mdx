@@ -28,7 +28,7 @@ import { Callout, Steps, Tabs } from "nextra/components";
 | Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)                     |
 | Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)                     |
 | Understand ownership and RAG                      | [How content flows](#how-content-flows)                      |
-| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file)           |
+| Download processed content or recover an original | [Download or recover](#download-or-recover-content)          |
 | Upgrade and clean up legacy File/Icon storage     | [One-time upgrade guide](/guides/file-icon-storage-upgrade)  |
 | Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service) |
 | Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)                      |
@@ -84,7 +84,7 @@ Enabling an endpoint makes the optional byte plane available; it does not move
 existing content or change producer placement by itself. An administrator must
 select it after Eneo reports it compatible and ready.
 
-## Download or recover a File
+## Download or recover content
 
 Eneo keeps processing views and original recovery explicit:
 
@@ -98,7 +98,8 @@ callers can request between one second and one hour. Original recovery is
 strict: Eneo never substitutes a processed representation when the original is
 absent. Instead it returns `404 file_original_not_found` (Eneo error `9045`).
 
-For a download button, keep the File ID and mint the URL when the user clicks:
+For a File download button, keep the File ID and mint the URL when the user
+clicks:
 
 ```js
 const { url, expires_at } = await eneo.files.generateOriginalSignedUrl({
@@ -109,6 +110,32 @@ const { url, expires_at } = await eneo.files.generateOriginalSignedUrl({
 window.location.assign(url);
 ```
 
+New uploaded knowledge can also retain its exact original. Use the
+`original_available` field on the InfoBlob response to decide whether to show
+the action. When the reader clicks, call
+`POST /api/v1/info-blobs/{id}/original/signed-url/` directly or use the SDK:
+
+```js
+if (infoBlob.original_available) {
+  const { url } = await eneo.infoBlobs.generateOriginalSignedUrl({
+    infoBlobId: infoBlob.id,
+    contentDisposition: "attachment",
+  });
+
+  window.location.assign(url);
+}
+```
+
+Open the returned URL with browser navigation or the platform's native `fetch`
+when handling bytes yourself. The Eneo SDK call above mints the temporary URL;
+its JSON client does not parse the binary download response.
+
+Legacy, manually entered, and crawled knowledge has no retained upload, so
+`original_available` is `false`. Do not show a disabled download action or fall
+back to extracted text. If the original becomes unavailable before link
+creation, Eneo returns `404 info_blob_original_unavailable` (Eneo error `9057`).
+Creating the link requires the same read access as opening that knowledge.
+
 Do not persist the returned URL or send it to analytics. It is a temporary
 bearer credential; use `expires_at` to decide when the application must request
 a new one. Eneo records who created an original-recovery link, its expiry, and
@@ -118,7 +145,8 @@ is never written to the audit log.
 The original response includes `Repr-Digest` for the SHA-256 of the complete
 original. That value stays the same on an audio `206` range response because it
 describes the full representation, not only the returned range. Range requests
-remain audio-only; other file types use a complete download.
+remain audio-only for File downloads. Knowledge originals use a complete
+streamed download.
 
 This contract is independent of placement. It behaves the same whether the
 bytes are stored inline in PostgreSQL or in an optional configured

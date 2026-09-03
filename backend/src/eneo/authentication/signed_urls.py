@@ -22,32 +22,37 @@ def _get_signing_key():
 
 SIGNING_KEY = _get_signing_key()
 FILE_ORIGINAL_DOWNLOAD_AUDIENCE = "file_original_download"
+INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE = "info_blob_original_download"
 _FILE_ORIGINAL_DOWNLOAD_KEY = hmac.new(
     SIGNING_KEY,
     b"eneo:file-original-download:v1",
     hashlib.sha256,
 ).digest()
+_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY = hmac.new(
+    SIGNING_KEY,
+    b"eneo:info-blob-original-download:v1",
+    hashlib.sha256,
+).digest()
 
 
 def _generate_token(
-    file_id: UUID,
+    resource_id: UUID,
     expires_at: int,
     content_disposition: ContentDisposition,
     *,
     signing_key: bytes,
     audience: str | None,
     tenant_id: UUID | None = None,
+    resource_claim: str = "file_id",
 ) -> str:
     payload: dict[str, Any] = {
-        "file_id": str(file_id),
+        resource_claim: str(resource_id),
         "expires_at": expires_at,
         "content_disposition": content_disposition.value,
     }
     if audience is not None:
         payload["aud"] = audience
-    # tenant_id is covered by the HMAC, so the download handler can refuse
-    # tokens whose signing-time tenant does not match the file being requested,
-    # defending against cross-tenant replay if a URL leaks.
+    # Bind leaked download credentials to the tenant that minted them.
     if tenant_id is not None:
         payload["tenant_id"] = str(tenant_id)
 
@@ -144,6 +149,34 @@ def verify_file_original_download_token(token: str) -> dict[str, Any] | None:
     """Verify an exact-original token using its purpose-separated key."""
     payload = _verify_token(token, signing_key=_FILE_ORIGINAL_DOWNLOAD_KEY)
     if payload is None or payload.get("aud") != FILE_ORIGINAL_DOWNLOAD_AUDIENCE:
+        return None
+    return payload
+
+
+def generate_info_blob_original_download_token(
+    info_blob_id: UUID,
+    expires_at: int,
+    content_disposition: ContentDisposition,
+    tenant_id: UUID,
+) -> str:
+    """Generate a purpose-separated token for an InfoBlob original."""
+    return _generate_token(
+        info_blob_id,
+        expires_at,
+        content_disposition,
+        signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY,
+        audience=INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE,
+        tenant_id=tenant_id,
+        resource_claim="info_blob_id",
+    )
+
+
+def verify_info_blob_original_download_token(token: str) -> dict[str, Any] | None:
+    """Verify an InfoBlob original token and its explicit audience."""
+    payload = _verify_token(token, signing_key=_INFO_BLOB_ORIGINAL_DOWNLOAD_KEY)
+    if payload is None or payload.get("aud") != INFO_BLOB_ORIGINAL_DOWNLOAD_AUDIENCE:
+        return None
+    if "info_blob_id" not in payload:
         return None
     return payload
 

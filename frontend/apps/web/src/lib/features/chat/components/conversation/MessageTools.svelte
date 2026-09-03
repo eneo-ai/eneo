@@ -15,7 +15,6 @@
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
   import { citedTextDocumentReferences, dedupeByDocument } from "../../mcpReferenceDocs";
-  import type { InfoBlob } from "@eneo/eneo-js";
 
   const { settings } = getAppContext();
   const { current, isLast } = getMessageContext();
@@ -65,8 +64,8 @@
 
   // A reference that points at an eneo document can open the full document
   // viewer (lazy fetch by id) instead of the stored snippet capture.
-  function blobForRef(infoBlobId: string, title: string): InfoBlob {
-    return { id: infoBlobId, metadata: { title } } as unknown as InfoBlob;
+  function blobForRef(infoBlobId: string, title: string) {
+    return { id: infoBlobId, metadata: { title } };
   }
 
   const totalRefs = $derived(
