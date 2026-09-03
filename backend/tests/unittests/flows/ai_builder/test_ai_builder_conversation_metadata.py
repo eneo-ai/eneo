@@ -738,7 +738,7 @@ def test_slot_classification_round_trips_all_llm_resolvable_slots() -> None:
     assert parsed is not None
     assert {slot.slot_name for slot in parsed.slots} == LLM_RESOLVABLE_SLOT_NAMES
     assert set(get_args(LLMResolvableSlotName)) == LLM_RESOLVABLE_SLOT_NAMES
-    assert parsed.to_result().slots == result.slots
+    assert parsed.to_result().slot_outcomes == result.slot_outcomes
     assert parsed.to_result().form_intake == result.form_intake
     assert parsed.named_result_evidence == named_result_evidence_snapshot
     assert parsed.to_result().named_result_evidence is None

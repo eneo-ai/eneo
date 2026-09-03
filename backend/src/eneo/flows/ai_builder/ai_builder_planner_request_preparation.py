@@ -127,9 +127,6 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     resolve_turn_control,
 )
 from eneo.flows.ai_builder.planning_state import BUILDER_SCHEMA_VERSION, PlanningState
-from eneo.flows.ai_builder.planning_state_builder import (
-    carry_forward_persisted_planner_state,
-)
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import (
@@ -300,13 +297,10 @@ async def prepare_planner_request(
             max_input_tokens=request.max_input_tokens,
             max_output_tokens=request.max_output_tokens,
             budget_policy=request.budget_policy,
-        )
-        rebuilt_planning_state = acknowledged_context.planning_state
-        carry_forward_persisted_planner_state(
-            rebuilt_planning_state,
-            request.persisted_planning_state,
+            persisted_planning_state=request.persisted_planning_state,
             attached_file_ids={file.id for file in request.attachment_files},
         )
+        rebuilt_planning_state = acknowledged_context.planning_state
         # A schema the user assigned is replayed from their own answer, never
         # assumed settled: carry-forward cannot restore a declared schema, so
         # asserting that nothing is pending here would deliver a proposal built

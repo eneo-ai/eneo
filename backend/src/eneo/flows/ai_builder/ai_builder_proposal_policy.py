@@ -33,6 +33,9 @@ from eneo.flows.ai_builder.ai_builder_plan_quality_critic import (
     build_conversation_aware_quality_feedback,
     build_conversation_critic_context,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    ResolvedSlotClassificationOutcome,
+)
 from eneo.flows.ai_builder.ai_builder_validation_common import (
     SpecValidationError,
     SpecValidationResult,
@@ -305,11 +308,11 @@ def _terminal_output_type_from_slot_classification(
     message: ConversationMessage,
 ) -> OutputType | None:
     classification = slot_classification_from_metadata(message.metadata)
-    if classification is None:
+    if classification is None or classification.outcome != "resolved":
         return None
-    for slot in classification.slots:
-        if slot.slot_name == "terminal_output":
-            return _output_type_from_intent(slot.value)
+    outcome = classification.to_result().slot_outcomes.get("terminal_output")
+    if isinstance(outcome, ResolvedSlotClassificationOutcome):
+        return _output_type_from_intent(outcome.value)
     return None
 
 

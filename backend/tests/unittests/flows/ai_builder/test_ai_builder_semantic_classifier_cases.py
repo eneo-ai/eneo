@@ -41,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedEvidence,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationBias,
     SlotClassificationSource,
 )
@@ -477,16 +478,19 @@ async def test_representative_exact_labels_cross_prompt_parse_and_citation_bound
 
     assert classification is not None
     assert classification.result is not None
-    assert len(classification.result.slots) == 1
-    resolved = classification.result.slots[0]
-    assert resolved.slot_name == case.slot_name
+    resolved_outcomes = {
+        name: outcome
+        for name, outcome in classification.result.slot_outcomes.items()
+        if isinstance(outcome, ResolvedSlotClassificationOutcome)
+    }
+    assert list(resolved_outcomes) == [case.slot_name]
+    resolved = resolved_outcomes[case.slot_name]
     assert resolved.value == case.option_value
     assert resolved.confidence == "high"
     assert resolved.evidence_level == "explicit"
     assert resolved.evidence == (
         ClassifiedEvidence(source_id=source.source_id, quote=case.label),
     )
-    assert all(slot.slot_name == case.slot_name for slot in classification.result.slots)
     litellm_client.acompletion.assert_awaited_once()
     provider_messages = cast(
         list[dict[str, str]],

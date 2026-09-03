@@ -26,7 +26,7 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     mentions_output_change,
 )
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
-    UNKNOWN_SLOT_VALUE,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationResult,
 )
 
@@ -249,15 +249,20 @@ def post_processing_goal_is_vague(
         return False
 
     if slot_classification_result is not None:
-        classified_slots = slot_classification_result.slots
-        if any(slot.slot_name == "post_processing_goal" for slot in classified_slots):
+        outcomes = slot_classification_result.slot_outcomes
+        if isinstance(
+            outcomes.get("post_processing_goal"), ResolvedSlotClassificationOutcome
+        ):
             # The classifier did try to place the purpose and the commit-grade
             # gate above still found it unsettled, so what it placed is a
             # guess and the question is still owed.
             return True
         # Without a purpose classification, only a turn the classifier could
         # read at all is worth spending the purpose question on.
-        return any(slot.value != UNKNOWN_SLOT_VALUE for slot in classified_slots)
+        return any(
+            isinstance(outcome, ResolvedSlotClassificationOutcome)
+            for outcome in outcomes.values()
+        )
 
     return _post_processing_goal_classifier_outage_requires_question(profile)
 

@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationBias,
     SlotClassificationInput,
@@ -297,7 +298,10 @@ async def classify_slots(
                 slot_names=slot_names,
                 cached=False,
             ),
-            "accepted_slot_count": len(result.slots),
+            "accepted_slot_count": sum(
+                isinstance(outcome, ResolvedSlotClassificationOutcome)
+                for outcome in result.slot_outcomes.values()
+            ),
             "omitted_slot_count": sum(
                 diagnostic.code == "slot_outcome_omitted"
                 for diagnostic in result.diagnostics

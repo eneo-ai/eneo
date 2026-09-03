@@ -53,7 +53,6 @@ def slot_classification_result(
         }
     )
     return SlotClassificationResult(
-        slots=slots,
         slot_outcomes=outcomes,
         diagnostics=diagnostics,
         file_roles=file_roles,

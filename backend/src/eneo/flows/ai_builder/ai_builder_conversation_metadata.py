@@ -56,7 +56,6 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedFileRole,
     ClassifiedFormIntake,
     ClassifiedSchemaDirection,
-    ClassifiedSlot,
     ExplicitlyUncertainSlotClassificationOutcome,
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
@@ -295,16 +294,6 @@ class SlotClassificationSlotMetadata(BaseModel):
         if self.confidence != "low" and not self.evidence:
             raise ValueError("supported slot classification requires evidence")
         return self
-
-    def to_classified_slot(self) -> ClassifiedSlot:
-        return ClassifiedSlot(
-            slot_name=self.slot_name,
-            value=self.value,
-            confidence=self.confidence,
-            reason=self.reason,
-            evidence=tuple(item.to_classified_evidence() for item in self.evidence),
-            evidence_level=self.evidence_level,
-        )
 
 
 class ResolvedSlotClassificationOutcomeMetadata(BaseModel):
@@ -876,7 +865,6 @@ class SlotClassificationMetadata(BaseModel):
                 "Only resolved slot classification metadata carries a result"
             )
         return SlotClassificationResult(
-            slots=tuple(slot.to_classified_slot() for slot in self.slots),
             slot_outcomes={
                 slot_name: (
                     outcome.to_outcome(slot_name=slot_name)

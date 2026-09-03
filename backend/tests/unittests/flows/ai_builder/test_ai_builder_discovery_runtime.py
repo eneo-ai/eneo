@@ -81,6 +81,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ClassifiedNamedResultEvidence,
     ClassifiedSchemaDirection,
     ClassifiedSlot,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationDiagnostic,
     SlotClassificationInput,
@@ -108,6 +109,7 @@ from eneo.flows.ai_builder.planning_state import (
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
+    SlotUncertainty,
 )
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
@@ -1891,7 +1893,10 @@ async def test_attachment_only_direction_citation_does_not_assign_schema() -> No
     assert state.output_schema_evidence is None
     assert context.schema_direction_pending is True
     assert context.slot_classification_result is not None
-    assert context.slot_classification_result.slots == ()
+    assert not any(
+        isinstance(outcome, ResolvedSlotClassificationOutcome)
+        for outcome in context.slot_classification_result.slot_outcomes.values()
+    )
     assert context.slot_classification_result.schema_direction is not None
     assert context.slot_classification_result.schema_direction.confidence == "low"
     assert context.slot_classification_metadata is not None
@@ -4072,3 +4077,40 @@ def test_targeted_bias_is_none_when_target_already_resolved() -> None:
     )
 
     assert bias is None
+
+
+async def test_persisted_uncertainty_survives_the_completion() -> None:
+    """Carry-forward runs before the policy assumes anything.
+
+    Codex iteration 12 on 3b reproduced the opposite order: the completion
+    wrote `runtime_metadata_fields = no_extra_metadata` as a policy default,
+    and the carry-forward then found a resolved slot and dropped the
+    uncertainty the user had stated in an earlier turn. The ordinary
+    discovery path and the confirmation reconstruction both go through this
+    builder, so one interface test covers both.
+    """
+
+    brief = "Sammanfatta uppladdade rapporter till en PDF-rapport."
+    persisted = build_planning_state_from_conversation(
+        [ConversationMessage(role="user", content=brief)]
+    )
+    persisted.slot_uncertainties["runtime_metadata_fields"] = SlotUncertainty(
+        slot="runtime_metadata_fields", kind="explicitly_uncertain"
+    )
+
+    context = await build_runtime_discovery_context(
+        [ConversationMessage(role="user", content=brief)],
+        tenant_id=uuid4(),
+        max_input_tokens=100_000,
+        max_output_tokens=2_000,
+        allow_classification=False,
+        persisted_planning_state=persisted,
+        attached_file_ids=frozenset(),
+    )
+
+    state = context.planning_state
+    assert "runtime_metadata_fields" in state.slot_uncertainties
+    assert "runtime_metadata_fields" not in state.resolved_slots
+    # The rest of the state is complete: what the persisted turn carried in
+    # and what the policy assumed on top of it.
+    assert "document_material_scope" in state.resolved_slots

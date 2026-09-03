@@ -253,16 +253,6 @@ class ResolvedSlotClassificationOutcome:
             evidence_level=slot.evidence_level,
         )
 
-    def to_classified_slot(self, slot_name: str) -> ClassifiedSlot:
-        return ClassifiedSlot(
-            slot_name=slot_name,
-            value=self.value,
-            confidence=self.confidence,
-            reason=self.reason,
-            evidence=self.evidence,
-            evidence_level=self.evidence_level,
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class ExplicitlyUncertainSlotClassificationOutcome:
@@ -388,7 +378,6 @@ def _classified_named_result_identity(
 
 @dataclass(frozen=True, slots=True)
 class SlotClassificationResult:
-    slots: tuple[ClassifiedSlot, ...] = ()
     slot_outcomes: dict[str, SlotClassificationOutcome] = dataclass_field(
         default_factory=_empty_slot_classification_outcomes
     )
@@ -539,22 +528,6 @@ def parse_slot_classification_response(
             )
             continue
         slot_outcomes[slot_name] = outcome
-    slots: list[ClassifiedSlot] = []
-    for slot_name, outcome in slot_outcomes.items():
-        if isinstance(outcome, ResolvedSlotClassificationOutcome):
-            slots.append(outcome.to_classified_slot(slot_name))
-        elif isinstance(outcome, ExplicitlyUncertainSlotClassificationOutcome):
-            slots.append(
-                ClassifiedSlot(
-                    slot_name=slot_name,
-                    value=UNKNOWN_SLOT_VALUE,
-                    confidence="high",
-                    reason="explicit user uncertainty",
-                    evidence=(outcome.quote,),
-                    evidence_level="explicit",
-                    classification_kind="explicitly_uncertain",
-                )
-            )
 
     file_roles = _parse_file_roles(
         raw_dict.get("file_roles", []),
@@ -593,7 +566,6 @@ def parse_slot_classification_response(
         candidate_fingerprints=tuple(sorted(set(schema_candidate_fingerprints))),
     )
     return SlotClassificationResult(
-        slots=tuple(slots),
         slot_outcomes=slot_outcomes,
         diagnostics=tuple(diagnostics),
         file_roles=file_roles,

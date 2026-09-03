@@ -2992,7 +2992,9 @@ class TestFlowObservedSlotsYieldToTheEdit:
         assert terminal_output.value == "pdf_document"
         assert terminal_output.source == "model"
         assert "docx_output_mode" not in state.resolved_slots
-        assert state.resolved_slots["pdf_generation_mode"].value == "generated_pdf"
+        assert (
+            "pdf_generation_mode" not in state.resolved_slots
+        )  # the policy assumes it
 
     def test_replacement_holds_when_the_classifier_never_answered(self) -> None:
         """Classification is skipped or unsure often enough to matter.
