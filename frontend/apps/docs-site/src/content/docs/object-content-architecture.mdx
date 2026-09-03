@@ -18,9 +18,43 @@ import { Callout } from "nextra/components";
 File and Icon use this contract for exact originals and named derivatives. New
 knowledge file and audio uploads use it for the exact original while searchable
 text and vectors remain in PostgreSQL. New content is stored inline by default,
-so Eneo still needs no S3-compatible service. A bounded upgrade migration
-copies and verifies legacy File and Icon bytes before removing duplicate
-columns.
+so Eneo still needs no S3-compatible service.
+
+Legacy File and Icon adoption uses an expand, online backfill, and later contract
+sequence. Two consecutive Alembic revisions own the expand phase. The first
+creates the ledger, makes legacy columns nullable, installs the payload-write
+fence, and commits. The second scans owners and obtains exact logical source
+sizes in resumable, idempotent groups without hashing, converting, or copying
+external payload bytes. It never inherits
+the schema revision's exclusive table locks. New code reads a verified
+object-content reference when present and otherwise reads the frozen legacy
+source. A scheduled worker first finalizes a bounded admission set: it locks
+owners, accepts still-available references, cancels deleted owners, and marks
+only source-bearing rows ready. The initial capacity decision is frozen after
+admission. If an adopted reference later fails verification, its replacement
+is re-admitted against the cumulative logical-byte total and requires a higher
+acknowledgement only above the automatic threshold. The worker adopts each ready
+variant in bounded, resumable PostgreSQL-inline transactions. The later contract
+applies the fail-closed completion and live-reference recheck described in
+[Verify and clean up](/guides/file-icon-storage-upgrade#verify-and-clean-up)
+before it removes the legacy schema.
+
+```mermaid
+flowchart LR
+  fence["Expand\nschema · write fence · commit"] --> inventory["Inventory\nresumable metadata groups"]
+  inventory --> fallback["Read fallback\nlegacy remains authoritative"]
+  fallback --> admission["Admission\nowner lock · reference recheck"]
+  admission --> backfill["Online backfill\nbounded lease · SHA-256 · reference flip"]
+  backfill --> complete["Campaign complete\none object-content path"]
+  complete --> contract["Contract\npreflight · short fence · legacy removal"]
+```
+
+The current online adapter targets PostgreSQL inline. It starts automatically
+for estimates up to the configured safety threshold and waits for capacity
+acknowledgement above it. If policy selects object storage before the campaign
+starts, it waits for a compatible adapter rather than redirecting the copy.
+This is intentional: Alembic owns schema and metadata, while application workers
+own byte-proportional work, network retries, leases, progress, and recovery.
 
 Administrators with the Storage permission use **Admin > Storage** to choose
 where eligible new content is written and to queue bounded moves of existing
@@ -96,7 +130,31 @@ stateDiagram-v2
   tombstoned --> [*]: purge horizon passed
 ```
 
-### Product usage fence
+## Why uploads pass through Eneo
+
+File and Icon uploads currently pass through the authenticated backend. Eneo
+prepares the product variants, enforces business and operator bounds, captures
+the bytes in a memory-bounded spool, calculates the canonical digest and
+per-chunk verification digests, and reserves opaque keys before remote storage
+I/O. The
+adapter uploads and reads the object back to recompute its SHA-256. Only a short
+database transaction after that verification publishes product metadata,
+available content, and concrete references together.
+
+This ordering prevents a partial or unverified remote object from becoming a
+visible File or Icon. It also gives reconciliation a durable reservation from
+which to clean up a remote object when a process or response fails between
+upload and publication.
+
+Browser-direct object-store upload is possible only with another public
+protocol: scoped signed multipart sessions, ownership binding, completion and
+abort state, digest proof or backend readback, expiry, orphan cleanup, and
+ambiguous-result reconciliation. It may reduce backend network traffic, but it
+does not remove verification or incomplete-upload recovery. Temporary disk also
+serves as a memory bound for multipart parsing and asynchronous knowledge jobs,
+so direct File/Icon upload would not eliminate all staging.
+
+## Product usage fence
 
 File deletion has a product-level fence before the object-content lifecycle
 starts. A bounded File-owned query counts four concrete relations:
@@ -120,6 +178,34 @@ Object-content holds and minimum retention protect bytes after the final
 product reference disappears; they are not duplicated as File-identity rules.
 
 ## Crash recovery and reconciliation
+
+Legacy File/Icon adoption commits one item at a time. Its durable ledger and
+expiring lease make a worker crash resumable; a PostgreSQL advisory transaction
+lock prevents replicas from overlapping batches. The database trigger keeps the
+legacy payload immutable. Before campaign admission, bounded set-based queries
+lock owners and references and durably separate rows that are already complete
+from rows that may require copied bytes. The capacity gate sums only that stable
+ready set. A delete trigger cancels owner rows even while the campaign is waiting.
+During adoption, the per-item transaction rechecks the owner and reference before
+PostgreSQL reads the exact logical size. Oversized content is rejected before the
+more expensive SHA-256 and copy. The content repository then verifies the
+expected size and digest while copying accepted frozen bytes directly into the
+inline payload table. The Python worker coordinates the transaction but never
+materializes those bytes. Payload, content control, reference, and ledger
+completion commit atomically. Legacy text requires PostgreSQL `server_encoding`
+`UTF8`, which makes the raw text byte length an exact, non-converting preflight;
+other encodings fail before byte production. A deleted owner is cancelled, not
+recreated. If a reference exists but its content is unavailable, the same
+transaction creates a verified replacement, switches the reference, and lets
+the normal lifecycle decrement the failed content's reference count and schedule
+cleanup when no references remain. An invalid source, integrity failure, or
+oversized payload fails its item immediately;
+interrupted attempts retry until their configured limit. Failed items halt the
+campaign with a stored reason and require a higher operator resume revision
+after correction. The campaign then requeues older failures through the normal
+row-bounded worker batches and stores its cursor in PostgreSQL. A worker restart
+continues from that cursor. An item that fails again waits for the next higher
+revision instead of looping within the current recovery attempt.
 
 Inline creation has no database/object-store crash gap: payload and intent share
 one transaction. For eligible new File and Icon object-store writes, Eneo
@@ -247,6 +333,17 @@ commands.
 ## Operational consequences
 
 - Inline-only backups contain control and bytes in PostgreSQL.
+- Legacy File/Icon adoption remains online and resumable, but inline adoption
+  needs additional PostgreSQL capacity for the second payload copy plus WAL and
+  safety headroom.
+- Removing legacy columns later does not by itself return PostgreSQL table
+  storage to the filesystem; physical reclamation is separate maintenance.
+- The later contract migration must fail closed until legacy adoption is
+  complete, then lock and recheck every surviving File/Icon reference as
+  `available` in the same transaction that drops legacy columns. Operators
+  choose when to close that recovery window.
+- Physical reclamation stays outside Alembic and startup because `pg_repack` or
+  `VACUUM FULL` has deployment-specific lock, time, and free-space costs.
 - If object-store rows exist, PostgreSQL and the object store must share one
   backup and restore point.
 - The stable deployment ID and internal marker must survive restoration.

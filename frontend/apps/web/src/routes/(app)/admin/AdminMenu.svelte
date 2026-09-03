@@ -9,6 +9,7 @@
   import {
     BookOpenCheck,
     BookText,
+    Boxes,
     ChartPie,
     Cloud,
     Cpu,
@@ -33,7 +34,7 @@
   import { deLocalizeHref, localizeHref } from "$lib/paraglide/runtime";
   import { getAppContext } from "$lib/core/AppContext.js";
 
-  const { settings } = getAppContext();
+  const { settings, user } = getAppContext();
 
   const currentRoute = $derived(deLocalizeHref($page.url.pathname));
 
@@ -76,6 +77,9 @@
         navItem("/admin/mcp-servers", Plug, m.mcp()),
         navItem("/admin/web-search", Globe, m.web_search()),
         navItem("/admin/integrations", Cloud, m.integrations()),
+        ...(user.hasPermission("modules")
+          ? [navItem("/admin/modules", Boxes, m.module_admin_title())]
+          : []),
         navItem("/admin/storage", HardDrive, m.storage_settings_nav())
       ]
     },

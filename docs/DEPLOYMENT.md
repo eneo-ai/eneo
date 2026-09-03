@@ -381,11 +381,10 @@ To get access to system administration endpoints, set an API key:
 ENEO_SUPER_API_KEY=your-secure-api-key
 ```
 
-**Access Modules Endpoint:**
-To get access to the modules endpoint, set a separate, higher-privileged API key:
-```bash
-ENEO_SUPER_DUPER_API_KEY=your-other-secure-api-key
-```
+**Configure Modules:**
+Use **Admin > Modules** while signed in with the `modules` permission. Eneo
+derives the organization from the session; no separate module-management
+environment key or tenant ID is required.
 
 ### Multi-Tenant Features
 

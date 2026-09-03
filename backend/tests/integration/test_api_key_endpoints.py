@@ -798,21 +798,40 @@ async def test_user_list_pagination_and_filtering(client, default_user_token):
         assert response.status_code == 201, response.text
 
     page_one = await client.get(
-        "/api/v1/api-keys?limit=1",
+        "/api/v1/api-keys?limit=2",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert page_one.status_code == 200, page_one.text
     page_one_payload = page_one.json()
-    assert len(page_one_payload["items"]) == 1
+    assert len(page_one_payload["items"]) == 2
     assert page_one_payload["total_count"] >= 3
     assert page_one_payload["next_cursor"] is not None
+    assert [item["name"] for item in page_one_payload["items"]] == [
+        "Paged PK",
+        "Paged SK 2",
+    ]
 
+    # The cursor anchors on the last emitted row: the immediately older key
+    # must appear on the next page, not be silently skipped.
     page_two = await client.get(
-        f"/api/v1/api-keys?limit=1&cursor={page_one_payload['next_cursor']}",
+        f"/api/v1/api-keys?limit=2&cursor={page_one_payload['next_cursor']}",
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
     assert page_two.status_code == 200, page_two.text
-    assert len(page_two.json()["items"]) == 1
+    page_two_payload = page_two.json()
+    assert len(page_two_payload["items"]) >= 1
+    assert page_two_payload["items"][0]["name"] == "Paged SK 1"
+
+    # And stepping back returns the exact page we came from.
+    page_back = await client.get(
+        f"/api/v1/api-keys?limit=2&cursor={page_two_payload['previous_cursor']}&previous=true",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert page_back.status_code == 200, page_back.text
+    assert [item["name"] for item in page_back.json()["items"]] == [
+        "Paged PK",
+        "Paged SK 2",
+    ]
 
     filtered = await client.get(
         "/api/v1/api-keys?key_type=pk_",
@@ -861,6 +880,160 @@ async def test_admin_list_filtering_and_total_count(client, default_user_token):
     assert payload["total_count"] >= len(payload["items"])
     assert any(item["id"] == key_id for item in payload["items"])
     assert all(item["key_type"] == "sk_" for item in payload["items"])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_list_cursor_is_total_ordered_and_round_trips_full_pages(
+    client, db_container, default_user_token
+):
+    marker = f"cursor-tie-{uuid4().hex[:8]}"
+    created_ids: list[str] = []
+    for index in range(5):
+        response = await client.post(
+            "/api/v1/api-keys",
+            json={
+                "name": f"{marker}-{index}",
+                "key_type": "sk_",
+                "permission": "read",
+                "scope_type": "tenant",
+            },
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert response.status_code == 201, response.text
+        created_ids.append(response.json()["api_key"]["id"])
+
+    shared_created_at = datetime.now(timezone.utc) - timedelta(days=1)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(ApiKeysV2Table)
+            .where(ApiKeysV2Table.id.in_([UUID(key_id) for key_id in created_ids]))
+            .values(created_at=shared_created_at)
+        )
+
+    pages: list[dict] = []
+    cursor: str | None = None
+    while True:
+        params = f"search={marker}&limit=2"
+        if cursor is not None:
+            params += f"&cursor={cursor}"
+        response = await client.get(
+            f"/api/v1/admin/api-keys?{params}",
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert response.status_code == 200, response.text
+        page = response.json()
+        pages.append(page)
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+
+    expected = sorted(created_ids, key=lambda value: UUID(value).int, reverse=True)
+    emitted = [item["id"] for page in pages for item in page["items"]]
+    assert emitted == expected
+    assert len(emitted) == len(set(emitted)) == 5
+    assert [len(page["items"]) for page in pages] == [2, 2, 1]
+
+    back_to_second = await client.get(
+        "/api/v1/admin/api-keys",
+        params={
+            "search": marker,
+            "limit": 2,
+            "cursor": pages[2]["previous_cursor"],
+            "previous": True,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert back_to_second.status_code == 200, back_to_second.text
+    back_to_second_page = back_to_second.json()
+    assert [item["id"] for item in back_to_second_page["items"]] == expected[2:4]
+
+    back_to_first = await client.get(
+        "/api/v1/admin/api-keys",
+        params={
+            "search": marker,
+            "limit": 2,
+            "cursor": back_to_second_page["previous_cursor"],
+            "previous": True,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert back_to_first.status_code == 200, back_to_first.text
+    assert [item["id"] for item in back_to_first.json()["items"]] == expected[:2]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_admin_module_binding_filter_uses_effective_key_eligibility(
+    client, db_container, default_user_token
+):
+    marker = f"module-eligible-{uuid4().hex[:8]}"
+
+    async def create_key(
+        suffix: str,
+        *,
+        ownership: str = "service",
+        key_type: str = "sk_",
+        permission: str = "write",
+    ) -> str:
+        payload: dict[str, object] = {
+            "name": f"{marker}-{suffix}",
+            "ownership": ownership,
+            "key_type": key_type,
+            "permission": permission,
+            "scope_type": "tenant",
+        }
+        if key_type == "sk_" and ownership == "service" and permission != "read":
+            payload["allowed_ips"] = ["203.0.113.0/24"]
+        if key_type == "pk_":
+            payload["allowed_origins"] = ["https://module.example.com"]
+        response = await client.post(
+            "/api/v1/api-keys",
+            json=payload,
+            headers={"Authorization": f"Bearer {default_user_token}"},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["api_key"]["id"]
+
+    eligible_write = await create_key("write")
+    eligible_admin = await create_key("admin", permission="admin")
+    await create_key("user-owned", ownership="user")
+    await create_key("read-only", permission="read")
+    await create_key("public", key_type="pk_", permission="read")
+    expired = await create_key("expired")
+    rotated_out = await create_key("rotated-out")
+
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(ApiKeysV2Table)
+            .where(ApiKeysV2Table.id == UUID(expired))
+            .values(expires_at=now - timedelta(minutes=1), state="active")
+        )
+        await session.execute(
+            sa.update(ApiKeysV2Table)
+            .where(ApiKeysV2Table.id == UUID(rotated_out))
+            .values(rotation_grace_until=now - timedelta(minutes=1), state="active")
+        )
+
+    response = await client.get(
+        "/api/v1/admin/api-keys",
+        params={
+            "search": marker,
+            "limit": 20,
+            "eligible_for_module_binding": True,
+        },
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {item["id"] for item in payload["items"]} == {
+        eligible_write,
+        eligible_admin,
+    }
+    assert payload["total_count"] == 2
 
 
 @pytest.mark.integration

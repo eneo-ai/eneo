@@ -44,6 +44,8 @@
     internalServers?: InternalMcpServer[];
     /** Server ids the user has switched off for this conversation (mutated in place). */
     disabledServerIds: SvelteSet<string>;
+    /** Called after the user changes the external server selection. */
+    onSelectionChange?: (disabledServerIds: ReadonlySet<string>) => void;
     /** When true, tool calls run without per-call approval. */
     autoAcceptTools: boolean;
   };
@@ -53,6 +55,7 @@
     webSearchServers = [],
     internalServers = [],
     disabledServerIds,
+    onSelectionChange,
     autoAcceptTools = $bindable()
   }: Props = $props();
 
@@ -74,13 +77,15 @@
     servers.filter((server) => disabledServerIds.has(server.id)).length
   );
 
-  function setServer(id: string, on: boolean) {
+  function setServer(id: string, on: boolean, notify = true) {
     if (on) disabledServerIds.delete(id);
     else disabledServerIds.add(id);
+    if (notify) onSelectionChange?.(disabledServerIds);
   }
 
   function setAll(on: boolean) {
-    for (const server of servers) setServer(server.id, on);
+    for (const server of servers) setServer(server.id, on, false);
+    onSelectionChange?.(disabledServerIds);
   }
 </script>
 

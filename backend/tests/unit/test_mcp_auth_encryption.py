@@ -51,7 +51,6 @@ def _make_service(encryption_service=None):
         mcp_server_repo=mock_repo,
         mcp_server_tool_repo=mock_tool_repo,
         user=mock_user,
-        mcp_state_repo=AsyncMock(),
         encryption_service=encryption_service,
     )
     return service, mock_repo, mock_tool_repo
@@ -719,31 +718,6 @@ class TestUpdateConnectionValidation:
 
         mock_repo.update.assert_called_once()
         service._test_connection_and_discover_tools.assert_not_called()
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("existing_mode", "requested_mode"), [(False, True), (True, False)]
-    )
-    async def test_identity_mode_change_invalidates_persisted_protocol_sessions(
-        self, _setup, existing_mode, requested_mode
-    ):
-        from eneo.mcp_servers.application.mcp_server_service import ConnectionResult
-
-        service, mock_repo, existing, _ = _setup
-        state_repo = service.mcp_state_repo
-        existing.forward_identity = existing_mode
-        service._test_connection_and_discover_tools = AsyncMock(
-            return_value=([], ConnectionResult(success=True))
-        )
-
-        await service.update_mcp_server(
-            mcp_server_id=existing.id,
-            forward_identity=requested_mode,
-        )
-
-        mock_repo.update.assert_awaited_once()
-        state_repo.delete_for_server.assert_awaited_once_with(existing.id)
-        assert existing.identity_policy_generation == 1
 
     @pytest.mark.asyncio
     async def test_disabling_identity_uses_anonymous_catalog_as_availability_snapshot(

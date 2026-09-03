@@ -4,12 +4,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
@@ -58,8 +55,6 @@ class MCPProxySessionFactory:
     def create(
         self,
         mcp_servers: list["MCPServer"],
-        chat_session_id: UUID | None = None,
-        db_session: "AsyncSession | None" = None,
         identity_headers: dict[str, str] | None = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
     ) -> MCPProxySession:
@@ -68,15 +63,6 @@ class MCPProxySessionFactory:
 
         Args:
             mcp_servers: List of MCP servers (already filtered by permissions)
-            chat_session_id: The eneo chat session id. When set together with
-                ``db_session``, each MCP server's protocol-assigned
-                ``mcp-session-id`` is loaded before connect (so the server
-                resumes the prior logical session) and re-upserted after
-                ``initialize()``. Pass ``None`` for non-chat callers (testing,
-                one-shot tool execution).
-            db_session: Active SQLAlchemy session used to read/write
-                ``chat_session_mcp_state``. Required only when
-                ``chat_session_id`` is set.
 
         Returns:
             Configured MCPProxySession instance
@@ -100,34 +86,6 @@ class MCPProxySessionFactory:
         return MCPProxySession(
             mcp_servers=mcp_servers,
             auth_credentials_map=auth_map,
-            chat_session_id=chat_session_id,
-            db_session=db_session,
             identity_headers=identity_headers,
             mcp_server_tool_repo=mcp_server_tool_repo,
         )
-
-    async def terminate(
-        self,
-        mcp_server: "MCPServer",
-        mcp_session_id: str,
-        identity_headers: dict[str, str] | None = None,
-    ) -> None:
-        """Terminate one persisted protocol session using server credentials.
-
-        ``identity_headers`` mirrors ``create``: the caller builds the acting
-        user's X-Eneo-* headers and the client sends them only when this
-        server has ``forward_identity=True``, so the DELETE carries the same
-        identity as the requests that created the session.
-        """
-        credentials: dict[str, str] | None = None
-        if mcp_server.http_auth_config_schema:
-            decrypted = self._decrypt_auth_config(mcp_server.http_auth_config_schema)
-            if decrypted:
-                credentials = {key: str(value) for key, value in decrypted.items()}
-
-        client = MCPClient(
-            mcp_server=mcp_server,
-            auth_credentials=credentials,
-            identity_headers=identity_headers,
-        )
-        await client.terminate_protocol_session(mcp_session_id)

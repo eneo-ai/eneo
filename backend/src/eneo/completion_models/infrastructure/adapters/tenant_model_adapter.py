@@ -989,9 +989,30 @@ class TenantModelAdapter(CompletionModelAdapter):
                 supported_params = (
                     _get_supported_openai_params(self.litellm_model) or []
                 )
-                if "reasoning_effort" not in supported_params or model_kwargs_dict[
-                    "reasoning_effort"
-                ] in (None, "none", ""):
+                reasoning_effort = model_kwargs_dict["reasoning_effort"]
+                remove_reasoning_effort = (
+                    "reasoning_effort" not in supported_params
+                    or reasoning_effort in (None, "")
+                )
+                if reasoning_effort == "none" and not remove_reasoning_effort:
+                    try:
+                        remove_reasoning_effort = (
+                            litellm_transport.get_model_info(self.litellm_model).get(
+                                "supports_none_reasoning_effort"
+                            )
+                            is not True
+                        )
+                    except Exception:
+                        # Old snapshots advertised `none` for every reasoning
+                        # route. Treat unavailable metadata conservatively so
+                        # those values retain their provider-default behavior.
+                        remove_reasoning_effort = True
+                        logger.debug(
+                            "Could not confirm literal none reasoning support",
+                            extra={"model_route": self.litellm_model},
+                            exc_info=True,
+                        )
+                if remove_reasoning_effort:
                     del model_kwargs_dict["reasoning_effort"]
 
             # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
@@ -1116,6 +1137,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
+                collected_tool_metadata: list[ToolCallMetadata] = []
                 result_budget = _ToolResultBudget(
                     token_limit=self.model.token_limit,
                     litellm_model=self.litellm_model,
@@ -1254,6 +1276,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         )
 
                     results: list[dict[str, Any]] = []
+                    proxy_calls: list[tuple[str, dict[str, Any]]] = []
                     if external_calls:
                         assert mcp_proxy is not None
                         allowed_tools = mcp_proxy.get_allowed_tool_names()
@@ -1277,13 +1300,18 @@ class TenantModelAdapter(CompletionModelAdapter):
                     # later persistence) and woven into the LLM-facing text via
                     # a structured MCP source context so the model can emit
                     # <inref/> markers without relying on server-specific shapes.
-                    for call, result in zip(external_calls, results):
+                    # Each call is also captured as ToolCallMetadata (buffered on
+                    # completion) so the caller can persist arguments + result
+                    # for replay on later turns, matching the streaming path.
+                    for call, (_, call_args), result in zip(
+                        external_calls, proxy_calls, results
+                    ):
                         content_list = cast(
                             list[dict[str, Any]], result.get("content") or []
                         )
                         (
                             llm_text,
-                            _display_text,
+                            display_text,
                             refs_for_call,
                         ) = _build_tool_result_with_references(
                             content_list=content_list,
@@ -1292,10 +1320,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                             existing_prefixes=seen_prefixes,
                         )
                         captured_refs.extend(refs_for_call)
+                        result_status = "succeeded"
                         if result.get("is_error"):
                             llm_text = json.dumps(
                                 {"error": llm_text or "Tool execution failed"}
                             )
+                            display_text = llm_text
+                            result_status = "failed"
                         messages.append(
                             {
                                 "role": "tool",
@@ -1303,11 +1334,35 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 "content": result_budget.admit(llm_text),
                             }
                         )
+                        assert mcp_proxy is not None
+                        tool_info = mcp_proxy.get_tool_info(call.name)
+                        if tool_info:
+                            server_name, tool_name, title = tool_info
+                        elif "__" in call.name:
+                            server_name, tool_name = call.name.split("__", 1)
+                            title = None
+                        else:
+                            server_name, tool_name, title = "", call.name, None
+                        collected_tool_metadata.append(
+                            ToolCallMetadata(
+                                server_name=server_name,
+                                tool_name=tool_name,
+                                title=title,
+                                arguments=call_args,
+                                tool_call_id=call.call_id,
+                                approved=True,
+                                result_status=result_status,
+                                result=display_text,
+                                mcp_tool_name=call.name,
+                            )
+                        )
                     if not await _follow_up_completion():
                         break
 
                 if captured_refs:
                     completion.mcp_tool_references = captured_refs
+                if collected_tool_metadata:
+                    completion.tool_calls_metadata = collected_tool_metadata
                 if msg.content:
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.stop = choice.finish_reason == "stop"

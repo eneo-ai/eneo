@@ -72,4 +72,11 @@ tenants_modules_table = Table(
     Base.metadata,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]  # SQLAlchemy declarative metadata
     Column("tenant_id", ForeignKey(Tenants.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
     Column("module_id", ForeignKey(Modules.id, ondelete="CASCADE"), primary_key=True),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
+    Column("redirect_uris", JSONB, nullable=True),
+    Column(
+        "service_key_id",
+        sa.UUID(),
+        ForeignKey("api_keys_v2.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
 )

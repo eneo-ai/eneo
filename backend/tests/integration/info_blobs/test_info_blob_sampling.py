@@ -188,6 +188,56 @@ async def test_sample_evenly_without_ids_touches_no_documents(db_container) -> N
         assert excerpts == []
 
 
+async def test_adjacent_chunks_stay_in_the_exact_active_document(db_container) -> None:
+    async with db_container() as container:
+        collection, model, _space = await _seed_collection(container, name="Adjacent")
+        wanted = await _seed_document(
+            container, collection, model, title="Wanted", chunk_count=3
+        )
+        other = await _seed_document(
+            container, collection, model, title="Other", chunk_count=3
+        )
+
+        excerpts = await container.info_blob_chunk_repo().get_adjacent_chunks(
+            info_blob_id=wanted.id, chunk_no=1
+        )
+
+        assert [(excerpt.info_blob_id, excerpt.chunk_no) for excerpt in excerpts] == [
+            (wanted.id, 0),
+            (wanted.id, 2),
+        ]
+        assert all(excerpt.info_blob_id != other.id for excerpt in excerpts)
+
+
+async def test_adjacent_chunks_handle_boundaries_and_ignore_superseded_versions(
+    db_container,
+) -> None:
+    async with db_container() as container:
+        collection, model, _space = await _seed_collection(container, name="Adjacent")
+        active = await _seed_document(
+            container, collection, model, title="Active", chunk_count=3
+        )
+        superseded = await _seed_document(
+            container,
+            collection,
+            model,
+            title="Superseded",
+            chunk_count=3,
+            active=False,
+        )
+        repo = container.info_blob_chunk_repo()
+
+        first = await repo.get_adjacent_chunks(info_blob_id=active.id, chunk_no=0)
+        final = await repo.get_adjacent_chunks(info_blob_id=active.id, chunk_no=2)
+        inactive = await repo.get_adjacent_chunks(
+            info_blob_id=superseded.id, chunk_no=1
+        )
+
+        assert [excerpt.chunk_no for excerpt in first] == [1]
+        assert [excerpt.chunk_no for excerpt in final] == [1]
+        assert inactive == []
+
+
 async def test_document_scope_returns_only_that_document(db_container) -> None:
     async with db_container() as container:
         collection, model, _space = await _seed_collection(container, name="Sampling")

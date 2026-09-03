@@ -109,7 +109,6 @@ class MCPServer(Entity):
         purpose: str = "general",
         is_enabled: bool = True,
         forward_identity: bool = False,
-        identity_policy_generation: int = 0,
         tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
         tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
         tool_definition_max_bytes: int = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
@@ -133,7 +132,6 @@ class MCPServer(Entity):
         self.purpose = purpose
         self.is_enabled = is_enabled
         self.forward_identity = forward_identity
-        self.identity_policy_generation = identity_policy_generation
         self.tool_catalog_max_count = tool_catalog_max_count
         self.tool_catalog_max_bytes = tool_catalog_max_bytes
         self.tool_definition_max_bytes = tool_definition_max_bytes

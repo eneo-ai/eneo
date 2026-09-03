@@ -518,7 +518,11 @@ async def test_interrupted_download_closes_content_context_once(
     reference = FileContentReferenceRecord(
         file_id=file_id,
         content_id=content_id,
-        variant=FileContentVariant.ORIGINAL,
+        variant=(
+            FileContentVariant.EXTRACTED_TEXT
+            if method_name == "get_download_no_auth"
+            else FileContentVariant.ORIGINAL
+        ),
         ordinal=0,
         page_number=None,
         width=None,

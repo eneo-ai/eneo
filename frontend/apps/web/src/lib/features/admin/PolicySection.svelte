@@ -5,10 +5,10 @@
 -->
 
 <!--
-  Shared shell for the governance policy sections (models, MCP, prompt).
+  Shared shell for administrative policy sections.
   Owns the card frame, the icon tile, the heading + status badge and the
-  divider so the three sections stay visually identical and there is a single
-  place to evolve that layout. Section-specific content goes in the default
+  divider so the sections stay visually identical and there is a single place
+  to evolve that layout. Section-specific content goes in the default
   slot; the section-specific icon goes in the `icon` snippet.
 -->
 <script lang="ts">
@@ -20,19 +20,27 @@
     id: string;
     title: string;
     description: string;
-    /** Short status text shown in the badge next to the title. */
-    summary: string;
-    summaryVariant: "default" | "outline" | "destructive";
+    /** Short status text shown in the badge next to the title, when the section has a status. */
+    summary?: string;
+    summaryVariant?: "default" | "outline" | "destructive";
     icon: Snippet;
     children: Snippet;
   };
 
-  let { id, title, description, summary, summaryVariant, icon, children }: Props = $props();
+  let {
+    id,
+    title,
+    description,
+    summary,
+    summaryVariant = "outline",
+    icon,
+    children
+  }: Props = $props();
 </script>
 
 <section
   aria-labelledby={`section-${id}-title`}
-  aria-describedby={`section-${id}-summary`}
+  aria-describedby={`section-${id}-description${summary ? ` section-${id}-summary` : ""}`}
   class="border-default bg-card overflow-hidden rounded-xl border"
 >
   <header class="border-default flex items-start gap-4 border-b p-5">
@@ -47,11 +55,16 @@
         <h2 id={`section-${id}-title`} class="text-primary text-base font-semibold">
           {title}
         </h2>
-        <Badge id={`section-${id}-summary`} variant={summaryVariant}>
-          {summary}
-        </Badge>
+        {#if summary}
+          <Badge id={`section-${id}-summary`} variant={summaryVariant}>
+            {summary}
+          </Badge>
+        {/if}
       </div>
-      <p class="text-secondary mt-1 max-w-[72ch] text-sm leading-5">
+      <p
+        id={`section-${id}-description`}
+        class="text-secondary mt-1 max-w-[72ch] text-sm leading-5"
+      >
         {description}
       </p>
     </div>

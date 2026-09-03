@@ -22,6 +22,12 @@ class IconContentReferenceRecord:
     access_class: ContentAccessClass
 
 
+@dataclass(frozen=True, slots=True)
+class LegacyIconContentRecord:
+    payload: bytes
+    media_type: str
+
+
 class IconRepository:
     """Persist Icon identity and its primary durable-content reference."""
 
@@ -48,20 +54,23 @@ class IconRepository:
         await self.session.flush()
 
     async def get(self, icon_id: UUID) -> IconMetadata | None:
-        row = await self.session.scalar(
-            sa.select(Icons)
-            .join(
-                IconContentReferences,
-                IconContentReferences.icon_id == Icons.id,
-            )
+        available_reference = sa.exists(
+            sa.select(1)
+            .select_from(IconContentReferences)
             .join(
                 ObjectContents,
                 ObjectContents.id == IconContentReferences.content_id,
             )
             .where(
-                Icons.id == icon_id,
+                IconContentReferences.icon_id == Icons.id,
                 IconContentReferences.variant == "primary",
                 ObjectContents.state == ContentState.AVAILABLE.value,
+            )
+        )
+        row = await self.session.scalar(
+            sa.select(Icons).where(
+                Icons.id == icon_id,
+                sa.or_(available_reference, Icons.legacy_blob.is_not(None)),
             )
         )
         return None if row is None else IconMetadata.model_validate(row)
@@ -101,6 +110,25 @@ class IconRepository:
             size_bytes=row.size_bytes,
             media_type=row.verified_media_type,
             access_class=ContentAccessClass(row.access_class),
+        )
+
+    async def get_legacy_primary(
+        self,
+        icon_id: UUID,
+    ) -> LegacyIconContentRecord | None:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    Icons.legacy_blob,
+                    Icons.legacy_mimetype,
+                ).where(Icons.id == icon_id)
+            )
+        ).one_or_none()
+        if row is None or row.legacy_blob is None or row.legacy_mimetype is None:
+            return None
+        return LegacyIconContentRecord(
+            payload=bytes(row.legacy_blob),
+            media_type=row.legacy_mimetype,
         )
 
     async def delete_by_tenant(self, icon_id: UUID, tenant_id: UUID) -> bool:

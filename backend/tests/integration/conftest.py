@@ -87,14 +87,6 @@ if not os.getenv("REDIS_HOST"):
     os.environ["REDIS_HOST"] = "placeholder"
 if not os.getenv("REDIS_PORT"):
     os.environ["REDIS_PORT"] = "6379"
-if not os.getenv("UPLOAD_FILE_TO_SESSION_MAX_SIZE"):
-    os.environ["UPLOAD_FILE_TO_SESSION_MAX_SIZE"] = "10485760"
-if not os.getenv("UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"):
-    os.environ["UPLOAD_IMAGE_TO_SESSION_MAX_SIZE"] = "10485760"
-if not os.getenv("UPLOAD_MAX_FILE_SIZE"):
-    os.environ["UPLOAD_MAX_FILE_SIZE"] = "10485760"
-if not os.getenv("TRANSCRIPTION_MAX_FILE_SIZE"):
-    os.environ["TRANSCRIPTION_MAX_FILE_SIZE"] = "10485760"
 if not os.getenv("MAX_IN_QUESTION"):
     os.environ["MAX_IN_QUESTION"] = "1"
 if not os.getenv("API_PREFIX"):
@@ -596,9 +588,13 @@ async def cleanup_database(
             setup_database.transcription_audio_limit_bytes,
         ),
     )
-    # The migration seeds this singleton once in production. Full test cleanup
+    # Migrations seed these singletons once in production. Full test cleanup
     # truncates every table, so restore the same required control-plane state.
     cursor.execute("INSERT INTO object_content_reconciliation_state (id) VALUES (1)")
+    cursor.execute(
+        "INSERT INTO file_icon_backfill_admission_state "
+        "(singleton, generation) VALUES (true, 0)"
+    )
     # Add API key scope enforcement feature flags.
     conn.commit()
     cursor.close()
@@ -945,7 +941,8 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         user: UserInDB,
         secret_key: str | None = None,
         audience: str | None = None,
-        expires_in: int | None = None,
+        expires_in: float | None = None,
+        extra_claims: dict[str, object] | None = None,
     ) -> str:
         secret = secret_key or test_settings.jwt_secret
         aud = audience or test_settings.jwt_audience
@@ -960,11 +957,14 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             ),
         )
         jwt_creds = JWTCreds(sub=user.email, username=user.username)
-        payload = JWTPayload(**jwt_meta.model_dump(), **jwt_creds.model_dump())
+        payload = {
+            **JWTPayload(
+                **jwt_meta.model_dump(), **jwt_creds.model_dump()
+            ).model_dump(),
+            **(extra_claims or {}),
+        }
 
-        return jwt_lib.encode(
-            payload.model_dump(), secret, algorithm=test_settings.jwt_algorithm
-        )
+        return jwt_lib.encode(payload, secret, algorithm=test_settings.jwt_algorithm)
 
     def patched_get_jwt_payload(
         self,
