@@ -14,7 +14,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import { writable } from "svelte/store";
-  import { tick, untrack } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { IconWorkflow } from "@eneo/icons/workflow";
   import { IconChevronRight } from "@eneo/icons/chevron-right";
   import MousePointerClick from "lucide-svelte/icons/mouse-pointer-click";
@@ -702,20 +702,22 @@
   let technicalRequestOpen = $state(0);
   let focusInstructionPending = $state(false);
   // A step the user just added lands with its name selected, so typing renames
-  // it at once. One handoff per creation token: the temp→real id reconciliation
-  // after the first save and later visits to the step must not steal focus.
+  // it at once. The editor owns the "once": taking the focus marks the intent
+  // handed over there, so neither the temp→real id reconciliation nor a later
+  // mount of this panel can steal focus a second time.
   let nameInputEl = $state<HTMLInputElement | null>(null);
-  let handledNewStepToken = $state<string | null>(null);
   $effect(() => {
     const intent = $newStepOpenIntent;
     const el = nameInputEl;
     const step = activeStep;
-    if (!intent || !step || !el || intent.stepId !== step.id) return;
-    if (untrack(() => handledNewStepToken) === intent.token) return;
-    handledNewStepToken = intent.token;
+    if (!intent?.focusPending || !step || !el || intent.stepId !== step.id) return;
+    flowEditor.takeNewStepFocus(intent.token);
     el.focus();
     el.select();
   });
+  // Leaving the step editor ends the creation episode: coming back should open
+  // the chapter the step's own state calls for, not the one it was created on.
+  onDestroy(() => flowEditor.clearNewStepOpenIntent());
   const chapterTaskStatus = $derived(
     activeStep
       ? getChapterTaskStatus(

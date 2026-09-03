@@ -157,11 +157,30 @@ function createFlowEditor(data: FlowEditorInitData) {
   const validationErrors = writable<Map<string, string[]>>(new Map());
   const saveStatus = writable<"saved" | "saving" | "unsaved">("saved");
   // The step the user just created: the editor opens its task chapter and hands
-  // it over once (name focused and selected). `token` is unique per creation so
-  // consumers act once; `stepId` follows the temp→real id reconciliation so the
-  // intent keeps pointing at the same step. Template steps land on the AI work
-  // section; blank steps land on "what".
-  const newStepOpenIntent = writable<{ token: string; stepId: string } | null>(null);
+  // it over once (name focused and selected). `stepId` follows the temp→real id
+  // reconciliation so the intent keeps pointing at the same step. Template steps
+  // land on the AI work section; blank steps land on "what".
+  //
+  // The handover is owned here, not in the panel: `focusPending` turns false the
+  // first time a consumer takes it, and `clearNewStepOpenIntent` ends the whole
+  // episode when the step editor goes away. A consumer that remembered "I have
+  // done this" in its own state would forget on remount and steal focus again
+  // when the user came back to the stage.
+  const newStepOpenIntent = writable<{
+    token: string;
+    stepId: string;
+    focusPending: boolean;
+  } | null>(null);
+  function takeNewStepFocus(token: string): void {
+    newStepOpenIntent.update((intent) =>
+      intent && intent.token === token && intent.focusPending
+        ? { ...intent, focusPending: false }
+        : intent
+    );
+  }
+  function clearNewStepOpenIntent(): void {
+    newStepOpenIntent.set(null);
+  }
   // Advances on every user-driven step selection, never on the temp→real id
   // reconciliation after a save, so views that react to "the user moved to a
   // step" (scroll resets) stay quiet while a step merely gets its real id.
@@ -602,7 +621,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       ...u,
       steps: [...(u.steps ?? []), newStep as FlowStep]
     }));
-    newStepOpenIntent.set({ token: tempId, stepId: tempId });
+    newStepOpenIntent.set({ token: tempId, stepId: tempId, focusPending: true });
     navigateToStep(tempId);
 
     try {
@@ -985,6 +1004,8 @@ function createFlowEditor(data: FlowEditorInitData) {
       isPublished
     },
     setResource,
+    takeNewStepFocus,
+    clearNewStepOpenIntent,
     addStep,
     insertStepAfter,
     insertSpeakerMappingStepAfter,

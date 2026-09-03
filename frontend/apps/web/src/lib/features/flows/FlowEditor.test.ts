@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { get } from "svelte/store";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EneoError } from "@eneo/eneo-js";
 import type { Flow, FlowStep, Eneo } from "@eneo/eneo-js";
@@ -1084,7 +1084,7 @@ describe("FlowEditor save flushing", () => {
     }
   });
 
-  it("hands a created step over once: the intent keeps its token and follows the real id", async () => {
+  it("hands a created step's name over once, across the save and any later mount", async () => {
     const flowUpdate = vi.fn(async ({ flow, update }) => ({
       ...(flow as Flow),
       ...(update as Partial<Flow>),
@@ -1107,17 +1107,52 @@ describe("FlowEditor save flushing", () => {
     try {
       const revisionBeforeAdd = get(editor.state.stepNavigationRevision);
       const tempId = await editor.addStep();
+      assert(tempId !== null, "addStep returns the new step's temporary id");
       expect(tempId).toMatch(/^_temp_/);
-      expect(get(editor.state.newStepOpenIntent)).toEqual({ token: tempId, stepId: tempId });
+      expect(get(editor.state.newStepOpenIntent)).toEqual({
+        token: tempId,
+        stepId: tempId,
+        focusPending: true
+      });
       expect(get(editor.state.stepNavigationRevision)).toBe(revisionBeforeAdd + 1);
+
+      // The panel focuses the name, and says so here rather than in its own
+      // state, which a later mount would not have.
+      editor.takeNewStepFocus(tempId);
+      expect(get(editor.state.newStepOpenIntent)?.focusPending).toBe(false);
 
       await editor.flushFlowSaves();
 
       expect(get(editor.state.activeStepId)).toBe("step-real-2");
-      // Same creation, same token: the name handoff already happened and must
-      // not repeat, while the intent keeps identifying the step by its real id.
-      expect(get(editor.state.newStepOpenIntent)).toEqual({ token: tempId, stepId: "step-real-2" });
+      // The intent follows the step to its real id and still opens the step's
+      // task chapter, but the name is never taken over again.
+      expect(get(editor.state.newStepOpenIntent)).toEqual({
+        token: tempId,
+        stepId: "step-real-2",
+        focusPending: false
+      });
+      editor.takeNewStepFocus(tempId);
+      expect(get(editor.state.newStepOpenIntent)?.focusPending).toBe(false);
       expect(get(editor.state.stepNavigationRevision)).toBe(revisionBeforeAdd + 1);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("ends the creation episode when the step editor goes away", async () => {
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ assistantCreate: vi.fn(async () => ({ id: "assistant-2" })) })
+    });
+    try {
+      const tempId = await editor.addStep();
+      expect(get(editor.state.newStepOpenIntent)?.stepId).toBe(tempId);
+
+      // The step editor is destroyed whenever the user leaves the step stage.
+      // Returning must not reopen the creation chapter or re-take the name.
+      editor.clearNewStepOpenIntent();
+
+      expect(get(editor.state.newStepOpenIntent)).toBeNull();
     } finally {
       editor.destroy();
     }
