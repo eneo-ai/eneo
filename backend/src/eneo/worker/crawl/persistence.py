@@ -126,7 +126,9 @@ async def _refresh_http_validators(
     ]
     async with sessionmanager.session() as session, session.begin():
         await _require_current_publication_lease(session, ctx)
-        await session.execute(
+        # A mapping list on AsyncSession would select ORM bulk-by-primary-key mode.
+        connection = await session.connection()
+        await connection.execute(
             sa.update(InfoBlobs)
             .where(
                 InfoBlobs.website_id == ctx.website_id,

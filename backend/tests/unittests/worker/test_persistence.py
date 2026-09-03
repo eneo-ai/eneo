@@ -205,68 +205,6 @@ class TestPreparedPageDataclass:
         assert len(prepared.embeddings) == 2
 
 
-class _AsyncContext:
-    def __init__(self, value):
-        self.value = value
-
-    async def __aenter__(self):
-        return self.value
-
-    async def __aexit__(self, *_args):
-        return None
-
-
-async def test_validator_refresh_is_tenant_and_website_scoped(monkeypatch):
-    from eneo.database.database import sessionmanager
-    from eneo.worker.crawl.persistence import _refresh_http_validators
-
-    ctx = CrawlContext(
-        website_id=uuid4(),
-        tenant_id=uuid4(),
-        tenant_slug="test",
-        user_id=uuid4(),
-        attempt_id=uuid4(),
-        lease_owner="test-worker",
-        embedding_model_id=uuid4(),
-        embedding_model_name="test-model",
-        embedding_model_open_source=False,
-        embedding_model_family=None,
-        embedding_model_dimensions=1536,
-    )
-    session = MagicMock()
-    session.execute = AsyncMock()
-    session.begin.return_value = _AsyncContext(None)
-    monkeypatch.setattr(
-        sessionmanager,
-        "session",
-        lambda: _AsyncContext(session),
-    )
-
-    await _refresh_http_validators(
-        ctx=ctx,
-        rows=[
-            {
-                "url": "https://example.se/page",
-                "content": "same",
-                "etag": '"v2"',
-                "last_modified": "Thu, 13 Aug 2026 10:00:00 GMT",
-            }
-        ],
-    )
-
-    statement, values = session.execute.await_args.args
-    compiled_values = statement.compile().params.values()
-    assert ctx.tenant_id in compiled_values
-    assert ctx.website_id in compiled_values
-    assert values == [
-        {
-            "b_title": "https://example.se/page",
-            "b_etag": '"v2"',
-            "b_last_modified": "Thu, 13 Aug 2026 10:00:00 GMT",
-        }
-    ]
-
-
 class TestCrawlContextDataclass:
     """Tests for CrawlContext DTO used by persist_batch."""
 

@@ -13,13 +13,14 @@ import shutil
 import socket
 import unicodedata
 from collections import deque
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory, gettempdir
 from time import monotonic
+from typing import TypeVar
 from urllib.parse import unquote, urlsplit
 from urllib.robotparser import RobotFileParser
 
@@ -48,6 +49,7 @@ from eneo.crawler.extraction import (
 )
 from eneo.crawler.sitemap import (
     InvalidSitemap,
+    ParsedSitemap,
     SitemapEntry,
     SitemapSnapshot,
     parse_sitemap,
@@ -65,6 +67,8 @@ _MAX_REDIRECTS = 10
 _MAX_FILENAME_BYTES = 200
 _MAX_SUFFIX_BYTES = 16
 _CRAWL_TEMP_PREFIX = "eneo-crawl-"
+
+_ResponseResult = TypeVar("_ResponseResult")
 
 _process_capacity: asyncio.Semaphore | None = None
 _process_capacity_loop: asyncio.AbstractEventLoop | None = None
@@ -567,6 +571,56 @@ class PythonCrawlEngine:
         )
         return parser
 
+    async def _request_with_retries(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        scope_url: str,
+        retries: int,
+        origin_authorization: str | None,
+        *,
+        path_scope: bool,
+        consume_response: Callable[
+            [aiohttp.ClientResponse, str], Awaitable[_ResponseResult]
+        ],
+        headers: dict[str, str] | None = None,
+    ) -> _ResponseResult:
+        """Consume one response under capacity, retrying transport/status failures.
+
+        The consumer may run once per attempt and must restart partial output cleanly.
+        """
+        attempts = retries + 1
+        for attempt in range(attempts):
+            try:
+                async with self._capacity:
+                    response, final_url = await self._request_with_redirects(
+                        session,
+                        url,
+                        scope_url,
+                        origin_authorization,
+                        path_scope=path_scope,
+                        headers=headers,
+                    )
+                    async with response:
+                        if (
+                            response.status in _RETRYABLE_STATUSES
+                            and attempt + 1 < attempts
+                        ):
+                            retry_delay = self._retry_delay(response, attempt)
+                        else:
+                            return await consume_response(response, final_url)
+            except (_UnsafeTarget, _RedirectRejected):
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                if attempt + 1 == attempts:
+                    raise
+                retry_delay = min(2**attempt, 10)
+
+            # Backoff must not occupy one of the process-wide HTTP slots.
+            await asyncio.sleep(retry_delay)
+
+        raise AssertionError("retry loop exhausted without a result")
+
     async def _fetch(
         self,
         session: aiohttp.ClientSession,
@@ -582,115 +636,89 @@ class PythonCrawlEngine:
         if robots is not None and not robots.can_fetch(_USER_AGENT, url):
             return _FetchResult(PageFailed(url=url, reason="robots_disallowed"))
 
-        attempts = request.limits.retries + 1
-        for attempt in range(attempts):
-            try:
-                retry_delay: float | None = None
-                request_headers: dict[str, str] = {}
-                validator = validators.get(url)
-                if validator is not None and validator.etag:
-                    request_headers["If-None-Match"] = validator.etag
-                if validator is not None and validator.last_modified:
-                    request_headers["If-Modified-Since"] = validator.last_modified
+        request_headers: dict[str, str] = {}
+        validator = validators.get(url)
+        if validator is not None and validator.etag:
+            request_headers["If-None-Match"] = validator.etag
+        if validator is not None and validator.last_modified:
+            request_headers["If-Modified-Since"] = validator.last_modified
 
-                async with self._capacity:
-                    response, final_url = await self._request_with_redirects(
-                        session,
-                        url,
-                        scope_url,
-                        origin_authorization,
-                        path_scope=path_scope,
-                        headers=request_headers,
+        async def consume_response(
+            response: aiohttp.ClientResponse,
+            final_url: str,
+        ) -> _FetchResult:
+            if response.status == 304:
+                return _FetchResult(PageUnchanged(url=final_url))
+            if response.status >= 400:
+                return _FetchResult(
+                    PageFailed(
+                        url=final_url,
+                        status_code=response.status,
+                        reason=f"http_{response.status}",
+                        retryable=response.status in _RETRYABLE_STATUSES,
                     )
-                    async with response:
-                        if (
-                            response.status in _RETRYABLE_STATUSES
-                            and attempt + 1 < attempts
-                        ):
-                            retry_delay = self._retry_delay(response, attempt)
-                        elif response.status == 304:
-                            return _FetchResult(PageUnchanged(url=final_url))
-                        elif response.status >= 400:
-                            return _FetchResult(
-                                PageFailed(
-                                    url=final_url,
-                                    status_code=response.status,
-                                    reason=f"http_{response.status}",
-                                    retryable=response.status in _RETRYABLE_STATUSES,
-                                )
-                            )
+                )
 
-                        body = (
-                            b""
-                            if retry_delay is not None
-                            else await self._read_bounded(
-                                response, request.limits.max_response_bytes
-                            )
-                        )
-                        content_type = response.headers.get("Content-Type", "").lower()
-                        charset = response.charset or "utf-8"
-                        response_status = response.status
-                        response_etag = response.headers.get("ETag")
-                        response_last_modified = response.headers.get("Last-Modified")
-
-                # Retry backoff must not occupy one of the process-wide HTTP slots.
-                if retry_delay is not None:
-                    await asyncio.sleep(retry_delay)
-                    continue
-
-                text = body.decode(charset, errors="replace")
-                if "application/json" in content_type:
-                    return _FetchResult(
-                        PageCrawled(
-                            url=final_url,
-                            title=final_url,
-                            content=text,
-                            etag=response_etag,
-                            last_modified=response_last_modified,
-                        )
-                    )
-                if "html" not in content_type:
-                    return _FetchResult(
-                        PageFailed(
-                            url=final_url,
-                            status_code=response_status,
-                            reason="unsupported_content_type",
-                        )
-                    )
-
-                extracted = extract_html(text, final_url)
+            body = await self._read_bounded(response, request.limits.max_response_bytes)
+            content_type = response.headers.get("Content-Type", "").lower()
+            text = body.decode(response.charset or "utf-8", errors="replace")
+            if "application/json" in content_type:
                 return _FetchResult(
                     PageCrawled(
                         url=final_url,
-                        title=extracted.title,
-                        content=extracted.content,
-                        etag=response_etag,
-                        last_modified=response_last_modified,
-                        file_links=(
-                            extracted.file_links if request.download_files else ()
-                        ),
-                    ),
-                    links=extracted.links,
-                )
-
-            except _ResponseTooLarge:
-                return _FetchResult(PageFailed(url=url, reason="response_too_large"))
-            except (_UnsafeTarget, _RedirectRejected, LookupError) as exc:
-                return _FetchResult(
-                    PageFailed(url=url, reason=_request_failure_reason(exc))
-                )
-            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-                if attempt + 1 == attempts:
-                    return _FetchResult(
-                        PageFailed(
-                            url=url,
-                            reason=_request_failure_reason(exc),
-                            retryable=True,
-                        )
+                        title=final_url,
+                        content=text,
+                        etag=response.headers.get("ETag"),
+                        last_modified=response.headers.get("Last-Modified"),
                     )
-                await asyncio.sleep(min(2**attempt, 10))
+                )
+            if "html" not in content_type:
+                return _FetchResult(
+                    PageFailed(
+                        url=final_url,
+                        status_code=response.status,
+                        reason="unsupported_content_type",
+                    )
+                )
 
-        raise AssertionError("retry loop exhausted without a result")
+            extracted = extract_html(text, final_url)
+            return _FetchResult(
+                PageCrawled(
+                    url=final_url,
+                    title=extracted.title,
+                    content=extracted.content,
+                    etag=response.headers.get("ETag"),
+                    last_modified=response.headers.get("Last-Modified"),
+                    file_links=(extracted.file_links if request.download_files else ()),
+                ),
+                links=extracted.links,
+            )
+
+        try:
+            return await self._request_with_retries(
+                session,
+                url,
+                scope_url,
+                request.limits.retries,
+                origin_authorization,
+                path_scope=path_scope,
+                consume_response=consume_response,
+                headers=request_headers,
+            )
+        except _ResponseTooLarge:
+            return _FetchResult(PageFailed(url=url, reason="response_too_large"))
+        except (_UnsafeTarget, _RedirectRejected, LookupError) as exc:
+            return _FetchResult(
+                PageFailed(url=url, reason=_request_failure_reason(exc))
+            )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            return _FetchResult(
+                PageFailed(
+                    url=url,
+                    reason=_request_failure_reason(exc),
+                    retryable=True,
+                )
+            )
 
     async def _download_files(
         self,
@@ -783,44 +811,48 @@ class PythonCrawlEngine:
         filename = self._filename_for_url(normalized, taken_names)
         target = directory / filename
         partial = target.with_name(f"{target.name}.part")
-        try:
-            async with self._capacity:
-                response, final_url = await self._request_with_redirects(
-                    session,
-                    normalized,
-                    scope_url,
-                    origin_authorization,
-                    path_scope=False,
-                )
-                async with response:
-                    if response.status >= 400:
-                        return FileFailed(
-                            url=final_url,
-                            status_code=response.status,
-                            reason=f"http_{response.status}",
-                            retryable=response.status in _RETRYABLE_STATUSES,
-                        )
-                    if (
-                        response.content_length is not None
-                        and response.content_length > request.limits.max_file_bytes
-                    ):
-                        return FileFailed(url=final_url, reason="file_too_large")
 
-                    written = 0
-                    async with aiofiles.open(partial, "wb") as output:
-                        async for chunk in response.content.iter_chunked(64 * 1024):
-                            written += len(chunk)
-                            if written > request.limits.max_file_bytes:
-                                return FileFailed(
-                                    url=final_url, reason="file_too_large"
-                                )
-                            await output.write(chunk)
-                    partial.replace(target)
-                    return FileDownloaded(
-                        url=final_url,
-                        filename=filename,
-                        path=target,
-                    )
+        async def consume_response(
+            response: aiohttp.ClientResponse,
+            final_url: str,
+        ) -> FileDownloaded | FileFailed:
+            if response.status >= 400:
+                return FileFailed(
+                    url=final_url,
+                    status_code=response.status,
+                    reason=f"http_{response.status}",
+                    retryable=response.status in _RETRYABLE_STATUSES,
+                )
+            if (
+                response.content_length is not None
+                and response.content_length > request.limits.max_file_bytes
+            ):
+                return FileFailed(url=final_url, reason="file_too_large")
+
+            written = 0
+            async with aiofiles.open(partial, "wb") as output:
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    written += len(chunk)
+                    if written > request.limits.max_file_bytes:
+                        return FileFailed(url=final_url, reason="file_too_large")
+                    await output.write(chunk)
+            partial.replace(target)
+            return FileDownloaded(
+                url=final_url,
+                filename=filename,
+                path=target,
+            )
+
+        try:
+            return await self._request_with_retries(
+                session,
+                normalized,
+                scope_url,
+                request.limits.retries,
+                origin_authorization,
+                path_scope=False,
+                consume_response=consume_response,
+            )
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             return FileFailed(
                 url=normalized,
@@ -876,36 +908,40 @@ class PythonCrawlEngine:
         failures: list[PageFailed] = []
         sitemap_entries: list[SitemapEntry] = []
         skipped_non_page_entries = 0
+        ignored_entries = 0
+        sitemap_truncated = False
         max_sitemap_documents = 100
 
-        while sitemap_frontier and len(seen_sitemaps) <= max_sitemap_documents:
+        async def consume_response(
+            response: aiohttp.ClientResponse,
+            final_url: str,
+        ) -> tuple[str, ParsedSitemap | PageFailed]:
+            if response.status >= 400:
+                return final_url, PageFailed(
+                    url=final_url,
+                    status_code=response.status,
+                    reason=f"http_{response.status}",
+                    retryable=response.status in _RETRYABLE_STATUSES,
+                )
+            body = await self._read_bounded(response, request.limits.max_response_bytes)
+            return final_url, parse_sitemap(
+                body,
+                max_decompressed_bytes=request.limits.max_response_bytes,
+            )
+
+        while sitemap_frontier:
             current = sitemap_frontier.popleft()
+
             try:
-                async with self._capacity:
-                    response, final_url = await self._request_with_redirects(
-                        session,
-                        current,
-                        sitemap_url,
-                        origin_authorization,
-                        path_scope=False,
-                    )
-                    async with response:
-                        if response.status >= 400:
-                            failures.append(
-                                PageFailed(
-                                    url=current,
-                                    status_code=response.status,
-                                    reason=f"http_{response.status}",
-                                )
-                            )
-                            continue
-                        body = await self._read_bounded(
-                            response, request.limits.max_response_bytes
-                        )
-                        parsed = parse_sitemap(
-                            body,
-                            max_decompressed_bytes=request.limits.max_response_bytes,
-                        )
+                final_url, parsed_or_failure = await self._request_with_retries(
+                    session,
+                    current,
+                    sitemap_url,
+                    request.limits.retries,
+                    origin_authorization,
+                    path_scope=False,
+                    consume_response=consume_response,
+                )
             except _ResponseTooLarge:
                 failures.append(PageFailed(url=current, reason="sitemap_too_large"))
                 continue
@@ -922,17 +958,29 @@ class PythonCrawlEngine:
                 )
                 continue
 
+            if isinstance(parsed_or_failure, PageFailed):
+                failures.append(parsed_or_failure)
+                continue
+            parsed = parsed_or_failure
+            if not parsed.structurally_complete:
+                failures.append(PageFailed(url=final_url, reason="invalid_sitemap"))
+
             if parsed.kind == "sitemapindex":
                 for location in parsed.locations:
                     normalized = normalize_url(location, base_url=final_url)
                     if (
-                        normalized is not None
-                        and is_same_origin(normalized, sitemap_url)
-                        and normalized not in seen_sitemaps
-                        and len(seen_sitemaps) < max_sitemap_documents
+                        normalized is None
+                        or not is_same_origin(normalized, sitemap_url)
+                        or normalized in seen_sitemaps
                     ):
-                        seen_sitemaps.add(normalized)
-                        sitemap_frontier.append(normalized)
+                        ignored_entries += 1
+                        continue
+                    if len(seen_sitemaps) >= max_sitemap_documents:
+                        ignored_entries += 1
+                        sitemap_truncated = True
+                        continue
+                    seen_sitemaps.add(normalized)
+                    sitemap_frontier.append(normalized)
                 continue
 
             for original_entry in parsed.entries:
@@ -943,9 +991,11 @@ class PythonCrawlEngine:
                     or not is_same_origin(normalized, sitemap_url)
                     or normalized in seen_pages
                 ):
+                    ignored_entries += 1
                     continue
                 if not is_page_link(normalized):
                     skipped_non_page_entries += 1
+                    ignored_entries += 1
                     continue
 
                 seen_pages.add(normalized)
@@ -962,46 +1012,15 @@ class PythonCrawlEngine:
 
         _log_skipped_sitemap_entries(skipped_non_page_entries)
         # Only page candidates belong in the fingerprint. Asset-only sitemap
-        # changes should not force a content recrawl.
-        snapshot = snapshot_sitemap(sitemap_entries) if not failures else None
-        return page_urls, failures, snapshot, False
-
-    async def probe_sitemap(self, request: CrawlRequest) -> SitemapSnapshot | None:
-        if request.crawl_type != CrawlType.SITEMAP:
-            return None
-        seed_url = normalize_url(request.url)
-        if seed_url is None:
-            return None
-        origin_authorization = (
-            aiohttp.encode_basic_auth(request.http_user, request.http_pass or "")
-            if request.http_user
-            else None
+        # changes should not force a content recrawl. If every declared entry
+        # was ignored, however, the sitemap is not proof that content vanished.
+        snapshot_is_complete = (
+            not failures
+            and not sitemap_truncated
+            and (bool(sitemap_entries) or ignored_entries == 0)
         )
-        timeout = aiohttp.ClientTimeout(
-            total=request.limits.request_timeout_seconds,
-            connect=min(
-                request.limits.dns_timeout_seconds,
-                request.limits.request_timeout_seconds,
-            ),
-        )
-        connector = aiohttp.TCPConnector(
-            resolver=_SafeResolver(allow_private_network=self._allow_private_network)
-        )
-        async with aiohttp.ClientSession(
-            headers={"User-Agent": _USER_AGENT},
-            timeout=timeout,
-            connector=connector,
-        ) as session:
-            try:
-                _, failures, snapshot, _ = await asyncio.wait_for(
-                    self._sitemap_urls(
-                        session, seed_url, request, origin_authorization
-                    ),
-                    timeout=request.limits.max_seconds,
-                )
-            except TimeoutError:
-                return None
-        return None if failures else snapshot
+        snapshot = snapshot_sitemap(sitemap_entries) if snapshot_is_complete else None
+        return page_urls, failures, snapshot, sitemap_truncated
 
     async def _request_with_redirects(
         self,

@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -26,6 +27,10 @@ from eneo.crawler.engine import (
 )
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.database.tables.info_blobs_table import (
+    InfoBlobs,
+    InfoBlobVersionState,
+)
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -65,6 +70,30 @@ class _EmptyCrawlEngine:
             status="completed",
             pages_crawled=0,
             pages_failed=0,
+        )
+
+
+class _AuthoritativeEmptySitemapEngine:
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        del request
+        yield CrawlFinished(
+            status="completed",
+            pages_crawled=0,
+            pages_failed=0,
+            sitemap_fingerprint=sha256(b"").hexdigest(),
+            sitemap_entries=0,
+        )
+
+
+class _StructurallyIncompleteSitemapEngine:
+    async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+        yield PageUnchanged(url=request.url)
+        yield PageFailed(url=request.url, reason="invalid_sitemap")
+        yield CrawlFinished(
+            status="completed",
+            pages_crawled=0,
+            pages_failed=1,
+            pages_unchanged=1,
         )
 
 
@@ -230,6 +259,7 @@ async def _persist_website(
     tenant_id: UUID,
     user_id: UUID,
     label: str,
+    crawl_type: CrawlType = CrawlType.CRAWL,
 ) -> Website:
     embedding_model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
     assert embedding_model_id is not None
@@ -237,7 +267,7 @@ async def _persist_website(
         name=label,
         url=f"https://{label.lower().replace(' ', '-')}.example.com",
         download_files=False,
-        crawl_type=CrawlType.CRAWL,
+        crawl_type=crawl_type,
         update_interval=UpdateInterval.NEVER,
         size=0,
         tenant_id=tenant_id,
@@ -1117,6 +1147,131 @@ async def test_worker_terminalizes_a_zero_page_crawl_as_empty(
         assert finished.outcome == CrawlOutcome.EMPTY
         assert finished.pages_crawled == 0
         assert job.status == Status.COMPLETE.value
+
+
+@pytest.mark.parametrize(
+    ("engine", "expected_blob_count", "expects_sitemap_state"),
+    [
+        (_AuthoritativeEmptySitemapEngine(), 0, True),
+        (_EmptyCrawlEngine(), 1, False),
+    ],
+    ids=("authoritative", "non-authoritative"),
+)
+async def test_only_authoritative_empty_sitemap_removes_withdrawn_content(
+    db_session,
+    admin_user,
+    engine,
+    expected_blob_count: int,
+    expects_sitemap_state: bool,
+) -> None:
+    stale_text = "Withdrawn municipal guidance"
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Authoritative empty sitemap",
+            crawl_type=CrawlType.SITEMAP,
+        )
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        stale_blob = InfoBlobs(
+            text=stale_text,
+            title=f"{website.url}/withdrawn",
+            url=f"{website.url}/withdrawn",
+            size=len(stale_text.encode()),
+            content_hash=sha256(stale_text.encode()).digest(),
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            embedding_model_id=website_record.embedding_model_id,
+        )
+        session.add(stale_blob)
+        await session.flush()
+        stale_blob_id = stale_blob.id
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(engine))
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.EMPTY.value
+    async with db_session() as session:
+        blob_count = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(InfoBlobs.id == stale_blob_id)
+        )
+        assert blob_count == expected_blob_count
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        assert (website_record.sitemap_state is not None) is expects_sitemap_state
+        if website_record.sitemap_state is not None:
+            assert website_record.sitemap_state["entry_count"] == 0
+            assert (
+                website_record.sitemap_state["fingerprint"] == sha256(b"").hexdigest()
+            )
+
+
+async def test_incomplete_sitemap_preserves_content_missing_from_observation(
+    db_session,
+    admin_user,
+) -> None:
+    stale_text = "Municipal guidance hidden by malformed sitemap content"
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Structurally incomplete sitemap",
+            crawl_type=CrawlType.SITEMAP,
+        )
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        stale_blob = InfoBlobs(
+            text=stale_text,
+            title=f"{website.url}/hidden",
+            url=f"{website.url}/hidden",
+            size=len(stale_text.encode()),
+            content_hash=sha256(stale_text.encode()).digest(),
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            embedding_model_id=website_record.embedding_model_id,
+        )
+        session.add(stale_blob)
+        await session.flush()
+        stale_blob_id = stale_blob.id
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(_StructurallyIncompleteSitemapEngine()))
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.PARTIAL.value
+    async with db_session() as session:
+        assert await session.get(InfoBlobs, stale_blob_id) is not None
+        website_record = await session.get(WebsitesTable, website.id)
+        assert website_record is not None
+        assert website_record.sitemap_state is None
 
 
 async def test_persistence_failure_is_not_counted_as_a_successful_page(

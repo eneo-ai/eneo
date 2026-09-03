@@ -606,6 +606,320 @@ async def test_crawl_retries_service_unavailable_with_retry_after() -> None:
     )
 
 
+async def test_sitemap_fetch_retries_service_unavailable() -> None:
+    sitemap_attempts = 0
+
+    async def sitemap(request: web.Request) -> web.Response:
+        nonlocal sitemap_attempts
+        sitemap_attempts += 1
+        if sitemap_attempts == 1:
+            return web.Response(status=503, headers={"Retry-After": "0"})
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<url><loc>{origin}/page</loc></url>"
+                "</urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def page(_: web.Request) -> web.Response:
+        return web.Response(text="<main>available</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/page", page)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    assert sitemap_attempts == 2
+    assert any(isinstance(event, PageCrawled) for event in events)
+
+
+async def test_empty_sitemap_emits_an_authoritative_snapshot() -> None:
+    async def sitemap(_: web.Request) -> web.Response:
+        return web.Response(
+            body=b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" />',
+            content_type="application/xml",
+        )
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    assert events[-1] == CrawlFinished(
+        status="completed",
+        pages_crawled=0,
+        pages_failed=0,
+        sitemap_fingerprint=hashlib.sha256(b"").hexdigest(),
+        sitemap_entries=0,
+    )
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://other.example.com/page",
+        "mailto:contact@example.com",
+        "{origin}/guide.pdf",
+    ],
+    ids=("off-origin", "unnormalizable", "non-page"),
+)
+async def test_filtered_only_sitemap_is_not_authoritatively_empty(
+    location: str,
+) -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<url><loc>{location.format(origin=origin)}</loc></url>"
+                "</urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.sitemap_fingerprint is None
+
+
+async def test_off_origin_only_sitemap_index_is_not_authoritatively_empty() -> None:
+    async def sitemap(_: web.Request) -> web.Response:
+        return web.Response(
+            body=(
+                '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                "<sitemap><loc>https://other.example.com/sitemap.xml</loc></sitemap>"
+                "</sitemapindex>"
+            ),
+            content_type="application/xml",
+        )
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.sitemap_fingerprint is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"<urlset><foo><loc>https://example.com/page</loc></foo></urlset>",
+        b"<urlset>upstream error</urlset>",
+        b'<x:urlset xmlns:x="urn:not-sitemaps" />',
+    ],
+    ids=("unexpected-child", "root-text", "wrong-namespace"),
+)
+async def test_structurally_untrusted_sitemap_is_not_authoritatively_empty(
+    body: bytes,
+) -> None:
+    async def sitemap(_: web.Request) -> web.Response:
+        return web.Response(body=body, content_type="application/xml")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.sitemap_fingerprint is None
+
+
+async def test_sitemap_index_with_empty_child_is_authoritatively_empty() -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                f"<sitemap><loc>{origin}/empty.xml</loc></sitemap>"
+                "</sitemapindex>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def empty(_: web.Request) -> web.Response:
+        return web.Response(body=b"<urlset />", content_type="application/xml")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/empty.xml", empty)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.sitemap_fingerprint == hashlib.sha256(b"").hexdigest()
+
+
+async def test_sitemap_index_with_discarded_item_content_is_not_empty() -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                "<sitemapindex><sitemap>"
+                f"<loc>{origin}/empty.xml</loc>"
+                "<unexpected>"
+                f"<loc>{origin}/populated.xml</loc>"
+                "</unexpected>"
+                "</sitemap></sitemapindex>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def empty(_: web.Request) -> web.Response:
+        return web.Response(body=b"<urlset />", content_type="application/xml")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/empty.xml", empty)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.sitemap_fingerprint is None
+
+
+async def test_sitemap_with_visible_page_and_discarded_content_is_incomplete() -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                "<urlset><url>"
+                f"<loc>{origin}/visible</loc>"
+                "<lastmod>2026-09-02</lastmod>"
+                "<unexpected>"
+                f"<loc>{origin}/hidden</loc>"
+                "</unexpected>"
+                "</url></urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def visible(_: web.Request) -> web.Response:
+        return web.Response(text="<main>Visible</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/visible", visible)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    assert any(
+        isinstance(event, PageFailed) and event.reason == "invalid_sitemap"
+        for event in events
+    )
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.pages_crawled == 1
+    assert finished.pages_failed == 1
+    assert finished.sitemap_fingerprint is None
+
+
+async def test_sitemap_skips_missing_location_without_losing_valid_pages() -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        origin = f"{request.scheme}://{request.host}"
+        return web.Response(
+            body=(
+                "<urlset>"
+                "<url><loc> </loc></url>"
+                f"<url><loc>{origin}/one</loc><lastmod>2026-09-01</lastmod></url>"
+                f"<url><loc>{origin}/two</loc><lastmod>2026-09-02</lastmod></url>"
+                "</urlset>"
+            ),
+            content_type="application/xml",
+        )
+
+    async def page(_: web.Request) -> web.Response:
+        return web.Response(text="<main>Visible</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/one", page)
+    app.router.add_get("/two", page)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/sitemap.xml", crawl_type=CrawlType.SITEMAP)
+            )
+        ]
+
+    assert (
+        sum(
+            isinstance(event, PageFailed) and event.reason == "invalid_sitemap"
+            for event in events
+        )
+        == 1
+    )
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.pages_crawled == 2
+    assert finished.pages_failed == 1
+    assert finished.sitemap_fingerprint is None
+
+
 async def test_crawl_rejects_oversized_response() -> None:
     async def oversized(_: web.Request) -> web.Response:
         return web.Response(text="<main>too large</main>", content_type="text/html")
@@ -793,6 +1107,136 @@ async def test_downloaded_file_is_removed_after_event_consumer_resumes() -> None
 
     assert len(downloaded_paths) == 2
     assert all(not path.exists() for path in downloaded_paths)
+
+
+async def test_file_download_retries_service_unavailable() -> None:
+    file_attempts = 0
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text='<main><a href="/guide.pdf">Guide</a></main>',
+            content_type="text/html",
+        )
+
+    async def guide(_: web.Request) -> web.Response:
+        nonlocal file_attempts
+        file_attempts += 1
+        if file_attempts == 1:
+            return web.Response(status=503, headers={"Retry-After": "0"})
+        return web.Response(body=b"document bytes", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/guide.pdf", guide)
+
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start")
+            )
+        ]
+
+    assert file_attempts == 2
+    assert any(isinstance(event, FileDownloaded) for event in events)
+    assert not any(isinstance(event, FileFailed) for event in events)
+
+
+async def test_file_download_retries_an_incomplete_payload_from_a_clean_file() -> None:
+    file_attempts = 0
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text='<main><a href="/guide.pdf">Guide</a></main>',
+            content_type="text/html",
+        )
+
+    async def guide(request: web.Request) -> web.StreamResponse:
+        nonlocal file_attempts
+        file_attempts += 1
+        if file_attempts == 1:
+            response = web.StreamResponse(
+                headers={
+                    "Content-Type": "application/pdf",
+                    "Content-Length": "32",
+                }
+            )
+            await response.prepare(request)
+            await response.write(b"incomplete")
+            assert request.transport is not None
+            request.transport.close()
+            return response
+        return web.Response(body=b"complete document", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/guide.pdf", guide)
+
+    async with _serve(app) as base_url:
+        downloaded: list[bytes] = []
+        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            _request(f"{base_url}/start")
+        ):
+            if isinstance(event, FileDownloaded):
+                downloaded.append(event.path.read_bytes())
+
+    assert file_attempts == 2
+    assert downloaded == [b"complete document"]
+
+
+async def test_retry_backoff_releases_process_wide_http_capacity(monkeypatch) -> None:
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity", None)
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity_loop", None)
+    monkeypatch.setattr("eneo.crawler.python_engine._process_capacity_limit", None)
+    first_attempt_finished = asyncio.Event()
+    other_request_started = asyncio.Event()
+    flaky_attempts = 0
+
+    async def flaky(_: web.Request) -> web.Response:
+        nonlocal flaky_attempts
+        flaky_attempts += 1
+        if flaky_attempts == 1:
+            first_attempt_finished.set()
+            return web.Response(status=503, headers={"Retry-After": "30"})
+        return web.Response(text="<main>recovered</main>", content_type="text/html")
+
+    async def other(_: web.Request) -> web.Response:
+        other_request_started.set()
+        return web.Response(text="<main>other</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/flaky", flaky)
+    app.router.add_get("/other", other)
+
+    async with _serve(app) as base_url:
+        engine = PythonCrawlEngine(global_concurrency=1, allow_private_network=True)
+
+        async def collect(path: str) -> list[CrawlEvent]:
+            return [
+                event
+                async for event in engine.crawl(
+                    _request(f"{base_url}/{path}", download_files=False)
+                )
+            ]
+
+        flaky_task = asyncio.create_task(collect("flaky"))
+        other_task: asyncio.Task[list[CrawlEvent]] | None = None
+        try:
+            await asyncio.wait_for(first_attempt_finished.wait(), timeout=2)
+            other_task = asyncio.create_task(collect("other"))
+            await asyncio.wait_for(other_request_started.wait(), timeout=2)
+            await other_task
+        finally:
+            flaky_task.cancel()
+            if other_task is not None and not other_task.done():
+                other_task.cancel()
+            await asyncio.gather(
+                flaky_task,
+                *([other_task] if other_task is not None else []),
+                return_exceptions=True,
+            )
+
+    assert flaky_attempts == 1
 
 
 async def test_closing_crawl_stream_removes_download_workspace() -> None:

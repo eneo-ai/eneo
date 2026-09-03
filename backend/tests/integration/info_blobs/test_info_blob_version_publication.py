@@ -26,6 +26,8 @@ from eneo.database.tables.object_content_table import (
     ObjectContents,
 )
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import (
@@ -39,7 +41,10 @@ from eneo.main.exceptions import (
 )
 from eneo.object_content.content import ContentState, StorageKind
 from eneo.websites.domain.crawl_run import CrawlType
-from eneo.worker.crawl.persistence import _publish_prepared_pages
+from eneo.worker.crawl.persistence import (
+    _publish_prepared_pages,
+    _refresh_http_validators,
+)
 from eneo.worker.crawl_context import CrawlContext, PreparedPage
 
 
@@ -195,6 +200,178 @@ async def test_crawler_float32_vector_round_trips_through_postgres(
         np.asarray(stored_vector, dtype=np.float32),
         source_vector,
     )
+
+
+async def test_validator_refresh_updates_only_the_existing_website_version(
+    db_container,
+    monkeypatch,
+) -> None:
+    title = "https://validator-refresh.example.com/page"
+    original_text = "Unchanged page content"
+
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        tenant = container.tenant()
+        embedding_model_id = await session.scalar(
+            sa.select(EmbeddingModels.id).limit(1)
+        )
+        assert embedding_model_id is not None
+        websites = [
+            Websites(
+                name=f"Validator refresh {index}",
+                url=f"https://validator-refresh-{index}.example.com",
+                download_files=False,
+                crawl_type=CrawlType.CRAWL,
+                update_interval="never",
+                size=0,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                embedding_model_id=embedding_model_id,
+            )
+            for index in range(2)
+        ]
+        session.add_all(websites)
+        await session.flush()
+        other_tenant = Tenants(
+            name=f"Validator refresh tenant {uuid4()}",
+            slug=f"validator-refresh-{uuid4().hex[:12]}",
+            quota_limit=1_000_000,
+            state="active",
+        )
+        session.add(other_tenant)
+        await session.flush()
+        other_user = Users(
+            username="validator-refresh-user",
+            email=f"validator-refresh-{uuid4()}@example.com",
+            state="active",
+            used_tokens=0,
+            tenant_id=other_tenant.id,
+        )
+        session.add(other_user)
+        await session.flush()
+        other_tenant_website = Websites(
+            name="Other tenant validator refresh",
+            url="https://other-tenant-validator-refresh.example.com",
+            download_files=False,
+            crawl_type=CrawlType.CRAWL,
+            update_interval="never",
+            size=0,
+            tenant_id=other_tenant.id,
+            user_id=other_user.id,
+            embedding_model_id=embedding_model_id,
+        )
+        session.add(other_tenant_website)
+        await session.flush()
+        blobs = [
+            InfoBlobs(
+                title=title,
+                url=title,
+                text=original_text,
+                size=len(original_text.encode()),
+                content_hash=sha256(original_text.encode()).digest(),
+                http_etag='"old"',
+                http_last_modified="Wed, 12 Aug 2026 10:00:00 GMT",
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.ACTIVE.value,
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                website_id=website.id,
+                embedding_model_id=embedding_model_id,
+            )
+            for website in websites
+        ]
+        blobs.append(
+            InfoBlobs(
+                title=title,
+                url=title,
+                text=original_text,
+                size=len(original_text.encode()),
+                content_hash=sha256(original_text.encode()).digest(),
+                http_etag='"old"',
+                http_last_modified="Wed, 12 Aug 2026 10:00:00 GMT",
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.ACTIVE.value,
+                user_id=other_user.id,
+                tenant_id=other_tenant.id,
+                website_id=other_tenant_website.id,
+                embedding_model_id=embedding_model_id,
+            )
+        )
+        session.add_all(blobs)
+        await session.flush()
+        target_website_id = websites[0].id
+        other_website_id = websites[1].id
+        other_tenant_website_id = other_tenant_website.id
+        tenant_id = user.tenant_id
+        user_id = user.id
+        tenant_slug = tenant.slug
+
+    ctx = CrawlContext(
+        website_id=target_website_id,
+        tenant_id=tenant_id,
+        tenant_slug=tenant_slug,
+        user_id=user_id,
+        attempt_id=uuid4(),
+        lease_owner="validator-refresh",
+        embedding_model_id=embedding_model_id,
+        embedding_model_name="validator-model",
+        embedding_model_open_source=False,
+        embedding_model_family=None,
+        embedding_model_dimensions=1536,
+    )
+    lease_check = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.worker.crawl.persistence._require_current_publication_lease",
+        lease_check,
+    )
+
+    await _refresh_http_validators(
+        ctx=ctx,
+        rows=[
+            {
+                "url": title,
+                "content": original_text,
+                "etag": '"new"',
+                "last_modified": "Thu, 13 Aug 2026 10:00:00 GMT",
+            }
+        ],
+    )
+
+    lease_check.assert_awaited_once()
+    async with db_container() as container:
+        rows = (
+            await container.session().execute(
+                sa.select(
+                    InfoBlobs.website_id,
+                    InfoBlobs.http_etag,
+                    InfoBlobs.http_last_modified,
+                ).where(InfoBlobs.title == title)
+            )
+        ).all()
+        stored = {
+            website_id: (etag, last_modified)
+            for website_id, etag, last_modified in rows
+        }
+        version_count = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(InfoBlobs.title == title)
+        )
+
+    assert stored[target_website_id] == (
+        '"new"',
+        "Thu, 13 Aug 2026 10:00:00 GMT",
+    )
+    assert stored[other_website_id] == (
+        '"old"',
+        "Wed, 12 Aug 2026 10:00:00 GMT",
+    )
+    assert stored[other_tenant_website_id] == (
+        '"old"',
+        "Wed, 12 Aug 2026 10:00:00 GMT",
+    )
+    assert version_count == 3
 
 
 async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:
