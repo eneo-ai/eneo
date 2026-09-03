@@ -43,7 +43,6 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery import (
     analyze_discovery,
-    build_discovery_block_message,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
     _targeted_classification_bias,
@@ -1806,7 +1805,9 @@ async def test_runtime_input_schema_does_not_override_requested_docx_output() ->
     assert state.resolved_slots["terminal_output"].value == "docx_document"
     assert state.resolved_slots["docx_output_mode"].value == "generated_docx"
     analysis = analyze_discovery(conversation, planning_state=state)
-    assert "terminal_output" not in analysis.selected_question_ids
+    assert (
+        "terminal_output" in analysis.selected_question_ids
+    )  # text-only evidence is below commit grade: the slot is asked, not settled
     compile_context = create_compile_context_from_planning_state(state)
     assert compile_context is not None
     assert compile_context.final_output_type is None
@@ -3990,12 +3991,6 @@ async def test_runtime_uses_one_classification_for_state_and_default_assumption(
         max_output_tokens=2_000,
         ui_language="sv",
     )
-    message = build_discovery_block_message(
-        conversation,
-        analysis=result.discovery_analysis,
-    )
-
-    assert message is None
     assert result.discovery_analysis.next_issue is None
     assert result.discovery_analysis.ready_for_confirmation is True
     assert result.planning_state.resolved_slots["runtime_metadata_fields"].source == (

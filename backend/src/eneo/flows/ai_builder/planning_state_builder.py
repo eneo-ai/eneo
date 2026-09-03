@@ -36,7 +36,6 @@ from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
 )
 from eneo.flows.ai_builder.ai_builder_discovery_signal_inference import (
     infer_answer_signals_from_text,
-    mentions_comparison_request,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
@@ -55,6 +54,7 @@ from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
 from eneo.flows.ai_builder.ai_builder_framework_policy import (
     aggregate_unprompted_user_text,
     extract_answer_signals,
+    has_explicit_docx_mode_text,
     has_explicit_pdf_mode_text,
     has_explicit_structured_answer,
     resolve_output_intent,
@@ -1616,10 +1616,9 @@ def apply_policy_defaults_from_resolved_slots(
     for policy in SLOT_INTERACTION_POLICIES.values():
         if policy.when_unknown != "assume" or policy.default_value is None:
             continue
-        if (
-            evaluate_slot_interaction(policy, state, freeform_text=freeform_text)
-            != "assume"
-        ):
+        if evaluate_slot_interaction(policy, state) != "assume":
+            continue
+        if policy.has_explicit_text(freeform_text):
             continue
         state.resolved_slots[policy.slot_name] = ResolvedSlot(
             name=policy.slot_name,
@@ -1631,26 +1630,18 @@ def apply_policy_defaults_from_resolved_slots(
     _reconcile_dependent_slot_relevance(state)
 
 
-# The slots relevance reads. A prerequisite the model may replace on this call
-# is projected as unresolved before relevance is judged, so a slot that only
-# dropped out through a replaceable guess is still offered to the model.
-_RELEVANCE_PREREQUISITE_SLOTS: tuple[str, ...] = (
-    "primary_runtime_input",
-    "terminal_output",
-    "document_material_scope",
-    "docx_output_mode",
-)
-
-
 def llm_resolvable_slot_values_for_state(
     state: PlanningState,
 ) -> dict[str, frozenset[str]]:
+    # Relevance is judged against what this call may still change: every
+    # resolved value the model is allowed to replace is projected unresolved,
+    # so a slot that only dropped out through a replaceable guess is still
+    # offered. Protected values (user answers, accepted, attachment-read)
+    # keep ruling slots out. No list of prerequisites: relevance itself owns
+    # which slots depend on which.
     projected = state.model_copy(deep=True)
-    for slot_name in _RELEVANCE_PREREQUISITE_SLOTS:
-        if _model_slot_can_replace(
-            existing_slot=projected.resolved_slots.get(slot_name),
-            model_confidence="high",
-        ):
+    for slot_name, existing in tuple(projected.resolved_slots.items()):
+        if _model_slot_can_replace(existing_slot=existing, model_confidence="high"):
             projected.resolved_slots.pop(slot_name, None)
     candidate_slots = {
         slot_name
@@ -2001,15 +1992,14 @@ def _resolve_slots(
             slot_value=report_disposition,
         )
 
-    # Unambiguous wording ("flera dokument i samma körning") settles the scope
-    # as a text rule; anything less leaves it to the interaction policy, which
-    # asks whenever the brief speaks of comparing.
+    # No text rule: a comparison the brief speaks of is asked by the
+    # interaction policy unless the user or the classifier settled it.
     comparison_scope = _single_slot_value(
         answer_signals=answer_signals,
         flow_defaults=flow_defaults,
         requirements_summary_values=requirements_summary_values,
         question_id="comparison_scope",
-    ) or _comparison_scope_from_text(freeform_text)
+    )
     if comparison_scope is not None:
         slots["comparison_scope"] = _build_slot(
             name="comparison_scope",
@@ -2429,35 +2419,6 @@ def _requirements_summary_slot(name: str, value: str) -> ResolvedSlot:
     )
 
 
-def _comparison_scope_from_text(freeform_text: str) -> str | None:
-    """What the wording says about comparing, when it says it clearly.
-
-    "Flera dokument i samma körning" names the scope outright. A brief that
-    compares the documents of a package it has already described as several
-    related documents compares them within the run; only a comparison whose
-    counterpart is unnamed (a policy, earlier material) is left open.
-    """
-
-    signalled = _single_text_signal(freeform_text, question_id="comparison_scope")
-    if signalled is not None:
-        return signalled
-    return "same_run_compare" if _same_run_comparison_implied(freeform_text) else None
-
-
-def _same_run_comparison_implied(freeform_text: str) -> bool:
-    signals = infer_answer_signals_from_text(freeform_text)
-    return signals.get("document_material_scope") == {
-        "multiple_documents_case"
-    } and mentions_comparison_request(freeform_text)
-
-
-def _single_text_signal(freeform_text: str, *, question_id: str) -> str | None:
-    values = infer_answer_signals_from_text(freeform_text).get(question_id)
-    if not values or len(values) != 1:
-        return None
-    return next(iter(values))
-
-
 def _heuristic_slot_confidence(
     *,
     question_id: str,
@@ -2474,7 +2435,6 @@ def _heuristic_slot_confidence(
         "document_material_scope",
         "comparison_scope",
         "report_disposition",
-        "structured_io_contract",
     }:
         return _heuristic_text_signal_confidence(
             question_id=question_id,
@@ -2533,8 +2493,8 @@ def _heuristic_docx_output_mode_confidence(
     slot_value: str,
     freeform_text: str,
 ) -> SlotConfidence:
-    # The output intent resolver owns what the text says about the mode; a
-    # mode it reads the same way is settled wording, marker list or not.
+    if not has_explicit_docx_mode_text(freeform_text):
+        return "medium"
     output_intent = resolve_output_intent(freeform_text, {})
     return "high" if output_intent.docx_output_mode == slot_value else "medium"
 
@@ -2556,15 +2516,7 @@ def _heuristic_text_signal_confidence(
     freeform_text: str,
 ) -> SlotConfidence:
     signals = infer_answer_signals_from_text(freeform_text)
-    if signals.get(question_id) == {slot_value}:
-        return "high"
-    if (
-        question_id == "comparison_scope"
-        and slot_value == "same_run_compare"
-        and _same_run_comparison_implied(freeform_text)
-    ):
-        return "high"
-    return "medium"
+    return "high" if signals.get(question_id) == {slot_value} else "medium"
 
 
 def _is_policy_default_slot(
