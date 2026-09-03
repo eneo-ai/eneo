@@ -1608,17 +1608,17 @@ def apply_policy_defaults_from_resolved_slots(
     """Take every default the interaction policy says to assume this turn.
 
     The only writer of policy defaults, for the live fold and a replay alike.
-    The policy decides (`assume` needs the slot relevant with its prerequisites
-    resolved, unresolved, and free of explicit uncertainty); the explicit-text
-    guard keeps a default off a slot the user's own words already speak to.
+    The policy decides everything, the user's wording included: what it
+    returns as `assume` is written, nothing else is.
     """
 
     for policy in SLOT_INTERACTION_POLICIES.values():
         if policy.when_unknown != "assume" or policy.default_value is None:
             continue
-        if evaluate_slot_interaction(policy, state) != "assume":
-            continue
-        if policy.has_explicit_text(freeform_text):
+        if (
+            evaluate_slot_interaction(policy, state, freeform_text=freeform_text)
+            != "assume"
+        ):
             continue
         state.resolved_slots[policy.slot_name] = ResolvedSlot(
             name=policy.slot_name,

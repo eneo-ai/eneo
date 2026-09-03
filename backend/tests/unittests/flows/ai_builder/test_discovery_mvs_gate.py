@@ -43,7 +43,6 @@ def _state_with_typed_goal(
 
 _EXPECTED_QUESTION_LEVELS: dict[str, str] = {
     "comparison_scope_conflict": "blocking",
-    "case_scope": "high_value",
     "input_material_mode": "blocking",
     "flow_input_architecture": "blocking",
     "document_material_scope": "high_value",
@@ -51,9 +50,6 @@ _EXPECTED_QUESTION_LEVELS: dict[str, str] = {
     "final_output_mode": "blocking",
     "docx_output_mode": "blocking",
     "pdf_generation_mode": "blocking",
-    "output_reader": "nice_to_have",
-    "final_output_scope": "nice_to_have",
-    "final_pdf_type": "high_value",
     "runtime_metadata_fields": "high_value",
 }
 
@@ -81,39 +77,6 @@ class TestQuestionTaxonomy:
                     f"got {expected_level}"
                 )
 
-    def test_output_reader_is_nice_to_have(self) -> None:
-        """output_reader should be nice_to_have, not blocking architecture."""
-        conversation = [
-            ConversationMessage(
-                role="user",
-                content=(
-                    "Jag vill analysera dokument och producera en sammanfattande rapport"
-                ),
-            ),
-            ConversationMessage(
-                role="user",
-                content="Dokument",
-                metadata={
-                    "question_answer": {
-                        "question_id": "input_material_mode",
-                        "selected_option_ids": ["documents"],
-                        "selected_values": ["documents"],
-                    }
-                },
-            ),
-        ]
-        analysis = analyze_discovery(conversation)
-        reader_issues = [i for i in analysis.issues if i.issue_id == "output_reader"]
-        for issue in reader_issues:
-            assert issue.question_level == "nice_to_have"
-
-
-# ---------------------------------------------------------------------------
-# MVS gate — Minimum Viable Specification
-# ---------------------------------------------------------------------------
-
-
-class TestMVSGate:
     def test_vague_swedish_triggers_mvs_not_met(self) -> None:
         conversation = [
             ConversationMessage(
@@ -211,7 +174,7 @@ class TestMVSGate:
         assert analysis.mvs_met
 
 
-class TestQuestionBudget:
+class TestInteractionPolicyAsks:
     def test_detailed_session_stops_asking_quality_questions_after_build_plan_signal(
         self,
     ) -> None:
@@ -360,7 +323,6 @@ class TestQuestionBudget:
         analysis = analyze_discovery(conversation)
 
         blocking_ids = {issue.issue_id for issue in analysis.blocking_issues}
-        assert "case_scope" not in blocking_ids
         assert "document_material_scope" not in blocking_ids
         assert "final_output_mode" not in blocking_ids
         # Text alone settles no architecture slot: the input and output are

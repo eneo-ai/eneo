@@ -343,15 +343,17 @@ def evaluate_slot_interaction(
       user can reopen: a default the policy itself took, or evidence for a
       quality slot the table would have assumed anyway.
     - `ask`: the user has to decide. The model said it did not know; the
-      answer is missing and the table says to ask; the brief speaks of a
-      comparison; or the only evidence is below commit grade for a slot worth
-      a question (it shapes the architecture, or the table asks about it).
+      answer is missing and the table says to ask; the user's words speak to a
+      slot the table would assume (template wording, a comparison, runtime
+      fields); or the only evidence is below commit grade for a slot worth a
+      question (it shapes the architecture, or the table asks about it).
       The architecture readers commit nothing weaker, so an accepted guess
       would disclose one flow and build another.
     - `assume`: the default is taken, silently, as a reopenable row.
 
     `freeform_text` is the user's own wording, read only through the policy's
-    explicit-text guard.
+    explicit-text guard; the defaults writer passes the same text, so what the
+    evaluator assumes is exactly what gets written.
     """
 
     if not slot_is_relevant(
@@ -386,11 +388,12 @@ def evaluate_slot_interaction(
         return "ask"
     if policy.when_unknown == "ask":
         return "ask"
-    if policy.slot_name == "comparison_scope" and (
-        policy.has_explicit_text(freeform_text) or _comparison_is_the_goal(state)
-    ):
-        # A brief that speaks of comparing, in words or through its goal, is
-        # asked how; only silence about it takes the no-comparison default.
+    if policy.has_explicit_text(freeform_text):
+        # The user's own words speak to a slot the table would otherwise
+        # assume, and did not settle it: no default is taken behind those
+        # words, the question is asked.
+        return "ask"
+    if policy.slot_name == "comparison_scope" and _comparison_is_the_goal(state):
         return "ask"
     return "assume"
 
