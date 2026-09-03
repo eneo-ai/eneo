@@ -3,6 +3,7 @@
   import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
   import Loader2 from "lucide-svelte/icons/loader-2";
   import Circle from "lucide-svelte/icons/circle";
+  import { untrack } from "svelte";
   import { fade } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
 
@@ -24,7 +25,9 @@
   const SAVING_SHOWN_FOR_AT_LEAST_MS = 600;
   const UNSAVED_SHOWN_AFTER_MS = 1500;
 
-  let shown = $state<SaveStatus>(status);
+  // The initial badge is whatever the store says at mount; from then on the
+  // effect below decides what is shown.
+  let shown = $state<SaveStatus>(untrack(() => status));
   let savingShownAt = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
