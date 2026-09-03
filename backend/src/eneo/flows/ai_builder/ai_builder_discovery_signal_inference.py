@@ -94,18 +94,6 @@ _MULTI_SOURCE_FILE_PHRASES: tuple[str, ...] = (
     "uploaded reports",
 )
 
-_SOURCE_TO_SOURCE_COMPARISON_PHRASES: tuple[str, ...] = (
-    "motsägelser mellan källorna",
-    "motsägelser mellan källor",
-    "motstridiga uppgifter mellan källorna",
-    "jämför vad de olika filerna säger",
-    "jämförelseanalysen",
-    "inconsistencies between the uploaded reports",
-    "inconsistencies between sources",
-    "contradictions between sources",
-    "compare what the different files say",
-)
-
 
 _COMPARISON_REQUEST_MARKERS = (
     "compare",
@@ -131,21 +119,6 @@ def mentions_comparison_request(text: str) -> bool:
     """
 
     return contains_any_token_prefix(text, _COMPARISON_REQUEST_MARKERS)
-
-
-def is_high_confidence_source_to_source_comparison(text: str) -> bool:
-    normalized = normalize_signal_text(text)
-    if not normalized:
-        return False
-    return _infer_document_material_scope(
-        normalized
-    ) == "multiple_documents_case" and _has_source_to_source_comparison_evidence(
-        normalized
-    )
-
-
-def _has_source_to_source_comparison_evidence(text: str) -> bool:
-    return _contains_any(text, _SOURCE_TO_SOURCE_COMPARISON_PHRASES)
 
 
 def _infer_document_material_scope(text: str) -> str | None:
