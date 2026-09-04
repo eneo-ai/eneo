@@ -1263,30 +1263,26 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
 
     assert isinstance(swedish, ConfirmRequirements)
     assert isinstance(english, ConfirmRequirements)
-    assert any(
-        'Bilageunderlag – Bilaga "complete.docx" '
-        f"(#{UUID('00000000-0000-0000-0000-000000000701')}): vald roll Mall; "
-        "läsbar text: ja; "
-        "täckning: hela den läsbara texten ingår." in assumption
-        for assumption in swedish.payload.assumptions
-    )
-    assert any(
-        'Bilageunderlag – Bilaga "not-excerpted.pdf" '
-        f"(#{UUID('00000000-0000-0000-0000-000000000702')}): vald roll Referensmaterial; "
-        "läsbar text: ja; täckning: läsbar text finns men "
-        "inget utdrag ingår." in assumption
-        for assumption in swedish.payload.assumptions
-    )
-    assert any(
-        'Attachment evidence — Attachment "unreadable.bin" '
-        f"(#{UUID('00000000-0000-0000-0000-000000000703')}): selected role Context only; "
-        "readable text: no; coverage: no readable text is available." in assumption
-        for assumption in english.payload.assumptions
-    )
+    rows = {row.filename: row for row in swedish.payload.attachment_rows}
+    assert set(rows) == {"complete.docx", "not-excerpted.pdf", "unreadable.bin"}
+    assert rows["complete.docx"].role == "template"
+    assert rows["complete.docx"].coverage == "fully_seen"
+    assert rows["complete.docx"].readable is True
+    assert rows["not-excerpted.pdf"].role == "reference_material"
+    assert rows["not-excerpted.pdf"].coverage == "inventory_only"
+    assert rows["unreadable.bin"].readable is False
+    # Rows carry ids only; the two locales disclose the same record.
+    assert english.payload.attachment_rows == swedish.payload.attachment_rows
+    assert set(swedish.payload.weak_role_file_ids) == {
+        rows["complete.docx"].file_id,
+        rows["not-excerpted.pdf"].file_id,
+        rows["unreadable.bin"].file_id,
+    }
+    assert not any("Bilageunderlag" in item for item in swedish.payload.assumptions)
 
 
 @pytest.mark.parametrize(
-    ("role", "slots", "swedish", "english"),
+    ("role", "slots", "travels"),
     [
         (
             "template",
@@ -1295,8 +1291,7 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
                 "terminal_output": "docx_document",
                 "docx_output_mode": "template_fill_docx",
             },
-            "Mallen följer med flödet och fylls i vid varje körning",
-            "The template travels with the flow and is filled at every run",
+            True,
         ),
         (
             "template",
@@ -1305,20 +1300,17 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
                 "terminal_output": "docx_document",
                 "docx_output_mode": "generated_docx",
             },
-            "Filen följer inte med i körningar",
-            "This file is not carried into runs",
+            False,
         ),
         (
             "reference_material",
             {"primary_runtime_input": "text", "terminal_output": "docx_document"},
-            "Filen följer inte med i körningar",
-            "This file is not carried into runs",
+            False,
         ),
         (
             "context_only",
             {"primary_runtime_input": "text", "terminal_output": "docx_document"},
-            "Filen följer inte med i körningar",
-            "This file is not carried into runs",
+            False,
         ),
     ],
     ids=[
@@ -1328,12 +1320,12 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
         "context-only",
     ],
 )
-def test_server_confirmation_derives_the_attachment_run_consequence_from_the_commit(
-    role: FileRole, slots: dict[str, str], swedish: str, english: str
+def test_server_confirmation_derives_the_attachment_travel_decision_from_the_commit(
+    role: FileRole, slots: dict[str, str], travels: bool
 ) -> None:
     # The role label is evidence about the file; whether it travels with the
     # flow is the commit's decision (template fill with one attached template).
-    # Nothing else is promised about what runs receive.
+    # The typed row carries that decision; nothing else is promised about runs.
     state = _state(**slots)
     state.file_roles = [
         FileRoleEvidence(
@@ -1351,25 +1343,16 @@ def test_server_confirmation_derives_the_attachment_run_consequence_from_the_com
     ]
     state.architecture_commit = _finalized_commit_for_state(state)
 
-    swedish_decision = _decision(state=state, ui_language="sv")
-    english_decision = _decision(state=state, ui_language="en")
-
-    assert isinstance(swedish_decision, ConfirmRequirements)
-    assert isinstance(english_decision, ConfirmRequirements)
-    swedish_rows = [
-        row
-        for row in swedish_decision.payload.assumptions
-        if 'Bilaga "attached.docx"' in row
-    ]
-    english_rows = [
-        row
-        for row in english_decision.payload.assumptions
-        if 'Attachment "attached.docx"' in row
-    ]
-    assert len(swedish_rows) == 1 and swedish in swedish_rows[0]
-    assert len(english_rows) == 1 and english in english_rows[0]
-    assert "laddar upp sina egna dokument" not in swedish_rows[0]
-    assert "uploads its own documents" not in english_rows[0]
+    for language in ("sv", "en"):
+        decision = _decision(state=state, ui_language=language)
+        assert isinstance(decision, ConfirmRequirements)
+        (row,) = decision.payload.attachment_rows
+        assert row.role == role
+        assert row.travels is travels
+        assert not any(
+            "Bilaga" in item or "Attachment" in item
+            for item in decision.payload.assumptions
+        )
 
 
 def _attachment(
@@ -1514,15 +1497,11 @@ def test_server_confirmation_discloses_every_attachment_and_versions_coverage() 
 
     first = _decision(state=state, ui_language="en")
     assert isinstance(first, ConfirmRequirements)
-    attachment_assumptions = [
-        assumption
-        for assumption in first.payload.assumptions
-        if assumption.startswith('Attachment evidence — Attachment "')
-    ]
-    assert len(attachment_assumptions) == 12
-    assert all(long_filename not in assumption for assumption in attachment_assumptions)
-    assert "…" in attachment_assumptions[0]
-    assert all("fully_seen" not in assumption for assumption in attachment_assumptions)
+    rows = first.payload.attachment_rows
+    assert len(rows) == 12
+    # Typed rows carry the whole filename; clipping is the card's business.
+    assert any(row.filename == long_filename for row in rows)
+    assert all(row.coverage == "fully_seen" for row in rows)
     first_version = build_requirements_version(first.payload)
 
     state.file_roles[0] = state.file_roles[0].model_copy(

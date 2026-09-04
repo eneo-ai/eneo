@@ -531,6 +531,21 @@
       </span>
     </div>
   {:else}
+    {#if question.understanding}
+      <div class="understanding" data-testid="question-understanding">
+        <p class="understanding-title">{m.ai_builder_understanding_title()}</p>
+        {#each question.understanding.sentences as sentence (sentence)}
+          <p class="understanding-sentence">{sentence}</p>
+        {/each}
+        {#if (question.understanding.open_topics ?? []).length > 0}
+          <p class="understanding-open">
+            {m.ai_builder_understanding_open({
+              topics: (question.understanding.open_topics ?? []).join(", ")
+            })}
+          </p>
+        {/if}
+      </div>
+    {/if}
     <div class="question-head">
       {#if questionNumber !== null}
         <p class="question-kicker">
@@ -1465,5 +1480,28 @@
     .question-panel {
       animation: none;
     }
+  }
+
+  .understanding {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem 0.875rem;
+    border: 1px solid var(--border-dimmer, #e5e7eb);
+    border-radius: 0.5rem;
+  }
+  .understanding-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-secondary, #6b7280);
+  }
+  .understanding-sentence {
+    font-size: 0.9rem;
+    color: var(--text-primary, #111827);
+  }
+  .understanding-open {
+    font-size: 0.8125rem;
+    color: var(--text-secondary, #6b7280);
   }
 </style>

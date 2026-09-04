@@ -12700,6 +12700,48 @@ export interface components {
       formats: components["schemas"]["FormatLimit"][];
     };
     /**
+     * AttachmentRowPayload
+     * @description One attached file as the card shows it: what it is, how sure, and
+     *     whether it travels with the flow.
+     *
+     *     `travels` is the committed architecture's decision (a template under a
+     *     template-fill commit), never the role label's. How sure the reading is
+     *     stays outside this row: a new citation or a changed confidence for the
+     *     same role is not a different plan, so it must not move the version
+     *     (see `RequirementsSummaryPayload.weak_role_file_ids`). Ids only: the
+     *     client owns the labels.
+     */
+    AttachmentRowPayload: {
+      /**
+       * Coverage
+       * @enum {string}
+       */
+      coverage: "fully_seen" | "excerpt_truncated" | "inventory_only";
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** Filename */
+      filename: string;
+      /** Placeholders */
+      placeholders?: string[] | null;
+      /** Readable */
+      readable: boolean;
+      /**
+       * Role
+       * @enum {string}
+       */
+      role:
+        | "runtime_input_sample"
+        | "template"
+        | "reference_material"
+        | "example_output"
+        | "context_only";
+      /** Travels */
+      travels: boolean;
+    };
+    /**
      * AuditConfigResponse
      * @description Response model for GET /api/v1/audit/config.
      *     Contains all 7 categories with metadata.
@@ -28020,6 +28062,8 @@ export interface components {
       assumption_rows?: components["schemas"]["AssumptionRowPayload"][];
       /** Assumptions */
       assumptions?: string[];
+      /** Attachment Rows */
+      attachment_rows?: components["schemas"]["AttachmentRowPayload"][];
       /** Input Description */
       input_description: string;
       /** Key Decisions */
@@ -28034,10 +28078,13 @@ export interface components {
       requirements_version: string;
       /** Resolved Requirements */
       resolved_requirements?: components["schemas"]["ResolvedRequirementPayload"][];
+      run_preview?: components["schemas"]["RunPreviewPayload"] | null;
       /** Runtime Input Fields */
       runtime_input_fields?: components["schemas"]["RuntimeInputFieldPayload"][];
       /** Summary */
       summary: string;
+      /** Weak Role File Ids */
+      weak_role_file_ids?: string[];
     };
     /** ResolvedRequirementPayload */
     ResolvedRequirementPayload: {
@@ -28334,6 +28381,43 @@ export interface components {
       files?: components["schemas"]["ModelId"][];
       /** Text */
       text?: string | null;
+    };
+    /**
+     * RunPreviewPayload
+     * @description The contract a run will follow, derived from planning state alone.
+     *
+     *     A preview of the contract, not of a result: it names what a run receives
+     *     and what kind of result comes out, never values, prose, layout, step
+     *     counts or execution. Every field is commit grade or a committed decision,
+     *     so the card previews only what the user is asked to sign.
+     */
+    RunPreviewPayload: {
+      /** Max Files */
+      max_files?: number | null;
+      /** Obligations */
+      obligations?: string[];
+      /** Report Layout */
+      report_layout?: string | null;
+      /** Report Layout Label */
+      report_layout_label?: string | null;
+      /** Required Sections */
+      required_sections?: string[];
+      /** Result Type */
+      result_type?: string | null;
+      /** Result Type Label */
+      result_type_label?: string | null;
+      /** Runtime Input */
+      runtime_input?: string | null;
+      /** Runtime Input Label */
+      runtime_input_label?: string | null;
+      template?: components["schemas"]["RunPreviewTemplatePayload"] | null;
+    };
+    /** RunPreviewTemplatePayload */
+    RunPreviewTemplatePayload: {
+      /** Filename */
+      filename: string;
+      /** Placeholder Count */
+      placeholder_count: number;
     };
     /** RunService */
     RunService: {
@@ -30913,6 +30997,7 @@ export interface components {
       selection_mode: "single" | "multi";
       /** Topic */
       topic?: string | null;
+      understanding?: components["schemas"]["UnderstandingPayload"] | null;
     };
     /**
      * SubscriptionRenewalResult
@@ -32415,6 +32500,22 @@ export interface components {
        * Format: uuid
        */
       target_space_id: string;
+    };
+    /**
+     * UnderstandingPayload
+     * @description What the Builder understood before its first question, in the user's
+     *     language: two or three short sentences from commit-grade readings only,
+     *     plus one aggregate sentence about the attachments with certain roles.
+     *
+     *     Unversioned and never a claim: weak readings are named as still open,
+     *     never as facts; nothing about output contents, layout, steps, or whether
+     *     an attachment travels, which only the commit can say.
+     */
+    UnderstandingPayload: {
+      /** Open Topics */
+      open_topics?: string[];
+      /** Sentences */
+      sentences: string[];
     };
     /** UpdateIntegrationKnowledgeRequest */
     UpdateIntegrationKnowledgeRequest: {
