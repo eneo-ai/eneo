@@ -692,6 +692,44 @@ class TestMCPClientAuthenticationErrorMapping:
             await client.call_tool("tool", {})
 
     @pytest.mark.asyncio
+    async def test_call_tool_keeps_result_meta_when_present(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.call_tool.return_value = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="done")],
+            isError=False,
+            meta={"gen_ai.usage.input_tokens": 3},
+        )
+
+        result = await client.call_tool("tool", {})
+
+        assert result["meta"] == {"gen_ai.usage.input_tokens": 3}
+
+    @pytest.mark.asyncio
+    async def test_call_tool_omits_meta_when_server_sent_none(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.call_tool.return_value = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="done")],
+            isError=False,
+            meta=None,
+        )
+
+        result = await client.call_tool("tool", {})
+
+        assert "meta" not in result
+
+    @pytest.mark.asyncio
     async def test_non_auth_upstream_error_does_not_map_to_authentication_error(self):
         server = MagicMock()
         server.name = "test-server"

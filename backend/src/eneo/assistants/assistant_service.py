@@ -2193,6 +2193,8 @@ class AssistantService:
                                         # tool output; keep it so later turns can replay.
                                         if tc.result is not None:
                                             existing.result = tc.result
+                                        if tc.meta is not None:
+                                            existing.meta = tc.meta
                                     else:
                                         # Add new tool call
                                         tool_calls.append(
@@ -2209,6 +2211,7 @@ class AssistantService:
                                                 result_status=tc.result_status,
                                                 result=tc.result,
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                meta=tc.meta,
                                             )
                                         )
                             yield chunk
@@ -2487,6 +2490,7 @@ class AssistantService:
                             result_status=tc.result_status,
                             result=tc.result,
                             mcp_tool_name=tc.mcp_tool_name,
+                            meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata
                     ]

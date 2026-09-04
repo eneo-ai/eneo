@@ -12,7 +12,10 @@ the tenant already manages under model providers.
 
 The generated image is returned as an MCP ``image`` content block, which the
 proxy caps and the ask path persists as a generated file like any other
-provider's output.
+provider's output. The image model's own token usage rides on the result's
+``_meta`` under the OpenTelemetry GenAI attribute names (``gen_ai.usage.*``,
+``gen_ai.request.model``, ...), so clients can account for it without an
+eneo-specific contract.
 
 See :mod:`eneo.internal_mcp.foundation` for the hosting and authentication
 model shared by all internal servers.
@@ -27,7 +30,7 @@ from uuid import UUID
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
-from mcp.types import ImageContent, TextContent
+from mcp.types import CallToolResult, ImageContent, TextContent
 
 from eneo.internal_mcp.constants import IMAGE_GENERATION_SERVER_NAME
 from eneo.internal_mcp.foundation import (
@@ -65,6 +68,10 @@ NOT_CONFIGURED_MESSAGE = (
 )
 NO_IMAGE_MESSAGE = "The image model returned no image."
 DEFAULT_MIME_TYPE = "image/png"
+
+# OpenTelemetry GenAI semantic-convention values for ``gen_ai.provider.name``
+# where they differ from eneo's provider type.
+_OTEL_PROVIDER_NAMES = {"azure": "azure.ai.openai"}
 
 
 def resolve_request_params(
@@ -107,6 +114,33 @@ async def image_bytes_from_response(response: Any) -> tuple[bytes, str | None]:
     raise ValueError(NO_IMAGE_MESSAGE)
 
 
+def usage_meta_from_response(
+    response: Any, *, provider_type: str, model: str
+) -> dict[str, Any]:
+    """Tool-result ``_meta`` describing the image model call.
+
+    Keys follow the OpenTelemetry GenAI semantic conventions. Token counts are
+    included only when the provider reported them (gpt-image-1 does, DALL-E
+    does not).
+    """
+    meta: dict[str, Any] = {
+        "gen_ai.operation.name": "generate_content",
+        "gen_ai.provider.name": _OTEL_PROVIDER_NAMES.get(provider_type, provider_type),
+        "gen_ai.request.model": model,
+    }
+    response_model = getattr(response, "model", None)
+    if isinstance(response_model, str) and response_model:
+        meta["gen_ai.response.model"] = response_model
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", None)
+    output_tokens = getattr(usage, "output_tokens", None)
+    if isinstance(input_tokens, int) and not isinstance(input_tokens, bool):
+        meta["gen_ai.usage.input_tokens"] = input_tokens
+    if isinstance(output_tokens, int) and not isinstance(output_tokens, bool):
+        meta["gen_ai.usage.output_tokens"] = output_tokens
+    return meta
+
+
 DROPPABLE_PARAMS = frozenset({"response_format", "size", "quality", "n"})
 
 
@@ -142,8 +176,13 @@ async def generate_with_litellm(
     prompt: str,
     params: dict[str, str],
     provider_type: str,
-) -> list[TextContent | ImageContent]:
-    """Call the image model and shape its answer as MCP content."""
+    model: str | None = None,
+) -> CallToolResult:
+    """Call the image model and shape its answer as an MCP tool result.
+
+    ``model`` is the configured model name for the usage metadata; it defaults
+    to the route with its provider prefix removed.
+    """
     call_kwargs: dict[str, Any] = {
         "model": route,
         "prompt": prompt,
@@ -168,14 +207,21 @@ async def generate_with_litellm(
     text = "Image generated and shown to the user."
     if revised:
         text += f" The model interpreted the prompt as: {revised}"
-    return [
-        TextContent(type="text", text=text),
-        ImageContent(
-            type="image",
-            data=base64.b64encode(image).decode("ascii"),
-            mimeType=DEFAULT_MIME_TYPE,
+    return CallToolResult(
+        content=[
+            TextContent(type="text", text=text),
+            ImageContent(
+                type="image",
+                data=base64.b64encode(image).decode("ascii"),
+                mimeType=DEFAULT_MIME_TYPE,
+            ),
+        ],
+        _meta=usage_meta_from_response(
+            response,
+            provider_type=provider_type,
+            model=model or route.removeprefix(f"{provider_type}/"),
         ),
-    ]
+    )
 
 
 @mcp.tool(title="Generate image")
@@ -184,7 +230,7 @@ async def generate_image(
     ctx: Context,
     size: str | None = None,
     quality: str | None = None,
-) -> list[TextContent | ImageContent]:
+) -> CallToolResult:
     """Generate an image from a text description.
 
     The image is shown to the user directly. Describe the subject, style and
@@ -224,6 +270,7 @@ async def generate_image(
         prompt=prompt,
         params=resolve_request_params(config, size, quality),
         provider_type=provider.provider_type,
+        model=config["model"],
     )
 
 
@@ -234,4 +281,5 @@ __all__ = [
     "image_bytes_from_response",
     "mcp",
     "resolve_request_params",
+    "usage_meta_from_response",
 ]

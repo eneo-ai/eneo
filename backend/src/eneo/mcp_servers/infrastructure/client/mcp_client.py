@@ -986,6 +986,14 @@ class MCPClient:
                 "content": content_list,
                 "is_error": bool(response.isError),
             }
+            # Result-level `_meta` (MCP spec "General fields"): servers attach
+            # metadata such as OpenTelemetry GenAI usage attributes here.
+            # Capped like resource meta; absent when the server sent none.
+            result_meta = _truncate_meta(
+                getattr(response, "meta", None) or {}, RESOURCE_META_MAX_BYTES
+            )
+            if result_meta:
+                result["meta"] = result_meta
 
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result

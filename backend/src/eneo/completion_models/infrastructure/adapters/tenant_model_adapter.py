@@ -1393,6 +1393,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=result_status,
                                 result=display_text,
                                 mcp_tool_name=call.name,
+                                meta=result.get("meta") or None,
                             )
                         )
                     if not await _follow_up_completion():
@@ -2239,6 +2240,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status=result_status,
                                     result=display_text,
                                     mcp_tool_name=tc["function"]["name"],
+                                    meta=result_data.get("meta") or None,
                                 )
                             )
 

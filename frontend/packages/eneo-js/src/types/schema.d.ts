@@ -19649,6 +19649,10 @@ export interface components {
       result?: string | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
+      /** Meta */
+      meta?: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * ToolCallResultPublic
@@ -27288,6 +27292,10 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }
@@ -27339,6 +27347,10 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }
@@ -27390,6 +27402,10 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }

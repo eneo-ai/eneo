@@ -62,6 +62,7 @@ class _SupportsToolCallMetadata(Protocol):
     result_status: str | None
     result: str | None
     mcp_tool_name: str | None
+    meta: dict[str, Any] | None
 
 
 def _require_approval_id(chunk: Completion) -> str:
@@ -239,6 +240,7 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     approved=tc.approved,
                     result_status=tc.result_status,
                     mcp_tool_name=tc.mcp_tool_name,
+                    meta=tc.meta,
                 )
                 for tc in tool_calls
             ],

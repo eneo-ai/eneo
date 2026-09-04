@@ -95,6 +95,11 @@ class ToolCallInfo(BaseModel):
     # currently-registered tools. `tool_name` above is the unprefixed/display
     # form used by the UI.
     mcp_tool_name: Optional[str] = None
+    # The tool result's MCP `_meta`, as sent by the server (size-capped by the
+    # client). Model-backed tools report their own usage here under the
+    # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,
+    # `gen_ai.usage.output_tokens`, `gen_ai.request.model`.
+    meta: Optional[dict[str, Any]] = None
 
 
 class QuestionAdd(QuestionBase):

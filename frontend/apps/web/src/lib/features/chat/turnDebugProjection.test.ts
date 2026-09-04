@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "@eneo/eneo-js";
-import { listPersistedDebugTurns, projectTurnDebugDetails } from "./turnDebugProjection";
+import {
+  listPersistedDebugTurns,
+  projectTurnDebugDetails,
+  readToolUsage
+} from "./turnDebugProjection";
 
 function message(id: string | null, question = "Question"): ConversationMessage {
   return {
@@ -83,12 +87,64 @@ describe("turn debug projection", () => {
         order: 1,
         serverName: "calendar",
         toolName: "list_events",
-        status: "complete"
+        status: "complete",
+        usage: null
       }
     ]);
     expect(projected.knowledge).toEqual([{ order: 1, title: "MCP", uri: null }]);
-    expect(projected.files[0].name).toBe("input.pdf");
+    expect(projected.files).toEqual([
+      {
+        order: 1,
+        id: "file-1",
+        name: "input.pdf",
+        mimetype: "application/pdf",
+        size: 10,
+        kind: "input"
+      }
+    ]);
     expect(serialized).not.toMatch(/SENSITIVE_/);
+  });
+
+  it("reads provider usage from the tool result's gen_ai meta and nothing else", () => {
+    const source = {
+      ...message("message-1"),
+      tool_calls: [
+        {
+          server_name: "image_generation",
+          tool_name: "generate_image",
+          result_status: "succeeded",
+          meta: {
+            "gen_ai.provider.name": "openai",
+            "gen_ai.request.model": "gpt-image-1",
+            "gen_ai.usage.input_tokens": 38,
+            "gen_ai.usage.output_tokens": 1056,
+            "com.example/trace": "SENSITIVE_META"
+          }
+        }
+      ]
+    } as unknown as ConversationMessage;
+
+    const projected = projectTurnDebugDetails(source);
+
+    expect(projected.tools[0].usage).toEqual({
+      provider: "openai",
+      model: "gpt-image-1",
+      inputTokens: 38,
+      outputTokens: 1056
+    });
+    expect(JSON.stringify(projected)).not.toMatch(/SENSITIVE_/);
+  });
+
+  it("treats meta without gen_ai attributes as no usage", () => {
+    expect(readToolUsage({ "com.example/trace": "abc" })).toBeNull();
+    expect(readToolUsage(null)).toBeNull();
+    expect(readToolUsage({ "gen_ai.usage.input_tokens": "38" })).toBeNull();
+    expect(readToolUsage({ "gen_ai.response.model": "gpt-image-1-2025" })).toEqual({
+      provider: null,
+      model: "gpt-image-1-2025",
+      inputTokens: null,
+      outputTokens: null
+    });
   });
 
   it("prefers the activation evidence for model id and route, keeping the display name", () => {
@@ -134,7 +190,8 @@ describe("turn debug projection", () => {
         order: 1,
         serverName: "warehouse",
         toolName: "query",
-        status: "complete"
+        status: "complete",
+        usage: null
       }
     ]);
     expect(JSON.stringify(projected)).not.toMatch(/SENSITIVE_/);
