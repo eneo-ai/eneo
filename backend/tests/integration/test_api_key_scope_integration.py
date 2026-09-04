@@ -587,6 +587,61 @@ async def test_space_scoped_key_denied_prompt_from_other_space(
     assert detail["code"] == "insufficient_scope"
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_missing_and_out_of_scope_knowledge_deletes_have_same_error(
+    api_client, bearer_token, db_container, default_user
+):
+    space_a = await _create_space(api_client, token=bearer_token)
+    space_b = await _create_space(api_client, token=bearer_token)
+    group_b = await _create_group(api_client, token=bearer_token, space_id=space_b)
+    blob_b = await _seed_info_blob(
+        db_container,
+        user_id=default_user.id,
+        tenant_id=default_user.tenant_id,
+        group_id=group_b,
+        text="Knowledge outside the key's space",
+    )
+    space_key = await _create_api_key(
+        api_client,
+        token=bearer_token,
+        scope_type="space",
+        scope_id=space_a,
+        permission="admin",
+    )
+    headers = {"X-API-Key": space_key, "X-Request-ID": "knowledge-scope-denial"}
+    expected_error = {
+        "code": "insufficient_scope",
+        "message": (
+            f"API key is scoped to space '{space_a}'. "
+            "The requested resource was not found or is outside this key's scope."
+        ),
+        "context": {"auth_layer": "api_key_scope"},
+        "request_id": "knowledge-scope-denial",
+    }
+    for blob_id in (str(uuid4()), blob_b):
+        response = await api_client.delete(
+            f"/api/v1/info-blobs/{blob_id}/", headers=headers
+        )
+        assert response.status_code == 403, response.text
+        assert response.json() == expected_error
+
+    # The denied deletion must leave the document available to an authorized key.
+    tenant_key = await _create_api_key(
+        api_client, token=bearer_token, permission="admin"
+    )
+    response = await api_client.delete(
+        f"/api/v1/info-blobs/{blob_b}/", headers={"X-API-Key": tenant_key}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == blob_b
+
+    response = await api_client.delete(
+        f"/api/v1/info-blobs/{blob_b}/", headers={"X-API-Key": tenant_key}
+    )
+    assert response.status_code == 404, response.text
+
+
 # ---------------------------------------------------------------------------
 # 2C: Create-Body Scope Mismatch
 # ---------------------------------------------------------------------------
