@@ -279,9 +279,12 @@ class RunPreviewPayload(BaseModel):
     """
 
     runtime_input: str | None = None
+    runtime_input_label: str | None = None
     max_files: int | None = Field(default=None, ge=1)
     result_type: str | None = None
+    result_type_label: str | None = None
     report_layout: str | None = None
+    report_layout_label: str | None = None
     required_sections: list[str] = Field(default_factory=list)
     obligations: list[str] = Field(default_factory=list)
     template: RunPreviewTemplatePayload | None = None

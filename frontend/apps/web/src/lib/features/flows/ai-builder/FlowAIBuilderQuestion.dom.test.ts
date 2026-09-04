@@ -367,3 +367,45 @@ describe("FlowAIBuilderQuestion runtime metadata fields", () => {
     ).toBeTruthy();
   });
 });
+
+describe("FlowAIBuilderQuestion understanding", () => {
+  it("opens the first question with what was understood and what is still open", () => {
+    const question: StructuredQuestion = {
+      question_id: "primary_runtime_input",
+      question: "Vad tar flödet emot vid körning?",
+      selection_mode: "single",
+      allow_custom: false,
+      question_index: 1,
+      options: [{ id: "documents", value: "documents", label: "Dokument" }],
+      understanding: {
+        sentences: [
+          "Flödet levererar PDF-dokument.",
+          "2 bifogade filer: 1 underlag, 1 med oklar roll."
+        ],
+        open_topics: ["Planerad bearbetning"]
+      }
+    };
+    render(FlowAIBuilderQuestion, { question, onanswer: vi.fn() });
+
+    const understanding = screen.getByTestId("question-understanding");
+    expect(understanding.textContent).toContain(m.ai_builder_understanding_title());
+    expect(understanding.textContent).toContain("Flödet levererar PDF-dokument.");
+    expect(understanding.textContent).toContain("1 med oklar roll");
+    expect(understanding.textContent).toContain(
+      m.ai_builder_understanding_open({ topics: "Planerad bearbetning" })
+    );
+  });
+
+  it("shows nothing about understanding on a later question", () => {
+    const question: StructuredQuestion = {
+      question_id: "terminal_output",
+      question: "Vad ska resultatet bli?",
+      selection_mode: "single",
+      allow_custom: false,
+      question_index: 2,
+      options: [{ id: "pdf_document", value: "pdf_document", label: "PDF" }]
+    };
+    render(FlowAIBuilderQuestion, { question, onanswer: vi.fn() });
+    expect(screen.queryByTestId("question-understanding")).toBeNull();
+  });
+});

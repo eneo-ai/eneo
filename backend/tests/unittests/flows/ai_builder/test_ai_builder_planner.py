@@ -1854,15 +1854,9 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
 
     assert isinstance(prepared, ServerOutputPrepared)
     assert isinstance(prepared.server_decision, ConfirmRequirements)
-    attachment_assumptions = [
-        assumption
-        for assumption in prepared.server_decision.payload.assumptions
-        if assumption.startswith("Attachment evidence — ")
-    ]
-    assert len(attachment_assumptions) == 12
-    assert any(
-        "Reference material" in assumption for assumption in attachment_assumptions
-    )
+    rows = prepared.server_decision.payload.attachment_rows
+    assert len(rows) == 12
+    assert any(row.role == "reference_material" for row in rows)
     build_proposal_prompt.assert_not_called()
     provider_callback.assert_not_awaited()
 
