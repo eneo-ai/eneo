@@ -3,6 +3,7 @@ from __future__ import annotations
 from eneo.flows.domain.speaker_labels import (
     INVENTORY_SAMPLE_CHARS,
     OPENING_EXCERPT_CHARS,
+    OPENING_EXCERPT_LINE_CHARS,
     OPENING_EXCERPT_LINES,
     apply_speaker_names,
     build_label_renumbering,
@@ -121,7 +122,7 @@ def test_opening_excerpt_is_bounded_by_lines_and_characters() -> None:
     )
     assert len(build_opening_excerpt(many)) == OPENING_EXCERPT_LINES
 
-    long_line = "x" * INVENTORY_SAMPLE_CHARS
+    long_line = "x" * (OPENING_EXCERPT_LINE_CHARS + 50)
     heavy = "\n".join(
         f"[00:00:00 - 00:00:01] SPEAKER_00: {long_line}"
         for _ in range(OPENING_EXCERPT_LINES)
@@ -129,7 +130,25 @@ def test_opening_excerpt_is_bounded_by_lines_and_characters() -> None:
     excerpt = build_opening_excerpt(heavy)
     assert 0 < len(excerpt) < OPENING_EXCERPT_LINES
     assert sum(len(line) for line in excerpt) <= OPENING_EXCERPT_CHARS
-    # Each line is truncated to the sample length, like inventory samples.
     assert all(
-        len(line) == len("SPEAKER_00: ") + INVENTORY_SAMPLE_CHARS for line in excerpt
+        len(line) == len("SPEAKER_00: ") + OPENING_EXCERPT_LINE_CHARS
+        for line in excerpt
     )
+
+
+def test_opening_excerpt_keeps_the_handover_at_the_end_of_a_long_line() -> None:
+    # A host's introduction runs well past an inventory sample before naming
+    # the person they hand over to; the opening must still carry that cue.
+    monologue = "Det är en knepig fråga. " * 12
+    handover = "Fredrik Birging, du är på ett möte där satsningen presenteras idag."
+    line = monologue + handover
+    assert INVENTORY_SAMPLE_CHARS < len(line) <= OPENING_EXCERPT_LINE_CHARS
+    transcript = "\n".join(
+        [
+            f"[00:00:00 - 00:00:20] SPEAKER_00: {line}",
+            "[00:00:21 - 00:00:25] SPEAKER_01: Ja, jag står här i kommunhuset.",
+        ]
+    )
+    excerpt = build_opening_excerpt(transcript)
+    assert excerpt[0].endswith(handover)
+    assert excerpt[1] == "SPEAKER_01: Ja, jag står här i kommunhuset."

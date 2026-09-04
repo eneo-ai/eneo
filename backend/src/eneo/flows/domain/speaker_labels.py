@@ -28,6 +28,10 @@ INVENTORY_SAMPLE_LINES = 3
 INVENTORY_SAMPLE_CHARS = 160
 OPENING_EXCERPT_LINES = 40
 OPENING_EXCERPT_CHARS = 6000
+# Opening lines keep far more than an inventory sample: a host's handover
+# ("Anna, du är på plats") tends to close a long monologue, so a short cap
+# cuts exactly the cue the mapping model is told to rely on.
+OPENING_EXCERPT_LINE_CHARS = 600
 
 # Fixed JSON contract for a speaker-mapping step's structured output. Set on
 # the runtime step by the definition parser so typed-output processing, the
@@ -136,7 +140,7 @@ def build_speaker_inventory(
 def build_opening_excerpt(text: str) -> list[str]:
     """The first diarized lines in order as ``LABEL: text`` (no timestamps),
     where introductions and greetings usually reveal who is who. Bounded by
-    line count and total characters."""
+    line count, characters per line and total characters."""
     lines: list[str] = []
     total = 0
     for line in text.split("\n"):
@@ -148,7 +152,7 @@ def build_opening_excerpt(text: str) -> list[str]:
         spoken = match.group("text").strip()
         if not spoken:
             continue
-        rendered = f"{match.group('label')}: {spoken[:INVENTORY_SAMPLE_CHARS]}"
+        rendered = f"{match.group('label')}: {spoken[:OPENING_EXCERPT_LINE_CHARS]}"
         if total + len(rendered) > OPENING_EXCERPT_CHARS:
             break
         lines.append(rendered)
