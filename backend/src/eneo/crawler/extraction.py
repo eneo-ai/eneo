@@ -113,6 +113,8 @@ def normalize_url(url: str, *, base_url: str | None = None) -> str | None:
         return None
 
     host = hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
     if port and not (
         (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
     ):

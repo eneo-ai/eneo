@@ -2398,6 +2398,128 @@ async def test_https_upgrade_checks_the_target_origins_robots_policy(
     assert not events[0].retryable
 
 
+@pytest.mark.parametrize("obey_robots", [True, False])
+async def test_https_upgrade_paces_child_pages_and_files_by_the_target_policy(
+    obey_robots: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secure_delay = 2
+    request_times: list[float] = []
+    active = 0
+    peak_active = 0
+
+    async def handler(request: web.Request) -> web.Response:
+        nonlocal active, peak_active
+        url = request.headers["X-Test-URL"]
+        if request.path == "/robots.txt":
+            delay = secure_delay if url.startswith("https:") else 1
+            return web.Response(text=f"User-agent: *\nAllow: /\nCrawl-delay: {delay}\n")
+        if url == "http://example.test/start":
+            return web.Response(
+                status=301, headers={"Location": "https://example.test/start"}
+            )
+
+        request_times.append(asyncio.get_running_loop().time())
+        active += 1
+        peak_active = max(peak_active, active)
+        try:
+            await asyncio.sleep(0.01)
+            if request.path == "/start":
+                return web.Response(
+                    text='<main>Start<a href="/start/one">One</a>'
+                    '<a href="/start/two">Two</a><a href="/one.pdf">PDF 1</a>'
+                    '<a href="/two.pdf">PDF 2</a></main>',
+                    content_type="text/html",
+                )
+            if request.path.endswith(".pdf"):
+                return web.Response(
+                    body=b"%PDF-1.4 fixture", content_type="application/pdf"
+                )
+            return web.Response(
+                text="<main>Child page</main>", content_type="text/html"
+            )
+        finally:
+            active -= 1
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+    async with _serve_origins(app, monkeypatch):
+        events = [
+            event
+            async for event in PythonCrawlEngine(
+                allow_private_network=True, global_concurrency=3
+            ).crawl(
+                _request(
+                    "http://example.test/start", obey_robots=obey_robots, max_seconds=25
+                )
+            )
+        ]
+
+    assert sum(isinstance(event, PageCrawled) for event in events) == 3
+    assert sum(isinstance(event, FileDownloaded) for event in events) == 2
+    assert not any(isinstance(event, (PageFailed, FileFailed)) for event in events)
+    assert len(request_times) == 5
+    if obey_robots:
+        assert peak_active == 1
+        assert all(
+            later - earlier >= secure_delay
+            for earlier, later in zip(request_times, request_times[1:])
+        )
+    else:
+        assert peak_active == 2
+
+
+async def test_robots_wait_leaves_http_capacity_free_and_honors_the_crawl_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_page_received = asyncio.Event()
+
+    async def handler(request: web.Request) -> web.Response:
+        if request.path == "/robots.txt":
+            return web.Response(text="User-agent: *\nAllow: /\nCrawl-delay: 5\n")
+        return web.Response(
+            text='<main>Page<a href="/start/child">Child</a></main>',
+            content_type="text/html",
+        )
+
+    async def collect_paced_crawl() -> list[CrawlEvent]:
+        events: list[CrawlEvent] = []
+        async for event in PythonCrawlEngine(
+            allow_private_network=True, global_concurrency=1
+        ).crawl(_request("http://paced.test/start", obey_robots=True, max_seconds=1)):
+            events.append(event)
+            if isinstance(event, PageCrawled):
+                first_page_received.set()
+        return events
+
+    async def collect_fast_crawl() -> list[CrawlEvent]:
+        return [
+            event
+            async for event in PythonCrawlEngine(
+                allow_private_network=True, global_concurrency=1
+            ).crawl(_request("http://fast.test/start", max_items=1))
+        ]
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+    async with _serve_origins(app, monkeypatch) as requests:
+        paced = asyncio.create_task(collect_paced_crawl())
+        try:
+            await asyncio.wait_for(first_page_received.wait(), timeout=1)
+            # Allow the paced crawl to queue its child behind the origin delay.
+            await asyncio.sleep(0.05)
+            fast_events = await asyncio.wait_for(collect_fast_crawl(), timeout=0.5)
+            assert sum(isinstance(event, PageCrawled) for event in fast_events) == 1
+            paced_events = await asyncio.wait_for(paced, timeout=2)
+        finally:
+            paced.cancel()
+            await asyncio.gather(paced, return_exceptions=True)
+
+    assert "http://paced.test/start/child" not in [url for url, _ in requests]
+    finished = paced_events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.reason == "timeout"
+
+
 @pytest.mark.parametrize("crawl_type", [CrawlType.CRAWL, CrawlType.SITEMAP])
 async def test_https_upgrade_keeps_files_and_nested_sitemaps_without_forwarding_auth(
     crawl_type: CrawlType,

@@ -1,9 +1,12 @@
+from urllib.parse import urlsplit
+
 import pytest
 
 from eneo.crawler.extraction import (
     extract_html,
     is_in_scope,
     is_page_link,
+    is_same_origin,
     normalize_url,
 )
 
@@ -65,6 +68,34 @@ def test_normalize_url_removes_fragments_and_default_ports() -> None:
         == "https://example.se/a/info?lang=sv"
     )
     assert normalize_url("mailto:test@example.se") is None
+
+
+@pytest.mark.parametrize(
+    ("url", "expected", "port"),
+    [
+        ("https://[2001:DB8::1]/path#part", "https://[2001:db8::1]/path", None),
+        ("https://[2001:db8::1]:443/path", "https://[2001:db8::1]/path", None),
+        ("http://[2001:db8::1]:80/path", "http://[2001:db8::1]/path", None),
+        ("https://[2001:db8::1]:8443/path", "https://[2001:db8::1]:8443/path", 8443),
+    ],
+)
+def test_ipv6_url_normalization_preserves_a_parseable_origin(
+    url: str, expected: str, port: int | None
+) -> None:
+    normalized = normalize_url(url)
+    assert normalized == expected
+    assert normalized is not None
+    parsed = urlsplit(normalized)
+    assert parsed.hostname == "2001:db8::1"
+    assert parsed.port == port
+    assert normalize_url(normalized) == normalized
+
+    child = normalize_url("path/child", base_url=normalized)
+    assert child is not None
+    assert is_in_scope(child, normalized)
+    assert is_same_origin(child, normalized)
+    assert not is_same_origin(child.replace("::1", "::2"), normalized)
+    assert not is_same_origin(child, "https://[2001:db8::1]:9443/path")
 
 
 def test_scope_requires_same_host_and_path_segment() -> None:

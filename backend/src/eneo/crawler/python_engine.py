@@ -14,8 +14,8 @@ import socket
 import unicodedata
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from contextlib import asynccontextmanager, nullcontext
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from itertools import islice
@@ -71,7 +71,6 @@ _MAX_SUFFIX_BYTES = 16
 _CRAWL_TEMP_PREFIX = "eneo-crawl-"
 
 _ResponseResult = TypeVar("_ResponseResult")
-_RobotsLookup = Callable[[str], Awaitable[RobotFileParser | None]]
 
 _process_capacity: asyncio.Semaphore | None = None
 _process_capacity_loop: asyncio.AbstractEventLoop | None = None
@@ -109,6 +108,36 @@ class _FetchResult:
 @dataclass(frozen=True, slots=True)
 class _FetchHandoff:
     pass
+
+
+@dataclass
+class _OriginRobotsPolicy:
+    parser: RobotFileParser
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    next_request_at: float = 0.0
+
+    @asynccontextmanager
+    async def pace(self) -> AsyncGenerator[None, None]:
+        delay = float(
+            self.parser.crawl_delay(_USER_AGENT) or self.parser.crawl_delay("*") or 0
+        )
+        if not delay:
+            yield
+            return
+
+        # Crawl-delay applies to every request to this origin, including files
+        # and redirect hops. Wait before acquiring shared HTTP capacity.
+        async with self.lock:
+            remaining = self.next_request_at - monotonic()
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+            try:
+                yield
+            finally:
+                self.next_request_at = monotonic() + delay
+
+
+_RobotsLookup = Callable[[str], Awaitable[_OriginRobotsPolicy | None]]
 
 
 class _ResponseTooLarge(Exception):
@@ -326,10 +355,10 @@ class PythonCrawlEngine:
                 timeout=timeout,
                 connector=connector,
             ) as session:
-                robots_by_origin: dict[str, RobotFileParser | None] = {}
+                robots_by_origin: dict[str, _OriginRobotsPolicy | None] = {}
                 robots_lock = asyncio.Lock()
 
-                async def robots_for_url(url: str) -> RobotFileParser | None:
+                async def robots_for_url(url: str) -> _OriginRobotsPolicy | None:
                     if not request.obey_robots:
                         return None
                     origin = (
@@ -342,7 +371,11 @@ class PythonCrawlEngine:
                             loaded = await self._load_robots(
                                 session, url, seed_url, request, origin_authorization
                             )
-                            policy = loaded[0] if loaded is not None else None
+                            policy = (
+                                _OriginRobotsPolicy(loaded[0])
+                                if loaded is not None
+                                else None
+                            )
                             robots_by_origin[origin] = policy
                             if loaded is not None:
                                 policy_origin = (
@@ -353,11 +386,13 @@ class PythonCrawlEngine:
                                 # A custom redirect destination is policy for
                                 # the requesting origin, not necessarily its host.
                                 if loaded[1] == f"{policy_origin}/robots.txt":
-                                    robots_by_origin.setdefault(policy_origin, policy)
+                                    robots_by_origin.setdefault(
+                                        policy_origin, _OriginRobotsPolicy(loaded[0])
+                                    )
                         return robots_by_origin[origin]
 
                 try:
-                    robots = await asyncio.wait_for(
+                    await asyncio.wait_for(
                         robots_for_url(seed_url),
                         timeout=self._remaining_seconds(started_at, request),
                     )
@@ -411,21 +446,10 @@ class PythonCrawlEngine:
                         page_owners[url] = url
                         frontier.append(url)
 
-                robots_delay = (
-                    (robots.crawl_delay(_USER_AGENT) or robots.crawl_delay("*"))
-                    if robots is not None
-                    else None
-                )
-                robots_request_delay = float(robots_delay or 0)
-                request_delay = max(
-                    request.limits.request_delay_seconds,
-                    robots_request_delay,
-                )
-                # A robots crawl-delay is a per-origin serial contract. Eneo's
-                # configured pacing instead delays refilling freed HTTP slots.
-                per_crawl_concurrency = (
-                    1 if robots_request_delay else request.limits.concurrency
-                )
+                # Configured pacing delays refilling freed HTTP slots. Robots
+                # pacing is enforced separately at each actual request origin.
+                request_delay = request.limits.request_delay_seconds
+                per_crawl_concurrency = request.limits.concurrency
                 link_reorder_window = per_crawl_concurrency * 2
                 # A redirect alias hands its result slot to the fetch that owns the
                 # target. One extra in-flight window permits useful replacements,
@@ -1240,7 +1264,7 @@ class PythonCrawlEngine:
             # Resolve the policy before holding HTTP capacity: loading robots
             # itself needs a slot, including after an HTTP-to-HTTPS redirect.
             policy = await robots(current) if robots is not None else None
-            if policy is not None and not policy.can_fetch(_USER_AGENT, current):
+            if policy is not None and not policy.parser.can_fetch(_USER_AGENT, current):
                 raise _RobotsDisallowed("request target is disallowed by robots.txt")
             if (
                 redirect_count
@@ -1260,7 +1284,10 @@ class PythonCrawlEngine:
                 request_headers["If-Modified-Since"] = validator.last_modified
             if request_authorization is not None:
                 request_headers["Authorization"] = request_authorization
-            async with self._capacity:
+            async with (
+                policy.pace() if policy is not None else nullcontext(),
+                self._capacity,
+            ):
                 response = await session.get(
                     current,
                     allow_redirects=False,
