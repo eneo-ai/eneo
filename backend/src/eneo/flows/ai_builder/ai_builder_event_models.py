@@ -53,10 +53,27 @@ class StructuredQuestionOptionPayload(BaseModel):
     example: str | None = None
 
 
+class UnderstandingPayload(BaseModel):
+    """What the Builder understood before its first question, in the user's
+    language: two or three short sentences from commit-grade readings only,
+    plus one aggregate sentence about the attachments with certain roles.
+
+    Unversioned and never a claim: weak readings are named as still open,
+    never as facts; nothing about output contents, layout, steps, or whether
+    an attachment travels, which only the commit can say.
+    """
+
+    sentences: list[str] = Field(min_length=1, max_length=4)
+    open_topics: list[str] = Field(default_factory=list)
+
+
 class StructuredQuestionPayload(BaseModel):
     question_id: str
     question: str
     options: list[StructuredQuestionOptionPayload]
+    # On the first question of a create session only: what was understood so
+    # far. Absent on every later question and in edit mode.
+    understanding: UnderstandingPayload | None = None
     selection_mode: Literal["single", "multi"]
     allow_custom: bool
     requires_confirm: bool = False

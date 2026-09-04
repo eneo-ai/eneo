@@ -34,6 +34,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     _slot_is_key_decision,
     build_requirements_disclosure,
+    build_understanding,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     build_requirements_version,
@@ -1372,11 +1373,15 @@ def test_server_confirmation_derives_the_attachment_run_consequence_from_the_com
 
 
 def _attachment(
-    role: FileRole, *, confidence: str = "high", placeholders: list[str] | None = None
+    role: FileRole,
+    *,
+    confidence: str = "high",
+    placeholders: list[str] | None = None,
+    ordinal: int = 1,
 ) -> FileRoleEvidence:
     return FileRoleEvidence(
-        file_id=UUID("00000000-0000-0000-0000-000000000901"),
-        filename="attached.docx",
+        file_id=UUID(f"00000000-0000-0000-0000-00000000090{ordinal}"),
+        filename="attached.docx" if ordinal == 1 else f"attached-{ordinal}.docx",
         file_type="document",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         has_readable_text=True,
@@ -1452,6 +1457,40 @@ def test_server_confirmation_previews_the_run_contract_not_a_result() -> None:
     assert (
         not isinstance(empty, ConfirmRequirements) or empty.payload.run_preview is None
     )
+
+
+def test_understanding_states_commit_grade_facts_and_names_weak_readings_as_open() -> (
+    None
+):
+    # Before the first question the Builder says what it understood: only
+    # commit-grade readings become facts; a weak reading is an open topic, and
+    # attachments are counted by certain role, never described one by one.
+    state = _state(primary_runtime_input="documents", terminal_output="pdf_document")
+    state.resolved_slots["post_processing_goal"] = _slot(
+        "post_processing_goal",
+        "summarize",
+        source="model",
+        confidence="medium",
+        evidence_level="inferred",
+    )
+    state.file_roles = [
+        _attachment("reference_material"),
+        _attachment("context_only", confidence="medium", ordinal=2),
+    ]
+
+    understanding = build_understanding(state, ui_language="sv")
+
+    assert understanding is not None
+    assert "dokument" in understanding.sentences[0]
+    assert "PDF" in understanding.sentences[0]
+    assert "Syftet" not in understanding.sentences[0]
+    assert (
+        understanding.sentences[1] == "2 bifogade filer: 1 underlag, 1 med oklar roll."
+    )
+    assert understanding.open_topics == [
+        render_summary_label("post_processing_goal", "sv")
+    ]
+    assert build_understanding(PlanningState.empty(), ui_language="sv") is None
 
 
 def test_server_confirmation_discloses_every_attachment_and_versions_coverage() -> None:
