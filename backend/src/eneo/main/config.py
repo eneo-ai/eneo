@@ -273,6 +273,9 @@ class Settings(BaseSettings):
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.
     mcp_tool_image_max_bytes: int = 10 * 1024 * 1024
+    # Image content blocks admitted from a single tool result; the rest are
+    # dropped with a notice so one call cannot flood the file store.
+    mcp_tool_image_max_count: int = 4
     mcp_circuit_breaker_failure_threshold: int = 5
     mcp_circuit_breaker_cooldown_seconds: int = 60
 
@@ -837,6 +840,13 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_TOOL_IMAGE_MAX_BYTES must be greater than zero. Current value: %s",
                 self.mcp_tool_image_max_bytes,
+            )
+            sys.exit(1)
+
+        if self.mcp_tool_image_max_count <= 0:
+            logging.error(
+                "MCP_TOOL_IMAGE_MAX_COUNT must be greater than zero. Current value: %s",
+                self.mcp_tool_image_max_count,
             )
             sys.exit(1)
 

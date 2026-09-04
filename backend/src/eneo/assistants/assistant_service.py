@@ -72,6 +72,7 @@ from eneo.mcp_servers.application.capability_resolver import (
 from eneo.mcp_servers.domain.entities.mcp_server import (
     GENERAL_PURPOSE,
     allowed_capability_purposes,
+    duplicate_capability_purposes,
     is_capability_purpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -1498,7 +1499,7 @@ class AssistantService:
             # at ask time, so a deactivated one may legitimately stay
             # attached; only general servers must be currently enabled.
             mcp_servers_query = (
-                sa.select(MCPServersTable.id)
+                sa.select(MCPServersTable.id, MCPServersTable.purpose)
                 .where(MCPServersTable.tenant_id == self.user.tenant_id)
                 .where(
                     sa.or_(
@@ -1509,7 +1510,16 @@ class AssistantService:
                 .where(MCPServersTable.id.in_(mcp_server_ids))
             )
             mcp_servers_result = await self.repo.session.execute(mcp_servers_query)
-            enabled_server_ids = {row[0] for row in mcp_servers_result.fetchall()}
+            enabled_server_rows = mcp_servers_result.fetchall()
+            enabled_server_ids = {row[0] for row in enabled_server_rows}
+            duplicate_purposes = duplicate_capability_purposes(
+                row[1] for row in enabled_server_rows
+            )
+            if duplicate_purposes:
+                raise BadRequestException(
+                    "Only one MCP server per capability can be attached: "
+                    + ", ".join(duplicate_purposes)
+                )
 
             missing_tenant_enabled_ids = [
                 str(server_id)

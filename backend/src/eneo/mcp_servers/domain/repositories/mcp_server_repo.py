@@ -53,3 +53,9 @@ class MCPServerRepository(ABC):
     async def delete(self, id: UUID) -> bool:
         """Delete an MCP server."""
         ...
+
+    @abstractmethod
+    async def detach_from_spaces_and_assistants(self, id: UUID) -> None:
+        """Remove every space and assistant attachment of an MCP server,
+        including the per-tool overrides that ride on its tools."""
+        ...

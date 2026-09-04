@@ -36,15 +36,12 @@
     selectedMCPServers: { [key: string]: unknown }[] | undefined;
     /** MCP tool overrides sent alongside the servers. */
     selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
-    /** Optional policy-filtered server list for personal assistant governance. */
-    allowedMCPServers?: { [key: string]: unknown }[] | undefined;
   };
 
   let {
     capability,
     selectedMCPServers = $bindable([]),
-    selectedMCPTools = $bindable([]),
-    allowedMCPServers = undefined
+    selectedMCPTools = $bindable([])
   }: Props = $props();
 
   const {
@@ -53,11 +50,9 @@
 
   let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
 
-  // The space (or governance policy) offers at most the active provider.
+  // The space offers at most the active provider.
   let offeredProvider = $derived.by(() => {
-    const spaceServers = (allowedMCPServers ??
-      $currentSpace.mcp_servers ??
-      []) as unknown as MCPServer[];
+    const spaceServers = ($currentSpace.mcp_servers ?? []) as unknown as MCPServer[];
     const provider = spaceServers.find((server) => server.purpose === capability.purpose);
     if (!provider) return undefined;
     return {
@@ -97,7 +92,6 @@
   class="border-default border-b transition-colors last:border-b-0 {capabilityOn
     ? 'bg-accent-dimmer/20'
     : ''}"
-  class:pointer-events-none={noProvider}
   class:opacity-60={noProvider}
 >
   <div class="flex items-center">
@@ -105,14 +99,9 @@
       <capability.icon class="text-muted h-4 w-4" aria-hidden="true" />
     </div>
     <div class="flex-1 py-2.5 pr-4">
-      <Input.Switch
-        value={capabilityOn}
-        sideEffect={() => {
-          if (!noProvider) {
-            toggleCapability();
-          }
-        }}
-      >
+      <!-- Locked via disabled (not pointer-events) so keyboard users cannot
+           flip a switch that attaches nothing. -->
+      <Input.Switch value={capabilityOn} disabled={noProvider} sideEffect={toggleCapability}>
         <div class="flex flex-col gap-0.5">
           <span class="text-default font-medium">{capability.label()}</span>
           <p class="text-muted text-xs leading-snug">

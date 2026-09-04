@@ -7,7 +7,13 @@ vi.mock("$lib/paraglide/messages", () => ({
 }));
 vi.mock("lucide-svelte", () => ({ Globe: "Globe", Image: "Image" }));
 
-import { CAPABILITIES, getCapability, isCapabilityPurpose } from "./capabilities";
+import {
+  CAPABILITIES,
+  canUseCapability,
+  getCapability,
+  isCapabilityPurpose,
+  qualifyingProviders
+} from "./capabilities";
 
 describe("capability descriptors", () => {
   it("lists web search before image generation", () => {
@@ -42,5 +48,55 @@ describe("capability descriptors", () => {
   it("resolves descriptors by purpose", () => {
     expect(getCapability("image_generation")?.purpose).toBe("image_generation");
     expect(getCapability("general")).toBeUndefined();
+  });
+});
+
+describe("canUseCapability", () => {
+  const userWith = (...granted: string[]) => ({
+    hasPermission: (permission: string) => granted.includes(permission)
+  });
+
+  it("never gates general servers", () => {
+    expect(canUseCapability(userWith(), "general")).toBe(true);
+    expect(canUseCapability(userWith(), null)).toBe(true);
+    expect(canUseCapability(userWith(), undefined)).toBe(true);
+  });
+
+  it("follows the role permission whose value equals the purpose", () => {
+    expect(canUseCapability(userWith("web_search"), "web_search")).toBe(true);
+    expect(canUseCapability(userWith("web_search"), "image_generation")).toBe(false);
+    expect(canUseCapability(userWith(), "web_search")).toBe(false);
+  });
+});
+
+describe("qualifyingProviders", () => {
+  const provider = (purpose: string, level: number | null) => ({
+    purpose,
+    security_classification: level === null ? null : { security_level: level }
+  });
+  const servers = [
+    provider("web_search", null),
+    provider("web_search", 1),
+    provider("web_search", 3),
+    provider("image_generation", 3),
+    provider("general", 3)
+  ];
+
+  it("offers every provider of the purpose to an unclassified space", () => {
+    expect(qualifyingProviders(servers, "web_search", null)).toEqual(servers.slice(0, 3));
+    expect(qualifyingProviders(servers, "web_search", undefined)).toEqual(servers.slice(0, 3));
+  });
+
+  it("requires a provider at or above a classified space's level", () => {
+    expect(qualifyingProviders(servers, "web_search", { security_level: 2 })).toEqual([servers[2]]);
+    expect(qualifyingProviders(servers, "web_search", { security_level: 3 })).toEqual([servers[2]]);
+    expect(qualifyingProviders(servers, "web_search", { security_level: 4 })).toEqual([]);
+  });
+
+  it("never lets an unclassified provider qualify for a classified space", () => {
+    expect(qualifyingProviders(servers, "web_search", { security_level: 0 })).toEqual([
+      servers[1],
+      servers[2]
+    ]);
   });
 });

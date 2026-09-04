@@ -935,6 +935,68 @@ class TestTruncateToolResult:
         assert notice["type"] == "text"
         assert "exceeded" in notice["text"] and "dropped" in notice["text"]
 
+    def test_image_with_non_raster_mime_is_dropped_with_notice(self):
+        # Only raster formats become generated files; a server cannot smuggle
+        # HTML or SVG into the file store through an image block.
+        result = {
+            "content": [
+                {"type": "text", "text": "done"},
+                {"type": "image", "data": "AAAA", "mime_type": "text/html"},
+                {"type": "image", "data": "AAAA", "mime_type": "image/svg+xml"},
+            ],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        text, *notices = truncated["content"]
+        assert text == {"type": "text", "text": "done"}
+        assert [n["type"] for n in notices] == ["text", "text"]
+        assert "'text/html'" in notices[0]["text"]
+        assert "'image/svg+xml'" in notices[1]["text"]
+
+    def test_image_without_mime_is_admitted_as_png(self):
+        # The adapter reads a missing type as PNG; the proxy agrees and
+        # records the normalized type so the two never disagree.
+        result = {
+            "content": [
+                {"type": "image", "data": "AAAA"},
+                {"type": "image", "data": "AAAA", "mime_type": "IMAGE/JPEG; q=1"},
+            ],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        assert truncated["content"] == [
+            {"type": "image", "data": "AAAA", "mime_type": "image/png"},
+            {"type": "image", "data": "AAAA", "mime_type": "image/jpeg"},
+        ]
+
+    def test_images_beyond_count_cap_are_dropped_with_one_notice(self, monkeypatch):
+        from eneo.mcp_servers.infrastructure.proxy import mcp_proxy_session
+
+        monkeypatch.setattr(
+            mcp_proxy_session._settings,  # pyright: ignore[reportPrivateUsage]
+            "mcp_tool_image_max_count",
+            2,
+        )
+        images = [
+            {"type": "image", "data": f"AAA{i}", "mime_type": "image/png"}
+            for i in range(5)
+        ]
+        result = {
+            "content": [{"type": "text", "text": "done"}, *images],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        text, notice, *kept = truncated["content"]
+        assert text == {"type": "text", "text": "done"}
+        assert "3 image content block(s)" in notice["text"]
+        assert kept == images[:2]
+
     def test_total_size_respects_budget(self):
         import json
 

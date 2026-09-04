@@ -17,7 +17,7 @@
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
   import CapabilityToggle from "$lib/features/mcp/components/CapabilityToggle.svelte";
-  import { CAPABILITIES } from "$lib/features/mcp/capabilities";
+  import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
@@ -658,7 +658,11 @@
             {#if availableMCPServers && availableMCPServers.length > 0}
               <div class="border-default bg-secondary/30 divide-default divide-y rounded-lg border">
                 {#each availableMCPServers as server (server.id)}
-                  <p class="text-default px-3 py-2 text-sm font-medium">{server.name}</p>
+                  <!-- Capability providers are policy-granted capabilities, not
+                       servers: show the capability, never the provider. -->
+                  <p class="text-default px-3 py-2 text-sm font-medium">
+                    {getCapability(server.purpose)?.label() ?? server.name}
+                  </p>
                 {/each}
               </div>
             {:else}
@@ -697,7 +701,6 @@
                   {capability}
                   bind:selectedMCPServers={$update.mcp_servers}
                   bind:selectedMCPTools={$update.mcp_tools}
-                  allowedMCPServers={availableMCPServers}
                 />
               {/each}
             </div>

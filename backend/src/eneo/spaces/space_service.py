@@ -29,6 +29,7 @@ from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
 from eneo.mcp_servers.domain.entities.mcp_server import (
     GENERAL_PURPOSE,
     MCPServer,
+    duplicate_capability_purposes,
     is_capability_purpose,
 )
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
@@ -282,7 +283,18 @@ class SpaceService:
         the provider serving the user), so the check runs against the active
         providers for the purpose: at least one must meet the space's
         classification. Ask time remains the hard guarantee per user.
+
+        Also rejects a second marker for the same purpose: one marker per
+        capability is what every surface toggles.
         """
+        duplicates = duplicate_capability_purposes(
+            server.purpose for server in mcp_servers
+        )
+        if duplicates:
+            raise BadRequestException(
+                "Only one MCP server per capability can be attached: "
+                + ", ".join(duplicates)
+            )
         if space_security_classification is None:
             return
         from eneo.mcp_servers.application.capability_resolver import (

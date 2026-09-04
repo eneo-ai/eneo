@@ -124,7 +124,6 @@
 <Tooltip text={meetsClassification ? undefined : capability.classificationHint()}>
   <div
     class="border-default border-b last:border-b-0"
-    class:pointer-events-none={noProvider || !meetsClassification || saving}
     class:opacity-60={noProvider || !meetsClassification}
   >
     <div class="hover:bg-hover-dimmer flex items-center">
@@ -132,13 +131,12 @@
         <capability.icon class="text-muted h-4 w-4" aria-hidden="true" />
       </div>
       <div class="flex-1 py-4 pr-4">
+        <!-- Locked via disabled (not pointer-events) so keyboard users cannot
+             flip a switch that attaches nothing. -->
         <Input.Switch
           value={capabilityOn}
-          sideEffect={() => {
-            if (!noProvider && meetsClassification) {
-              toggleCapability();
-            }
-          }}
+          disabled={noProvider || !meetsClassification || saving}
+          sideEffect={toggleCapability}
         >
           <div class="flex flex-col gap-1">
             <span class="font-medium">{capability.label()}</span>

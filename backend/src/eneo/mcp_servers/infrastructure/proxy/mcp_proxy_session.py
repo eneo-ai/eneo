@@ -35,6 +35,12 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _settings = get_settings()
+
+# Raster formats the file store serves as images. An MCP ``image`` block with
+# any other type never becomes a generated file.
+MCP_IMAGE_MIME_TYPES: frozenset[str] = frozenset(
+    {"image/png", "image/jpeg", "image/webp", "image/gif"}
+)
 MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
     _settings.mcp_client_connect_timeout_seconds
     + _settings.mcp_client_list_tools_timeout_seconds
@@ -618,16 +624,36 @@ class MCPProxySession:
     def _admit_image_blocks(
         blocks: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Keep image blocks within the decoded-size cap.
+        """Keep the image blocks the ask path may persist as generated files.
 
-        Oversized images are dropped and replaced by a text notice so the model
-        learns the tool produced something it cannot show.
+        A block is admitted when its MIME type is a raster image format (a
+        missing type reads as PNG, matching the adapter's default), its decoded
+        size fits the byte cap, and it is within the per-result count cap. The
+        admitted block carries the normalized MIME type, which is what the file
+        store records as verified. Everything else is dropped and replaced by a
+        text notice so the model learns the tool produced something it cannot
+        show.
         """
         max_bytes = _settings.mcp_tool_image_max_bytes
+        max_count = _settings.mcp_tool_image_max_count
         admitted: list[dict[str, Any]] = []
         notices: list[dict[str, Any]] = []
+        over_count = 0
         for block in blocks:
             if block.get("type") != "image":
+                continue
+            raw_mime = block.get("mime_type") or "image/png"
+            mime_type = str(raw_mime).split(";", 1)[0].strip().lower()
+            if mime_type not in MCP_IMAGE_MIME_TYPES:
+                notices.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[An image content block of unsupported type "
+                            f"{mime_type!r} was dropped.]"
+                        ),
+                    }
+                )
                 continue
             encoded = block.get("data") or ""
             decoded_size = len(encoded) * 3 // 4
@@ -643,7 +669,24 @@ class MCPProxySession:
                     }
                 )
                 continue
-            admitted.append(block)
+            if len(admitted) >= max_count:
+                over_count += 1
+                continue
+            admitted.append(
+                block
+                if block.get("mime_type") == mime_type
+                else {**block, "mime_type": mime_type}
+            )
+        if over_count:
+            notices.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"[{over_count} image content block(s) beyond the "
+                        f"{max_count} per result limit were dropped.]"
+                    ),
+                }
+            )
         return admitted, notices
 
     def get_tools_for_llm(self) -> list[dict[str, Any]]:

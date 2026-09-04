@@ -7,7 +7,7 @@ Covers, for every capability purpose (web search, image generation):
 - atomic switch: activating one provider deactivates the previous one for
   the same purpose only
 - purpose changes on update re-home the server (inactive provider on the way
-  in, enabled general server on the way out)
+  in, enabled general server with its attachments detached on the way out)
 - catalog write conflicts map to the matching domain error per constraint
 - usable-tool filtering that gates provider activation
 - audiences: the default provider replaces only the default, group-targeted
@@ -291,6 +291,20 @@ class TestPurposeUpdate:
 
         assert result.server.purpose == "general"
         assert result.server.is_enabled is True
+        # Markers were admitted without the space classification check, so
+        # they must not survive as attachments of a directly-called server.
+        mock_repo.detach_from_spaces_and_assistants.assert_awaited_once_with(server.id)
+
+    @pytest.mark.parametrize("purpose", CAPABILITY_PURPOSES)
+    async def test_general_server_keeps_attachments_when_promoted(self, purpose):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="general", is_enabled=True)
+        mock_repo.one.return_value = server
+        mock_repo.update.side_effect = lambda obj: obj
+
+        await service.update_mcp_server(server.id, purpose=purpose)
+
+        mock_repo.detach_from_spaces_and_assistants.assert_not_awaited()
 
     async def test_switching_between_capabilities_deactivates(self):
         first, second = CAPABILITY_PURPOSES[0], CAPABILITY_PURPOSES[1]

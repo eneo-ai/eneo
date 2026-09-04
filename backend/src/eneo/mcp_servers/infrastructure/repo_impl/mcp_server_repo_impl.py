@@ -6,8 +6,17 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from typing_extensions import override
 
+from eneo.database.tables.assistant_table import (
+    AssistantMCPServers,
+    AssistantMCPServerTools,
+)
 from eneo.database.tables.mcp_server_table import MCPServers as MCPServersTable
-from eneo.database.tables.mcp_server_table import MCPServerUserGroups
+from eneo.database.tables.mcp_server_table import (
+    MCPServerTools,
+    MCPServerUserGroups,
+    SpacesMCPServers,
+    SpacesMCPServerTools,
+)
 from eneo.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
 )
@@ -60,6 +69,30 @@ class MCPServerRepoImpl(
     async def update(self, obj: MCPServer) -> MCPServer:
         await self._sync_user_groups(obj)
         return await super().update(obj)
+
+    @override
+    async def detach_from_spaces_and_assistants(self, id: UUID) -> None:
+        tool_ids = sa.select(MCPServerTools.id).where(
+            MCPServerTools.mcp_server_id == id
+        )
+        await self.session.execute(
+            sa.delete(SpacesMCPServerTools).where(
+                SpacesMCPServerTools.mcp_server_tool_id.in_(tool_ids)
+            )
+        )
+        await self.session.execute(
+            sa.delete(AssistantMCPServerTools).where(
+                AssistantMCPServerTools.mcp_server_tool_id.in_(tool_ids)
+            )
+        )
+        await self.session.execute(
+            sa.delete(SpacesMCPServers).where(SpacesMCPServers.mcp_server_id == id)
+        )
+        await self.session.execute(
+            sa.delete(AssistantMCPServers).where(
+                AssistantMCPServers.mcp_server_id == id
+            )
+        )
 
     @override
     async def all(self) -> list[MCPServer]:

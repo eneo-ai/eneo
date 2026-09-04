@@ -247,8 +247,18 @@
     { value: "everyone", label: m.mcp_audience_everyone() },
     { value: "groups", label: m.mcp_audience_groups() }
   ]);
+  // The number input yields null when cleared and accepts negatives; the
+  // backend requires a non-negative integer, so gate submit here.
+  const audiencePriorityInvalid = $derived(
+    !!capability &&
+      (audiencePriority === null ||
+        audiencePriority === undefined ||
+        !Number.isInteger(audiencePriority) ||
+        audiencePriority < 0)
+  );
   const audienceIncomplete = $derived(
-    !!capability && audience === "groups" && selectedGroupIds.length === 0
+    !!capability &&
+      ((audience === "groups" && selectedGroupIds.length === 0) || audiencePriorityInvalid)
   );
 
   const credentialPreview = $derived(mcpServer?.credential_preview ?? "");
@@ -437,13 +447,20 @@
                   type="number"
                   min="0"
                   step="1"
+                  required
                   bind:value={audiencePriority}
+                  aria-invalid={audiencePriorityInvalid}
                   aria-describedby="mcp-audience-priority-hint"
                   class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-32 rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
                 />
                 <p id="mcp-audience-priority-hint" class="text-muted mt-1.5 text-xs">
                   {m.mcp_audience_priority_hint()}
                 </p>
+                {#if audiencePriorityInvalid}
+                  <p class="text-warning-default mt-1 text-xs">
+                    {m.mcp_audience_priority_invalid()}
+                  </p>
+                {/if}
               </div>
             {/if}
           </fieldset>

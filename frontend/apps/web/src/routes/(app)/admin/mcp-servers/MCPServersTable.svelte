@@ -148,6 +148,7 @@
               <div class="flex justify-center">
                 <MCPServerEnabledSwitch
                   mcpServer={server}
+                  onAttempt={() => (switchError = "")}
                   onError={(message) => (switchError = message)}
                 />
               </div>

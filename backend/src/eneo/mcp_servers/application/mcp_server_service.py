@@ -477,8 +477,10 @@ class MCPServerService:
         purpose saves it as an inactive provider (activation stays an explicit
         step, so the single-active-provider index never collides), a move back
         to general makes it an ordinary enabled server with no audience. Space
-        and assistant attachments are left in place; they read as capability
-        markers or as plain server attachments according to the new purpose.
+        and assistant attachments survive a move into a capability purpose
+        (they become capability markers) but are detached on the way back to
+        general: markers were admitted without the space's classification
+        check, and a general server is called directly.
 
         Audience changes (``audience``, ``audience_priority``,
         ``user_group_ids``) are validated against the effective purpose. An
@@ -548,6 +550,15 @@ class MCPServerService:
         if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
         if purpose is not None and purpose != mcp_server.purpose:
+            if is_capability_purpose(mcp_server.purpose) and not is_capability_purpose(
+                purpose
+            ):
+                # Attachments of a capability server are markers admitted
+                # without the space's classification check. As a general
+                # server they would be called directly, so they are detached
+                # rather than re-homed.
+                assert mcp_server.id is not None
+                await self.repo.detach_from_spaces_and_assistants(mcp_server.id)
             mcp_server.purpose = purpose
             mcp_server.is_enabled = not is_capability_purpose(purpose)
             if not is_capability_purpose(purpose):

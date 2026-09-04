@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
@@ -44,6 +45,26 @@ DEFAULT_AUDIENCE_PRIORITY = 100
 
 def is_capability_purpose(purpose: str | None) -> bool:
     return bool(purpose) and purpose != GENERAL_PURPOSE
+
+
+def duplicate_capability_purposes(purposes: Iterable[str | None]) -> list[str]:
+    """Capability purposes that occur more than once, in first-seen order.
+
+    A space or assistant attaches at most one marker per capability: the
+    marker only requests the capability, so a second one for the same purpose
+    adds nothing and would let a stale marker keep the capability requested
+    after the user switches the other one off.
+    """
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for purpose in purposes:
+        if not is_capability_purpose(purpose):
+            continue
+        assert purpose is not None
+        if purpose in seen and purpose not in duplicates:
+            duplicates.append(purpose)
+        seen.add(purpose)
+    return duplicates
 
 
 def capability_permission(purpose: str) -> Permission:
