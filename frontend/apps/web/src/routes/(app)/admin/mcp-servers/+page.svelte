@@ -10,8 +10,8 @@
   import { invalidate } from "$app/navigation";
   import { Plus } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
-  import { localizeHref } from "$lib/paraglide/runtime";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
+  import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import MCPServerDialog from "./MCPServerDialog.svelte";
   import MCPServersTable from "./MCPServersTable.svelte";
   import { writable } from "svelte/store";
@@ -50,13 +50,56 @@
   <Page.Main>
     <Settings.Page>
       <Settings.Group title={m.available_mcp_servers()}>
-        <p class="text-muted pb-2 text-sm">
-          {m.capabilities_managed_elsewhere_hint()}
-          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from typed route literal -->
-          <a href={localizeHref("/admin/capabilities")} class="text-accent-default underline">
-            {m.capabilities_go_to_page()}
-          </a>
-        </p>
+        <!-- Which provider is live for each capability, at a glance. -->
+        <div
+          class="border-dimmer bg-secondary/20 mb-4 grid gap-4 rounded-xl border p-4 sm:grid-cols-2"
+          aria-label={m.capabilities()}
+        >
+          {#each CAPABILITIES as capability (capability.purpose)}
+            {@const activeProviders = mcpServers.filter(
+              (server) => server.purpose === capability.purpose && server.is_enabled
+            )}
+            {@const active = activeProviders.find((server) => server.audience !== "groups")}
+            {@const groupProviders = activeProviders.filter(
+              (server) => server.audience === "groups"
+            )}
+            <div class="flex items-center gap-3">
+              <span
+                class="bg-accent-dimmer flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+              >
+                <capability.icon class="text-accent-default h-4 w-4" aria-hidden="true" />
+              </span>
+              <div class="min-w-0">
+                <p class="text-default text-sm font-medium">{capability.label()}</p>
+                {#if active}
+                  <p class="text-muted flex items-center gap-1.5 truncate text-xs">
+                    <span
+                      class="bg-positive-dimmer text-positive-stronger inline-flex rounded-md px-1.5 py-0.5 font-medium"
+                    >
+                      {m.capability_default_provider()}
+                    </span>
+                    {active.name}
+                  </p>
+                {:else}
+                  <p class="text-muted text-xs">{m.capability_no_active_provider()}</p>
+                {/if}
+                {#if groupProviders.length > 0}
+                  <p
+                    class="text-muted truncate text-xs"
+                    title={groupProviders
+                      .map(
+                        (server) =>
+                          `${server.name}: ${(server.user_groups ?? []).map((group: { name: string }) => group.name).join(", ")}`
+                      )
+                      .join("\n")}
+                  >
+                    {m.capability_group_providers({ count: groupProviders.length })}
+                  </p>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
         {#if mcpServers.length > 0}
           <MCPServersTable {mcpServers} />
         {:else}

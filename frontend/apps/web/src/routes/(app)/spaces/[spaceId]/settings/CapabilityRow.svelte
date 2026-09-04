@@ -1,12 +1,16 @@
 <!--
     One capability (web search, image generation) as a space toggle. The
-    provider is configured globally by the admin and resolved at ask time, so
-    this is a pure on/off switch with no provider identity. Under the hood it
-    attaches/detaches the active MCP server with this capability's purpose:
+    providers are configured globally by the admin and the one serving each
+    user is resolved at ask time, so this is a pure on/off switch with no
+    provider identity. Under the hood it attaches/detaches an active MCP
+    server with this capability's purpose as a marker:
     - Checked when the space contains ANY server with this purpose, including
-      a stale previously-active provider (the backend substitutes the active
-      one at ask time).
-    - Turning ON attaches the currently offered active provider.
+      a stale previously-active provider (the backend substitutes the
+      user's provider at ask time).
+    - Turning ON attaches an active provider that meets the space's
+      security classification; when none does, the toggle is locked and
+      explains why (the backend also refuses such a marker, and never calls
+      a provider below the space's classification).
     - Turning OFF detaches EVERY server with this purpose so the space
       self-heals after provider switches.
 -->
@@ -15,8 +19,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { Input, Tooltip } from "@eneo/ui";
   import { derived } from "svelte/store";
-  import { m } from "$lib/paraglide/messages";
-  import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
+  import { qualifyingProviders, type CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import type { components } from "@eneo/eneo-js";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
@@ -49,10 +52,19 @@
     updateSpace
   } = getSpacesManager();
 
-  // The offered list only ever contains the active provider (the loader
-  // filters on is_org_enabled, which mirrors activation for capabilities).
+  // The offered list contains every ACTIVE provider for the purpose (the
+  // loader filters on is_org_enabled, which mirrors activation): the tenant
+  // default and any group-targeted providers. Any of them works as the
+  // attached marker.
+  const activeProviders = $derived(
+    selectableServers.filter((server) => server.purpose === capability.purpose)
+  );
   const activeProvider = $derived(
-    selectableServers.find((server) => server.purpose === capability.purpose)
+    qualifyingProviders(
+      selectableServers,
+      capability.purpose,
+      $currentSpace.security_classification
+    )[0]
   );
 
   // Server ids with this purpose currently attached to the space. Read from
@@ -65,18 +77,10 @@
   );
 
   const capabilityOn = $derived($attachedCapabilityIds.length > 0);
-  const noProvider = $derived(!activeProvider && !capabilityOn);
-  // Turning OFF is always allowed; classification only gates attaching the
-  // active provider.
-  const meetsClassification = $derived.by(() => {
-    if (capabilityOn || !activeProvider) return true;
-    const spaceClassification = $currentSpace.security_classification;
-    if (!spaceClassification) return true;
-    if (!activeProvider.security_classification) return false;
-    return (
-      activeProvider.security_classification.security_level >= spaceClassification.security_level
-    );
-  });
+  const noProvider = $derived(activeProviders.length === 0 && !capabilityOn);
+  // Turning OFF is always allowed; classification only gates attaching a
+  // provider: at least one active provider must meet the space's level.
+  const meetsClassification = $derived(capabilityOn || noProvider || !!activeProvider);
 
   let saving = $state(false);
 
@@ -117,9 +121,7 @@
   }
 </script>
 
-<Tooltip
-  text={meetsClassification ? undefined : m.mcp_server_does_not_meet_security_classification()}
->
+<Tooltip text={meetsClassification ? undefined : capability.classificationHint()}>
   <div
     class="border-default border-b last:border-b-0"
     class:pointer-events-none={noProvider || !meetsClassification || saving}
@@ -141,7 +143,13 @@
           <div class="flex flex-col gap-1">
             <span class="font-medium">{capability.label()}</span>
             <span class="text-muted text-sm">
-              {noProvider ? capability.noActiveProviderHint() : capability.spaceHint()}
+              {#if noProvider}
+                {capability.noActiveProviderHint()}
+              {:else if !meetsClassification}
+                {capability.classificationHint()}
+              {:else}
+                {capability.spaceHint()}
+              {/if}
             </span>
           </div>
         </Input.Switch>

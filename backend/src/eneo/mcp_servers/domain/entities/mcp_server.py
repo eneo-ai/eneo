@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
+from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from eneo.security_classifications.domain.entities.security_classification import (
@@ -29,9 +31,44 @@ MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
 GENERAL_PURPOSE = "general"
 CAPABILITY_PURPOSES: tuple[str, ...] = ("web_search", "image_generation")
 
+# Who a capability provider serves. "everyone" is the tenant's default provider
+# for its purpose (at most one active per tenant and purpose); "groups" targets
+# the members of the provider's user groups and may coexist with the default
+# and with other group-targeted providers. A user matching several
+# group-targeted providers gets the one with the lowest audience_priority.
+AUDIENCE_EVERYONE = "everyone"
+AUDIENCE_GROUPS = "groups"
+AUDIENCES: tuple[str, ...] = (AUDIENCE_EVERYONE, AUDIENCE_GROUPS)
+DEFAULT_AUDIENCE_PRIORITY = 100
+
 
 def is_capability_purpose(purpose: str | None) -> bool:
     return bool(purpose) and purpose != GENERAL_PURPOSE
+
+
+def capability_permission(purpose: str) -> Permission:
+    """The role permission that lets a user use this capability purpose.
+
+    Permission values equal purpose strings, so no per-purpose table exists.
+    """
+    return Permission(purpose)
+
+
+def allowed_capability_purposes(permissions: "set[Permission]") -> set[str]:
+    """Capability purposes the given permission set may use."""
+    return {
+        purpose
+        for purpose in CAPABILITY_PURPOSES
+        if capability_permission(purpose) in permissions
+    }
+
+
+@dataclass(frozen=True)
+class MCPServerAudienceGroup:
+    """A user group in a group-targeted provider's audience."""
+
+    id: UUID
+    name: str
 
 
 class MCPToolCatalogLimitExceeded(ValueError):
@@ -121,6 +158,9 @@ class MCPServer(Entity):
         http_auth_config_schema: Optional[dict[str, Any]] = None,
         purpose: str = GENERAL_PURPOSE,
         is_enabled: bool = True,
+        audience: str = AUDIENCE_EVERYONE,
+        audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
+        user_groups: Optional[list[MCPServerAudienceGroup]] = None,
         forward_identity: bool = False,
         tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
         tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -144,6 +184,9 @@ class MCPServer(Entity):
         self.http_auth_config_schema = http_auth_config_schema
         self.purpose = purpose
         self.is_enabled = is_enabled
+        self.audience = audience
+        self.audience_priority = audience_priority
+        self.user_groups = list(user_groups or [])
         self.forward_identity = forward_identity
         self.tool_catalog_max_count = tool_catalog_max_count
         self.tool_catalog_max_bytes = tool_catalog_max_bytes
@@ -154,6 +197,22 @@ class MCPServer(Entity):
         self.documentation_url = documentation_url
         self.tools = tools or []
         self.security_classification = security_classification
+
+    @property
+    def user_group_ids(self) -> list[UUID]:
+        return [group.id for group in self.user_groups]
+
+    def is_default_provider(self) -> bool:
+        """True for a capability provider that serves everyone in the tenant."""
+        return (
+            is_capability_purpose(self.purpose) and self.audience == AUDIENCE_EVERYONE
+        )
+
+    def serves_user_groups(self, user_group_ids: "set[UUID]") -> bool:
+        """True when this group-targeted provider covers any of the groups."""
+        return self.audience == AUDIENCE_GROUPS and any(
+            group_id in user_group_ids for group_id in self.user_group_ids
+        )
 
 
 class MCPServerSettings(Entity):

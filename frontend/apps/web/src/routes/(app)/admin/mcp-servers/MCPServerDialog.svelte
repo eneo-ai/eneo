@@ -7,10 +7,11 @@
 <script lang="ts">
   import { Dialog, Button, Select } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
-  import type { SecurityClassification, components } from "@eneo/eneo-js";
+  import { getEneo } from "$lib/core/Eneo";
+  import type { SecurityClassification, UserGroup, components } from "@eneo/eneo-js";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
-  import { getCapability } from "$lib/features/mcp/capabilities";
+  import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
   import type { Writable } from "svelte/store";
 
   type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
@@ -21,31 +22,66 @@
   type Props = {
     openController: Writable<boolean>;
     mcpServer?: MCPServerSettings | null;
-    /** Purpose used when creating a new server. Defaults to "general". */
-    purpose?: string;
     onSubmit: (data: Record<string, unknown>, id?: string) => Promise<void>;
   };
 
-  const { openController, mcpServer, purpose = "general", onSubmit }: Props = $props();
+  const { openController, mcpServer, onSubmit }: Props = $props();
 
   const isEditMode = $derived(!!mcpServer);
-  // Capability providers (web search, image generation) get provider wording
-  // from their descriptor; the general MCP variant is unchanged.
-  const capability = $derived(getCapability(purpose));
-  const dialogTitle = $derived(
-    capability
-      ? isEditMode
-        ? capability.editProviderTitle()
-        : capability.addProviderTitle()
-      : isEditMode
-        ? m.edit_mcp_server()
-        : m.add_mcp_server()
-  );
-  const submitLabel = $derived(
-    isEditMode ? m.save() : capability ? capability.addProviderTitle() : m.add_mcp_server()
-  );
+  const dialogTitle = $derived(isEditMode ? m.edit_mcp_server() : m.add_mcp_server());
+  const submitLabel = $derived(isEditMode ? m.save() : m.add_mcp_server());
+
+  // What the server is for: an ordinary tool server, or the tenant's
+  // provider for one capability (web search, image generation). Changing it
+  // on an existing server re-homes it; the backend saves a new provider
+  // inactive and turns a demoted provider back into an enabled server.
+  let selectedPurpose = $state("general");
+  const purposeOptions = $derived([
+    { value: "general", label: m.general() },
+    ...CAPABILITIES.map((capability) => ({
+      value: capability.purpose as string,
+      label: capability.label()
+    }))
+  ]);
+  const capability = $derived(getCapability(selectedPurpose));
+  const purposeChanged = $derived(isEditMode && selectedPurpose !== mcpServer?.purpose);
 
   const classifications = getSecurityContext().security_classifications;
+  const eneo = getEneo();
+
+  // Audience (capability providers only): the tenant default, or selected
+  // user groups. Groups are loaded lazily the first time a capability purpose
+  // is shown so ordinary tool servers never pay for the request.
+  let audience = $state<"everyone" | "groups">("everyone");
+  let audiencePriority = $state(100);
+  let selectedGroupIds = $state<string[]>([]);
+  let userGroups = $state<UserGroup[] | null>(null);
+  let loadingGroups = $state(false);
+
+  async function ensureUserGroups() {
+    if (userGroups !== null || loadingGroups) return;
+    loadingGroups = true;
+    try {
+      userGroups = await eneo.userGroups.list();
+    } catch (error) {
+      console.error("Failed to load user groups:", error);
+      userGroups = [];
+    } finally {
+      loadingGroups = false;
+    }
+  }
+
+  $effect(() => {
+    if (capability && $openController) {
+      ensureUserGroups();
+    }
+  });
+
+  function toggleGroup(id: string) {
+    selectedGroupIds = selectedGroupIds.includes(id)
+      ? selectedGroupIds.filter((groupId) => groupId !== id)
+      : [...selectedGroupIds, id];
+  }
 
   let name = $state("");
   let description = $state("");
@@ -70,11 +106,15 @@
   $effect(() => {
     if (mcpServer) {
       name = mcpServer.name || "";
+      selectedPurpose = mcpServer.purpose ?? "general";
       description = mcpServer.description || "";
       http_url = mcpServer.http_url || "";
       http_auth_type = (mcpServer.http_auth_type as "none" | "bearer" | "api_key_header") || "none";
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
+      audience = (mcpServer.audience as "everyone" | "groups") ?? "everyone";
+      audiencePriority = mcpServer.audience_priority ?? 100;
+      selectedGroupIds = (mcpServer.user_groups ?? []).map((group) => group.id);
       forward_identity = mcpServer.forward_identity ?? false;
       tool_catalog_max_count = mcpServer.tool_catalog_max_count ?? DEFAULT_TOOL_CATALOG_MAX_COUNT;
       tool_catalog_max_mib = Math.round(
@@ -86,11 +126,15 @@
       );
     } else {
       name = "";
+      selectedPurpose = "general";
       description = "";
       http_url = "";
       http_auth_type = "none";
       documentation_url = "";
       security_classification = null;
+      audience = "everyone";
+      audiencePriority = 100;
+      selectedGroupIds = [];
       forward_identity = false;
       tool_catalog_max_count = DEFAULT_TOOL_CATALOG_MAX_COUNT;
       tool_catalog_max_mib = DEFAULT_TOOL_CATALOG_MAX_MIB;
@@ -112,9 +156,11 @@
     try {
       const data: Record<string, unknown> = { name };
 
-      // Purpose is set at creation time only (e.g. web-search providers).
-      if (!isEditMode && purpose !== "general") {
-        data.purpose = purpose;
+      if (!isEditMode && selectedPurpose !== "general") {
+        data.purpose = selectedPurpose;
+      }
+      if (purposeChanged) {
+        data.purpose = selectedPurpose;
       }
 
       // Only send connection-affecting fields when actually changed to avoid
@@ -139,6 +185,17 @@
         ? { id: security_classification.id }
         : null;
 
+      // Audience only applies to capability providers; a general server is
+      // always for everyone and the backend rejects anything else.
+      if (selectedPurpose !== "general") {
+        data.audience = audience;
+        data.audience_priority = audiencePriority;
+        data.user_group_ids = audience === "groups" ? selectedGroupIds : [];
+      } else if (purposeChanged) {
+        data.audience = "everyone";
+        data.user_group_ids = [];
+      }
+
       // Add auth config if provided
       if (http_auth_type === "bearer" && bearer_token) {
         data.http_auth_config_schema = { token: bearer_token };
@@ -156,6 +213,7 @@
       // Reset form on success (for add mode)
       if (!isEditMode) {
         name = "";
+        selectedPurpose = "general";
         description = "";
         http_url = "";
         http_auth_type = "none";
@@ -164,6 +222,9 @@
         api_key_header_name = "";
         api_key_token = "";
         security_classification = null;
+        audience = "everyone";
+        audiencePriority = 100;
+        selectedGroupIds = [];
         forward_identity = false;
         tool_catalog_max_count = DEFAULT_TOOL_CATALOG_MAX_COUNT;
         tool_catalog_max_mib = DEFAULT_TOOL_CATALOG_MAX_MIB;
@@ -181,6 +242,14 @@
       submitting = false;
     }
   }
+
+  const audienceOptions = $derived([
+    { value: "everyone", label: m.mcp_audience_everyone() },
+    { value: "groups", label: m.mcp_audience_groups() }
+  ]);
+  const audienceIncomplete = $derived(
+    !!capability && audience === "groups" && selectedGroupIds.length === 0
+  );
 
   const credentialPreview = $derived(mcpServer?.credential_preview ?? "");
   const authPlaceholder = $derived(
@@ -247,14 +316,6 @@
           </div>
         {/if}
 
-        {#if capability && !isEditMode}
-          <p
-            class="border-dimmer bg-secondary/50 text-secondary rounded-lg border px-4 py-3 text-sm"
-          >
-            {capability.providerManagedNote()}
-          </p>
-        {/if}
-
         <!-- Server Identity Section -->
         <fieldset class="space-y-4">
           <legend class="sr-only">{m.mcp_server_info_legend()}</legend>
@@ -280,22 +341,113 @@
             />
           </div>
 
-          {#if !capability}
-            <div>
-              <label for="mcp-description" class="text-default mb-1.5 block text-sm font-medium">
-                {m.description()}
-                <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
-              </label>
-              <textarea
-                id="mcp-description"
-                bind:value={description}
-                rows="2"
-                placeholder={m.mcp_description_placeholder()}
-                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-              ></textarea>
-            </div>
-          {/if}
+          <div>
+            <label for="mcp-description" class="text-default mb-1.5 block text-sm font-medium">
+              {m.description()}
+              <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
+            </label>
+            <textarea
+              id="mcp-description"
+              bind:value={description}
+              rows="2"
+              placeholder={m.mcp_description_placeholder()}
+              class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+            ></textarea>
+          </div>
         </fieldset>
+
+        <!-- Purpose Section -->
+        <fieldset class="border-dimmer bg-secondary/20 space-y-3 rounded-xl border p-4 pt-3">
+          <legend
+            class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+          >
+            {m.mcp_purpose_label()}
+          </legend>
+          <Select.Simple options={purposeOptions} bind:value={selectedPurpose}>
+            {m.mcp_purpose_label()}
+          </Select.Simple>
+          <p class="text-muted text-xs leading-relaxed">
+            {#if purposeChanged && capability}
+              {m.mcp_purpose_promote_hint({ capability: capability.label() })}
+            {:else if purposeChanged}
+              {m.mcp_purpose_demote_hint()}
+            {:else if capability && !isEditMode}
+              {capability.providerManagedNote()}
+              {m.mcp_purpose_create_capability_hint()}
+            {:else if capability}
+              {capability.providerManagedNote()}
+            {:else}
+              {m.mcp_purpose_hint()}
+            {/if}
+          </p>
+        </fieldset>
+
+        <!-- Audience Section (capability providers only) -->
+        {#if capability}
+          <fieldset class="border-dimmer bg-secondary/20 space-y-3 rounded-xl border p-4 pt-3">
+            <legend
+              class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+            >
+              {m.mcp_audience_label()}
+            </legend>
+            <Select.Simple options={audienceOptions} bind:value={audience}>
+              {m.mcp_audience_label()}
+            </Select.Simple>
+            <p class="text-muted text-xs leading-relaxed">{m.mcp_audience_hint()}</p>
+
+            {#if audience === "groups"}
+              <div
+                class="border-default bg-primary max-h-48 space-y-1 overflow-y-auto rounded-lg border p-2"
+                role="group"
+                aria-label={m.mcp_audience_groups()}
+              >
+                {#if loadingGroups || userGroups === null}
+                  <p class="text-muted px-2 py-1 text-xs">{m.loading()}</p>
+                {:else if userGroups.length === 0}
+                  <p class="text-muted px-2 py-1 text-xs">{m.mcp_audience_no_groups()}</p>
+                {:else}
+                  {#each userGroups as group (group.id)}
+                    <label
+                      class="hover:bg-hover-dimmer flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedGroupIds.includes(group.id)}
+                        onchange={() => toggleGroup(group.id)}
+                        class="border-default text-accent-default ring-accent-default focus:ring-accent-default h-4 w-4 rounded border shadow-sm focus:ring-2"
+                      />
+                      <span class="text-default truncate">{group.name}</span>
+                    </label>
+                  {/each}
+                {/if}
+              </div>
+              {#if audienceIncomplete}
+                <p class="text-warning-default text-xs">{m.mcp_audience_select_groups()}</p>
+              {/if}
+
+              <div>
+                <label
+                  for="mcp-audience-priority"
+                  class="text-default mb-1.5 block text-sm font-medium"
+                >
+                  {m.mcp_audience_priority()}
+                </label>
+                <input
+                  id="mcp-audience-priority"
+                  type="number"
+                  min="0"
+                  step="1"
+                  bind:value={audiencePriority}
+                  aria-describedby="mcp-audience-priority-hint"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-32 rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                />
+                <p id="mcp-audience-priority-hint" class="text-muted mt-1.5 text-xs">
+                  {m.mcp_audience_priority_hint()}
+                </p>
+              </div>
+            {/if}
+          </fieldset>
+        {/if}
 
         <!-- Connection Section -->
         <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
@@ -619,6 +771,7 @@
         disabled={submitting ||
           !name ||
           !http_url ||
+          audienceIncomplete ||
           (http_auth_type === "api_key_header" &&
             !isEditMode &&
             (!api_key_header_name || !api_key_token))}

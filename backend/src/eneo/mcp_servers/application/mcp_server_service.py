@@ -13,11 +13,15 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    AUDIENCE_EVERYONE,
+    AUDIENCES,
+    DEFAULT_AUDIENCE_PRIORITY,
     GENERAL_PURPOSE,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
     MCPServer,
+    MCPServerAudienceGroup,
     MCPServerTool,
     is_capability_purpose,
 )
@@ -27,6 +31,33 @@ from eneo.mcp_servers.infrastructure.client.mcp_client import (
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
 from eneo.roles.permissions import Permission, validate_permissions
+
+_NAME_CONSTRAINT = "uq_mcp_servers_tenant_name_purpose"
+_ACTIVE_CAPABILITY_INDEX = "uq_mcp_servers_tenant_active_capability"
+
+
+def _violated_constraint(error: IntegrityError) -> str:
+    original = getattr(error, "orig", None)
+    reported = getattr(original, "constraint_name", None)
+    if reported:
+        return reported
+    return str(original if original is not None else error)
+
+
+def _raise_for_integrity_error(error: IntegrityError) -> None:
+    """Translate a catalog write conflict into the matching domain error."""
+    violated = _violated_constraint(error)
+    if _NAME_CONSTRAINT in violated:
+        raise NameCollisionException(
+            "An MCP server with this name already exists for this purpose."
+        ) from error
+    if _ACTIVE_CAPABILITY_INDEX in violated:
+        raise BadRequestException(
+            "Another default provider is already active for this capability. "
+            "Deactivate it first or target this provider at user groups."
+        ) from error
+    raise error
+
 
 if TYPE_CHECKING:
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
@@ -39,6 +70,7 @@ if TYPE_CHECKING:
         SecurityClassification,
     )
     from eneo.settings.encryption_service import EncryptionService
+    from eneo.user_groups.user_groups_repo import UserGroupsRepository
     from eneo.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
@@ -147,12 +179,59 @@ class MCPServerService:
         mcp_server_tool_repo: "MCPServerToolRepository",
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
+        user_groups_repo: "UserGroupsRepository | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
         self.encryption_service = encryption_service
+        self.user_groups_repo = user_groups_repo
+
+    async def _resolve_audience(
+        self,
+        purpose: str,
+        audience: str,
+        user_group_ids: list[UUID],
+    ) -> list[MCPServerAudienceGroup]:
+        """Validate an audience for ``purpose`` and load its tenant groups.
+
+        Only capability providers have an audience; a group-targeted audience
+        needs at least one group and every group must belong to the tenant.
+        """
+        if audience not in AUDIENCES:
+            raise BadRequestException(f"Unknown audience '{audience}'")
+        if not is_capability_purpose(purpose):
+            if audience != AUDIENCE_EVERYONE or user_group_ids:
+                raise BadRequestException(
+                    "Only capability providers can target user groups"
+                )
+            return []
+        if audience == AUDIENCE_EVERYONE:
+            if user_group_ids:
+                raise BadRequestException(
+                    "A provider for everyone cannot also list user groups"
+                )
+            return []
+        if not user_group_ids:
+            raise BadRequestException(
+                "Select at least one user group for a group-targeted provider"
+            )
+        if self.user_groups_repo is None:
+            raise BadRequestException("User groups are not available")
+        tenant_groups = {
+            group.id: group
+            for group in await self.user_groups_repo.get_all_user_groups(
+                tenant_id=self.user.tenant_id
+            )
+        }
+        resolved: list[MCPServerAudienceGroup] = []
+        for group_id in dict.fromkeys(user_group_ids):
+            group = tenant_groups.get(group_id)
+            if group is None:
+                raise BadRequestException(f"User group {group_id} not found")
+            resolved.append(MCPServerAudienceGroup(id=group.id, name=group.name))
+        return resolved
 
     # Keys in http_auth_config_schema that contain secrets
     _SECRET_KEYS = ("token",)
@@ -280,6 +359,9 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | None" = None,
+        audience: str = AUDIENCE_EVERYONE,
+        audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
+        user_group_ids: list[UUID] | None = None,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
@@ -292,10 +374,13 @@ class MCPServerService:
             documentation_url = str(documentation_url)
 
         self._validate_auth_config(http_auth_type, http_auth_config_schema)
+        user_groups = await self._resolve_audience(
+            purpose, audience, list(user_group_ids or [])
+        )
 
         # Create domain object (not saved yet). Capability providers are saved
-        # inactive: at most one may be enabled per tenant and purpose, and
-        # switching is an explicit activation step.
+        # inactive: at most one default provider may be enabled per tenant and
+        # purpose, and switching is an explicit activation step.
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
             name=name,
@@ -303,6 +388,9 @@ class MCPServerService:
             http_auth_type=http_auth_type,
             purpose=purpose,
             is_enabled=not is_capability_purpose(purpose),
+            audience=audience,
+            audience_priority=audience_priority,
+            user_groups=user_groups,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -340,9 +428,7 @@ class MCPServerService:
         try:
             mcp_server = await self.repo.add(mcp_server)
         except IntegrityError as e:
-            raise NameCollisionException(
-                "An MCP server with this name already exists."
-            ) from e
+            _raise_for_integrity_error(e)
 
         # Save discovered tools
         for tool_def in tools:
@@ -376,12 +462,28 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | NotProvided | None" = NOT_PROVIDED,
+        purpose: str | None = None,
+        audience: str | None = None,
+        audience_priority: int | None = None,
+        user_group_ids: list[UUID] | None = None,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
         Validates connection before saving when connection-affecting fields
         (URL, authentication, credentials, identity forwarding) change.
         Returns MCPServerUpdateResult with connection info when validation occurs.
+
+        Changing ``purpose`` re-homes the server: a move into a capability
+        purpose saves it as an inactive provider (activation stays an explicit
+        step, so the single-active-provider index never collides), a move back
+        to general makes it an ordinary enabled server with no audience. Space
+        and assistant attachments are left in place; they read as capability
+        markers or as plain server attachments according to the new purpose.
+
+        Audience changes (``audience``, ``audience_priority``,
+        ``user_group_ids``) are validated against the effective purpose. An
+        active provider that becomes the default while another default is
+        active is rejected by the activation index.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
         # Track whether connection-affecting fields are actually changing
@@ -445,6 +547,30 @@ class MCPServerService:
             mcp_server.documentation_url = str(documentation_url)
         if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
+        if purpose is not None and purpose != mcp_server.purpose:
+            mcp_server.purpose = purpose
+            mcp_server.is_enabled = not is_capability_purpose(purpose)
+            if not is_capability_purpose(purpose):
+                mcp_server.audience = AUDIENCE_EVERYONE
+                mcp_server.audience_priority = DEFAULT_AUDIENCE_PRIORITY
+                mcp_server.user_groups = []
+        if audience is not None or user_group_ids is not None:
+            effective_audience = (
+                audience if audience is not None else mcp_server.audience
+            )
+            effective_group_ids = (
+                list(user_group_ids)
+                if user_group_ids is not None
+                else mcp_server.user_group_ids
+            )
+            if effective_audience == AUDIENCE_EVERYONE and audience is not None:
+                effective_group_ids = []
+            mcp_server.user_groups = await self._resolve_audience(
+                mcp_server.purpose, effective_audience, effective_group_ids
+            )
+            mcp_server.audience = effective_audience
+        if audience_priority is not None:
+            mcp_server.audience_priority = audience_priority
 
         # Validate connection before saving when connection config changes
         if (
@@ -502,9 +628,7 @@ class MCPServerService:
         try:
             mcp_server = await self.repo.update(mcp_server)
         except IntegrityError as e:
-            raise NameCollisionException(
-                "An MCP server with this name already exists."
-            ) from e
+            _raise_for_integrity_error(e)
         return MCPServerUpdateResult(server=mcp_server)
 
     @validate_permissions(Permission.ADMIN)
@@ -952,13 +1076,16 @@ class MCPServerService:
     async def activate_capability_server(
         self, mcp_server_id: UUID
     ) -> CapabilityActivationResult:
-        """Make this server the tenant's active provider for its capability
-        purpose (admin only).
+        """Activate this server as a provider for its capability purpose
+        (admin only).
 
-        Atomic switch: the previously active provider for the same purpose is
-        deactivated in the same transaction, under the partial unique index
-        that allows at most one enabled server per tenant and capability
-        purpose. Rejects servers that are unreachable or have no usable tools.
+        A default provider (audience "everyone") replaces the previously
+        active default for the same purpose in the same transaction, under
+        the partial unique index that allows at most one enabled default per
+        tenant and capability purpose. A group-targeted provider coexists with
+        the default and with other group-targeted providers, so activating it
+        deactivates nothing. Rejects servers that are unreachable or have no
+        usable tools.
         """
         import sqlalchemy as sa
 
@@ -989,25 +1116,32 @@ class MCPServerService:
                 or "Provider is unreachable and cannot be activated"
             )
 
-        # Deactivate the current provider first so the partial unique index
-        # never sees two enabled servers for this purpose. Both statements
-        # commit with the request's unit of work — the switch is all-or-nothing.
-        deactivate_stmt = (
-            sa.update(MCPServersTable)
-            .where(
-                MCPServersTable.tenant_id == self.user.tenant_id,
-                MCPServersTable.purpose == server.purpose,
-                MCPServersTable.is_enabled == True,  # noqa: E712
-                MCPServersTable.id != mcp_server_id,
+        # Deactivate the current default first so the partial unique index
+        # never sees two enabled default providers for this purpose. Both
+        # statements commit with the request's unit of work — the switch is
+        # all-or-nothing.
+        deactivated_ids: list[UUID] = []
+        if server.is_default_provider():
+            deactivate_stmt = (
+                sa.update(MCPServersTable)
+                .where(
+                    MCPServersTable.tenant_id == self.user.tenant_id,
+                    MCPServersTable.purpose == server.purpose,
+                    MCPServersTable.audience == AUDIENCE_EVERYONE,
+                    MCPServersTable.is_enabled == True,  # noqa: E712
+                    MCPServersTable.id != mcp_server_id,
+                )
+                .values(is_enabled=False)
+                .returning(MCPServersTable.id)
             )
-            .values(is_enabled=False)
-            .returning(MCPServersTable.id)
-        )
-        result = await self.repo.session.execute(deactivate_stmt)
-        deactivated_ids = [row[0] for row in result.fetchall()]
+            result = await self.repo.session.execute(deactivate_stmt)
+            deactivated_ids = [row[0] for row in result.fetchall()]
 
         server.is_enabled = True
-        server = await self.repo.update(server)
+        try:
+            server = await self.repo.update(server)
+        except IntegrityError as e:
+            _raise_for_integrity_error(e)
         return CapabilityActivationResult(
             server=server, deactivated_server_ids=deactivated_ids
         )

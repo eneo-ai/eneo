@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from eneo.database.tables.security_classifications_table import (
         SecurityClassification,
     )
+    from eneo.database.tables.user_groups_table import UserGroups
 
 
 class MCPServers(BasePublic):
@@ -28,16 +29,26 @@ class MCPServers(BasePublic):
 
     __tablename__ = "mcp_servers"  # type: ignore[assignment]
     __table_args__ = (
-        UniqueConstraint("tenant_id", "name", name="uq_mcp_servers_tenant_name"),
+        # One vendor may serve several capabilities from different endpoints
+        # under the same name, so names are unique per tenant and purpose.
+        UniqueConstraint(
+            "tenant_id",
+            "name",
+            "purpose",
+            name="uq_mcp_servers_tenant_name_purpose",
+        ),
         # A tenant may save several providers per capability purpose but only
-        # one may be active at a time; activation is an explicit transactional
-        # switch.
+        # one DEFAULT provider (audience = everyone) may be active at a time;
+        # activation is an explicit transactional switch. Group-targeted
+        # providers coexist with the default and with each other.
         Index(
             "uq_mcp_servers_tenant_active_capability",
             "tenant_id",
             "purpose",
             unique=True,
-            postgresql_where=text("purpose <> 'general' AND is_enabled = true"),
+            postgresql_where=text(
+                "purpose <> 'general' AND is_enabled = true AND audience = 'everyone'"
+            ),
         ),
     )
 
@@ -65,6 +76,15 @@ class MCPServers(BasePublic):
     # Tenant enablement and credentials
     is_enabled: Mapped[bool] = mapped_column(
         Boolean, server_default="True", nullable=False
+    )
+    # Capability providers only: "everyone" is the tenant default provider,
+    # "groups" serves the members of the linked user groups. Lowest
+    # audience_priority wins when a user matches several group providers.
+    audience: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="everyone"
+    )
+    audience_priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="100"
     )
     # When true, the acting user/tenant identity is forwarded to this server as
     # X-Eneo-* headers on every request. Off by default: identity is PII egress
@@ -101,6 +121,22 @@ class MCPServers(BasePublic):
     # Relationships
     tools: Mapped[list["MCPServerTools"]] = relationship(
         back_populates="mcp_server", cascade="all, delete-orphan"
+    )
+    user_groups: Mapped[list["UserGroups"]] = relationship(
+        secondary="mcp_server_user_groups"
+    )
+
+
+class MCPServerUserGroups(BaseCrossReference):
+    """Audience of a group-targeted capability provider."""
+
+    __tablename__ = "mcp_server_user_groups"  # type: ignore[assignment]
+
+    mcp_server_id: Mapped[UUID] = mapped_column(
+        ForeignKey(MCPServers.id, ondelete="CASCADE"), primary_key=True
+    )
+    user_group_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True
     )
 
 

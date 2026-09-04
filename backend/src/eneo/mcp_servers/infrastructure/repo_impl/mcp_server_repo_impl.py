@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from typing_extensions import override
 
 from eneo.database.tables.mcp_server_table import MCPServers as MCPServersTable
+from eneo.database.tables.mcp_server_table import MCPServerUserGroups
 from eneo.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
 )
@@ -25,10 +26,44 @@ class MCPServerRepoImpl(
 ):
     def __init__(self, session: "AsyncSession", mapper: MCPServerMapper):
         super().__init__(session=session, model=MCPServersTable, mapper=mapper)
+        # Audience groups are part of the provider's identity for resolution,
+        # so every single-row read carries them.
+        self._options = [selectinload(self._db_model.user_groups)]
+
+    async def _sync_user_groups(self, server: MCPServer) -> None:
+        """Make the audience join rows match the entity's user_group_ids."""
+        await self.session.execute(
+            sa.delete(MCPServerUserGroups).where(
+                MCPServerUserGroups.mcp_server_id == server.id
+            )
+        )
+        if server.user_group_ids:
+            await self.session.execute(
+                sa.insert(MCPServerUserGroups).values(
+                    [
+                        {"mcp_server_id": server.id, "user_group_id": group_id}
+                        for group_id in dict.fromkeys(server.user_group_ids)
+                    ]
+                )
+            )
+
+    @override
+    async def add(self, obj: MCPServer) -> MCPServer:
+        created = await super().add(obj)
+        if obj.user_groups:
+            created.user_groups = list(obj.user_groups)
+            await self._sync_user_groups(created)
+            return await self.one(id=created.id)
+        return created
+
+    @override
+    async def update(self, obj: MCPServer) -> MCPServer:
+        await self._sync_user_groups(obj)
+        return await super().update(obj)
 
     @override
     async def all(self) -> list[MCPServer]:
-        query = select(self._db_model)
+        query = select(self._db_model).options(*self._options)
         result = await self.session.scalars(query)
         records = result.all()
         if not records:
@@ -51,6 +86,11 @@ class MCPServerRepoImpl(
         if filters:
             query = query.filter_by(**filters)
 
+        # Stable order: without it Postgres returns heap order, so an updated
+        # row (e.g. a provider toggle) jumps around in admin lists.
+        query = query.options(*self._options).order_by(
+            self._db_model.created_at, self._db_model.id
+        )
         result = await self.session.scalars(query)
         records = result.all()
         if not records:
@@ -66,10 +106,12 @@ class MCPServerRepoImpl(
             .where(self._db_model.tenant_id == tenant_id)
             .options(
                 selectinload(self._db_model.tools),
+                selectinload(self._db_model.user_groups),
                 selectinload(self._db_model.security_classification).selectinload(
                     SecurityClassificationDBModel.tenant
                 ),
             )
+            .order_by(self._db_model.created_at, self._db_model.id)
         )
         result = await self.session.scalars(query)
         records = result.all()

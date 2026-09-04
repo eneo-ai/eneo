@@ -1391,6 +1391,7 @@ class Container(containers.DeclarativeContainer):
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
         encryption_service=encryption_service,
+        user_groups_repo=user_groups_repo,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

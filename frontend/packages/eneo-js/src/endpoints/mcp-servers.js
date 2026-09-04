@@ -57,6 +57,9 @@ export function initMCPServers(client) {
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
      * @param {{id: string} | null} [params.security_classification] Security classification
+     * @param {"everyone" | "groups"} [params.audience] Capability providers: who this provider serves
+     * @param {number} [params.audience_priority] Lowest number wins when a user matches several group providers
+     * @param {string[]} [params.user_group_ids] User groups served when audience is "groups"
      * @throws {EneoError}
      * */
     create: async ({
@@ -74,7 +77,10 @@ export function initMCPServers(client) {
       tags,
       icon_url,
       documentation_url,
-      security_classification
+      security_classification,
+      audience,
+      audience_priority,
+      user_group_ids
     }) => {
       /** @type {any} */
       const body = {
@@ -92,7 +98,10 @@ export function initMCPServers(client) {
         tags,
         icon_url,
         documentation_url,
-        security_classification
+        security_classification,
+        audience,
+        audience_priority,
+        user_group_ids
       };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
@@ -110,6 +119,7 @@ export function initMCPServers(client) {
      * @param {string} [params.name] Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server
      * @param {"none" | "bearer" | "api_key_header"} [params.http_auth_type] Authentication type
+     * @param {"general" | "web_search" | "image_generation"} [params.purpose] Server purpose; moving into a capability purpose saves it as an inactive provider
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
      * @param {{[key: string]: unknown} | null} [params.config_schema] JSON schema for configuration
@@ -121,6 +131,9 @@ export function initMCPServers(client) {
      * @param {string} [params.icon_url] URL to icon image
      * @param {string} [params.documentation_url] URL to documentation
      * @param {{id: string} | null} [params.security_classification] Security classification
+     * @param {"everyone" | "groups"} [params.audience] Capability providers: who this provider serves
+     * @param {number} [params.audience_priority] Lowest number wins when a user matches several group providers
+     * @param {string[]} [params.user_group_ids] User groups served when audience is "groups"
      * @throws {EneoError}
      * */
     update: async ({
@@ -128,6 +141,7 @@ export function initMCPServers(client) {
       name,
       http_url,
       http_auth_type,
+      purpose,
       description,
       http_auth_config_schema,
       config_schema,
@@ -138,13 +152,17 @@ export function initMCPServers(client) {
       tags,
       icon_url,
       documentation_url,
-      security_classification
+      security_classification,
+      audience,
+      audience_priority,
+      user_group_ids
     }) => {
       /** @type {any} */
       const body = {
         name,
         http_url,
         http_auth_type,
+        purpose,
         description,
         http_auth_config_schema,
         config_schema,
@@ -155,7 +173,10 @@ export function initMCPServers(client) {
         tags,
         icon_url,
         documentation_url,
-        security_classification
+        security_classification,
+        audience,
+        audience_priority,
+        user_group_ids
       };
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",

@@ -305,6 +305,9 @@ async def create_mcp_server(
         if data.documentation_url
         else None,
         security_classification=security_classification,
+        audience=data.audience,
+        audience_priority=data.audience_priority,
+        user_group_ids=data.user_group_ids,
     )
 
     # If connection failed, return 400 error with message
@@ -383,6 +386,10 @@ async def update_mcp_server(
         if data.documentation_url
         else None,
         security_classification=security_classification,
+        purpose=data.purpose,
+        audience=data.audience,
+        audience_priority=data.audience_priority,
+        user_group_ids=data.user_group_ids,
     )
 
     # If connection validation failed, return 400 error with message
@@ -397,6 +404,8 @@ async def update_mcp_server(
     changes: dict[str, Any] = {}
     if data.name is not None and data.name != old_server.name:
         changes["name"] = {"old": old_server.name, "new": data.name}
+    if data.purpose is not None and data.purpose != old_server.purpose:
+        changes["purpose"] = {"old": old_server.purpose, "new": data.purpose}
     if data.http_url is not None and str(data.http_url) != old_server.http_url:
         changes["http_url"] = {"old": old_server.http_url, "new": str(data.http_url)}
     if data.description is not None and data.description != old_server.description:

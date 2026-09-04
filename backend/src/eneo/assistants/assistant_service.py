@@ -71,6 +71,7 @@ from eneo.mcp_servers.application.capability_resolver import (
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
     GENERAL_PURPOSE,
+    allowed_capability_purposes,
     is_capability_purpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -2862,11 +2863,13 @@ class AssistantService:
 
         # Capabilities: an attached capability-purpose server (web search,
         # image generation) is a capability marker, not a provider pin. The
-        # tenant's currently ACTIVE provider for each requested purpose is
-        # resolved here and attached in its place, so switching providers
-        # never requires reconfiguring spaces or assistants. Attached
-        # (possibly stale or deactivated) capability servers are stripped from
-        # the ordinary set; if no provider is active for a purpose or the
+        # provider serving THIS user for each requested purpose (their user
+        # groups' provider, else the tenant default) is resolved here and
+        # attached in its place, so switching providers never requires
+        # reconfiguring spaces or assistants. Attached (possibly stale or
+        # deactivated) capability servers are stripped from the ordinary set;
+        # if the user's role lacks the capability, no provider serves them,
+        # the provider fails the space's security classification, or the
         # model cannot call tools, that capability is silently unavailable
         # this turn.
         capability_base = (
@@ -2881,6 +2884,9 @@ class AssistantService:
                 self.user.tenant_id,
                 capability_base,
                 supports_tool_calling=effective_completion_model.supports_tool_calling,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                space_security_classification=space.security_classification,
             )
             mcp_servers_override = resolution.general_servers
             capability_mcp_servers = resolution.capability_servers

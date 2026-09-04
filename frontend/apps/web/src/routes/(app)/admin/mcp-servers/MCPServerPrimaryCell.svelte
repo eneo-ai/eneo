@@ -6,7 +6,8 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, KeyRound, Shield, ShieldCheck } from "lucide-svelte";
+  import { Globe, KeyRound, Shield, ShieldCheck, UsersRound } from "lucide-svelte";
+  import { getCapability } from "$lib/features/mcp/capabilities";
 
   type Props = {
     mcpServer: {
@@ -14,6 +15,9 @@
       description?: string | null;
       http_url: string;
       http_auth_type: string;
+      purpose?: string | null;
+      audience?: string | null;
+      user_groups?: Array<{ id: string; name: string }> | null;
       security_classification?: { name: string } | null;
     };
   };
@@ -52,6 +56,13 @@
 
   const authConfig = $derived(getAuthConfig(mcpServer.http_auth_type));
   const AuthIcon = $derived(authConfig.icon);
+  // Capability providers carry their purpose as a chip so they stand out
+  // from ordinary tool servers in the same list.
+  const capability = $derived(getCapability(mcpServer.purpose));
+  // Who a capability provider serves: the tenant default, or named groups.
+  const audienceGroups = $derived(
+    capability && mcpServer.audience === "groups" ? (mcpServer.user_groups ?? []) : []
+  );
 </script>
 
 <div class="flex min-w-0 flex-col gap-1 py-0.5">
@@ -65,6 +76,33 @@
       <AuthIcon class="h-3 w-3" aria-hidden="true" />
       {authConfig.label}
     </span>
+    {#if capability}
+      <span
+        class="bg-accent-dimmer text-accent-stronger inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium"
+        role="status"
+        aria-label="{m.mcp_purpose_label()}: {capability.label()}"
+      >
+        <capability.icon class="h-3 w-3" aria-hidden="true" />
+        {capability.label()}
+      </span>
+      <span
+        class="bg-secondary text-secondary inline-flex min-w-0 shrink items-center gap-1 truncate rounded-md px-2 py-0.5 text-[11px] font-medium"
+        role="status"
+        aria-label="{m.mcp_audience_label()}: {audienceGroups.length > 0
+          ? audienceGroups.map((group) => group.name).join(', ')
+          : m.mcp_audience_everyone()}"
+        title={audienceGroups.map((group) => group.name).join(", ")}
+      >
+        <UsersRound class="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span class="truncate">
+          {#if audienceGroups.length > 0}
+            {audienceGroups.map((group) => group.name).join(", ")}
+          {:else}
+            {m.mcp_audience_everyone()}
+          {/if}
+        </span>
+      </span>
+    {/if}
     {#if mcpServer.security_classification}
       <span
         class="bg-amethyst-100 text-amethyst-700 dark:bg-amethyst-900/50 dark:text-amethyst-300 inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium"

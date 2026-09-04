@@ -5,6 +5,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field, computed_field
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    DEFAULT_AUDIENCE_PRIORITY,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_CATALOG_HARD_MAX_BYTES,
@@ -19,6 +20,13 @@ from eneo.security_classifications.presentation.security_classification_models i
 T = TypeVar("T", bound=BaseModel)
 
 MCPServerPurpose = Literal["general", "web_search", "image_generation"]
+MCPServerAudience = Literal["everyone", "groups"]
+
+
+class MCPServerAudienceGroupPublic(BaseModel):
+    id: UUID
+    name: str
+
 
 # "api_key_header" sends the credential in an admin-chosen header
 # (e.g. X-Api-Key). Header name is validated server-side against HTTP token
@@ -44,6 +52,12 @@ class MCPServerPublic(BaseModel):
     http_auth_type: str  # "none", "bearer", "api_key_header"
     purpose: MCPServerPurpose = "general"
     is_enabled: bool = True
+    # Capability providers: who this provider serves. "everyone" is the
+    # tenant default; "groups" serves the listed user groups (lowest
+    # audience_priority wins when a user matches several providers).
+    audience: MCPServerAudience = "everyone"
+    audience_priority: int = DEFAULT_AUDIENCE_PRIORITY
+    user_groups: list[MCPServerAudienceGroupPublic] = []
     has_credentials: bool
     credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
     forward_identity: bool = False
@@ -91,6 +105,9 @@ class MCPServerCreate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Optional[ModelId] = None
+    audience: MCPServerAudience = "everyone"
+    audience_priority: int = Field(default=DEFAULT_AUDIENCE_PRIORITY, ge=0)
+    user_group_ids: list[UUID] = []
 
 
 class MCPServerUpdate(BaseModel):
@@ -99,6 +116,9 @@ class MCPServerUpdate(BaseModel):
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
     http_auth_type: Optional[MCPServerAuthType] = None
+    # Moving into a capability purpose saves the server as an inactive
+    # provider; moving back to general makes it an ordinary enabled server.
+    purpose: Optional[MCPServerPurpose] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
     forward_identity: Optional[bool] = None
@@ -123,6 +143,9 @@ class MCPServerUpdate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Union[ModelId, None, NotProvided] = NOT_PROVIDED
+    audience: Optional[MCPServerAudience] = None
+    audience_priority: Optional[int] = Field(default=None, ge=0)
+    user_group_ids: Optional[list[UUID]] = None
 
 
 class MCPServerSettingsPublic(MCPServerPublic):

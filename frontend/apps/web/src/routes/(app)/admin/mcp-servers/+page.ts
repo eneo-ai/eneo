@@ -1,11 +1,11 @@
 export const load = async (event) => {
   const { eneo } = await event.parent();
 
-  // Capability providers (web search, image generation) are managed on the
-  // Capabilities admin page, so this catalog only lists general-purpose servers.
+  // Every purpose is listed here: general servers and the capability
+  // providers (web search, image generation), which are activated inline.
   const [mcpServers, mcpSettings, securityClassifications] = await Promise.all([
-    eneo.mcpServers.list({ purpose: "general" }),
-    eneo.mcpServers.listSettings({ purpose: "general" }),
+    eneo.mcpServers.list(),
+    eneo.mcpServers.listSettings(),
     eneo.securityClassifications.list()
   ]);
 

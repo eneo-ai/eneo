@@ -4,7 +4,11 @@ from sqlalchemy import inspect
 from sqlalchemy.orm.base import NEVER_SET
 
 from eneo.database.tables.mcp_server_table import MCPServers as MCPServersTable
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    MCPServerAudienceGroup,
+    MCPServerTool,
+)
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -84,6 +88,15 @@ class MCPServerMapper:
             if sc_loaded is not NEVER_SET and sc_loaded is not None:
                 security_classification = SecurityClassification.to_domain(sc_loaded)
 
+        user_groups: List[MCPServerAudienceGroup] = []
+        if inspector is not None:
+            groups_loaded = inspector.attrs.user_groups.loaded_value
+            if groups_loaded is not NEVER_SET and groups_loaded:
+                user_groups = [
+                    MCPServerAudienceGroup(id=group.id, name=group.name)
+                    for group in groups_loaded
+                ]
+
         return MCPServer(
             id=db_model.id,  # type: ignore[arg-type]
             created_at=db_model.created_at,  # type: ignore[arg-type]
@@ -96,6 +109,9 @@ class MCPServerMapper:
             http_auth_config_schema=db_model.http_auth_config_schema,
             purpose=db_model.purpose,
             is_enabled=db_model.is_enabled,
+            audience=db_model.audience,
+            audience_priority=db_model.audience_priority,
+            user_groups=user_groups,
             forward_identity=db_model.forward_identity,
             tool_catalog_max_count=db_model.tool_catalog_max_count,
             tool_catalog_max_bytes=db_model.tool_catalog_max_bytes,
@@ -126,6 +142,8 @@ class MCPServerMapper:
             "http_auth_config_schema": entity.http_auth_config_schema,
             "purpose": entity.purpose,
             "is_enabled": entity.is_enabled,
+            "audience": entity.audience,
+            "audience_priority": entity.audience_priority,
             "forward_identity": entity.forward_identity,
             "tool_catalog_max_count": entity.tool_catalog_max_count,
             "tool_catalog_max_bytes": entity.tool_catalog_max_bytes,

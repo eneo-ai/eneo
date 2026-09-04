@@ -19,20 +19,18 @@ export type CapabilityDescriptor = {
   icon: typeof Globe;
   /** Capability name as shown in toggles, tabs and the chat popover. */
   label: () => string;
-  addProviderTitle: () => string;
-  editProviderTitle: () => string;
   providerNamePlaceholder: () => string;
   /** Explains what the provider owns versus what Eneo controls. */
   providerManagedNote: () => string;
   forwardIdentityHint: () => string;
-  noActiveProviderDescription: () => string;
-  noProviders: () => string;
   /** Assistant-level toggle hint. */
   capabilityHint: () => string;
   /** Space-level toggle hint. */
   spaceHint: () => string;
   noActiveProviderHint: () => string;
   notAvailableHereHint: () => string;
+  /** Space-level hint when no active provider meets the space's classification. */
+  classificationHint: () => string;
 };
 
 export const CAPABILITIES: readonly CapabilityDescriptor[] = [
@@ -40,35 +38,63 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     purpose: "web_search",
     icon: Globe,
     label: m.web_search,
-    addProviderTitle: m.web_search_add_provider_title,
-    editProviderTitle: m.web_search_edit_provider_title,
     providerNamePlaceholder: m.web_search_provider_name_placeholder,
     providerManagedNote: m.web_search_provider_managed_note,
     forwardIdentityHint: m.web_search_forward_identity_hint,
-    noActiveProviderDescription: m.web_search_no_active_provider_description,
-    noProviders: m.web_search_no_providers,
     capabilityHint: m.web_search_capability_hint,
     spaceHint: m.web_search_space_group_hint,
     noActiveProviderHint: m.web_search_no_active_provider_hint,
-    notAvailableHereHint: m.web_search_not_available_here_hint
+    notAvailableHereHint: m.web_search_not_available_here_hint,
+    classificationHint: m.web_search_classification_hint
   },
   {
     purpose: "image_generation",
     icon: Image,
     label: m.image_generation,
-    addProviderTitle: m.image_generation_add_provider_title,
-    editProviderTitle: m.image_generation_edit_provider_title,
     providerNamePlaceholder: m.image_generation_provider_name_placeholder,
     providerManagedNote: m.image_generation_provider_managed_note,
     forwardIdentityHint: m.image_generation_forward_identity_hint,
-    noActiveProviderDescription: m.image_generation_no_active_provider_description,
-    noProviders: m.image_generation_no_providers,
     capabilityHint: m.image_generation_capability_hint,
     spaceHint: m.image_generation_space_group_hint,
     noActiveProviderHint: m.image_generation_no_active_provider_hint,
-    notAvailableHereHint: m.image_generation_not_available_here_hint
+    notAvailableHereHint: m.image_generation_not_available_here_hint,
+    classificationHint: m.image_generation_classification_hint
   }
 ];
+
+/**
+ * Whether the signed-in user may USE a capability. The role permission value
+ * equals the purpose string, so no per-capability lookup table is needed.
+ * Configuring a capability on an assistant or space is not gated by this.
+ */
+export function canUseCapability(
+  user: { hasPermission: (permission: CapabilityPurpose) => boolean },
+  purpose: string | null | undefined
+): boolean {
+  if (!isCapabilityPurpose(purpose)) return true;
+  return user.hasPermission(purpose as CapabilityPurpose);
+}
+
+/**
+ * The providers of `purpose` a space may attach: any active provider when
+ * the space is unclassified, otherwise only providers at or above the space's
+ * classification. Unclassified providers never qualify for a classified space.
+ */
+export function qualifyingProviders<
+  T extends { purpose?: string | null; security_classification?: { security_level: number } | null }
+>(
+  servers: T[],
+  purpose: string,
+  spaceClassification: { security_level: number } | null | undefined
+): T[] {
+  const providers = servers.filter((server) => server.purpose === purpose);
+  if (!spaceClassification) return providers;
+  return providers.filter(
+    (server) =>
+      !!server.security_classification &&
+      server.security_classification.security_level >= spaceClassification.security_level
+  );
+}
 
 /** True for any non-general purpose, including ones this build does not know. */
 export function isCapabilityPurpose(purpose: string | null | undefined): boolean {

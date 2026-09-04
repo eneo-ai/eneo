@@ -13468,6 +13468,16 @@ export interface components {
       /** Error Message */
       error_message?: string | null;
     };
+    /** MCPServerAudienceGroupPublic */
+    MCPServerAudienceGroupPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
     /**
      * MCPServerCreate
      * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
@@ -13525,6 +13535,22 @@ export interface components {
       /** Documentation Url */
       documentation_url?: string | null;
       security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
+      /**
+       * User Group Ids
+       * @default []
+       */
+      user_group_ids?: string[];
     };
     /**
      * MCPServerCreateResponse
@@ -13563,6 +13589,22 @@ export interface components {
        * @default true
        */
       is_enabled?: boolean;
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["MCPServerAudienceGroupPublic"][];
       /** Has Credentials */
       has_credentials: boolean;
       /** Credential Preview */
@@ -13661,6 +13703,22 @@ export interface components {
        * @default true
        */
       is_enabled?: boolean;
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["MCPServerAudienceGroupPublic"][];
       /** Has Credentials */
       has_credentials: boolean;
       /** Credential Preview */
@@ -13838,6 +13896,8 @@ export interface components {
       http_url?: string | null;
       /** Http Auth Type */
       http_auth_type?: ("none" | "bearer" | "api_key_header") | null;
+      /** Purpose */
+      purpose?: ("general" | "web_search" | "image_generation") | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -13860,6 +13920,12 @@ export interface components {
       documentation_url?: string | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+      /** Audience */
+      audience?: ("everyone" | "groups") | null;
+      /** Audience Priority */
+      audience_priority?: number | null;
+      /** User Group Ids */
+      user_group_ids?: string[] | null;
     };
     /**
      * MCPToolSetting
@@ -16093,7 +16159,9 @@ export interface components {
       | "api_keys"
       | "storage"
       | "modules"
-      | "assistant_debug";
+      | "assistant_debug"
+      | "web_search"
+      | "image_generation";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];

@@ -28,7 +28,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import { AlertTriangle, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { canUseCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
   type McpServerSummary = {
@@ -281,12 +281,15 @@
   // The tenant's capability providers (web search, image generation) flow
   // through the same MCP inheritance chain as other servers but are presented
   // as capabilities, not servers: split them out of the generic rows and give
-  // each its own popover entry.
+  // each its own popover entry. A capability the user's role may not use is
+  // hidden; the backend never attaches its tools for that user anyway.
   const generalMcpServers = $derived(
     mcpServers.filter((server) => !isCapabilityPurpose(server.purpose))
   );
   const capabilityServers = $derived(
-    mcpServers.filter((server) => isCapabilityPurpose(server.purpose))
+    mcpServers.filter(
+      (server) => isCapabilityPurpose(server.purpose) && canUseCapability(user, server.purpose)
+    )
   );
 
   $effect(() => {

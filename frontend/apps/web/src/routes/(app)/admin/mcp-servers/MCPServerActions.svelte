@@ -20,11 +20,9 @@
 
   type Props = {
     mcpServer: MCPServerSettings;
-    /** Forwarded to the edit dialog so capability providers get provider wording. */
-    purpose?: string;
   };
 
-  const { mcpServer, purpose = "general" }: Props = $props();
+  const { mcpServer }: Props = $props();
 
   const eneo = getEneo();
 
@@ -91,5 +89,5 @@
   </Dropdown.Menu>
 </Dropdown.Root>
 
-<MCPServerDialog openController={showEditDialog} {mcpServer} {purpose} onSubmit={handleSave} />
+<MCPServerDialog openController={showEditDialog} {mcpServer} onSubmit={handleSave} />
 <DeleteMCPDialog openController={showDeleteDialog} {mcpServer} onDelete={handleDelete} />

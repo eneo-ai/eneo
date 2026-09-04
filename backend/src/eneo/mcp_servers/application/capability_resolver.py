@@ -1,15 +1,21 @@
-"""Resolve a tenant's active MCP provider for a capability purpose.
+"""Resolve the MCP provider that serves a user for a capability purpose.
 
 Capabilities (web search, image generation) are configured through the
-ordinary MCP inheritance chain (admin activates a provider, spaces include
-it, assistants attach it), but the attached server is a capability marker,
-not a provider pin: at ask time the tenant's currently active provider for
-that purpose (is_enabled=true, at most one per tenant and purpose via partial
-unique index) is resolved and attached in its place. Switching providers
+ordinary MCP inheritance chain (admin activates providers, spaces include
+them, assistants attach them), but the attached server is a capability marker,
+not a provider pin: at ask time the provider that serves the current user for
+that purpose is resolved and attached in its place. Switching providers
 therefore never requires touching spaces or assistants.
+
+Per purpose a tenant may have one active default provider (audience
+"everyone") and any number of active group-targeted providers (audience
+"groups"). A user gets the group-targeted provider with the lowest
+audience_priority among those covering one of their groups, else the default.
+The resolved provider is then gated by the user's role permission for the
+purpose and by the space's security classification.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -39,6 +45,9 @@ if TYPE_CHECKING:
         MCPServer,
         MCPServerTool,
     )
+    from eneo.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
 
 
 def usable_capability_tools(server: "MCPServer") -> list["MCPServerTool"]:
@@ -53,13 +62,14 @@ def usable_capability_tools(server: "MCPServer") -> list["MCPServerTool"]:
     ]
 
 
-async def get_active_capability_server(
+async def get_active_capability_servers(
     session: "AsyncSession", tenant_id: UUID, purpose: str
-) -> "MCPServer | None":
-    """Return the tenant's active provider for ``purpose``, or None.
+) -> list["MCPServer"]:
+    """Return every active provider for ``purpose`` in the tenant.
 
     Tools carry the tenant-level enablement overlay so downstream consumers
-    (the MCP proxy, usability checks) see effective enablement.
+    (the MCP proxy, usability checks) see effective enablement. Audience
+    groups and security classification are loaded for resolution.
     """
     query = (
         sa.select(MCPServersTable)
@@ -70,18 +80,20 @@ async def get_active_capability_server(
         )
         .options(
             selectinload(MCPServersTable.tools),
+            selectinload(MCPServersTable.user_groups),
             selectinload(MCPServersTable.security_classification).selectinload(
                 SecurityClassificationDBModel.tenant
             ),
         )
+        .order_by(MCPServersTable.created_at, MCPServersTable.id)
     )
-    record = await session.scalar(query)
-    if record is None:
-        return None
+    records = (await session.scalars(query)).all()
+    if not records:
+        return []
 
-    server = MCPServerMapper.to_entity(record)
+    servers = [MCPServerMapper.to_entity(record) for record in records]
 
-    tool_ids = [tool.id for tool in server.tools]
+    tool_ids = [tool.id for server in servers for tool in server.tools]
     if tool_ids:
         settings_stmt = sa.select(
             MCPServerToolSettings.mcp_server_tool_id,
@@ -92,11 +104,44 @@ async def get_active_capability_server(
         )
         settings_rows = (await session.execute(settings_stmt)).all()
         tenant_settings = {tool_id: enabled for tool_id, enabled in settings_rows}
-        for tool in server.tools:
-            if tool.id in tenant_settings:
-                tool.is_enabled_by_default = tenant_settings[tool.id]
+        for server in servers:
+            for tool in server.tools:
+                if tool.id in tenant_settings:
+                    tool.is_enabled_by_default = tenant_settings[tool.id]
 
-    return server
+    return servers
+
+
+def select_provider_for_user(
+    providers: Iterable["MCPServer"], user_group_ids: "set[UUID]"
+) -> "MCPServer | None":
+    """Pick the provider that serves a member of ``user_group_ids``.
+
+    A group-targeted provider covering any of the user's groups wins over the
+    default; among several, the lowest ``audience_priority`` wins and the
+    name breaks ties so the choice is deterministic and visible to admins.
+    """
+    providers = list(providers)
+    targeted = [
+        provider
+        for provider in providers
+        if provider.serves_user_groups(user_group_ids)
+    ]
+    if targeted:
+        return min(targeted, key=lambda p: (p.audience_priority, p.name.lower()))
+    return next((p for p in providers if p.is_default_provider()), None)
+
+
+def meets_security_classification(
+    provider: "MCPServer",
+    space_security_classification: "SecurityClassification | None",
+) -> bool:
+    """False when the space's classification is stricter than the provider's."""
+    if space_security_classification is None:
+        return True
+    return not space_security_classification.is_greater_than(
+        provider.security_classification
+    )
 
 
 @dataclass(frozen=True)
@@ -113,14 +158,20 @@ async def resolve_capability_servers(
     attached_servers: Sequence["MCPServer"],
     *,
     supports_tool_calling: bool,
+    user_group_ids: "set[UUID] | None" = None,
+    allowed_purposes: "set[str] | None" = None,
+    space_security_classification: "SecurityClassification | None" = None,
 ) -> CapabilityResolution:
-    """Replace attached capability markers with the tenant's active providers.
+    """Replace attached capability markers with the providers serving the user.
 
     Capability-purpose servers among ``attached_servers`` are stripped (they
     may be stale or deactivated) and, for every requested purpose in
-    ``CAPABILITY_PURPOSES`` order, the currently active provider is attached
-    in their place when it exists, has usable tools, and the model can call
-    tools. A purpose without an active provider is silently unavailable.
+    ``CAPABILITY_PURPOSES`` order, the provider serving the user is attached
+    in its place when the user's role allows the purpose (``allowed_purposes``,
+    None meaning every purpose), a provider exists for the user's groups or
+    the tenant default, it has usable tools, it meets the space's security
+    classification, and the model can call tools. Anything else leaves the
+    purpose silently unavailable this turn.
     """
     general_servers = [
         server
@@ -132,16 +183,23 @@ async def resolve_capability_servers(
         for server in attached_servers
         if is_capability_purpose(server.purpose)
     }
+    if allowed_purposes is not None:
+        requested_purposes &= allowed_purposes
     capability_servers: list["MCPServer"] = []
     if requested_purposes and supports_tool_calling:
         for purpose in CAPABILITY_PURPOSES:
             if purpose not in requested_purposes:
                 continue
-            active_provider = await get_active_capability_server(
-                session, tenant_id, purpose
-            )
-            if active_provider is not None and usable_capability_tools(active_provider):
-                capability_servers.append(active_provider)
+            providers = await get_active_capability_servers(session, tenant_id, purpose)
+            provider = select_provider_for_user(providers, user_group_ids or set())
+            if (
+                provider is not None
+                and usable_capability_tools(provider)
+                and meets_security_classification(
+                    provider, space_security_classification
+                )
+            ):
+                capability_servers.append(provider)
     return CapabilityResolution(
         general_servers=general_servers, capability_servers=capability_servers
     )

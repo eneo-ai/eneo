@@ -26,9 +26,13 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
-from eneo.mcp_servers.domain.entities.mcp_server import GENERAL_PURPOSE, MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    GENERAL_PURPOSE,
+    MCPServer,
+    is_capability_purpose,
+)
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember, SpaceRoleValue
-from eneo.spaces.space import Space
+from eneo.spaces.space import SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_repo import SpaceRepository
@@ -53,6 +57,9 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.security_classifications.application.security_classification_service import (
         SecurityClassificationService,
+    )
+    from eneo.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
     )
     from eneo.services.service import Service
     from eneo.transcription_models.domain.transcription_model import (
@@ -264,6 +271,39 @@ class SpaceService:
             )
         return projection
 
+    async def _validate_capability_markers(
+        self,
+        mcp_servers: list["MCPServer"],
+        space_security_classification: "SecurityClassification | None",
+    ) -> None:
+        """Reject a capability marker no active provider can serve.
+
+        The marker's own classification is irrelevant (the ask path swaps in
+        the provider serving the user), so the check runs against the active
+        providers for the purpose: at least one must meet the space's
+        classification. Ask time remains the hard guarantee per user.
+        """
+        if space_security_classification is None:
+            return
+        from eneo.mcp_servers.application.capability_resolver import (
+            get_active_capability_servers,
+            meets_security_classification,
+        )
+
+        for purpose in {
+            server.purpose
+            for server in mcp_servers
+            if is_capability_purpose(server.purpose)
+        }:
+            providers = await get_active_capability_servers(
+                self.repo.session, self.user.tenant_id, purpose
+            )
+            if providers and not any(
+                meets_security_classification(provider, space_security_classification)
+                for provider in providers
+            ):
+                raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
+
     async def update_space(
         self,
         id: UUID,
@@ -396,6 +436,14 @@ class SpaceService:
                 )
                 for server in servers_db
             ]
+
+        if mcp_servers is not None:
+            await self._validate_capability_markers(
+                mcp_servers,
+                space_security_classification
+                if is_provided(security_classification)
+                else space.security_classification,
+            )
 
         space.update(
             name=name,

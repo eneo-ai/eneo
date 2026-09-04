@@ -14,6 +14,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
+from eneo.mcp_servers.domain.entities.mcp_server import is_capability_purpose
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -374,10 +375,13 @@ class Space:
                         model.security_classification
                     )
                 ]
+                # Capability markers stay: the provider resolved at ask time
+                # is what gets checked, not the marker's own classification.
                 self._mcp_servers = [
                     server
                     for server in self._mcp_servers
-                    if not self.security_classification.is_greater_than(
+                    if is_capability_purpose(server.purpose)
+                    or not self.security_classification.is_greater_than(
                         server.security_classification
                     )
                 ]
@@ -678,6 +682,11 @@ class Space:
         self, mcp_server: "MCPServer"
     ) -> None:
         if not self.security_classification:
+            return
+        # A capability marker is not the provider that will be called; the
+        # service validates the active providers and the ask path enforces
+        # the classification on the resolved provider.
+        if is_capability_purpose(mcp_server.purpose):
             return
         if self.security_classification.is_greater_than(
             mcp_server.security_classification

@@ -26,6 +26,7 @@ import { SvelteMap, SvelteSet } from "svelte/reactivity";
 import type { AssistantSkillBindingInput, AssistantSkillBindingSummary, Eneo } from "@eneo/eneo-js";
 import type { SkillBindingCatalogPage } from "$lib/features/skills/skillBindingCatalog";
 import { disabledToolIdsForSelectedServers } from "./mcpPolicy";
+import { CAPABILITIES, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
 
 type ModelSelection = { selected: boolean; isDefault: boolean };
 type CompletionModel = {
@@ -60,6 +61,8 @@ type McpServer = {
   description?: string | null;
   purpose?: string | null;
   is_available?: boolean;
+  is_enabled?: boolean;
+  audience?: string | null;
   tools?: McpTool[] | null;
 };
 type PromptOption = { id: string; name: string; description?: string | null };
@@ -182,7 +185,13 @@ export class PolicyDraft {
     const selectableModels = data.models.completionModels.filter((m) => m.can_access);
     this.#allModels = selectableModels;
     this.#allProviders = (data.modelProviders ?? []).filter((p) => p.is_active);
-    this.#allMcpServers = (data.mcpSettings?.items ?? []).filter((s) => s.is_available);
+    // Capability servers (web search, image generation) stay selectable even
+    // when deactivated: the policy holds a capability marker that the ask
+    // path resolves to the user's provider, so a marker for a since-replaced
+    // server must keep the capability on rather than vanish from the draft.
+    this.#allMcpServers = (data.mcpSettings?.items ?? []).filter(
+      (s) => s.is_available || isCapabilityPurpose(s.purpose)
+    );
     this.promptOptions = data.promptLibrary.items;
     this.skillCatalogPage = data.skills;
     this.selectiveActivationEnabled = data.skillRuntimePolicy.selective_activation_enabled;
@@ -420,15 +429,30 @@ export class PolicyDraft {
           providers: providerCount
         });
   });
+  // Capability servers collapse into one row per capability in the UI, so
+  // the summary counts rows (general servers + capabilities), not markers.
+  #mcpRowCounts = $derived.by(() => {
+    const general = this.#allMcpServers.filter((s) => !isCapabilityPurpose(s.purpose));
+    const purposes = new SvelteSet(
+      this.#allMcpServers
+        .filter((s) => isCapabilityPurpose(s.purpose))
+        .map((s) => s.purpose as string)
+    );
+    const selectedGeneral = general.filter((s) => this.mcpSelections.has(s.id)).length;
+    const selectedPurposes = Array.from(purposes).filter((purpose) =>
+      this.#allMcpServers.some((s) => s.purpose === purpose && this.mcpSelections.has(s.id))
+    ).length;
+    return {
+      selected: selectedGeneral + selectedPurposes,
+      total: general.length + purposes.size
+    };
+  });
   mcpSummary = $derived(
     !this.mcpEnabled
       ? m.governance_mcp_summary_inactive()
       : this.mcpSelections.size === 0
         ? m.governance_mcp_summary_none()
-        : m.governance_mcp_summary_count({
-            selected: this.mcpSelections.size,
-            total: this.#allMcpServers.length
-          })
+        : m.governance_mcp_summary_count(this.#mcpRowCounts)
   );
   reasoningSummary = $derived.by(() => {
     if (!this.reasoningPolicyConfigured) return m.governance_reasoning_summary_inactive();
@@ -511,6 +535,43 @@ export class PolicyDraft {
   toggleMcpDefault = (id: string, on: boolean) => {
     if (this.mcpSelections.has(id)) this.mcpSelections.set(id, { isDefaultEnabled: on });
   };
+
+  #capabilityServers(purpose: string): McpServer[] {
+    return this.#allMcpServers.filter((s) => s.purpose === purpose);
+  }
+
+  /**
+   * Turn a capability on or off for the personal assistant. On stores ONE
+   * marker for the purpose (the active default server when there is one,
+   * else any active server, else any saved one); off removes every marker
+   * of that purpose so the policy self-heals after provider switches.
+   */
+  toggleCapability = (purpose: string, on: boolean) => {
+    const servers = this.#capabilityServers(purpose);
+    if (!on) {
+      for (const server of servers) this.toggleMcp(server.id, false);
+      return;
+    }
+    if (servers.some((s) => this.mcpSelections.has(s.id))) return;
+    const marker =
+      servers.find((s) => s.is_enabled && s.audience !== "groups") ??
+      servers.find((s) => s.is_enabled) ??
+      servers[0];
+    if (marker) this.mcpSelections.set(marker.id, { isDefaultEnabled: true });
+  };
+
+  toggleCapabilityDefault = (purpose: string, on: boolean) => {
+    for (const server of this.#capabilityServers(purpose)) {
+      this.toggleMcpDefault(server.id, on);
+    }
+  };
+
+  /** Capabilities offered to the personal assistant, in canonical order. */
+  capabilityRows = $derived(
+    CAPABILITIES.filter((capability) =>
+      this.#allMcpServers.some((s) => s.purpose === capability.purpose)
+    )
+  );
 
   toggleMcpTool = (toolId: string, on: boolean) => {
     if (on) this.disabledMcpToolIds.delete(toolId);

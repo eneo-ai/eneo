@@ -6,8 +6,9 @@
 
 <script lang="ts">
   import { Button, Input } from "@eneo/ui";
-  import { ChevronRight } from "lucide-svelte";
+  import { AlertTriangle, ChevronRight } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";
   import MCPServerEnabledSwitch from "./MCPServerEnabledSwitch.svelte";
   import MCPServerActions from "./MCPServerActions.svelte";
@@ -35,10 +36,14 @@
     mcpServers.filter((server) => {
       if (!filterValue) return true;
       const searchStr =
-        `${server.name} ${server.description || ""} ${server.http_url} ${server.security_classification?.name || ""}`.toLowerCase();
+        `${server.name} ${server.description || ""} ${server.http_url} ${server.security_classification?.name || ""} ${getCapability(server.purpose)?.label() || ""} ${(server.user_groups ?? []).map((group) => group.name).join(" ")}`.toLowerCase();
       return searchStr.includes(filterValue.toLowerCase());
     })
   );
+
+  // Activating a capability provider can be refused (unreachable, no usable
+  // tools); the switch reports that here so it shows above the table.
+  let switchError = $state("");
 
   function toggleExpanded(serverId: string) {
     expandedServerId = expandedServerId === serverId ? null : serverId;
@@ -61,6 +66,16 @@
       inputClass="!px-4 !rounded-lg !bg-secondary/50"
     />
   </div>
+
+  {#if switchError}
+    <div
+      class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mb-4 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+      role="alert"
+    >
+      <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <p>{switchError}</p>
+    </div>
+  {/if}
 
   <!-- Server cards -->
   <div class="w-full">
@@ -91,6 +106,7 @@
         {#each filteredServers as server (server.mcp_server_id)}
           {@const hasTools = (server.tools_count ?? 0) > 0}
           {@const expanded = isExpanded(server.mcp_server_id)}
+          {@const capability = getCapability(server.purpose)}
           <!-- Server row -->
           <tr
             class="group relative transition-colors duration-150 {expanded
@@ -112,6 +128,12 @@
             </td>
             <td class="border-dimmer overflow-hidden border-b px-4 py-3">
               <MCPServerPrimaryCell mcpServer={server} />
+              {#if capability && server.forward_identity}
+                <p class="text-warning-default mt-1.5 flex items-center gap-1.5 text-xs">
+                  <AlertTriangle class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {m.capability_identity_forwarded_warning()}
+                </p>
+              {/if}
             </td>
             <td class="border-dimmer border-b px-4 py-3 text-center align-middle">
               <span
@@ -124,7 +146,10 @@
             </td>
             <td class="border-dimmer border-b px-4 py-3 align-middle">
               <div class="flex justify-center">
-                <MCPServerEnabledSwitch mcpServer={server} />
+                <MCPServerEnabledSwitch
+                  mcpServer={server}
+                  onError={(message) => (switchError = message)}
+                />
               </div>
             </td>
             <td class="border-dimmer border-b px-4 py-3 align-middle">

@@ -414,4 +414,114 @@ describe("PolicyDraft", () => {
 
     expect(draft.skillCatalogPage).toEqual(skills);
   });
+  it("stores one marker per capability and keeps a stale marker selectable", async () => {
+    const update = vi.fn(async () => {});
+    const draft = new PolicyDraft();
+    const base = {
+      description: null,
+      http_url: "http://provider.example/mcp",
+      http_auth_type: "none",
+      has_credentials: false,
+      tools: []
+    };
+    draft.sync({
+      eneo: { governancePolicy: { update } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: {
+          enabled: true,
+          // A previously active search server: deactivated, but the policy
+          // still holds it as the web-search marker.
+          servers: [{ mcp_server_id: "old-search", is_default_enabled: true }],
+          disabled_tool_ids: []
+        },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        skills: { bindings: [] }
+      },
+      models: { completionModels: [] },
+      modelProviders: [],
+      mcpSettings: {
+        items: [
+          {
+            ...base,
+            id: "old-search",
+            name: "Old",
+            purpose: "web_search",
+            is_available: false,
+            is_enabled: false,
+            audience: "everyone"
+          },
+          {
+            ...base,
+            id: "group-search",
+            name: "Legal",
+            purpose: "web_search",
+            is_available: true,
+            is_enabled: true,
+            audience: "groups"
+          },
+          {
+            ...base,
+            id: "default-search",
+            name: "GDM",
+            purpose: "web_search",
+            is_available: true,
+            is_enabled: true,
+            audience: "everyone"
+          },
+          {
+            ...base,
+            id: "images",
+            name: "GDM images",
+            purpose: "image_generation",
+            is_available: true,
+            is_enabled: true,
+            audience: "everyone"
+          },
+          {
+            ...base,
+            id: "general",
+            name: "Tools",
+            purpose: "general",
+            is_available: true,
+            is_enabled: true,
+            audience: "everyone"
+          }
+        ]
+      } as never,
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
+    });
+
+    expect(draft.capabilityRows.map((row) => row.purpose)).toEqual([
+      "web_search",
+      "image_generation"
+    ]);
+    // The stale marker keeps web search switched on in the draft.
+    expect(draft.mcpSelections.has("old-search")).toBe(true);
+    expect(draft.mcpSummary).toContain("1");
+
+    draft.toggleCapability("web_search", false);
+    expect(draft.mcpSelections.size).toBe(0);
+
+    draft.toggleCapability("web_search", true);
+    expect(Array.from(draft.mcpSelections.keys())).toEqual(["default-search"]);
+
+    draft.toggleCapability("image_generation", true);
+    draft.toggleCapabilityDefault("image_generation", false);
+    draft.save();
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update).toHaveBeenCalledWith({
+      mcp_restriction: {
+        enabled: true,
+        servers: [
+          { mcp_server_id: "default-search", is_default_enabled: true },
+          { mcp_server_id: "images", is_default_enabled: false }
+        ],
+        disabled_tool_ids: []
+      }
+    });
+  });
 });

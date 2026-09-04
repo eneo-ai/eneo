@@ -108,6 +108,11 @@ _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.INTEGRATIONS,
         Permission.SHARED_SPACES,
         Permission.INSIGHTS,
+        # Capability use (web search, image generation): automations asking an
+        # assistant keep the capabilities the assistant offers; the route guards
+        # and the tenant's providers still bound what a key can reach.
+        Permission.WEB_SEARCH,
+        Permission.IMAGE_GENERATION,
     }
 )
 

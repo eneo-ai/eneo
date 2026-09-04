@@ -2,6 +2,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.mcp_servers.presentation.models import (
+    MCPServerAudience,
+    MCPServerAudienceGroupPublic,
     MCPServerList,
     MCPServerPublic,
     MCPServerPurpose,
@@ -104,6 +106,12 @@ class MCPServerAssembler:
             http_auth_type=mcp_server.http_auth_type,
             purpose=cast(MCPServerPurpose, mcp_server.purpose),
             is_enabled=mcp_server.is_enabled,
+            audience=cast(MCPServerAudience, mcp_server.audience),
+            audience_priority=mcp_server.audience_priority,
+            user_groups=[
+                MCPServerAudienceGroupPublic(id=group.id, name=group.name)
+                for group in mcp_server.user_groups
+            ],
             has_credentials=bool(mcp_server.http_auth_config_schema),
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
@@ -167,6 +175,12 @@ class MCPServerSettingsAssembler:
             http_auth_type=mcp_server.http_auth_type,
             purpose=cast(MCPServerPurpose, mcp_server.purpose),
             is_enabled=mcp_server.is_enabled,
+            audience=cast(MCPServerAudience, mcp_server.audience),
+            audience_priority=mcp_server.audience_priority,
+            user_groups=[
+                MCPServerAudienceGroupPublic(id=group.id, name=group.name)
+                for group in mcp_server.user_groups
+            ],
             has_credentials=bool(mcp_server.http_auth_config_schema),
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service

@@ -9,7 +9,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { AlertCircle, ChevronRight, Info, Plug } from "lucide-svelte";
-  import { getCapability } from "$lib/features/mcp/capabilities";
+  import { isCapabilityPurpose, type CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { SvelteSet } from "svelte/reactivity";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
 
@@ -42,6 +42,10 @@
     toggleMcp: (serverId: string, selected: boolean) => void;
     toggleMcpDefault: (serverId: string, defaultEnabled: boolean) => void;
     toggleMcpTool: (toolId: string, enabled: boolean) => void;
+    /** Capabilities (web search, image generation) shown as one row each. */
+    capabilityRows: readonly CapabilityDescriptor[];
+    toggleCapability: (purpose: string, selected: boolean) => void;
+    toggleCapabilityDefault: (purpose: string, defaultEnabled: boolean) => void;
   };
 
   let {
@@ -54,8 +58,32 @@
     badgeVariant,
     toggleMcp,
     toggleMcpDefault,
-    toggleMcpTool
+    toggleMcpTool,
+    capabilityRows,
+    toggleCapability,
+    toggleCapabilityDefault
   }: Props = $props();
+
+  // A capability is a feature the admin turns on, not a server to pick: the
+  // provider serving each user is resolved at ask time, and tool overrides on
+  // a specific server would not carry over to a substituted provider. So
+  // capability servers collapse into one switch per capability, without
+  // server name or tools, and only general servers get the per-server rows.
+  const generalServers = $derived(
+    allMcpServers.filter((server) => !isCapabilityPurpose(server.purpose))
+  );
+
+  function capabilitySelection(purpose: string) {
+    const selected = allMcpServers.filter(
+      (server) => server.purpose === purpose && mcpSelections.has(server.id)
+    );
+    return {
+      isSelected: selected.length > 0,
+      isDefaultEnabled: selected.every(
+        (server) => mcpSelections.get(server.id)?.isDefaultEnabled ?? true
+      )
+    };
+  }
 
   const expandedServers = new SvelteSet<string>();
 
@@ -97,15 +125,52 @@
       <p id="mcp-help" class="text-secondary text-sm">
         {m.governance_mcp_help_enabled()}
       </p>
+      {#if capabilityRows.length > 0}
+        <fieldset class="border-default divide-default divide-y overflow-hidden rounded-lg border">
+          <legend class="sr-only">{m.capabilities()}</legend>
+          {#each capabilityRows as capability (capability.purpose)}
+            {@const selection = capabilitySelection(capability.purpose)}
+            <div class={selection.isSelected ? "bg-secondary/30" : ""}>
+              <div class="flex items-center gap-3 py-2.5 pr-4 pl-1">
+                <span class="flex h-8 w-8 shrink-0 items-center justify-center">
+                  <capability.icon class="text-tertiary h-4 w-4" aria-hidden="true" />
+                </span>
+                <Switch
+                  checked={selection.isSelected}
+                  onCheckedChange={(v) => toggleCapability(capability.purpose, v)}
+                  aria-label={m.governance_mcp_allow_aria({ name: capability.label() })}
+                />
+                <div class="min-w-0 flex-1">
+                  <span
+                    class="block text-sm font-medium {selection.isSelected ? '' : 'text-secondary'}"
+                  >
+                    {capability.label()}
+                  </span>
+                  <p class="text-tertiary line-clamp-1 text-xs">{capability.capabilityHint()}</p>
+                </div>
+                {#if selection.isSelected}
+                  <label class="flex shrink-0 items-center gap-2">
+                    <span class="text-secondary text-xs">{m.governance_mcp_default_label()}</span>
+                    <Switch
+                      checked={selection.isDefaultEnabled}
+                      onCheckedChange={(v) => toggleCapabilityDefault(capability.purpose, v)}
+                      aria-label={m.governance_mcp_default_aria({ name: capability.label() })}
+                    />
+                  </label>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </fieldset>
+      {/if}
       <fieldset class="border-default divide-default divide-y overflow-hidden rounded-lg border">
         <legend class="sr-only">{m.governance_mcp_legend()}</legend>
-        {#each allMcpServers as server (server.id)}
+        {#each generalServers as server (server.id)}
           {@const isSelected = mcpSelections.has(server.id)}
           {@const isDefaultEnabled = mcpSelections.get(server.id)?.isDefaultEnabled ?? true}
           {@const hasTools = server.tools.length > 0}
           {@const isExpanded = isSelected && expandedServers.has(server.id)}
           {@const enabledCount = enabledToolCount(server)}
-          {@const capability = getCapability(server.purpose)}
           <div class={isSelected ? "bg-secondary/30" : ""}>
             <div class="flex items-center gap-3 py-2.5 pr-4 pl-1">
               <button
@@ -132,14 +197,6 @@
                   <span class="text-sm font-medium {isSelected ? '' : 'text-secondary'}">
                     {server.name}
                   </span>
-                  {#if capability}
-                    <span
-                      class="bg-secondary text-secondary inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
-                    >
-                      <capability.icon class="h-3 w-3" aria-hidden="true" />
-                      {capability.label()}
-                    </span>
-                  {/if}
                   {#if isSelected && hasTools}
                     <span
                       class="bg-secondary text-secondary inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
