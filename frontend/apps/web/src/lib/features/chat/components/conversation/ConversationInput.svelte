@@ -341,8 +341,10 @@
     });
   });
 
-  // Check if the assistant has MCP servers/tools
-  const hasMcpTools = $derived(mcpServers.length > 0);
+  // Whether the popover has anything to show: general servers plus the
+  // capabilities this user may use (a capability the role withholds is not a
+  // row, so it must not open an empty popover either).
+  const hasMcpTools = $derived(generalMcpServers.length + capabilityServers.length > 0);
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge
   // cannot be toggled per conversation the way MCP servers can).

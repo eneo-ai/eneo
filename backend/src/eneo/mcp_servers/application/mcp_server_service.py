@@ -9,11 +9,13 @@ from sqlalchemy.exc import IntegrityError
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
+    NotFoundException,
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
+    AUDIENCE_GROUPS,
     AUDIENCES,
     DEFAULT_AUDIENCE_PRIORITY,
     GENERAL_PURPOSE,
@@ -576,6 +578,18 @@ class MCPServerService:
             )
             if effective_audience == AUDIENCE_EVERYONE and audience is not None:
                 effective_group_ids = []
+            if (
+                mcp_server.is_enabled
+                and mcp_server.audience == AUDIENCE_EVERYONE
+                and effective_audience == AUDIENCE_GROUPS
+            ):
+                # The active default is what everyone outside a targeted group
+                # gets; silently narrowing it would leave the tenant without a
+                # provider. Deactivate first, or activate another default.
+                raise BadRequestException(
+                    "This server is the active default provider. Deactivate it "
+                    "before limiting it to user groups."
+                )
             mcp_server.user_groups = await self._resolve_audience(
                 mcp_server.purpose, effective_audience, effective_group_ids
             )
@@ -986,36 +1000,53 @@ class MCPServerService:
             return []
         return await self.approve_tool_changes(mcp_server_id, pending_ids)
 
+    async def _get_tool_for_server(
+        self, mcp_server_id: UUID, tool_id: UUID
+    ) -> MCPServerTool:
+        """Load a tool addressed as ``/{mcp_server_id}/tools/{tool_id}``.
+
+        The tool must belong to that server within the caller's tenant; a
+        tool id from another server is treated as not found so an admin
+        cannot edit a tool through a path that names a different server.
+        """
+        tool = await self.tool_repo.one(id=tool_id)
+        server = await self._get_server_for_tenant(tool.mcp_server_id)
+        if server.id != mcp_server_id:
+            raise NotFoundException(
+                f"Tool {tool_id} does not belong to MCP server {mcp_server_id}"
+            )
+        return tool
+
     @validate_permissions(Permission.ADMIN)
     async def update_tool_default_enabled(
-        self, tool_id: UUID, is_enabled: bool
+        self, mcp_server_id: UUID, tool_id: UUID, is_enabled: bool
     ) -> MCPServerTool:
         """
         Update the global default enabled status for a tool (admin only).
 
         Args:
+            mcp_server_id: Server the tool is addressed under; the tool must
+                belong to it
             tool_id: ID of the tool to update
             is_enabled: Whether tool should be enabled by default
 
         Returns:
             Updated tool
         """
-        tool = await self.tool_repo.one(id=tool_id)
-        await self._get_server_for_tenant(tool.mcp_server_id)
+        tool = await self._get_tool_for_server(mcp_server_id, tool_id)
         tool.is_enabled_by_default = is_enabled
         return await self.tool_repo.update(tool)
 
     @validate_permissions(Permission.ADMIN)
     async def update_tool_display_name(
-        self, tool_id: UUID, display_name: str | None
+        self, mcp_server_id: UUID, tool_id: UUID, display_name: str | None
     ) -> MCPServerTool:
         """Set or clear the admin display name for a tool (admin only).
 
         Display-only: the protocol-level tool name is untouched, so calls keep
         routing to the same remote tool. None or blank clears the override.
         """
-        tool = await self.tool_repo.one(id=tool_id)
-        await self._get_server_for_tenant(tool.mcp_server_id)
+        tool = await self._get_tool_for_server(mcp_server_id, tool_id)
 
         if display_name is not None:
             display_name = display_name.strip() or None

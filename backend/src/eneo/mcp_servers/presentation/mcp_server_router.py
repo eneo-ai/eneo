@@ -823,7 +823,7 @@ async def update_tool_display_name(
     assembler = container.mcp_server_tool_assembler()
 
     mcp_server = await service.get_mcp_server(id)
-    tool = await service.update_tool_display_name(tool_id, data.display_name)
+    tool = await service.update_tool_display_name(id, tool_id, data.display_name)
 
     user = container.user()
     audit_service = container.audit_service()
@@ -874,7 +874,7 @@ async def update_tool_default_enabled(
     mcp_server = await service.get_mcp_server(id)
 
     # Update tool's default enabled status
-    tool = await service.update_tool_default_enabled(tool_id, data.is_enabled)
+    tool = await service.update_tool_default_enabled(id, tool_id, data.is_enabled)
 
     # Audit logging
     user = container.user()

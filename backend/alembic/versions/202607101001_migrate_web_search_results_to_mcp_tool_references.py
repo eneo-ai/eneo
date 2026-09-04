@@ -4,7 +4,8 @@ Web search now flows through an external MCP provider, so citations land in
 mcp_tool_references like every other tool result. Historical Tavily rows are
 migrated with their original UUIDs preserved so existing <inref id="...">
 prefixes in stored answers keep resolving. Title and score move into meta,
-alongside sourceType="web-search" for frontend rendering.
+alongside sourceType="web-search" for frontend rendering; ``order`` follows
+each question's insertion order so multi-result answers keep their sequence.
 
 Revision ID: 202607101001
 Revises: 202607101000
@@ -40,7 +41,9 @@ def upgrade() -> None:
                     'score', score,
                     'sourceType', 'web-search'
                 ),
-                0
+                row_number() OVER (
+                    PARTITION BY question_id ORDER BY created_at, id
+                ) - 1
             FROM web_search_results
             ON CONFLICT (id) DO NOTHING
             """

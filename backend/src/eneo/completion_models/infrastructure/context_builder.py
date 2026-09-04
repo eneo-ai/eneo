@@ -519,7 +519,7 @@ class ContextBuilder:
         messages: list[Message] = []
         total_tokens = 0
 
-        for message in reversed(session.questions):
+        for turns_back, message in enumerate(reversed(session.questions)):
             # History replays each turn's files through the same inline-vs-URL
             # rules as the current turn: URL-only files must not have their
             # text re-inlined on follow-ups.
@@ -532,11 +532,16 @@ class ContextBuilder:
             )
             answer = message.answer
             # History can contain images (e.g. after a model switch) — never
-            # replay them to a model without vision.
+            # replay them to a model without vision. Generated images replay
+            # only from the latest turn: that keeps "change this image" flows
+            # working, while older ones are already described to the model by
+            # the placeholder text in their replayed tool results.
             if vision:
                 images = self._get_files_by_type(message.files, FileType.IMAGE)
-                generated_images = self._get_files_by_type(
-                    message.generated_files, FileType.IMAGE
+                generated_images = (
+                    self._get_files_by_type(message.generated_files, FileType.IMAGE)
+                    if turns_back == 0
+                    else []
                 )
             else:
                 images = []

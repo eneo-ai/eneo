@@ -10,6 +10,7 @@ from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.files_table import Files
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
@@ -588,4 +589,30 @@ class SessionRepository:
         return sessions
 
     async def delete(self, id: UUID) -> SessionInDB | None:
-        return await self._hydrate_optional(await self.delegate.delete(id))
+        """Delete a session and the generated files only its answers owned.
+
+        Questions and their file links cascade with the session, but the
+        ``files`` rows do not: a tool-generated image (linked with type
+        ``assistant``) has no other owner surface, so it is removed here once
+        nothing else references it. Uploads are left alone; the user manages
+        those.
+        """
+        generated_file_ids = list(
+            await self.session.scalars(
+                sa.select(QuestionsFiles.file_id)
+                .join(Questions, Questions.id == QuestionsFiles.question_id)
+                .where(Questions.session_id == id, QuestionsFiles.type == "assistant")
+            )
+        )
+        deleted = await self.delegate.delete(id)
+        if generated_file_ids:
+            still_referenced = sa.select(QuestionsFiles.file_id).where(
+                QuestionsFiles.file_id.in_(generated_file_ids)
+            )
+            await self.session.execute(
+                sa.delete(Files).where(
+                    Files.id.in_(generated_file_ids),
+                    Files.id.not_in(still_referenced),
+                )
+            )
+        return await self._hydrate_optional(deleted)

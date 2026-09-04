@@ -11,7 +11,9 @@ Covers, for every capability purpose (web search, image generation):
 - catalog write conflicts map to the matching domain error per constraint
 - usable-tool filtering that gates provider activation
 - audiences: the default provider replaces only the default, group-targeted
-  providers coexist, and audience input is validated against the purpose
+  providers coexist, audience input is validated against the purpose, and
+  the active default cannot be narrowed to groups in place
+- tool edits addressed under a server path apply only to that server's tools
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -21,7 +23,11 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
-from eneo.main.exceptions import BadRequestException, NameCollisionException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    NotFoundException,
+)
 from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
     MCPServerService,
@@ -527,6 +533,36 @@ class TestAudience:
         compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
         assert "mcp_servers.audience = 'everyone'" in compiled
 
+    async def test_active_default_cannot_be_narrowed_to_groups(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, is_enabled=True)
+        mock_repo.one.return_value = server
+        monkeypatch.setattr(service, "_resolve_audience", AsyncMock(return_value=[]))
+
+        with pytest.raises(BadRequestException, match="active default"):
+            await service.update_mcp_server(
+                server.id, audience=AUDIENCE_GROUPS, user_group_ids=[uuid4()]
+            )
+
+        mock_repo.update.assert_not_awaited()
+
+    async def test_inactive_default_can_be_narrowed_to_groups(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, is_enabled=False)
+        mock_repo.one.return_value = server
+        mock_repo.update.side_effect = lambda obj: obj
+        group = MCPServerAudienceGroup(id=uuid4(), name="Legal")
+        monkeypatch.setattr(
+            service, "_resolve_audience", AsyncMock(return_value=[group])
+        )
+
+        result = await service.update_mcp_server(
+            server.id, audience=AUDIENCE_GROUPS, user_group_ids=[group.id]
+        )
+
+        assert result.server.audience == AUDIENCE_GROUPS
+        assert result.server.user_groups == [group]
+
     async def test_moving_to_general_resets_the_audience(self):
         service, mock_repo, _, user = _make_service()
         server = _make_server(user.tenant_id, is_enabled=True)
@@ -540,3 +576,50 @@ class TestAudience:
         assert result.server.audience == AUDIENCE_EVERYONE
         assert result.server.user_groups == []
         assert result.server.audience_priority == DEFAULT_AUDIENCE_PRIORITY
+
+
+class TestToolPathOwnership:
+    """``/{id}/tools/{tool_id}/`` edits only tools that belong to ``id``."""
+
+    def _tool_on(self, server_id):
+        tool = _make_tool()
+        tool.mcp_server_id = server_id
+        return tool
+
+    async def test_display_name_rejects_tool_of_another_server(self):
+        service, mock_repo, mock_tool_repo, user = _make_service()
+        owner = _make_server(user.tenant_id)
+        other = _make_server(user.tenant_id)
+        tool = self._tool_on(owner.id)
+        mock_tool_repo.one.return_value = tool
+        mock_repo.one.return_value = owner
+
+        with pytest.raises(NotFoundException):
+            await service.update_tool_display_name(other.id, tool.id, "Renamed")
+
+        mock_tool_repo.update.assert_not_awaited()
+
+    async def test_display_name_updates_tool_of_addressed_server(self):
+        service, mock_repo, mock_tool_repo, user = _make_service()
+        owner = _make_server(user.tenant_id)
+        tool = self._tool_on(owner.id)
+        mock_tool_repo.one.return_value = tool
+        mock_tool_repo.update.side_effect = lambda obj: obj
+        mock_repo.one.return_value = owner
+
+        updated = await service.update_tool_display_name(owner.id, tool.id, " Renamed ")
+
+        assert updated.display_name == "Renamed"
+
+    async def test_default_enabled_rejects_tool_of_another_server(self):
+        service, mock_repo, mock_tool_repo, user = _make_service()
+        owner = _make_server(user.tenant_id)
+        other = _make_server(user.tenant_id)
+        tool = self._tool_on(owner.id)
+        mock_tool_repo.one.return_value = tool
+        mock_repo.one.return_value = owner
+
+        with pytest.raises(NotFoundException):
+            await service.update_tool_default_enabled(other.id, tool.id, False)
+
+        mock_tool_repo.update.assert_not_awaited()

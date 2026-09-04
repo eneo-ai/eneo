@@ -8,7 +8,7 @@
   import { Button, Input } from "@eneo/ui";
   import { AlertTriangle, ChevronRight } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
-  import { getCapability } from "$lib/features/mcp/capabilities";
+  import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";
   import MCPServerEnabledSwitch from "./MCPServerEnabledSwitch.svelte";
   import MCPServerActions from "./MCPServerActions.svelte";
@@ -44,6 +44,15 @@
   // Activating a capability provider can be refused (unreachable, no usable
   // tools); the switch reports that here so it shows above the table.
   let switchError = $state("");
+
+  // The switch column means "activated as provider" for capability rows and
+  // "enabled for the tenant" for general servers; label it for what is shown.
+  const switchColumnLabel = $derived(
+    filteredServers.length > 0 &&
+      filteredServers.every((server) => isCapabilityPurpose(server.purpose))
+      ? m.active()
+      : m.enabled()
+  );
 
   function toggleExpanded(serverId: string) {
     expandedServerId = expandedServerId === serverId ? null : serverId;
@@ -95,7 +104,7 @@
           >
           <th
             class="border-default text-muted h-12 w-28 border-b px-4 text-center text-xs font-medium tracking-wider uppercase"
-            >{m.enabled()}</th
+            >{switchColumnLabel}</th
           >
           <th
             class="border-default text-muted h-12 w-16 border-b px-4 text-left text-xs font-medium tracking-wider uppercase"
