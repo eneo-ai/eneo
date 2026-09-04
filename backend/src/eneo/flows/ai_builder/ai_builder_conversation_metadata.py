@@ -2361,8 +2361,9 @@ def metadata_for_user_message(
             evidence_classification_level=review_evidence_level or 0,
         ).to_metadata()
     if evidence_floor:
-        # Written on every accepted turn once evidence entered the
-        # conversation, so the bounded tail compaction keeps still carries it.
+        # The conversation's own floor, written on every accepted turn once
+        # evidence entered it, so the bounded tail that compaction keeps
+        # always carries it.
         metadata[EVIDENCE_FLOOR_METADATA_KEY] = evidence_floor
     return metadata or None
 

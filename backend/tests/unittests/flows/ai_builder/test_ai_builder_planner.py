@@ -1211,6 +1211,46 @@ async def test_requirements_confirmation_reuses_latest_saved_step_scope(
     assert resolve_context.await_args.kwargs["context"] == scoped_context
 
 
+@pytest.mark.asyncio
+async def test_accepted_turn_persists_the_evidence_floor_it_was_held_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The floor the service resolved for a turn is written on the accepted
+    user message, whether or not the turn named a review, so the next turn
+    reads it from the retained conversation."""
+    planner = _make_planner()
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+        latest_plan_id=None,
+    )
+    prepare = AsyncMock(side_effect=RuntimeError("accepted"))
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        prepare,
+    )
+    stream = planner.send_message(
+        session_id=uuid4(),
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Fortsätt"),
+        message="Fortsätt",
+        evidence_floor=3,
+        completion_model_route=_route(),
+        flow=cast(Any, SimpleNamespace(id=uuid4())),
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+    with pytest.raises(RuntimeError, match="accepted"):
+        await anext(stream)
+    accepted = planner.repo.get_session.return_value.conversation[-1]
+    assert accepted.role == "user"
+    assert (accepted.metadata or {}).get("evidence_floor") == 3
+    assert "review_context" not in (accepted.metadata or {})
+
+
 def test_prepare_user_question_metadata_ingests_structured_slot_answer() -> None:
     result = prepare_user_question_metadata(
         conversation=[],

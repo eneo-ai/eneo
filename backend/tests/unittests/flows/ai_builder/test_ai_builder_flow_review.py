@@ -8,6 +8,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+    compact_ai_builder_conversation,
+)
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     conversation_evidence_floor,
     metadata_for_user_message,
@@ -619,9 +622,10 @@ async def test_packet_refuses_a_flow_with_more_steps_than_it_reads(user):
 
 @pytest.mark.asyncio
 async def test_the_evidence_floor_persists_with_the_turn_and_never_drops(user):
-    """The level a turn was held to is written by the server next to the
-    review reference; later turns are held to the highest level seen, even
-    after the review itself went stale and yields no evidence."""
+    """The level a turn was held to is stored by the server, first beside the
+    review reference and then as the conversation's own floor on every later
+    accepted turn; a turn is held to the highest level seen even after the
+    review itself went stale and yields no evidence."""
     packet = _packet(version=3, checksum="new")
     finding = packet.facts[0].finding_id
     context = AIBuilderReviewContext(
@@ -658,3 +662,80 @@ async def test_the_evidence_floor_persists_with_the_turn_and_never_drops(user):
     assert conversation_evidence_floor(compacted.conversation) == 3
     # No evidence, nothing written: a plain turn carries no floor key.
     assert metadata_for_user_message(evidence_floor=0) is None
+
+
+def test_the_floor_survives_the_real_compactor_dropping_the_review_message(user):
+    """Compaction keeps a bounded tail; because every accepted turn since the
+    review re-wrote the floor, the tail still carries it once the review
+    message itself is gone."""
+    review = metadata_for_user_message(
+        review_context=AIBuilderReviewContext(
+            flow_version=1, definition_checksum="a", finding_ids=["0" * 16]
+        ),
+        review_evidence_level=3,
+    )
+    conversation = [
+        ConversationMessage(role="user", content="Förbered ändring", metadata=review),
+        ConversationMessage(role="assistant", content="Här är ett förslag."),
+    ]
+    for index in range(30):
+        conversation.append(
+            ConversationMessage(
+                role="user",
+                content=f"Mer {index}",
+                metadata=metadata_for_user_message(evidence_floor=3),
+            )
+        )
+        conversation.append(ConversationMessage(role="assistant", content="Ok."))
+    compacted = compact_ai_builder_conversation(
+        conversation, max_messages=12, tail_messages=8
+    )
+    assert len(compacted) < len(conversation)
+    assert all("review_context" not in (m.metadata or {}) for m in compacted)
+    assert conversation_evidence_floor(compacted) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_retained_floor_refuses_a_lower_named_model_before_any_provider_work(
+    user,
+):
+    """The service resolves the floor from the retained conversation alone and
+    refuses a named model below it while preparing the turn."""
+    from unittest.mock import MagicMock
+
+    model = MagicMock()
+    model.id = uuid4()
+    model.can_access = True
+    model.provider_id = uuid4()
+    model.security_classification = SimpleNamespace(security_level=1)
+    space = MagicMock()
+    space.completion_models = [model]
+    space.allows_model_security_classification.return_value = True
+    session = _edit_session(user, review_metadata=None)
+    session.conversation.append(
+        ConversationMessage(
+            role="user",
+            content="Fortsätt",
+            metadata=metadata_for_user_message(evidence_floor=3),
+        )
+    )
+    completion_service = AsyncMock()
+    service = AIBuilderService(
+        user=user,
+        repo=AsyncMock(),
+        flow_service=AsyncMock(),
+        completion_service=completion_service,
+        space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
+        flow_review_service=SimpleNamespace(build_packet=AsyncMock()),
+    )
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await service.prepare_message_context(
+            session=session,
+            space=space,
+            model_id=model.id,
+            active_provider_ids={model.provider_id},
+            tenant_flow_settings=None,
+        )
+    assert refused.value.code == AIBuilderErrorCode.PLANNER_MODEL_BELOW_EVIDENCE_LEVEL
+    completion_service.resolve_model_route.assert_not_awaited()
