@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from eneo.flows.ai_builder.ai_builder_action_policy import build_planner_action_policy
-from eneo.flows.ai_builder.ai_builder_discovery import analyze_discovery
+from eneo.flows.ai_builder.ai_builder_discovery import (
+    analyze_discovery,
+    build_registry_question_followup,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
     SLOT_INTERACTION_POLICIES,
@@ -117,9 +120,9 @@ def test_a_result_wanted_in_the_template_never_becomes_a_generated_document() ->
     state = build_planning_state_from_conversation(conversation)
 
     mode = state.resolved_slots.get("docx_output_mode")
-    assert mode is None or (
-        mode.value == "template_fill_docx" and mode.source != "policy_default"
-    )
+    assert mode is not None
+    assert mode.value == "template_fill_docx" and mode.source != "policy_default"
+    assert not mode.is_commit_grade
     assert (
         evaluate_slot_interaction(
             SLOT_INTERACTION_POLICIES["docx_output_mode"],
@@ -137,6 +140,11 @@ def test_a_result_wanted_in_the_template_never_becomes_a_generated_document() ->
     )
     assert policy.allowed_action_kinds == ("ask_question",)
     assert "docx_output_mode" in policy.allowed_ask_question_targets
+    followup = build_registry_question_followup(
+        "docx_output_mode", conversation, planning_state=state
+    )
+    assert followup is not None
+    assert followup.question_data.recommended_option_id == "template_fill_docx"
 
 
 def test_validating_several_files_against_a_policy_is_asked_how_to_compare() -> None:

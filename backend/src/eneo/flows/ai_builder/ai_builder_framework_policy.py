@@ -793,6 +793,12 @@ def resolve_docx_output_mode(
     output_text = scoped_text.preferred_output_text()
     has_docx_context = contains_any_phrase(output_text, DOCX_CONTEXT_MARKERS)
     if not has_docx_context:
+        # The terminal is already known to be a DOCX here, so template wording
+        # about the result ("i kommunens mall") names the mode without the word
+        # DOCX; the reading stays a heuristic, so the policy still asks and the
+        # question recommends the template instead of a generated document.
+        if contains_any_phrase(output_text, DOCX_TEMPLATE_MODE_MARKERS):
+            return "template_fill_docx"
         if _looks_like_docx_template_fill_terminal_output(scoped_text.full_text):
             return "template_fill_docx"
         return None
