@@ -45,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_question_state import (
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
+    build_understanding,
     resolve_locale,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
@@ -211,6 +212,7 @@ async def _dispatch_question(
                 flow=request.flow,
                 planned_remaining=decision.planned_remaining,
                 locale=resolve_locale(request.ui_language),
+                planning_state=request.planning_state,
             ),
         )
 
@@ -271,6 +273,7 @@ def _situate_question(
     flow: Flow | None,
     planned_remaining: int | None,
     locale: Locale,
+    planning_state: PlanningState | None = None,
 ) -> StructuredQuestionPayload:
     """Place this question in the interview, and in the flow it is asked about.
 
@@ -309,11 +312,23 @@ def _situate_question(
     keeps_recommendation = (
         payload.recommended_option_id == current_option_id if flow is not None else True
     )
+    question_index = question_ordinal_in_session(
+        conversation, question_id=payload.question_id
+    )
+    # The first question of a create session opens with what was understood so
+    # far; later questions and edit sessions carry none, so the user reads the
+    # comprehension once, before deciding anything.
+    understanding = (
+        build_understanding(planning_state, ui_language=locale)
+        if planning_state is not None and flow is None and question_index == 1
+        else None
+    )
     return StructuredQuestionPayload.model_validate(
         payload.model_dump()
         | {
-            "question_index": question_ordinal_in_session(
-                conversation, question_id=payload.question_id
+            "question_index": question_index,
+            "understanding": (
+                understanding.model_dump() if understanding is not None else None
             ),
             "questions_planned_remaining": planned_remaining,
             "topic": _question_topic(payload, locale=locale),
