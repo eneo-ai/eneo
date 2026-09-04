@@ -2461,6 +2461,9 @@
         "smoke_v3"
       ],
       "question_answer_overrides": {
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
         "terminal_output": {
           "selected_option_id": "pdf_document"
         }
@@ -5131,6 +5134,9 @@
       "complexity": "medium",
       "domain": "municipality_archives",
       "prompt": "Registratorn klistrar in en begäran om allmän handling och laddar upp träfflistor från arkiv och diarier. Strukturera efterfrågade handlingar, sökavgränsningar, möjliga träffar, sekretessfrågor som måste bedömas och nästa manuella steg. Skapa en intern PDF; gör ingen sekretessbedömning.",
+      "question_answer_overrides": {
+        "report_disposition": {"selected_option_id": "synthesized_overview"}
+      },
       "expected": {
         "min_steps": 3,
         "max_steps": 6,
@@ -6200,6 +6206,9 @@
       "domain": "municipality_procurement",
       "prompt": "Upphandlaren laddar upp krav, utvärderingsmodell och anbud samt fyller i run_reference, owning_unit och report_date. Bygg först en JSON-matris med supplier_reference, requirement_reference, stated_evidence, rubric_value och uncertainty. Användaren ska granska matrisen i visningsläge innan fortsatt bearbetning. Efter godkännande ska exakt ett skrivsteg skapa en neutral rapporttext och den ska renderas som PDF utan mall. Vinnare eller tilldelningsbeslut får inte föreslås.",
       "question_answer_overrides": {
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
         "runtime_metadata_fields": {
           "selected_option_id": "basic_runtime_metadata"
         },
@@ -6239,7 +6248,10 @@
         }
       },
       "expected": {
-        "allowed_question_event_ids": ["runtime_metadata_field_details"],
+        "allowed_question_event_ids": [
+          "report_disposition",
+          "runtime_metadata_field_details"
+        ],
         "min_steps": 3,
         "max_steps": 5,
         "terminal_output_type": "pdf",
@@ -6440,6 +6452,9 @@
       "domain": "municipality_information_security",
       "prompt": "Säkerhetsteamet laddar upp loggar och incidentanteckningar och fyller i run_reference, owning_unit och report_date. Strukturera först JSON med timeline, confirmed_facts, hypotheses, affected_systems och evidence_gaps. En analytiker ska granska JSON i visningsläge innan rapporten skapas. Efter godkännande ska exakt ett skrivsteg skilja fakta från hypoteser i en rapporttext som renderas som PDF utan mall.",
       "question_answer_overrides": {
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
         "runtime_metadata_fields": {
           "selected_option_id": "basic_runtime_metadata"
         },
@@ -6479,7 +6494,10 @@
         }
       },
       "expected": {
-        "allowed_question_event_ids": ["runtime_metadata_field_details"],
+        "allowed_question_event_ids": [
+          "report_disposition",
+          "runtime_metadata_field_details"
+        ],
         "min_steps": 3,
         "max_steps": 5,
         "terminal_output_type": "pdf",
@@ -10814,6 +10832,9 @@
       "domain": "municipality_building_permits",
       "prompt_file": "02_bygglov_pdf_till_docx.md",
       "synthetic_user_profile": "document_source",
+      "question_answer_overrides": {
+        "report_disposition": {"selected_option_id": "synthesized_overview"}
+      },
       "expected": {
         "min_steps": 3,
         "max_steps": 5,
@@ -10842,6 +10863,7 @@
       "domain": "municipality_building_permits",
       "prompt_file": "03_grannehornande_text_json_till_docx.md",
       "question_answer_overrides": {
+        "report_disposition": {"selected_option_id": "synthesized_overview"},
         "primary_runtime_input": {"selected_option_id": "text"},
         "runtime_metadata_fields": {"selected_option_id": "no_extra_metadata"}
       },
