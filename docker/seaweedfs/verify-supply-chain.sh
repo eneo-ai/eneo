@@ -7,10 +7,10 @@ readonly SOURCE_TREE="f6590c71c41ec414fc193b89e9d9dd586d39ad17"
 readonly SOURCE_ARCHIVE_SHA256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e"
 readonly SOURCE_LICENSE_SHA256="d789d433cc11da163273d1e39be2e8fa67642f9a58ef220d3f258fa9c14ef613"
 readonly DOWNSTREAM_PATCH_NAME="0001-upgrade-vulnerable-dependencies.patch"
-readonly DOWNSTREAM_PATCH_SHA256="24e01bfdf3bd29bdb3e4f9b55f6567332d6e6286342ef4a9097e7803fd7e8323"
+readonly DOWNSTREAM_PATCH_SHA256="1df1c50cc95f91da78408eda2693f601ceb523964fad085878162e37444e770c"
 readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DOWNSTREAM_PATCH="$SCRIPT_DIRECTORY/patches/$DOWNSTREAM_PATCH_NAME"
-readonly GO_IMAGE="docker.io/library/golang:1.25.13-bookworm@sha256:e401dae1bf814e29204a8cb7915682e1780951e609ca0dd8865ee1937f510c48"
+readonly GO_IMAGE="docker.io/library/golang:1.26.8-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81"
 readonly GO_LICENSES_REVISION="3e084b0caf710f7bfead967567539214f598c0a2"
 readonly GOVULNCHECK_VERSION="v1.6.0"
 
@@ -130,6 +130,8 @@ audit_source() {
             and .Version == "v1.82.1")
         and any(.[]; .Path == "golang.org/x/image"
             and .Version == "v0.45.0")
+        and any(.[]; .Path == "golang.org/x/crypto"
+            and .Version == "v0.56.0")
         ' "$output_directory/modules.json" >/dev/null
 
     cut -d, -f3 "$output_directory/licenses.csv" | LC_ALL=C sort -u \

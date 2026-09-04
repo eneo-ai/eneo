@@ -2,7 +2,7 @@
 
 # This image is built by Eneo from the exact upstream source archive below.
 # It is not an upstream SeaweedFS image and does not claim upstream signing.
-FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.25.13-bookworm@sha256:e401dae1bf814e29204a8cb7915682e1780951e609ca0dd8865ee1937f510c48 AS builder
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26.8-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81 AS builder
 
 ARG TARGETARCH
 ARG TARGETOS
@@ -20,7 +20,7 @@ RUN mkdir source \
     && test "$(sha256sum /tmp/seaweedfs.tar.gz | cut -d ' ' -f 1)" \
         = "2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e" \
     && test "$(sha256sum /tmp/seaweedfs-security.patch | cut -d ' ' -f 1)" \
-        = "24e01bfdf3bd29bdb3e4f9b55f6567332d6e6286342ef4a9097e7803fd7e8323" \
+        = "1df1c50cc95f91da78408eda2693f601ceb523964fad085878162e37444e770c" \
     && git -C source apply --check /tmp/seaweedfs-security.patch \
     && git -C source apply /tmp/seaweedfs-security.patch
 
@@ -46,14 +46,14 @@ LABEL org.opencontainers.image.title="Eneo SeaweedFS object-content store" \
       org.opencontainers.image.description="Eneo-built reference S3-compatible byte store for object content" \
       org.opencontainers.image.source="https://github.com/eneo-ai/eneo" \
       org.opencontainers.image.vendor="Eneo" \
-      org.opencontainers.image.version="4.40-eneo.2" \
+      org.opencontainers.image.version="4.40-eneo.3" \
       org.opencontainers.image.licenses="Apache-2.0" \
       io.eneo.upstream.name="SeaweedFS" \
       io.eneo.upstream.version="4.40" \
       io.eneo.upstream.commit="875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa" \
       io.eneo.upstream.tree="f6590c71c41ec414fc193b89e9d9dd586d39ad17" \
       io.eneo.upstream.archive.sha256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e" \
-      io.eneo.downstream.patch.sha256="24e01bfdf3bd29bdb3e4f9b55f6567332d6e6286342ef4a9097e7803fd7e8323"
+      io.eneo.downstream.patch.sha256="1df1c50cc95f91da78408eda2693f601ceb523964fad085878162e37444e770c"
 
 COPY --from=builder --chown=65532:65532 /out/weed /usr/local/bin/weed
 COPY --from=builder /out/SEAWEEDFS-LICENSE /licenses/seaweedfs/LICENSE
