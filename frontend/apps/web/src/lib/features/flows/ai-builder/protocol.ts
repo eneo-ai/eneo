@@ -443,7 +443,16 @@ const questionEventDataSchema = z.object({
   // that can shrink or grow, so it is never rendered as progress to an end.
   questions_planned_remaining: z.int().nonnegative().nullable().optional(),
   requires_confirm: z.boolean().optional(),
-  input_field_collection: z.boolean().optional()
+  input_field_collection: z.boolean().optional(),
+  // On the first question of a create session only: what was understood so
+  // far, from commit-grade readings, with weak readings named as open topics.
+  understanding: z
+    .object({
+      sentences: stringArraySchema,
+      open_topics: stringArraySchema.optional()
+    })
+    .nullable()
+    .optional()
 }) satisfies z.ZodType<AIBuilderQuestionEventData>;
 
 const requirementsSummaryEventDataSchema = z.object({
@@ -515,7 +524,49 @@ const requirementsSummaryEventDataSchema = z.object({
         selected_value: z.string()
       })
     )
-    .optional()
+    .optional(),
+  // Every attachment as a typed row; whether it travels is the commit's decision.
+  attachment_rows: z
+    .array(
+      z.object({
+        file_id: z.string(),
+        filename: z.string(),
+        role: z.enum([
+          "runtime_input_sample",
+          "template",
+          "reference_material",
+          "example_output",
+          "context_only"
+        ]),
+        readable: z.boolean(),
+        coverage: z.enum(["fully_seen", "excerpt_truncated", "inventory_only"]),
+        travels: z.boolean(),
+        placeholders: stringArraySchema.nullable().optional()
+      })
+    )
+    .optional(),
+  // The contract a run will follow: what it receives and what kind of result
+  // comes out. Never values, prose, layout, steps or execution.
+  run_preview: z
+    .object({
+      runtime_input: z.string().nullable().optional(),
+      runtime_input_label: z.string().nullable().optional(),
+      max_files: z.int().min(1).nullable().optional(),
+      result_type: z.string().nullable().optional(),
+      result_type_label: z.string().nullable().optional(),
+      report_layout: z.string().nullable().optional(),
+      report_layout_label: z.string().nullable().optional(),
+      required_sections: stringArraySchema.optional(),
+      obligations: stringArraySchema.optional(),
+      template: z
+        .object({ filename: z.string(), placeholder_count: z.int().nonnegative() })
+        .nullable()
+        .optional()
+    })
+    .nullable()
+    .optional(),
+  // Attachments whose role is a weak reading; display provenance, not identity.
+  weak_role_file_ids: stringArraySchema.optional()
 }) satisfies z.ZodType<RequirementsSummary>;
 
 const planEventDataSchema = z.strictObject({

@@ -748,6 +748,72 @@ describe("FlowAIBuilder discovery screens", () => {
     });
   });
 
+  it("shows every attachment as a typed row and previews the run contract", async () => {
+    const typed = {
+      ...SUMMARY,
+      attachment_rows: [
+        {
+          file_id: "00000000-0000-0000-0000-000000000801",
+          filename: "mall.docx",
+          role: "template",
+          readable: true,
+          coverage: "fully_seen",
+          travels: true,
+          placeholders: ["diarienummer", "datum"]
+        },
+        {
+          file_id: "00000000-0000-0000-0000-000000000802",
+          filename: "underlag.pdf",
+          role: "reference_material",
+          readable: true,
+          coverage: "fully_seen",
+          travels: false,
+          placeholders: null
+        }
+      ],
+      weak_role_file_ids: ["00000000-0000-0000-0000-000000000802"],
+      run_preview: {
+        runtime_input: "documents",
+        runtime_input_label: "Dokument",
+        max_files: 5,
+        result_type: "docx_document",
+        result_type_label: "Word-dokument",
+        report_layout: null,
+        report_layout_label: null,
+        required_sections: [],
+        obligations: [],
+        template: { filename: "mall.docx", placeholder_count: 2 }
+      }
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Fyll i kommunens mall"),
+            assistantMessage("a1", "Här är min tolkning.", { requirements_summary: typed })
+          ]
+        })
+      ]
+    });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    const rows = await screen.findByTestId("attachment-rows");
+    expect(rows.textContent).toContain("mall.docx");
+    expect(rows.textContent).toContain(m.ai_builder_attachment_travels());
+    expect(rows.textContent).toContain(m.ai_builder_attachment_placeholders({ count: "2" }));
+    expect(rows.textContent).toContain("underlag.pdf");
+    expect(rows.textContent).toContain(m.ai_builder_attachment_not_carried());
+    expect(rows.textContent).toContain(m.ai_builder_attachment_role_unsure());
+
+    const preview = screen.getByTestId("run-preview");
+    expect(preview.textContent).toContain(m.ai_builder_run_preview_title());
+    expect(preview.textContent).toContain("Dokument");
+    expect(preview.textContent).toContain(m.ai_builder_run_preview_max_files({ count: "5" }));
+    expect(preview.textContent).toContain("Word-dokument");
+    expect(preview.textContent).toContain("mall.docx");
+  });
+
   it("shows an assumption as a row and reopens its question on the server", async () => {
     const assumed = {
       ...SUMMARY,

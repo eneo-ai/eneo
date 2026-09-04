@@ -392,6 +392,24 @@
       : (assumptions[0] ?? "")
   );
   const manualNotes = $derived(summary.manual_setup_notes ?? []);
+  /** Every attachment as the server typed it; the role label is the client's. */
+  const attachmentRows = $derived(summary.attachment_rows ?? []);
+  const weakRoleIds = $derived(new Set(summary.weak_role_file_ids ?? []));
+  const runPreview = $derived(summary.run_preview ?? null);
+  const attachmentRoleLabel = (role: string): string => {
+    switch (role) {
+      case "runtime_input_sample":
+        return m.ai_builder_attachment_role_runtime_input_sample();
+      case "template":
+        return m.ai_builder_attachment_role_template();
+      case "reference_material":
+        return m.ai_builder_attachment_role_reference_material();
+      case "example_output":
+        return m.ai_builder_attachment_role_example_output();
+      default:
+        return m.ai_builder_attachment_role_context_only();
+    }
+  };
 </script>
 
 <div
@@ -609,7 +627,47 @@
                   {/if}
                 </div>
               {/each}
-              {#if attachments.length > 0}
+              {#if attachmentRows.length > 0}
+                <div
+                  class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
+                >
+                  <dt class="text-secondary text-[0.8125rem]">
+                    {m.ai_builder_attachment_rows_title()}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem]">
+                    <ul class="flex flex-col gap-1.5" data-testid="attachment-rows">
+                      {#each attachmentRows as row (row.file_id)}
+                        <li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span class="font-medium" title={row.filename}>{row.filename}</span>
+                          <span class="text-secondary">{attachmentRoleLabel(row.role)}</span>
+                          <span class="text-secondary">
+                            · {row.travels
+                              ? m.ai_builder_attachment_travels()
+                              : m.ai_builder_attachment_not_carried()}
+                          </span>
+                          {#if row.placeholders && row.placeholders.length > 0}
+                            <span class="text-secondary">
+                              · {m.ai_builder_attachment_placeholders({
+                                count: String(row.placeholders.length)
+                              })}
+                            </span>
+                          {/if}
+                          {#if !row.readable}
+                            <span class="text-secondary"
+                              >· {m.ai_builder_attachment_unreadable()}</span
+                            >
+                          {/if}
+                          {#if weakRoleIds.has(row.file_id)}
+                            <span class="text-warning-default text-[0.8rem] font-medium">
+                              {m.ai_builder_attachment_role_unsure()}
+                            </span>
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  </dd>
+                </div>
+              {:else if attachments.length > 0}
                 <div
                   class="border-dimmer grid gap-x-4 gap-y-0.5 border-t py-2.5 sm:grid-cols-[12.5rem_1fr]"
                 >
@@ -625,6 +683,61 @@
                         {file.name}
                       </span>
                     {/each}
+                  </dd>
+                </div>
+              {/if}
+            </dl>
+          </section>
+        {/if}
+
+        {#if runPreview}
+          <section class="border-default mt-4 border-t pt-3.5" data-testid="run-preview">
+            <h3 class="text-primary text-[0.8125rem] font-bold">
+              {m.ai_builder_run_preview_title()}
+            </h3>
+            <p class="text-secondary mt-0.5 text-[0.8rem]">{m.ai_builder_run_preview_note()}</p>
+            <dl class="mt-1.5 flex flex-col">
+              {#if runPreview.runtime_input_label}
+                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
+                  <dt class="text-secondary text-[0.8125rem]">
+                    {m.ai_builder_run_preview_input()}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">
+                    {runPreview.runtime_input_label}{#if runPreview.max_files}, {m.ai_builder_run_preview_max_files(
+                        { count: String(runPreview.max_files) }
+                      )}{/if}
+                  </dd>
+                </div>
+              {/if}
+              {#if runPreview.result_type_label}
+                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
+                  <dt class="text-secondary text-[0.8125rem]">
+                    {m.ai_builder_run_preview_result()}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">
+                    {runPreview.result_type_label}{#if runPreview.report_layout_label}, {runPreview.report_layout_label}{/if}
+                  </dd>
+                </div>
+              {/if}
+              {#if (runPreview.required_sections ?? []).length > 0}
+                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
+                  <dt class="text-secondary text-[0.8125rem]">
+                    {m.ai_builder_run_preview_sections()}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem]">
+                    {(runPreview.required_sections ?? []).join(", ")}
+                  </dd>
+                </div>
+              {/if}
+              {#if runPreview.template}
+                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
+                  <dt class="text-secondary text-[0.8125rem]">
+                    {m.ai_builder_run_preview_template()}
+                  </dt>
+                  <dd class="text-primary text-[0.85rem] font-medium">
+                    {runPreview.template.filename}, {m.ai_builder_attachment_placeholders({
+                      count: String(runPreview.template.placeholder_count)
+                    })}
                   </dd>
                 </div>
               {/if}
