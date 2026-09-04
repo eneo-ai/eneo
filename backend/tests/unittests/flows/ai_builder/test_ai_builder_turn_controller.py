@@ -65,6 +65,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSchemaInferenceOutcome,
     ExampleOutputSourceCoverage,
     ExampleOutputStyleConstraint,
+    FileRole,
     FileRoleEvidence,
     NamedResultEvidence,
     PlanningState,
@@ -1280,6 +1281,72 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
         f"(#{UUID('00000000-0000-0000-0000-000000000703')}): selected role Context only; "
         "readable text: no; coverage: no readable text is available." in assumption
         for assumption in english.payload.assumptions
+    )
+
+
+@pytest.mark.parametrize(
+    ("role", "swedish", "english"),
+    [
+        (
+            "runtime_input_sample",
+            "flödet läser inte just den här filen",
+            "the flow does not read this file itself",
+        ),
+        (
+            "template",
+            "Mallen följer med flödet och fylls i vid varje körning",
+            "The template travels with the flow and is filled at every run",
+        ),
+        (
+            "reference_material",
+            "följer inte med i körningar; varje körning laddar upp sina egna dokument",
+            "is not carried into runs; each run uploads its own documents",
+        ),
+        (
+            "example_output",
+            "visar resultatets form och följer inte med i körningar",
+            "shows the result's form and is not carried into runs",
+        ),
+        (
+            "context_only",
+            "flödet läser den aldrig",
+            "the flow never reads it",
+        ),
+    ],
+)
+def test_server_confirmation_says_what_each_attachment_role_means_for_runs(
+    role: FileRole, swedish: str, english: str
+) -> None:
+    # The role label alone leaves the user to guess whether the file travels
+    # with the flow; only a template does, and the row says so per role.
+    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=UUID("00000000-0000-0000-0000-000000000801"),
+            filename="attached.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role=role,
+            source="model",
+            confidence="high",
+        ),
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    swedish_decision = _decision(state=state, ui_language="sv")
+    english_decision = _decision(state=state, ui_language="en")
+
+    assert isinstance(swedish_decision, ConfirmRequirements)
+    assert isinstance(english_decision, ConfirmRequirements)
+    assert any(
+        'Bilaga "attached.pdf"' in assumption and swedish in assumption
+        for assumption in swedish_decision.payload.assumptions
+    )
+    assert any(
+        'Attachment "attached.pdf"' in assumption and english in assumption
+        for assumption in english_decision.payload.assumptions
     )
 
 

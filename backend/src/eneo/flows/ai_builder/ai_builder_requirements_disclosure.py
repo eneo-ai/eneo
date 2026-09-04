@@ -618,19 +618,60 @@ def _attachment_assumption(
     # label, not an identity, so the whole id is disclosed.
     reference = str(item.file_id)
     placeholders = _template_placeholder_text(item, locale, render_value=render_value)
+    consequence = _attachment_role_consequence(item.role, locale)
     if locale == "sv":
         readable = "ja" if item.has_readable_text else "nej"
         return (
             f'{_ATTACHMENT_ASSUMPTION_PREFIX_SV}Bilaga "{filename}" (#{reference}): '
             f"vald roll {role}; läsbar text: {readable}; "
-            f"täckning: {coverage}.{placeholders}"
+            f"täckning: {coverage}. {consequence}{placeholders}"
         )
     readable = "yes" if item.has_readable_text else "no"
     return (
         f'{_ATTACHMENT_ASSUMPTION_PREFIX_EN}Attachment "{filename}" (#{reference}): '
         f"selected role {role}; "
-        f"readable text: {readable}; coverage: {coverage}.{placeholders}"
+        f"readable text: {readable}; coverage: {coverage}. {consequence}{placeholders}"
     )
+
+
+def _attachment_role_consequence(role: FileRole, locale: Locale) -> str:
+    """What the role means for runs, so the user is not left to infer it.
+
+    Only a template travels with the flow. Every other attachment was read
+    while designing, and each run brings its own material.
+    """
+
+    consequences_sv: dict[FileRole, str] = {
+        "runtime_input_sample": (
+            "Filen visar vad varje körning laddar upp; flödet läser inte just "
+            "den här filen."
+        ),
+        "template": "Mallen följer med flödet och fylls i vid varje körning.",
+        "reference_material": (
+            "Underlaget användes när flödet utformades och följer inte med i "
+            "körningar; varje körning laddar upp sina egna dokument."
+        ),
+        "example_output": (
+            "Filen visar resultatets form och följer inte med i körningar."
+        ),
+        "context_only": "Bakgrund för samtalet; flödet läser den aldrig.",
+    }
+    consequences_en: dict[FileRole, str] = {
+        "runtime_input_sample": (
+            "This file shows what each run uploads; the flow does not read this "
+            "file itself."
+        ),
+        "template": "The template travels with the flow and is filled at every run.",
+        "reference_material": (
+            "This material was read while designing the flow and is not carried "
+            "into runs; each run uploads its own documents."
+        ),
+        "example_output": (
+            "This file shows the result's form and is not carried into runs."
+        ),
+        "context_only": "Background for this conversation; the flow never reads it.",
+    }
+    return (consequences_sv if locale == "sv" else consequences_en)[role]
 
 
 def _template_placeholder_text(
