@@ -247,6 +247,15 @@ class CrawlRunRepository:
         )
         return CrawlRun.to_domain(record=record) if record is not None else None
 
+    async def get_latest_for_website(self, website_id: UUID) -> CrawlRun | None:
+        record = await self.session.scalar(
+            sa.select(CrawlRunsTable)
+            .where(CrawlRunsTable.website_id == website_id)
+            .order_by(CrawlRunsTable.created_at.desc(), CrawlRunsTable.id.desc())
+            .limit(1)
+        )
+        return CrawlRun.to_domain(record=record) if record is not None else None
+
     async def lock_website_deletion(
         self,
         website_id: UUID,

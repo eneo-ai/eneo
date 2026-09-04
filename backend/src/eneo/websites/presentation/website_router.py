@@ -405,6 +405,20 @@ async def get_crawl_runs(
     )
 
 
+@router.get(
+    "/{id}/runs/latest/",
+    response_model=CrawlRunPublic | None,
+    responses=responses.get_responses([403, 404]),
+    description="Read the latest crawl run without loading the full website or run history.",
+)
+async def get_latest_crawl_run(
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
+) -> CrawlRunPublic | None:
+    run = await container.website_crud_service().get_latest_crawl_run(id)
+    return CrawlRunPublic.from_domain(run) if run is not None else None
+
+
 @router.post(
     "/{id}/transfer/",
     status_code=204,

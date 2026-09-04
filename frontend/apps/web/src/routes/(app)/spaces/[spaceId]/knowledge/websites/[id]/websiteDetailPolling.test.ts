@@ -1,4 +1,4 @@
-import type { CrawlRun, Website, WebsiteInfoBlobPage } from "@eneo/eneo-js";
+import type { CrawlRun, Website } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
 import { pollWebsiteDetail } from "./websiteDetailPolling";
 
@@ -23,48 +23,46 @@ function crawlRun(phase: CrawlRun["phase"]): CrawlRun {
 }
 
 describe("website detail polling", () => {
-  test("refreshes one bounded indexed-content page when a crawl becomes terminal", async () => {
+  test.each(["running", "terminal"] as const)(
+    "discovers a new %s run using the bounded latest-run endpoint",
+    async (phase) => {
+      const website = { id: crypto.randomUUID() } as Website;
+      const previous = crawlRun("terminal");
+      const latestRun = crawlRun(phase);
+      const list = vi.fn().mockResolvedValue([latestRun, previous]);
+      const latest = vi.fn().mockResolvedValue(latestRun);
+      const eneo = { websites: { crawlRuns: { latest, list } } };
+      const result = await pollWebsiteDetail(eneo as never, website, [previous]);
+      expect(latest).toHaveBeenCalledWith(website);
+      expect(list).not.toHaveBeenCalled();
+      expect(result).toEqual({ crawlRuns: [previous, latestRun], latestRun });
+
+      await pollWebsiteDetail(eneo as never, website, result.crawlRuns);
+      expect(list).not.toHaveBeenCalled();
+    }
+  );
+
+  test("publishes a known run's terminal status without fetching history or indexed content", async () => {
     const website = { id: crypto.randomUUID() } as Website;
     const running = crawlRun("running");
-    const terminal = crawlRun("terminal");
-    const infoBlobPage = {
-      items: [{ id: crypto.randomUUID() }],
-      count: 1,
-      limit: 100,
-      total_count: 1,
-      next_cursor: null,
-      previous_cursor: null
-    } as WebsiteInfoBlobPage;
-    const listCrawlRuns = vi.fn().mockResolvedValue([terminal]);
-    const listInfoBlobs = vi.fn().mockResolvedValue(infoBlobPage);
-    const eneo = {
-      websites: {
-        crawlRuns: { list: listCrawlRuns },
-        indexedBlobs: { listPage: listInfoBlobs }
-      }
-    };
-
-    const result = await pollWebsiteDetail(eneo as never, website, [running]);
-
-    expect(listCrawlRuns).toHaveBeenCalledWith(website);
-    expect(listInfoBlobs).toHaveBeenCalledWith({ id: website.id, limit: 100 });
-    expect(result).toEqual({ crawlRuns: [terminal], infoBlobPage });
+    const terminal = { ...crawlRun("terminal"), id: running.id };
+    const list = vi.fn();
+    const eneo = { websites: { crawlRuns: { latest: vi.fn().mockResolvedValue(terminal), list } } };
+    expect(await pollWebsiteDetail(eneo as never, website, [running])).toEqual({
+      crawlRuns: [terminal],
+      latestRun: terminal
+    });
+    expect(list).not.toHaveBeenCalled();
   });
 
-  test("does not reload indexed content while the crawl remains active", async () => {
+  test("an idle website without any runs makes only a latest-run request", async () => {
     const website = { id: crypto.randomUUID() } as Website;
-    const running = crawlRun("running");
-    const listInfoBlobs = vi.fn();
-    const eneo = {
-      websites: {
-        crawlRuns: { list: vi.fn().mockResolvedValue([running]) },
-        indexedBlobs: { listPage: listInfoBlobs }
-      }
-    };
-
-    const result = await pollWebsiteDetail(eneo as never, website, [running]);
-
-    expect(listInfoBlobs).not.toHaveBeenCalled();
-    expect(result).toEqual({ crawlRuns: [running] });
+    const list = vi.fn();
+    const eneo = { websites: { crawlRuns: { latest: vi.fn().mockResolvedValue(null), list } } };
+    expect(await pollWebsiteDetail(eneo as never, website, [])).toEqual({
+      crawlRuns: [],
+      latestRun: null
+    });
+    expect(list).not.toHaveBeenCalled();
   });
 });

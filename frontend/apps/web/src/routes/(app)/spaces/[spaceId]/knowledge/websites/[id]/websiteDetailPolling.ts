@@ -1,27 +1,24 @@
-import type { CrawlRun, Eneo, Website, WebsiteInfoBlobPage } from "@eneo/eneo-js";
-import { PAGINATION } from "$lib/core/constants";
-import { isActiveCrawlRun } from "$lib/features/knowledge/crawlRunState";
+import type { CrawlRun, Eneo, Website } from "@eneo/eneo-js";
 
 type WebsiteDetailPoll = {
   crawlRuns: CrawlRun[];
-  infoBlobPage?: WebsiteInfoBlobPage;
+  latestRun: CrawlRun | null;
 };
+
+export function mergeLatestCrawlRun(currentRuns: CrawlRun[], latestRun: CrawlRun): CrawlRun[] {
+  return currentRuns.some((run) => run.id === latestRun.id)
+    ? currentRuns.map((run) => (run.id === latestRun.id ? latestRun : run))
+    : [...currentRuns, latestRun];
+}
 
 export async function pollWebsiteDetail(
   eneo: Eneo,
   website: Website,
   currentRuns: CrawlRun[]
 ): Promise<WebsiteDetailPoll> {
-  const hadActiveRun = currentRuns.some(isActiveCrawlRun);
-  const crawlRuns = [...(await eneo.websites.crawlRuns.list(website))].reverse();
+  const latestRun = await eneo.websites.crawlRuns.latest(website);
+  if (!latestRun) return { crawlRuns: currentRuns, latestRun: null };
 
-  if (!hadActiveRun || crawlRuns.some(isActiveCrawlRun)) {
-    return { crawlRuns };
-  }
-
-  const infoBlobPage = await eneo.websites.indexedBlobs.listPage({
-    id: website.id,
-    limit: PAGINATION.PAGE_SIZE
-  });
-  return { crawlRuns, infoBlobPage };
+  // Publish confirmed status before attempting secondary history/content reads.
+  return { crawlRuns: mergeLatestCrawlRun(currentRuns, latestRun), latestRun };
 }

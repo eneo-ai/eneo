@@ -4820,6 +4820,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/websites/{id}/runs/latest/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Latest Crawl Run
+     * @description Read the latest crawl run without loading the full website or run history.
+     */
+    get: operations["get_latest_crawl_run_api_v1_websites__id__runs_latest__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/websites/{id}/transfer/": {
     parameters: {
       query?: never;
@@ -38196,6 +38216,56 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_latest_crawl_run_api_v1_websites__id__runs_latest__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"] | null;
         };
       };
       /** @description Forbidden */

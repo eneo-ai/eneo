@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
+from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.database.database import AsyncSession
 from eneo.database.tables.ai_models_table import (
     CompletionModels,
@@ -1836,6 +1838,74 @@ class SpaceRepository:
             raise NotFoundException()
 
         return space
+
+    async def get_website_access_facts(self, website_id: UUID) -> SpaceAccessFacts:
+        """Load only this caller's facts for website access, not the space aggregate."""
+        space = await self.session.scalar(
+            sa.select(Spaces)
+            .join(WebsitesTable, WebsitesTable.space_id == Spaces.id)
+            .where(WebsitesTable.id == website_id)
+            .where(WebsitesTable.tenant_id == self.user.tenant_id)
+            .where(Spaces.tenant_id == self.user.tenant_id)
+        )
+        if space is None:
+            raise NotFoundException("Website not found")
+
+        member_rows = await self.session.execute(
+            sa.select(SpacesUsers.user_id, SpacesUsers.role)
+            .join(Users, Users.id == SpacesUsers.user_id)
+            .where(
+                SpacesUsers.space_id == space.id,
+                SpacesUsers.user_id == self.user.id,
+                Users.deleted_at.is_(None),
+            )
+        )
+        group_rows = await self.session.execute(
+            sa.select(SpacesUserGroups.user_group_id, SpacesUserGroups.role)
+            .join(UserGroups, UserGroups.id == SpacesUserGroups.user_group_id)
+            .where(SpacesUserGroups.space_id == space.id)
+            .where(SpacesUserGroups.user_group_id.in_(self.user.user_groups_ids))
+            .where(
+                sa.or_(
+                    UserGroups.state.is_(None),
+                    UserGroups.state != UserGroupState.DELETED.value,
+                )
+            )
+        )
+        assistant_ids: Sequence[UUID] = ()
+        app_ids: Sequence[UUID] = ()
+        key = self.user.active_api_key
+        if key is not None and key.scope_type == ApiKeyScopeType.ASSISTANT:
+            assistant_ids = (
+                await self.session.scalars(
+                    sa.select(Assistants.id).where(
+                        Assistants.space_id == space.id,
+                        Assistants.id == key.scope_id,
+                        Assistants.is_default.is_(False),
+                    )
+                )
+            ).all()
+        elif key is not None and key.scope_type == ApiKeyScopeType.APP:
+            app_ids = (
+                await self.session.scalars(
+                    sa.select(Apps.id).where(
+                        Apps.space_id == space.id, Apps.id == key.scope_id
+                    )
+                )
+            ).all()
+        return SpaceAccessFacts(
+            id=space.id,
+            user_id=space.user_id,
+            tenant_space_id=space.tenant_space_id,
+            members={id: SpaceRoleFact(id=id, role=role) for id, role in member_rows},
+            group_members={
+                id: SpaceRoleFact(id=id, role=role) for id, role in group_rows
+            },
+            # Website access never uses the default assistant's identity.
+            default_assistant_id=None,
+            assistant_ids=frozenset(assistant_ids),
+            app_ids=frozenset(app_ids),
+        )
 
     async def get_space_by_website(self, website_id: UUID) -> Space:
         query = (

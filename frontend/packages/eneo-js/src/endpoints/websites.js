@@ -164,6 +164,18 @@ export function initWebsites(client) {
 
     crawlRuns: {
       /**
+       * Read the latest run without fetching website contents or run history.
+       * @param {{id: string} | Website} website Website
+       * @returns {Promise<CrawlRun | null>}
+       * @throws {EneoError}
+       */
+      latest: async ({ id }) =>
+        client.fetch("/api/v1/websites/{id}/runs/latest/", {
+          method: "get",
+          params: { path: { id } }
+        }),
+
+      /**
        * List all runs of a specific website
        * @param {{id: string} | Website} website Website
        * @returns {Promise<CrawlRun[]>}

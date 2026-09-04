@@ -21,6 +21,38 @@ from eneo.websites.domain.crawl_run_repo import (
 )
 
 
+async def test_stop_denies_access_without_cancelling_and_explains_permission() -> None:
+    website_id = uuid4()
+    run_id = uuid4()
+    crawl_service = SimpleNamespace(cancel=AsyncMock())
+    service = WebsiteCRUDService(
+        user=SimpleNamespace(),
+        space_service=SimpleNamespace(
+            get_space_by_website=AsyncMock(return_value=SimpleNamespace())
+        ),
+        space_repo=SimpleNamespace(),
+        crawl_run_repo=SimpleNamespace(
+            one=AsyncMock(return_value=SimpleNamespace(website_id=website_id))
+        ),
+        actor_manager=SimpleNamespace(
+            get_space_actor_from_space=Mock(
+                return_value=SimpleNamespace(can_create_websites=lambda: False)
+            )
+        ),
+        crawl_service=crawl_service,
+    )
+
+    with pytest.raises(UnauthorizedException, match="permission to stop"):
+        await service.cancel_crawl_run(run_id)
+
+    stopped, not_running, errors = await service.bulk_stop_websites([website_id])
+
+    assert stopped == []
+    assert not_running == []
+    assert errors == [WebsiteBulkError(website_id, WebsiteBulkErrorCode.NOT_AUTHORIZED)]
+    crawl_service.cancel.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_bulk_stop_only_cancels_active_websites() -> None:
     active_website_id = uuid4()

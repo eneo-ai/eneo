@@ -15,7 +15,7 @@
   import { isActiveCrawlRun } from "$lib/features/knowledge/crawlRunState";
   import { LoaderCircle } from "lucide-svelte";
   import type { WebsiteInfoBlobPage } from "@eneo/eneo-js";
-  import { pollWebsiteDetail } from "./websiteDetailPolling";
+  import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
 
   export let data;
 
@@ -28,25 +28,63 @@
   let totalInfoBlobCount = data.infoBlobPage.total_count;
   let loadingMoreInfoBlobs = false;
   let pollingCrawlRuns = false;
+  let historyRunId = data.crawlRuns.at(-1)?.id;
+  let contentRunId = data.crawlRuns.filter((run) => !isActiveCrawlRun(run)).at(-1)?.id;
 
   $: if (data.crawlRuns !== serverCrawlRuns) {
     serverCrawlRuns = data.crawlRuns;
     crawlRuns = data.crawlRuns;
+    historyRunId = data.crawlRuns.at(-1)?.id;
   }
 
   $: if (data.infoBlobPage !== serverInfoBlobPage) {
+    serverInfoBlobPage = data.infoBlobPage;
     replaceInfoBlobPage(data.infoBlobPage);
+    contentRunId = data.crawlRuns.filter((run) => !isActiveCrawlRun(run)).at(-1)?.id;
   }
 
   onMount(() => {
+    let mounted = true;
     const interval = setInterval(async () => {
-      if (!crawlRuns.some(isActiveCrawlRun) || pollingCrawlRuns) return;
+      if (pollingCrawlRuns) return;
 
       pollingCrawlRuns = true;
+      const websiteId = data.website.id;
+      const pageCrawlRuns = data.crawlRuns;
       try {
         const result = await pollWebsiteDetail(eneo, data.website, crawlRuns);
+        if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns) return;
         crawlRuns = result.crawlRuns;
-        if (result.infoBlobPage) replaceInfoBlobPage(result.infoBlobPage);
+        // Status is independent of content availability. Retry an unsuccessful
+        // content refresh on the next poll without reverting the terminal state.
+        if (
+          result.latestRun &&
+          !isActiveCrawlRun(result.latestRun) &&
+          result.latestRun.id !== contentRunId
+        ) {
+          try {
+            const infoBlobPage = await eneo.websites.indexedBlobs.listPage({
+              id: websiteId,
+              limit: PAGINATION.PAGE_SIZE
+            });
+            if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns)
+              return;
+            replaceInfoBlobPage(infoBlobPage);
+            contentRunId = result.latestRun.id;
+          } catch {
+            // Keep old content and retry, independently of the history refresh.
+          }
+        }
+        if (result.latestRun && result.latestRun.id !== historyRunId) {
+          const history = [...(await eneo.websites.crawlRuns.list({ id: websiteId }))].reverse();
+          if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns) return;
+          crawlRuns = mergeLatestCrawlRun(history, result.latestRun);
+          // A lagging response is not a completed sync. Keep retrying until
+          // history includes the run, without letting it overwrite latest status.
+          if (history.some((run) => run.id === result.latestRun?.id)) {
+            historyRunId = result.latestRun.id;
+          }
+        }
       } catch {
         // Preserve the last confirmed status. The next poll or a manual action retries.
       } finally {
@@ -54,17 +92,21 @@
       }
     }, 10 * 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   });
 
   const {
     state: { currentSpace }
   } = getSpacesManager();
 
-  $: activeRun = crawlRuns.find(isActiveCrawlRun);
+  // History may contain an older last-known active state while its refresh fails.
+  $: latestKnownRun = crawlRuns.at(-1);
+  $: activeRun = latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined;
 
   function replaceInfoBlobPage(page: WebsiteInfoBlobPage) {
-    serverInfoBlobPage = page;
     infoBlobs = [...page.items];
     nextInfoBlobCursor = page.next_cursor ?? null;
     totalInfoBlobCount = page.total_count;

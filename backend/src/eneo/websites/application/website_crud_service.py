@@ -275,7 +275,9 @@ class WebsiteCRUDService:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_create_websites():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "You do not have permission to stop crawls in this space"
+            )
 
         return await self.crawl_service.cancel(id)
 
@@ -287,6 +289,15 @@ class WebsiteCRUDService:
             raise UnauthorizedException()
 
         return await self.crawl_run_repo.get_crawl_runs(website_id=website_id)
+
+    async def get_latest_crawl_run(self, website_id: UUID) -> "CrawlRun | None":
+        access = await self.space_repo.get_website_access_facts(website_id)
+        actor = self.actor_manager.get_space_actor(access)
+        if not actor.can_read_space() or not actor.can_read_websites():
+            raise UnauthorizedException(
+                "You do not have permission to read crawls in this space"
+            )
+        return await self.crawl_run_repo.get_latest_for_website(website_id)
 
     async def bulk_crawl_websites(
         self, website_ids: list[UUID]
@@ -351,7 +362,9 @@ class WebsiteCRUDService:
                 space = await self.space_service.get_space_by_website(website_id)
                 actor = self.actor_manager.get_space_actor_from_space(space=space)
                 if not actor.can_create_websites():
-                    raise UnauthorizedException()
+                    raise UnauthorizedException(
+                        "You do not have permission to stop crawls in this space"
+                    )
 
                 active_run = await self.crawl_run_repo.get_active_for_website(
                     website_id

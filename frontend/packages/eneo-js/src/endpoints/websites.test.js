@@ -3,6 +3,23 @@ import test from "node:test";
 
 import { initWebsites } from "./websites.js";
 
+test("latest crawl uses the bounded endpoint and preserves the no-run response", async () => {
+  const calls = [];
+  const websites = initWebsites({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return null;
+    }
+  });
+  assert.equal(await websites.crawlRuns.latest({ id: "website-id" }), null);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/websites/{id}/runs/latest/",
+      request: { method: "get", params: { path: { id: "website-id" } } }
+    }
+  ]);
+});
+
 test("cancel crawl run uses the typed crawl lifecycle endpoint", async () => {
   const calls = [];
   const websites = initWebsites({
