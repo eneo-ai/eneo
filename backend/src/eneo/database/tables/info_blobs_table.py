@@ -33,6 +33,12 @@ class InfoBlobs(BasePublic):
             postgresql_where=text("version_state = 'active'"),
         ),
         Index("ix_info_blobs_source_id", "source_id"),
+        Index(
+            "ix_info_blobs_active_website_cursor",
+            "website_id",
+            "id",
+            postgresql_where=text("version_state = 'active'"),
+        ),
     )
 
     text: Mapped[str] = mapped_column()
@@ -42,6 +48,12 @@ class InfoBlobs(BasePublic):
     content_hash: Mapped[Optional[bytes]] = mapped_column(
         LargeBinary(length=32),
         comment="SHA-256 hash of normalized content for change detection",
+    )
+    http_etag: Mapped[Optional[str]] = mapped_column(
+        comment="ETag sent as If-None-Match on the next crawl",
+    )
+    http_last_modified: Mapped[Optional[str]] = mapped_column(
+        comment="Last-Modified sent as If-Modified-Since on the next crawl",
     )
     source_id: Mapped[UUID] = mapped_column(nullable=False)
     version_state: Mapped[str] = mapped_column(String(16), nullable=False)

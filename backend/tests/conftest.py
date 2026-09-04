@@ -8,13 +8,9 @@ unit tests (with function-scoped tests).
 
 import os
 
-# CRITICAL: Set crawler settings BEFORE importing pytest_plugins
-# pytest_plugins imports modules that trigger get_settings() at module load time
-# Settings validation requires TENANT_WORKER_SEMAPHORE_TTL_SECONDS > CRAWL_MAX_LENGTH
+# Set the shorter test crawl limit before imports that initialize settings.
 if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
-if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
-    os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = "3600"  # 1 hour
 
 import asyncio
 import faulthandler
@@ -103,9 +99,8 @@ def pytest_sessionfinish(
     """Guarantee the process always terminates with a clear, bounded signal.
 
     The tests themselves complete in ~11s, but interpreter shutdown can
-    intermittently hang while joining a non-daemon thread left running by the
-    test stack (a Twisted reactor started via Scrapy/crochet, or a leaked
-    async client). When that happens the process never exits, so CI and
+    intermittently hang while joining a non-daemon thread left running by a
+    leaked async client. When that happens the process never exits, so CI and
     automated callers wait indefinitely with no result after the summary line
     has already printed.
 

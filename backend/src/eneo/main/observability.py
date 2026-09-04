@@ -22,7 +22,7 @@ import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlencode
 
-from opentelemetry import trace
+from opentelemetry import metrics, trace
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.propagators.composite import CompositePropagator
@@ -145,6 +145,13 @@ def init_observability() -> None:
     # InMemorySpanExporter is used in tests to verify instrumentation.
     provider = TracerProvider(resource=resource)
     trace.set_tracer_provider(provider)
+
+    # Auto-instrumentors request metric instruments even though Eneo does not
+    # export metrics yet. OpenTelemetry's default proxy provider retains every
+    # requested meter while waiting for a real provider, so long-lived workers
+    # otherwise accumulate one proxy graph per crawl. Make the v1 no-export
+    # policy explicit and non-retaining.
+    metrics.set_meter_provider(metrics.NoOpMeterProvider())
 
     # W3C TraceContext propagation (traceparent / tracestate headers)
     set_global_textmap(

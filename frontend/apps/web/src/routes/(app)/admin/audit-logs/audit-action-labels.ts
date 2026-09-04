@@ -341,6 +341,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_website_crawled,
     description: m.audit_action_website_crawled_description
   },
+  website_crawl_probed: {
+    name: m.audit_action_website_crawl_probed,
+    description: m.audit_action_website_crawl_probed_description
+  },
   website_transferred: {
     name: m.audit_action_website_transferred,
     description: m.audit_action_website_transferred_description

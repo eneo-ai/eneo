@@ -365,7 +365,7 @@
     ];
 
     // System actions - GRAY
-    const systemActions = ["website_crawled"];
+    const systemActions = ["website_crawled", "website_crawl_probed"];
 
     if (adminActions.includes(action)) {
       return "bg-red-50 dark:bg-red-950 text-red-900 dark:text-red-300 border border-red-300 dark:border-red-700 font-medium";

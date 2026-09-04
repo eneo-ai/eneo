@@ -1,32 +1,48 @@
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Optional, Union
 from uuid import UUID
 
 from eneo.main.exceptions import (
     BadRequestException,
-    CrawlAlreadyRunningException,
+    NotFoundException,
     UnauthorizedException,
 )
-from eneo.main.logging import get_logger
-from eneo.main.models import (  # Status used for job status check
-    NOT_PROVIDED,
-    NotProvided,
-    Status,
+from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.websites.domain.crawl_run_repo import (
+    CrawlDeletionBlocker,
+    WebsiteCrawlActiveError,
+    WebsiteCrawlCleanupPendingError,
 )
-from eneo.tenants.crawler_settings_helper import get_crawler_setting
 from eneo.websites.domain.website import UpdateInterval, Website
-
-logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
-    from eneo.tenants.tenant_repo import TenantRepository
     from eneo.users.user import UserInDB
     from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
     from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
     from eneo.websites.domain.crawl_service import CrawlService
+
+
+class WebsiteBulkErrorCode(StrEnum):
+    NOT_AUTHORIZED = "not_authorized"
+    NOT_FOUND = "not_found"
+    CRAWL_STOP_REQUESTED = "crawl_stop_requested"
+    CRAWL_ACTIVE = "crawl_active"
+    CRAWL_CLEANUP_PENDING = "crawl_cleanup_pending"
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteBulkError:
+    website_id: UUID
+    error: WebsiteBulkErrorCode
+
+
+def _ordered_website_ids(website_ids: list[UUID]) -> list[UUID]:
+    """Use one lock order across bulk mutations to avoid reversed-order deadlocks."""
+    return sorted(set(website_ids), key=lambda website_id: website_id.int)
 
 
 class WebsiteCRUDService:
@@ -38,7 +54,6 @@ class WebsiteCRUDService:
         crawl_run_repo: "CrawlRunRepository",
         actor_manager: "ActorManager",
         crawl_service: "CrawlService",
-        tenant_repo: "TenantRepository",
     ):
         super().__init__()
         self.user = user
@@ -47,7 +62,6 @@ class WebsiteCRUDService:
         self.crawl_run_repo = crawl_run_repo
         self.actor_manager = actor_manager
         self.crawl_service = crawl_service
-        self.tenant_repo = tenant_repo
 
     async def create_website(
         self,
@@ -138,7 +152,15 @@ class WebsiteCRUDService:
 
         return website
 
-    async def delete_website(self, id: UUID) -> None:
+    async def delete_website(self, id: UUID) -> Website:
+        website, owner_space_id = await self._authorize_website_deletion(id)
+        await self._delete_authorized_website(
+            website=website,
+            owner_space_id=owner_space_id,
+        )
+        return website
+
+    async def _authorize_website_deletion(self, id: UUID) -> tuple[Website, UUID]:
         owner_space = await self.space_service.get_space_by_website(id)
         assert owner_space.id is not None
         owner_actor = self.actor_manager.get_space_actor_from_space(space=owner_space)
@@ -146,9 +168,85 @@ class WebsiteCRUDService:
         if not owner_actor.can_delete_websites():
             raise UnauthorizedException()
 
+        website = owner_space.get_website(website_id=id)
+        return website, owner_space.id
+
+    async def _delete_authorized_website(
+        self,
+        *,
+        website: Website,
+        owner_space_id: UUID,
+    ) -> None:
+        assert website.id is not None
+        blocker = await self.crawl_run_repo.lock_website_deletion(website.id)
+        if blocker == CrawlDeletionBlocker.ACTIVE_CRAWL:
+            raise WebsiteCrawlActiveError()
+        if blocker == CrawlDeletionBlocker.TRANSPORT_CLEANUP:
+            raise WebsiteCrawlCleanupPendingError()
         await self.space_repo.hard_delete_website(
-            website_id=id, owner_space_id=owner_space.id
+            website_id=website.id,
+            owner_space_id=owner_space_id,
         )
+
+    async def bulk_delete_websites(
+        self, website_ids: list[UUID]
+    ) -> tuple[list[Website], list[UUID], list[WebsiteBulkError]]:
+        """Delete a bounded selection while reporting expected per-item misses."""
+        if len(website_ids) > 50:
+            raise BadRequestException("Cannot delete more than 50 websites at once")
+
+        deleted: list[Website] = []
+        not_found: list[UUID] = []
+        errors: list[WebsiteBulkError] = []
+
+        for website_id in _ordered_website_ids(website_ids):
+            try:
+                website, owner_space_id = await self._authorize_website_deletion(
+                    website_id
+                )
+                active_run = await self.crawl_run_repo.get_active_for_website(
+                    website_id
+                )
+                if active_run is not None:
+                    assert active_run.id is not None
+                    await self.crawl_service.cancel(active_run.id)
+                    errors.append(
+                        WebsiteBulkError(
+                            website_id=website_id,
+                            error=WebsiteBulkErrorCode.CRAWL_STOP_REQUESTED,
+                        )
+                    )
+                    continue
+                await self._delete_authorized_website(
+                    website=website,
+                    owner_space_id=owner_space_id,
+                )
+                deleted.append(website)
+            except NotFoundException:
+                not_found.append(website_id)
+            except UnauthorizedException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_AUTHORIZED,
+                    )
+                )
+            except WebsiteCrawlActiveError:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.CRAWL_ACTIVE,
+                    )
+                )
+            except WebsiteCrawlCleanupPendingError:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.CRAWL_CLEANUP_PENDING,
+                    )
+                )
+
+        return deleted, not_found, errors
 
     async def crawl_website(self, id: UUID) -> "CrawlRun":
         space = await self.space_service.get_space_by_website(id)
@@ -159,128 +257,7 @@ class WebsiteCRUDService:
 
         website = space.get_website(website_id=id)
 
-        if website.latest_crawl is not None and website.latest_crawl.status in [
-            Status.QUEUED,
-            Status.IN_PROGRESS,
-        ]:
-            # Safe preemption: Check if job is stale (no activity for threshold period)
-            preempted = await self._try_preempt_stale_job(website)
-            if not preempted:
-                # Job is actively running, don't preempt
-                raise CrawlAlreadyRunningException()
-            # Job was stale and preempted, proceed with new crawl
-
         return await self.crawl_service.crawl(website=website)
-
-    async def _try_preempt_stale_job(self, website: Website) -> bool:
-        """Check if existing crawl job is stale and preempt it if so.
-
-        Safe preemption: If a job hasn't had activity (updated_at) for longer than
-        the configured threshold, it's considered stale (crashed worker). We mark it
-        as FAILED so the user can immediately start a new crawl.
-
-        Uses atomic Compare-and-Swap to prevent race conditions when multiple
-        users click "recrawl" simultaneously on the same stale job.
-
-        Returns:
-            True if job was stale and preempted (or already finished), False if actively running.
-        """
-        latest_crawl = website.latest_crawl
-        if not latest_crawl or not latest_crawl.job_id:
-            return True  # No job to preempt, allow new crawl
-
-        try:
-            # Get the job to check its updated_at
-            job_repo = self.crawl_service.task_service.job_service.job_repo
-            job = await job_repo.get_job(latest_crawl.job_id)
-
-            if not job:
-                return True  # Job not found, allow new crawl
-
-            # Check if job is stale - use different thresholds for QUEUED vs IN_PROGRESS
-            # QUEUED jobs should move to IN_PROGRESS quickly (within seconds)
-            # If stuck in QUEUED for 5+ min, it's likely orphaned (Redis cleared, worker restarted)
-            # IN_PROGRESS jobs use longer tenant-configurable threshold (heartbeat timeout)
-            tenant = await self.tenant_repo.get(self.user.tenant_id)
-            tenant_settings = tenant.crawler_settings if tenant else None
-
-            if job.status == Status.QUEUED:
-                # Configurable threshold for QUEUED - if stuck, it's orphaned
-                threshold_minutes = get_crawler_setting(
-                    "queued_stale_threshold_minutes", tenant_settings
-                )
-            else:
-                # Standard threshold for IN_PROGRESS (heartbeat timeout)
-                threshold_minutes = get_crawler_setting(
-                    "crawl_stale_threshold_minutes", tenant_settings
-                )
-            cutoff_time = datetime.now(timezone.utc) - timedelta(
-                minutes=threshold_minutes
-            )
-
-            # Use updated_at if available, otherwise created_at
-            job_activity_time = job.updated_at or job.created_at
-            if job_activity_time and job_activity_time.tzinfo is None:
-                job_activity_time = job_activity_time.replace(tzinfo=timezone.utc)
-
-            if job_activity_time and job_activity_time < cutoff_time:
-                # Job is stale - attempt ATOMIC preemption (Compare-and-Swap)
-                # Only succeeds if job is still IN_PROGRESS or QUEUED
-                error_message = f"Preempted: Job was stale (no activity for {threshold_minutes} minutes)"
-                rows_affected = await job_repo.mark_job_failed_if_running(
-                    latest_crawl.job_id, error_message
-                )
-
-                if rows_affected > 0:
-                    # We successfully preempted the job
-                    # Release Redis slot and clean up flag to prevent zombie slots
-                    # Safe to call even if resources don't exist (idempotent)
-                    try:
-                        await self.crawl_service.release_job_resources(
-                            job_id=latest_crawl.job_id,
-                            tenant_id=website.tenant_id,
-                        )
-                    except Exception as slot_exc:
-                        logger.warning(
-                            "Failed to release slot for preempted job",
-                            extra={
-                                "job_id": str(latest_crawl.job_id),
-                                "error": str(slot_exc),
-                            },
-                        )
-                    logger.info(
-                        "Preempted stale crawl job",
-                        extra={
-                            "job_id": str(latest_crawl.job_id),
-                            "website_id": str(website.id),
-                            "last_activity": str(job_activity_time),
-                            "threshold_minutes": threshold_minutes,
-                        },
-                    )
-                    return True
-                else:
-                    # rows_affected == 0: Someone else preempted it, or job already finished
-                    # Check current status to decide if we can proceed
-                    refreshed_job = await job_repo.get_job(latest_crawl.job_id)
-                    if refreshed_job and refreshed_job.status in [
-                        Status.QUEUED,
-                        Status.IN_PROGRESS,
-                    ]:
-                        # Job is still running (another user refreshed it?) - don't allow
-                        return False
-                    # Job completed or was preempted by someone else - allow new crawl
-                    return True
-
-            # Job has recent activity, don't preempt
-            return False
-
-        except Exception as exc:
-            # If we can't check staleness, be conservative and don't preempt
-            logger.warning(
-                "Failed to check job staleness, not preempting",
-                extra={"job_id": str(latest_crawl.job_id), "error": str(exc)},
-            )
-            return False
 
     async def get_crawl_run(self, id: UUID) -> "CrawlRun":
         crawl_run = await self.crawl_run_repo.one(id)
@@ -292,6 +269,18 @@ class WebsiteCRUDService:
 
         return crawl_run
 
+    async def cancel_crawl_run(self, id: UUID) -> "CrawlRun":
+        crawl_run = await self.crawl_run_repo.one(id)
+        space = await self.space_service.get_space_by_website(crawl_run.website_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+
+        if not actor.can_create_websites():
+            raise UnauthorizedException(
+                "You do not have permission to stop crawls in this space"
+            )
+
+        return await self.crawl_service.cancel(id)
+
     async def get_crawl_runs(self, website_id: UUID) -> list["CrawlRun"]:
         space = await self.space_service.get_space_by_website(website_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -301,9 +290,18 @@ class WebsiteCRUDService:
 
         return await self.crawl_run_repo.get_crawl_runs(website_id=website_id)
 
+    async def get_latest_crawl_run(self, website_id: UUID) -> "CrawlRun | None":
+        access = await self.space_repo.get_website_access_facts(website_id)
+        actor = self.actor_manager.get_space_actor(access)
+        if not actor.can_read_space() or not actor.can_read_websites():
+            raise UnauthorizedException(
+                "You do not have permission to read crawls in this space"
+            )
+        return await self.crawl_run_repo.get_latest_for_website(website_id)
+
     async def bulk_crawl_websites(
         self, website_ids: list[UUID]
-    ) -> tuple[list["CrawlRun"], list[dict[str, str]]]:
+    ) -> tuple[list["CrawlRun"], list[WebsiteBulkError]]:
         """Trigger crawls for multiple websites in bulk.
 
         Why: Enables efficient batch operations for users managing many websites.
@@ -315,7 +313,7 @@ class WebsiteCRUDService:
         Returns:
             Tuple of (successful_crawl_runs, errors)
             - successful_crawl_runs: List of CrawlRun objects that were queued
-            - errors: List of dicts with website_id and error message for failures
+            - errors: Website-scoped expected failures
 
         Raises:
             BadRequestException: If more than 50 websites requested (safety limit)
@@ -324,31 +322,75 @@ class WebsiteCRUDService:
             raise BadRequestException("Cannot crawl more than 50 websites at once")
 
         successful_runs: list["CrawlRun"] = []
-        errors: list[dict[str, str]] = []
+        errors: list[WebsiteBulkError] = []
 
-        for website_id in website_ids:
+        for website_id in _ordered_website_ids(website_ids):
             try:
                 # Reuse existing crawl_website method for consistent behavior
                 crawl_run = await self.crawl_website(website_id)
                 successful_runs.append(crawl_run)
-            except CrawlAlreadyRunningException:
-                errors.append(
-                    {
-                        "website_id": str(website_id),
-                        "error": "Crawl already in progress for this website",
-                    }
-                )
             except UnauthorizedException:
                 errors.append(
-                    {
-                        "website_id": str(website_id),
-                        "error": "Not authorized to crawl this website",
-                    }
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_AUTHORIZED,
+                    )
                 )
-            except Exception as e:
-                errors.append({"website_id": str(website_id), "error": str(e)})
+            except NotFoundException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_FOUND,
+                    )
+                )
 
         return successful_runs, errors
+
+    async def bulk_stop_websites(
+        self, website_ids: list[UUID]
+    ) -> tuple[list["CrawlRun"], list[UUID], list[WebsiteBulkError]]:
+        """Stop the active crawl for each website without failing the whole batch."""
+        if len(website_ids) > 50:
+            raise BadRequestException("Cannot stop more than 50 websites at once")
+
+        stopped_runs: list["CrawlRun"] = []
+        not_running: list[UUID] = []
+        errors: list[WebsiteBulkError] = []
+
+        for website_id in _ordered_website_ids(website_ids):
+            try:
+                space = await self.space_service.get_space_by_website(website_id)
+                actor = self.actor_manager.get_space_actor_from_space(space=space)
+                if not actor.can_create_websites():
+                    raise UnauthorizedException(
+                        "You do not have permission to stop crawls in this space"
+                    )
+
+                active_run = await self.crawl_run_repo.get_active_for_website(
+                    website_id
+                )
+                if active_run is None:
+                    not_running.append(website_id)
+                    continue
+
+                assert active_run.id is not None
+                stopped_runs.append(await self.crawl_service.cancel(active_run.id))
+            except UnauthorizedException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_AUTHORIZED,
+                    )
+                )
+            except NotFoundException:
+                errors.append(
+                    WebsiteBulkError(
+                        website_id=website_id,
+                        error=WebsiteBulkErrorCode.NOT_FOUND,
+                    )
+                )
+
+        return stopped_runs, not_running, errors
 
     async def find_on_organization_space(self, url: str) -> dict[str, object] | None:
         """Find website with matching URL on the user's organization space.

@@ -11,6 +11,9 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9050: () => "An App run needs it.",
     eneo_error_9051: () => "Still attached.",
     eneo_error_9052: () => "The execution block changed.",
+    eneo_error_9057: () => "Original unavailable.",
+    eneo_error_9058: () => "Active website sync.",
+    eneo_error_9059: () => "Crawler cleanup pending.",
     request_failed: () => "Request failed."
   }
 }));
@@ -70,5 +73,19 @@ describe("getErrorMessage", () => {
         expect(skillCopy).not.toBe(modelCopy);
       }
     }
+  });
+
+  it("keeps original-download and crawler lifecycle errors distinct", () => {
+    const messages = ([9057, 9058, 9059] as const).map((code) =>
+      getErrorMessage(
+        new EneoError("Backend fallback", "RESPONSE", 409, code, {}, { endpoint: "" })
+      )
+    );
+
+    expect(messages).toEqual([
+      "Original unavailable.",
+      "Active website sync.",
+      "Crawler cleanup pending."
+    ]);
   });
 });

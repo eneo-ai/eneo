@@ -2,13 +2,18 @@
 
 Tests PostgreSQL JSONB atomic merge operations for crawler settings:
 - update_crawler_settings: Uses PostgreSQL || operator for atomic merge
-- clear_crawler_settings: Resets to empty JSONB
+- clear_crawler_settings: Removes active keys while preserving rollback data
 - Race condition prevention via atomic operations
 """
 
 import asyncio
+from typing import cast
 
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from eneo.database.tables.tenant_table import Tenants
 
 
 @pytest.mark.asyncio
@@ -86,6 +91,31 @@ class TestUpdateCrawlerSettings:
             assert updated.crawler_settings["dns_timeout"] == 45
             assert updated.crawler_settings["retry_times"] == 5
 
+    async def test_update_preserves_retired_keys_for_rollback(
+        self, db_container, test_tenant
+    ):
+        """Active updates must not rewrite legacy JSONB during rollback support."""
+        async with db_container() as container:
+            session = cast(AsyncSession, container.session())
+            await session.execute(
+                sa.update(Tenants)
+                .where(Tenants.id == test_tenant.id)
+                .values(crawler_settings={"crawl_feeder_enabled": True})
+            )
+
+            await container.tenant_repo().update_crawler_settings(
+                tenant_id=test_tenant.id,
+                crawler_settings={"download_timeout": 120},
+            )
+
+            stored = await session.scalar(
+                sa.select(Tenants.crawler_settings).where(Tenants.id == test_tenant.id)
+            )
+            assert stored == {
+                "crawl_feeder_enabled": True,
+                "download_timeout": 120,
+            }
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration
@@ -117,7 +147,7 @@ class TestAtomicJSONBMerge:
                 update_setting("dns_timeout", 50),
                 update_setting("retry_times", 5),
                 update_setting("crawl_max_length", 7200),
-                update_setting("crawl_feeder_batch_size", 20),
+                update_setting("crawl_page_batch_size", 200),
             )
 
             # Verify ALL writes persisted (no lost updates)
@@ -126,7 +156,7 @@ class TestAtomicJSONBMerge:
             assert tenant.crawler_settings.get("dns_timeout") == 50
             assert tenant.crawler_settings.get("retry_times") == 5
             assert tenant.crawler_settings.get("crawl_max_length") == 7200
-            assert tenant.crawler_settings.get("crawl_feeder_batch_size") == 20
+            assert tenant.crawler_settings.get("crawl_page_batch_size") == 200
 
     async def test_concurrent_updates_same_key_last_write_wins(
         self, db_container, test_tenant
@@ -197,6 +227,25 @@ class TestClearCrawlerSettings:
             tenant = await tenant_repo.get(test_tenant.id)
             assert tenant.crawler_settings == {}
 
+    async def test_clear_preserves_rollback_only_settings(
+        self, db_container, test_tenant
+    ):
+        """Reset removes active overrides without deleting rollback data."""
+        async with db_container() as container:
+            tenant_repo = container.tenant_repo()
+            await tenant_repo.update_crawler_settings(
+                tenant_id=test_tenant.id,
+                crawler_settings={
+                    "crawl_feeder_enabled": True,
+                    "download_timeout": 120,
+                },
+            )
+
+            await tenant_repo.clear_crawler_settings(tenant_id=test_tenant.id)
+
+            tenant = await tenant_repo.get(test_tenant.id)
+            assert tenant.crawler_settings == {"crawl_feeder_enabled": True}
+
 
 @pytest.mark.asyncio
 @pytest.mark.integration
@@ -210,23 +259,22 @@ class TestCrawlerSettingsIntegrationWithHelper:
         async with db_container() as container:
             tenant_repo = container.tenant_repo()
 
-            # Set tenant-specific limit
+            # Set tenant-specific persistence batch size
             await tenant_repo.update_crawler_settings(
                 tenant_id=test_tenant.id,
-                crawler_settings={"tenant_worker_concurrency_limit": 2},
+                crawler_settings={"crawl_page_batch_size": 250},
             )
 
             # Retrieve and verify via helper
             tenant = await tenant_repo.get(test_tenant.id)
-            limit = get_crawler_setting(
-                "tenant_worker_concurrency_limit",
+            batch_size = get_crawler_setting(
+                "crawl_page_batch_size",
                 tenant.crawler_settings,
-                default=4,
             )
-            assert limit == 2
+            assert batch_size == 250
 
-    async def test_feeder_batch_size_from_db(self, db_container, test_tenant):
-        """Feeder batch size correctly retrieved from tenant settings."""
+    async def test_heartbeat_interval_from_db(self, db_container, test_tenant):
+        """Heartbeat interval is correctly retrieved from tenant settings."""
         from eneo.tenants.crawler_settings_helper import get_crawler_setting
 
         async with db_container() as container:
@@ -234,16 +282,15 @@ class TestCrawlerSettingsIntegrationWithHelper:
 
             await tenant_repo.update_crawler_settings(
                 tenant_id=test_tenant.id,
-                crawler_settings={"crawl_feeder_batch_size": 5},
+                crawler_settings={"crawl_heartbeat_interval_seconds": 600},
             )
 
             tenant = await tenant_repo.get(test_tenant.id)
-            batch_size = get_crawler_setting(
-                "crawl_feeder_batch_size",
+            heartbeat_interval = get_crawler_setting(
+                "crawl_heartbeat_interval_seconds",
                 tenant.crawler_settings,
-                default=10,
             )
-            assert batch_size == 5
+            assert heartbeat_interval == 600
 
     async def test_get_all_settings_merges_correctly(self, db_container, test_tenant):
         """get_all_crawler_settings() merges tenant overrides with defaults."""
@@ -267,6 +314,4 @@ class TestCrawlerSettingsIntegrationWithHelper:
             # Verify defaults still present
             assert "dns_timeout" in all_settings
             assert "crawl_max_length" in all_settings
-            assert (
-                len(all_settings) == 18
-            )  # Updated: now includes queued_stale_threshold_minutes
+            assert len(all_settings) == 10

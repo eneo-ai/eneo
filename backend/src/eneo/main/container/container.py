@@ -70,7 +70,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.presentation import CompletionModelAssembler
 from eneo.conversations.application.conversation_service import ConversationService
-from eneo.crawler.crawler import Crawler
+from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
@@ -395,7 +395,6 @@ from eneo.websites.infrastructure.update_website_size_service import (
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
 from eneo.worker.task_manager import TaskManager
-from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 from eneo.workflows.step_repo import StepRepository
 
 _logger = get_logger(__name__)
@@ -411,12 +410,9 @@ def _create_redis_client() -> aioredis.Redis:
     return aioredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _build_tenant_limiter(redis_client: aioredis.Redis) -> TenantConcurrencyLimiter:
-    settings = get_settings()
-    return TenantConcurrencyLimiter(
-        redis=redis_client,
-        max_concurrent=settings.tenant_worker_concurrency_limit,
-        ttl_seconds=settings.tenant_worker_semaphore_ttl_seconds,
+def _build_crawl_engine() -> PythonCrawlEngine:
+    return PythonCrawlEngine(
+        global_concurrency=get_settings().crawl_global_http_concurrency
     )
 
 
@@ -488,7 +484,7 @@ class SessionProxy:
         if session is None:
             raise RuntimeError(
                 "No active session found! You are running in a sessionless container. "
-                "You must wrap this call in 'async with container.session_scope():' "
+                "You must wrap this call in 'async with Container.session_scope():' "
                 "or pass the session explicitly via container.some_repo(session=session)."
             )
         return getattr(session, name)
@@ -499,7 +495,7 @@ class SessionProxy:
         if session is None:
             raise RuntimeError(
                 "Cannot call SessionProxy without active session scope. "
-                "Wrap your code in 'async with container.session_scope():'."
+                "Wrap your code in 'async with Container.session_scope():'."
             )
         # AsyncSession is not callable; the runtime check above prevents reaching
         # this branch in practice. Pyright still flags both the call and the
@@ -534,10 +530,6 @@ class Container(containers.DeclarativeContainer):
     )
 
     redis_client = providers.Singleton(_create_redis_client)
-    tenant_concurrency_limiter = providers.Factory(
-        _build_tenant_limiter, redis_client=redis_client
-    )
-
     # Factories
     prompt_factory = providers.Factory(PromptFactory)
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)
@@ -1118,8 +1110,7 @@ class Container(containers.DeclarativeContainer):
     crawl_service = providers.Factory(
         CrawlService,
         repo=crawl_run_repo,
-        task_service=task_service,
-        redis_client=redis_client,
+        job_service=job_service,
     )
     crawl_scheduler_service = providers.Factory(
         CrawlSchedulerService, website_sparse_repo=website_sparse_repo
@@ -1140,7 +1131,6 @@ class Container(containers.DeclarativeContainer):
         crawl_run_repo=crawl_run_repo,
         actor_manager=actor_manager,
         crawl_service=crawl_service,
-        tenant_repo=tenant_repo,
     )
     info_blob_service = providers.Factory(
         InfoBlobService,
@@ -1609,7 +1599,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         session=session,
     )
-    crawler = providers.Factory(Crawler)
+    crawler = providers.Singleton(_build_crawl_engine)
 
     # Worker dependent services
     app_service = providers.Factory(
@@ -1662,7 +1652,7 @@ class Container(containers.DeclarativeContainer):
     # tasks should use this to acquire sessions only when needed (~50-300ms).
     #
     # Usage in tasks:
-    #     async with container.session_scope() as session:
+    #     async with Container.session_scope() as session:
     #         repo = container.some_repo(session=session)  # Override default
     #         await repo.update(...)
     #     # Session returned to pool immediately
@@ -1685,7 +1675,7 @@ class Container(containers.DeclarativeContainer):
         passing session= explicitly - the proxy will find the session.
 
         Example:
-            async with container.session_scope() as session:
+            async with Container.session_scope() as session:
                 # Option 1: Explicit session override (always works)
                 repo = container.crawl_run_repo(session=session)
                 await repo.mark_started(job_id)

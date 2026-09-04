@@ -9,12 +9,22 @@ Tests the crawl/persistence.py module directly to ensure:
 Run with: pytest tests/unittests/worker/test_persistence.py -v
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import numpy as np
 import pytest
 
 from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec, PreparedPage
+
+
+@pytest.fixture(autouse=True)
+def current_crawl_lease():
+    with patch(
+        "eneo.websites.domain.crawl_run_repo.CrawlRunRepository.lock_attempt_lease",
+        AsyncMock(return_value=True),
+    ):
+        yield
 
 
 def create_mock_container(embeddings_service):
@@ -70,6 +80,8 @@ class TestPersistenceModuleSemantics:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,
@@ -115,6 +127,8 @@ class TestPersistenceModuleSemantics:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,
@@ -122,7 +136,9 @@ class TestPersistenceModuleSemantics:
             embedding_model_dimensions=1536,
         )
 
-        page_buffer = [
+        from eneo.worker.crawl.persistence import CrawlPageData
+
+        page_buffer: list[CrawlPageData] = [
             {"url": "https://example.com/page1", "content": "Test content 1"},
             {"url": "https://example.com/page2", "content": "Test content 2"},
         ]
@@ -170,8 +186,13 @@ class TestPreparedPageDataclass:
             title="Test Page",
             content="Test content",
             content_hash=b"\x00" * 32,  # 32-byte hash
+            http_etag=None,
+            http_last_modified=None,
             chunks=["chunk1", "chunk2"],
-            embeddings=[[0.1, 0.2], [0.3, 0.4]],
+            embeddings=[
+                np.asarray([0.1, 0.2], dtype=np.float32),
+                np.asarray([0.3, 0.4], dtype=np.float32),
+            ],
             tenant_id=uuid4(),
             website_id=uuid4(),
             user_id=uuid4(),
@@ -194,6 +215,8 @@ class TestCrawlContextDataclass:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,
@@ -203,7 +226,7 @@ class TestCrawlContextDataclass:
 
         # Attempting to modify should raise FrozenInstanceError
         with pytest.raises(Exception):  # dataclasses.FrozenInstanceError
-            ctx.website_id = uuid4()
+            ctx.website_id = uuid4()  # pyright: ignore[reportAttributeAccessIssue]
 
     def test_crawl_context_default_batch_settings(self):
         """CrawlContext should have sensible default batch settings."""
@@ -212,6 +235,8 @@ class TestCrawlContextDataclass:
             tenant_id=uuid4(),
             tenant_slug="test",
             user_id=uuid4(),
+            attempt_id=uuid4(),
+            lease_owner="test-worker",
             embedding_model_id=uuid4(),
             embedding_model_name="test-model",
             embedding_model_open_source=False,

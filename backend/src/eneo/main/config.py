@@ -297,27 +297,12 @@ class Settings(BaseSettings):
 
     # Background worker configuration
     worker_max_jobs: int = 15
-    tenant_worker_concurrency_limit: int = 4
-    # IMPORTANT: Must be >= crawl_max_length to prevent semaphore expiry mid-crawl
-    # Heartbeat refreshes TTL during crawls, but this provides defense-in-depth
-    # See validate_worker_settings() which enforces this constraint
-    # Configurable per-tenant via crawler_settings API
-    tenant_worker_semaphore_ttl_seconds: int = (
-        60 * 60 * 11
-    )  # 11 hour safety window (10h crawl + 1h buffer)
-
-    # Crawl feeder configuration (Prevents burst overload during scheduled crawls)
-    crawl_feeder_enabled: bool = True  # Enabled by default - meters job enqueue rate
-    crawl_feeder_interval_seconds: int = 10  # How often feeder checks for work
-    crawl_feeder_batch_size: int = 10  # Max jobs to enqueue per cycle per tenant
-
-    # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
-    orphan_crawl_run_timeout_hours: int = (
-        12  # Must be > crawl_max_length (10h) to avoid killing valid long crawls
-    )
-    crawl_stale_threshold_minutes: int = (
-        30  # Safe preemption: jobs older than this can be preempted on recrawl
-    )
+    # Optional cluster-wide crawl admission limit. The dedicated crawler queue
+    # uses WORKER_MAX_JOBS when unset.
+    crawl_job_concurrency_limit: int | None = Field(default=None, gt=0)
+    # Shared installations can leave headroom for other tenants. Unset preserves
+    # full capacity for single-tenant installations; existing work is not stopped.
+    crawl_job_tenant_concurrency_limit: int | None = Field(default=None, gt=0)
     crawl_heartbeat_interval_seconds: int = (
         300  # Heartbeat every 5 minutes (time-based, not count-based)
     )
@@ -481,26 +466,19 @@ class Settings(BaseSettings):
     testing: bool = False
     dev: bool = False
 
-    # Crawl - Scrapy crawler settings
-    # IMPORTANT: Must be <= tenant_worker_semaphore_ttl_seconds
-    # Otherwise the concurrency slot could expire before crawl completes
-    # See validate_worker_settings() which enforces this constraint
+    # Crawl - in-process async Python crawler settings
     crawl_max_length: int = 60 * 60 * 10  # 10 hour crawls max (large municipal sites)
-    closespider_itemcount: int = 20000  # Maximum number of pages to crawl per website
+    # Shared budget for pages and linked files; the actual mix follows the site.
+    closespider_itemcount: int = 20000
     download_max_size: int = 10485760  # Max file download size in bytes (10MB default)
     obey_robots: bool = True  # Respect robots.txt rules
-    autothrottle_enabled: bool = True  # Enable automatic request throttling
-    using_crawl: bool = True  # Enable/disable crawling feature globally
-
-    # Crawl retry configuration
-    crawl_page_max_retries: int = 3  # Maximum retries for failed pages during crawl
-    crawl_page_retry_delay: float = (
-        1.0  # Initial retry delay in seconds (exponential backoff)
+    crawl_fetch_concurrency: int = Field(default=4, gt=0, le=32)
+    crawl_global_http_concurrency: int = Field(default=20, gt=0, le=512)
+    crawl_request_delay_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
+    crawl_page_max_size: int = Field(
+        default=10 * 1024 * 1024, ge=64 * 1024, le=1024 * 1024 * 1024
     )
-
-    # Crawl job age limit (prevents infinite retry loops)
-    crawl_job_max_age_seconds: int = 1800  # Maximum retry window (30 minutes)
-
+    autothrottle_enabled: bool = True  # Pace bounded request batches conservatively
     # Migration
     migration_auto_recalc_threshold: int = (
         30  # Auto-recalculate usage stats for migrations <= this threshold
@@ -617,10 +595,8 @@ class Settings(BaseSettings):
                 )
                 sys.exit(1)
 
-        # Warn if crawling is enabled but no encryption key (HTTP auth will be disabled)
-        if self.using_crawl and (
-            not self.encryption_key or not self.encryption_key.strip()
-        ):
+        # HTTP authentication for protected crawl targets requires encryption.
+        if not self.encryption_key or not self.encryption_key.strip():
             logging.warning(
                 "⚠️  ENCRYPTION_KEY not set. HTTP authentication for crawling will be disabled.\n"
                 "To enable HTTP auth for protected websites, generate key:\n"
@@ -665,45 +641,6 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        if self.tenant_worker_concurrency_limit < 0:
-            logging.error(
-                "TENANT_WORKER_CONCURRENCY_LIMIT cannot be negative. Current value: %s",
-                self.tenant_worker_concurrency_limit,
-            )
-            sys.exit(1)
-
-        if self.tenant_worker_semaphore_ttl_seconds <= 0:
-            logging.error(
-                "TENANT_WORKER_SEMAPHORE_TTL_SECONDS must be greater than zero. Current value: %s",
-                self.tenant_worker_semaphore_ttl_seconds,
-            )
-            sys.exit(1)
-
-        if self.tenant_worker_semaphore_ttl_seconds < self.crawl_max_length:
-            logging.error(
-                "TENANT_WORKER_SEMAPHORE_TTL_SECONDS (%s) is shorter than CRAWL_MAX_LENGTH (%s)."
-                " Increase the TTL to cover the longest crawl duration to avoid leaking slots.",
-                self.tenant_worker_semaphore_ttl_seconds,
-                self.crawl_max_length,
-            )
-            sys.exit(1)
-
-        # Validate TTL vs job max age to prevent flag expiration race condition
-        # The flag stores tenant_id for slot release - if it expires before watchdog
-        # can kill the job, the slot becomes permanently leaked
-        from eneo.tenants.crawler_settings_helper import TTL_MAX_AGE_BUFFER_SECONDS
-
-        min_required_ttl = self.crawl_job_max_age_seconds + TTL_MAX_AGE_BUFFER_SECONDS
-        if self.tenant_worker_semaphore_ttl_seconds < min_required_ttl:
-            logging.error(
-                "TENANT_WORKER_SEMAPHORE_TTL_SECONDS (%s) must be at least 5 minutes greater than "
-                "CRAWL_JOB_MAX_AGE_SECONDS (%s) to prevent slot leaks. Required minimum: %s",
-                self.tenant_worker_semaphore_ttl_seconds,
-                self.crawl_job_max_age_seconds,
-                min_required_ttl,
-            )
-            sys.exit(1)
-
         if self.oidc_state_ttl_seconds <= 0:
             logging.error(
                 "OIDC_STATE_TTL_SECONDS must be greater than zero. Current value: %s",
@@ -737,6 +674,17 @@ class Settings(BaseSettings):
             )
 
         return self
+
+    @property
+    def effective_crawl_job_concurrency_limit(self) -> int:
+        """Cluster-wide crawl admission limit.
+
+        An explicit value represents aggregate admission capacity when the
+        dedicated crawler worker is scaled horizontally.
+        """
+        if self.crawl_job_concurrency_limit is not None:
+            return self.crawl_job_concurrency_limit
+        return self.worker_max_jobs
 
     @model_validator(mode="after")
     def validate_redis_settings(self):

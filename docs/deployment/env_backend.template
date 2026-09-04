@@ -279,18 +279,11 @@ OBJECT_CONTENT_PENDING_STALE_SECONDS=300
 # ----------------------------------------------------------------------------
 # Database Connection Pool Configuration
 # ----------------------------------------------------------------------------
-# Controls PostgreSQL connection pooling. Each container has its own pool.
-#
-# ⚠️  API STARVATION PREVENTION
-# Reserve ≥40% of DB connections for API: WORKER_MAX_JOBS ≤ 0.6 × pool_max
-# If workers consume all connections, API requests timeout during crawling.
-#
-# RECOMMENDED TUNING:
-#   Small (8GB):   POOL_SIZE=10, OVERFLOW=5  → WORKER_MAX_JOBS=8
-#   Medium (16GB): POOL_SIZE=20, OVERFLOW=10 → WORKER_MAX_JOBS=15
-#   Large (32GB+): POOL_SIZE=30, OVERFLOW=20 → WORKER_MAX_JOBS=25
-#
-# Symptoms of misconfiguration: API timeouts, "QueuePool limit reached" errors
+# Controls PostgreSQL connection pooling. Every API and worker process owns an
+# independent pool. Size PostgreSQL max_connections for the sum of all process
+# pool maxima, plus headroom for migrations and administration.
+# Symptoms of misconfiguration: API timeouts, "QueuePool limit reached" errors,
+# or PostgreSQL "too many connections" errors.
 # ----------------------------------------------------------------------------
 # Base pool size - permanent connections
 DB_POOL_SIZE=20
@@ -308,36 +301,33 @@ DB_POOL_PRE_PING=true
 # ----------------------------------------------------------------------------
 # Background Worker Configuration
 # ----------------------------------------------------------------------------
-# Controls ARQ (Async Redis Queue) worker pool and per-tenant concurrency fairness.
-# ARQ processes background jobs like web crawling, document processing, etc.
+# Controls each ARQ (Async Redis Queue) worker process.
+# The general and crawler services apply this limit independently.
 #
-# NOTE: RUN_AS_WORKER is set in docker-compose.yml to run the container as
-# a background task processor instead of HTTP server. Both backend and worker
-# containers use the same image; run.sh detects RUN_AS_WORKER=true to launch
-# the ARQ worker instead of Gunicorn.
+# NOTE: RUN_AS_WORKER is set in docker-compose.yml to run the container as a
+# background task processor instead of the HTTP server. WORKER_ROLE selects
+# either the general queue or the isolated crawler queue. The Compose services
+# set these values; operators normally do not need to add them to this file.
 #
 # VOLUMES: Ensure both backend and worker services have these volumes in docker-compose.yml:
 #   - eneo_backend_data:/app/data
 #   - eneo_temp_files:/tmp  # Also used for audit log exports (/tmp/exports)
 # ----------------------------------------------------------------------------
-# ⚠️  WORKER_MAX_JOBS ≤ 0.6 × (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW)
-# Crawl jobs hold DB connections for hours. See "Database Connection Pool" above.
-# ----------------------------------------------------------------------------
-# Max concurrent jobs across all tenants
-# Memory: 100-500MB per job. With default pool (30), safe max is 18.
+# Max concurrent jobs per worker process
+# Tune this for each process's CPU, memory, and database-active workload.
+# Crawler jobs release DB connections between batches, but retain their ARQ slot
+# and consume CPU and memory for the duration of the crawl.
 WORKER_MAX_JOBS=15
 
-# Max concurrent jobs per tenant (prevents "noisy neighbor" problem)
-# In multi-tenant deployments, prevents one tenant from monopolizing all worker slots
-# Set to 0 to disable (not recommended for multi-tenant production)
-TENANT_WORKER_CONCURRENCY_LIMIT=4
+# Optional cluster-wide crawl admission limit. Defaults to WORKER_MAX_JOBS.
+# Set an aggregate value when the dedicated crawler worker has multiple replicas.
+# CRAWL_JOB_CONCURRENCY_LIMIT=15
 
-# Semaphore TTL - auto-cleanup for crashed workers
-# CRITICAL: Must be > CRAWL_MAX_LENGTH to prevent premature lock release
-# If TTL < crawl duration, slot expires mid-crawl causing tenant lockout
-# Formula: TENANT_WORKER_SEMAPHORE_TTL_SECONDS > CRAWL_MAX_LENGTH + 1 hour buffer
-# Default: 39600s (11 hours) > 36000s (10 hours) + 1 hour buffer
-TENANT_WORKER_SEMAPHORE_TTL_SECONDS=39600  # 11 hours
+# Optional positive per-tenant ceiling for shared installations. Leave unset for
+# single-tenant deployments. Set below the global limit to leave shared headroom.
+# Already reserved jobs can still be repaired or redelivered at the ceiling.
+# Use the same value on the backend and all workers.
+# CRAWL_JOB_TENANT_CONCURRENCY_LIMIT=
 
 # ============================================================================
 # WEB CRAWLER SETTINGS
@@ -349,7 +339,7 @@ TENANT_WORKER_SEMAPHORE_TTL_SECONDS=39600  # 11 hours
 # Large municipal websites may need 6-10 hours for full crawl
 CRAWL_MAX_LENGTH=36000
 
-# Maximum pages to crawl per website
+# Maximum combined pages and linked files to process per crawl
 CLOSESPIDER_ITEMCOUNT=20000
 
 # Maximum file size the crawler will download (bytes). Default: 10MB
@@ -361,14 +351,16 @@ OBEY_ROBOTS=true
 # Automatically slow down to not overload target websites
 AUTOTHROTTLE_ENABLED=true
 
+# Async HTTP requests per crawl and process-wide across concurrent crawl jobs
+CRAWL_FETCH_CONCURRENCY=4
+CRAWL_GLOBAL_HTTP_CONCURRENCY=20
+CRAWL_REQUEST_DELAY_SECONDS=0
+CRAWL_PAGE_MAX_SIZE=10485760
+
 # --- ADVANCED SETTINGS ------------------------------------------------------
 
 # Pages saved per database write. Lower = less data loss on crash, higher = faster
 CRAWL_PAGE_BATCH_SIZE=100
-
-# Retry configuration for failed pages during crawl
-# CRAWL_PAGE_MAX_RETRIES=3           # Maximum retries per page (default: 3)
-# CRAWL_PAGE_RETRY_DELAY=1.0         # Initial retry delay in seconds (exponential backoff)
 
 # Parallel embedding API calls per crawl
 CRAWL_EMBEDDING_CONCURRENCY=3
@@ -378,39 +370,6 @@ CRAWL_HEARTBEAT_INTERVAL_SECONDS=300
 
 # Stop crawler after this many missed heartbeats
 CRAWL_HEARTBEAT_MAX_FAILURES=3
-
-# Cancel old jobs for same website when user starts a new crawl (minutes)
-CRAWL_STALE_THRESHOLD_MINUTES=30
-
-# Mark stuck/crashed jobs as failed after this time (hours)
-# Must be > CRAWL_MAX_LENGTH to avoid killing valid long crawls
-ORPHAN_CRAWL_RUN_TIMEOUT_HOURS=12
-
-# Reject jobs waiting in queue longer than this (seconds). Prevents backlog
-CRAWL_JOB_MAX_AGE_SECONDS=1800
-
-# --- OPTIONAL: Queue Throttling ---------------------------------------------
-# Spreads out scheduled crawls to prevent worker overload
-# Rate: releases BATCH_SIZE jobs every INTERVAL seconds
-
-CRAWL_FEEDER_ENABLED=true
-CRAWL_FEEDER_INTERVAL_SECONDS=10
-CRAWL_FEEDER_BATCH_SIZE=10
-
-# ----------------------------------------------------------------------------
-# Web Crawling Configuration
-# ----------------------------------------------------------------------------
-# [OPTIONAL] Max crawl duration (default: 14400 = 4 hours)
-CRAWL_MAX_LENGTH=14400
-# [OPTIONAL] Max items before stopping (default: 20000)
-CLOSESPIDER_ITEMCOUNT=20000
-# [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
-# This controls crawler downloads, not the upload policy in Admin > Storage.
-DOWNLOAD_MAX_SIZE=10485760
-# [OPTIONAL] Respect robots.txt (default: True)
-OBEY_ROBOTS=True
-# [OPTIONAL] Auto-throttle requests (default: True)
-AUTOTHROTTLE_ENABLED=True
 
 # ----------------------------------------------------------------------------
 # Audit Log Export Configuration
@@ -448,7 +407,6 @@ USING_ACCESS_MANAGEMENT=true
 USING_AZURE_MODELS=false
 USING_IAM=false
 USING_IMAGE_GENERATION=false
-USING_CRAWL=true
 TESTING=false
 DEV=false
 

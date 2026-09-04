@@ -111,6 +111,9 @@ export type CrawlRun = components["schemas"]["CrawlRunPublic"];
 export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
+export type WebsiteInfoBlobPage =
+  components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
+export type WebsiteBulkActionError = components["schemas"]["WebsiteBulkActionError"];
 export type Settings = components["schemas"]["SettingsPublic"];
 export type SkillExecutionBlockPublic = components["schemas"]["SkillExecutionBlockPublic"];
 export type SkillExecutionBlockState = components["schemas"]["SkillExecutionBlockState"];

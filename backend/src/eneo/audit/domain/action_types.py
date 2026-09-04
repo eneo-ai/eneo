@@ -82,6 +82,7 @@ class ActionType(str, Enum):
     WEBSITE_UPDATED = "website_updated"
     WEBSITE_DELETED = "website_deleted"
     WEBSITE_CRAWLED = "website_crawled"
+    WEBSITE_CRAWL_PROBED = "website_crawl_probed"
     WEBSITE_TRANSFERRED = "website_transferred"
     GROUP_CHAT_CREATED = "group_chat_created"
     COLLECTION_CREATED = "collection_created"

@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+import numpy as np
 import sqlalchemy as sa
-from dependency_injector import providers
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from typing_extensions import TypedDict
+from sqlalchemy.exc import SQLAlchemyError
+from typing_extensions import NotRequired, TypedDict
 
 from eneo.admin.quota_service import ensure_quota_capacity
 from eneo.completion_models.infrastructure.context_builder import count_tokens
@@ -30,18 +32,27 @@ from eneo.database.tables.info_blobs_table import (
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.embedding_models.infrastructure.adapters.base import (
+    PartialEmbeddingBatchError,
+)
 from eneo.info_blobs.info_blob import InfoBlobChunk
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.websites.domain.crawl_run import CrawlPhase
+from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
+from eneo.worker.crawl.heartbeat import CrawlLeaseLostError
 from eneo.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
     FailureReason,
+    Float32Vector,
     PreparedPage,
 )
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from eneo.main.container.container import Container
 
 logger = get_logger(__name__)
@@ -65,6 +76,330 @@ _embedding_semaphore: asyncio.Semaphore | None = None
 class CrawlPageData(TypedDict):
     url: str
     content: str
+    title: NotRequired[str]
+    content_hash: NotRequired[bytes]
+    etag: NotRequired[str | None]
+    last_modified: NotRequired[str | None]
+
+
+@dataclass(frozen=True, slots=True)
+class _EmbeddingPagePlan:
+    """One changed page and its ordered chunks before provider I/O."""
+
+    page: CrawlPageData
+    title: str
+    content_hash: bytes
+    chunks: list[str]
+
+
+async def _require_current_publication_lease(
+    session: "AsyncSession",
+    ctx: CrawlContext,
+) -> None:
+    current = await CrawlRunRepository(session).lock_attempt_lease(
+        ctx.attempt_id,
+        lease_owner=ctx.lease_owner,
+        expected_phase=CrawlPhase.RUNNING,
+    )
+    if not current:
+        raise CrawlLeaseLostError(
+            "Crawl attempt lease was lost before publishing content"
+        )
+
+
+async def _refresh_http_validators(
+    *,
+    ctx: CrawlContext,
+    rows: list[CrawlPageData],
+) -> bool:
+    """Refresh one batch atomically; report database failure without losing content."""
+    if not rows:
+        return True
+
+    from eneo.database.database import sessionmanager
+
+    values = [
+        {
+            "b_title": row.get("title", row["url"]),
+            "b_etag": row.get("etag"),
+            "b_last_modified": row.get("last_modified"),
+        }
+        for row in rows
+    ]
+    try:
+        async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
+            async with sessionmanager.session() as session, session.begin():
+                await _require_current_publication_lease(session, ctx)
+                # AsyncSession would select ORM bulk-by-primary-key mode here.
+                connection = await session.connection()
+                await connection.execute(
+                    sa.update(InfoBlobs)
+                    .where(
+                        InfoBlobs.website_id == ctx.website_id,
+                        InfoBlobs.tenant_id == ctx.tenant_id,
+                        InfoBlobs.title == sa.bindparam("b_title"),
+                        active_info_blob_version(),
+                    )
+                    .values(
+                        http_etag=sa.bindparam("b_etag"),
+                        http_last_modified=sa.bindparam("b_last_modified"),
+                    ),
+                    values,
+                )
+    except (SQLAlchemyError, TimeoutError) as error:
+        logger.error(
+            "Failed to save crawl HTTP cache metadata; existing content is retained",
+            extra={
+                "website_id": str(ctx.website_id),
+                "attempt_id": str(ctx.attempt_id),
+                "page_count": len(rows),
+                "error_type": type(error).__name__,
+            },
+        )
+        return False
+    return True
+
+
+async def _publish_prepared_pages(
+    *,
+    prepared_pages: list[PreparedPage],
+    ctx: CrawlContext,
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Publish one memory-bounded group in a short database transaction."""
+    from eneo.database.database import sessionmanager
+
+    successful_identities: list[str] = []
+    failures_by_reason: dict[str, list[str]] = {}
+
+    def fail_all() -> None:
+        failures_by_reason[FailureReason.DB_ERROR.value] = [
+            page.title for page in prepared_pages
+        ]
+
+    logger.debug(
+        "Phase 2: Persisting batch to database",
+        extra={
+            "website_id": str(ctx.website_id),
+            "pages_to_persist": len(prepared_pages),
+            "total_chunks": sum(len(page.chunks) for page in prepared_pages),
+        },
+    )
+
+    try:
+        async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
+            async with sessionmanager.session() as session, session.begin():
+                await _require_current_publication_lease(session, ctx)
+                tenant_limit, user_limit = (
+                    await session.execute(
+                        sa.select(Tenants.quota_limit, Users.quota_limit)
+                        .select_from(Users)
+                        .join(Tenants, Tenants.id == Users.tenant_id)
+                        .where(
+                            Users.id == ctx.user_id,
+                            Tenants.id == ctx.tenant_id,
+                        )
+                    )
+                ).one()
+                quota_repo = InfoBlobRepository(session)
+                tenant_usage = await quota_repo.get_retained_size_of_tenant(
+                    ctx.tenant_id
+                )
+                user_usage = (
+                    await quota_repo.get_retained_size_of_user(ctx.user_id)
+                    if user_limit is not None
+                    else 0
+                )
+
+                for prepared in prepared_pages:
+                    savepoint = await session.begin_nested()
+                    try:
+                        await session.execute(
+                            sa.text(
+                                "SELECT pg_advisory_xact_lock("
+                                "hashtextextended(:identity, 0))"
+                            ),
+                            {
+                                "identity": (
+                                    f"website:{prepared.website_id}:"
+                                    f"title:{prepared.title}"
+                                )
+                            },
+                        )
+
+                        existing = (
+                            await session.execute(
+                                sa.select(
+                                    InfoBlobs.id,
+                                    InfoBlobs.source_id,
+                                    InfoBlobs.content_hash,
+                                    InfoBlobs.embedding_model_id,
+                                )
+                                .where(
+                                    InfoBlobs.title == prepared.title,
+                                    InfoBlobs.website_id == prepared.website_id,
+                                    InfoBlobs.tenant_id == prepared.tenant_id,
+                                    active_info_blob_version(),
+                                )
+                                .with_for_update()
+                            )
+                        ).one_or_none()
+                        if (
+                            existing is not None
+                            and existing.content_hash == prepared.content_hash
+                            and existing.embedding_model_id
+                            == prepared.embedding_model_id
+                        ):
+                            await session.execute(
+                                sa.update(InfoBlobs)
+                                .where(
+                                    InfoBlobs.id == existing.id,
+                                    InfoBlobs.tenant_id == prepared.tenant_id,
+                                    active_info_blob_version(),
+                                )
+                                .values(
+                                    http_etag=prepared.http_etag,
+                                    http_last_modified=prepared.http_last_modified,
+                                )
+                            )
+                            await savepoint.commit()
+                            successful_identities.append(prepared.title)
+                            continue
+
+                        chunk_sizes = [
+                            len(chunk_text.encode("utf-8")) + embedding.nbytes
+                            for chunk_text, embedding in zip(
+                                prepared.chunks,
+                                prepared.embeddings,
+                            )
+                        ]
+                        stored_size = len(prepared.content.encode("utf-8")) + sum(
+                            chunk_sizes
+                        )
+                        ensure_quota_capacity(
+                            tenant_usage=tenant_usage,
+                            tenant_limit=tenant_limit,
+                            user_usage=user_usage,
+                            user_limit=user_limit,
+                            size_in_bytes=stored_size,
+                        )
+                        source_id = (
+                            existing.source_id if existing is not None else uuid4()
+                        )
+                        if existing is not None:
+                            await session.execute(
+                                sa.update(InfoBlobs)
+                                .where(
+                                    InfoBlobs.id == existing.id,
+                                    InfoBlobs.tenant_id == prepared.tenant_id,
+                                    active_info_blob_version(),
+                                )
+                                .values(
+                                    version_state=(
+                                        InfoBlobVersionState.SUPERSEDED.value
+                                    )
+                                )
+                            )
+
+                        result = await session.execute(
+                            sa.insert(InfoBlobs)
+                            .values(
+                                text=prepared.content,
+                                title=prepared.title,
+                                url=prepared.url,
+                                size=stored_size,
+                                content_hash=prepared.content_hash,
+                                http_etag=prepared.http_etag,
+                                http_last_modified=prepared.http_last_modified,
+                                user_id=prepared.user_id,
+                                tenant_id=prepared.tenant_id,
+                                website_id=prepared.website_id,
+                                embedding_model_id=prepared.embedding_model_id,
+                                group_id=None,
+                                integration_knowledge_id=None,
+                                source_id=source_id,
+                                version_state=InfoBlobVersionState.ACTIVE.value,
+                            )
+                            .returning(InfoBlobs.id)
+                        )
+                        info_blob_id = result.scalar_one()
+                        chunk_values = [
+                            {
+                                "text": chunk_text,
+                                "chunk_no": index,
+                                "size": chunk_size,
+                                "embedding": embedding,
+                                "info_blob_id": info_blob_id,
+                                "tenant_id": prepared.tenant_id,
+                            }
+                            for index, (chunk_text, embedding, chunk_size) in enumerate(
+                                zip(
+                                    prepared.chunks,
+                                    prepared.embeddings,
+                                    chunk_sizes,
+                                )
+                            )
+                        ]
+                        if not chunk_values:
+                            raise ValueError(
+                                f"Crawled page {prepared.url} has no searchable chunks"
+                            )
+                        await session.execute(
+                            sa.insert(InfoBlobChunks).values(chunk_values)
+                        )
+
+                        await savepoint.commit()
+                        tenant_usage += stored_size
+                        user_usage += stored_size
+                        successful_identities.append(prepared.title)
+                    except Exception as error:
+                        await savepoint.rollback()
+                        failures_by_reason.setdefault(
+                            FailureReason.DB_ERROR.value, []
+                        ).append(prepared.title)
+                        logger.error(
+                            f"Phase 2: Failed to persist page {prepared.url}: {error}",
+                            extra={
+                                "website_id": str(ctx.website_id),
+                                "tenant_id": str(ctx.tenant_id),
+                                "url": prepared.url,
+                                "error": str(error),
+                            },
+                        )
+
+        logger.debug(
+            "Phase 2: Batch persist complete",
+            extra={
+                "website_id": str(ctx.website_id),
+                "success_count": len(successful_identities),
+                "failed_count": sum(map(len, failures_by_reason.values())),
+            },
+        )
+    except CrawlLeaseLostError:
+        raise
+    except TimeoutError:
+        successful_identities = []
+        failures_by_reason = {}
+        fail_all()
+        logger.error(
+            f"Phase 2: Transaction wall-time exceeded ({ctx.max_transaction_wall_time_seconds}s)",
+            extra={
+                "website_id": str(ctx.website_id),
+                "pages_attempted": len(prepared_pages),
+            },
+        )
+    except Exception as error:
+        successful_identities = []
+        failures_by_reason = {}
+        fail_all()
+        logger.error(
+            f"Phase 2: Session error: {error}",
+            extra={
+                "website_id": str(ctx.website_id),
+                "error": str(error),
+            },
+        )
+
+    return successful_identities, failures_by_reason
 
 
 def _get_embedding_semaphore() -> asyncio.Semaphore:
@@ -95,62 +430,26 @@ async def persist_batch(
     container: "Container",
     existing_publications: dict[str, tuple[bytes, UUID]] | None = None,
 ) -> tuple[int, int, list[str], dict[str, list[str]]]:
+    """Embed changed pages together and publish complete, memory-bounded groups.
+
+    Chunking and provider I/O happen without a database connection. The model
+    adapter owns sequential request batching through max_batch_size. Only pages
+    with a complete ordered set of embeddings reach publication. A provider
+    failure keeps the previous published versions for the affected page and the
+    remaining page-buffer tail so a later crawl can retry them. The embedding
+    timeout applies to each provider request; the ARQ job timeout remains the
+    aggregate execution bound.
     """
-    Persist a batch of pages using the TWO-PHASE pattern.
-
-    This function minimizes database connection hold time by separating
-    compute from persistence using a two-phase pattern.
-
-    PHASE 1 (Pure Compute - ZERO DB operations):
-        - Compute content_hash via SHA-256
-        - Chunk text using RecursiveCharacterTextSplitter
-        - Call embedding API with concurrency limit (semaphore)
-        - Create PreparedPage objects with pre-computed data
-        - Network I/O happens HERE, outside any DB transaction
-
-    PHASE 2 (Short-lived Session - ~50-300ms):
-        - Open fresh session from pool
-        - For each prepared page:
-            - Lock the page identity
-            - Supersede the previous active version
-            - Insert the replacement InfoBlob
-            - Bulk insert InfoBlobChunks with embeddings
-            - Commit savepoint
-        - Return connection to pool immediately
-
-    Args:
-        page_buffer: List of page dicts with 'url' and 'content' keys
-        ctx: CrawlContext DTO with all primitives (no ORM objects!)
-        embedding_model: EmbeddingModelSpec frozen dataclass (session-independent)
-        container: DI container for creating embedding service with proper session
-
-    Returns:
-        Tuple of (success_count, failed_count, successful_urls, failures_by_reason)
-        - success_count: Number of pages successfully persisted
-        - failed_count: Number of pages that failed to persist
-        - successful_urls: List of URLs persisted or confirmed unchanged
-        - failures_by_reason: Dict mapping FailureReason codes to lists of failed URLs
-
-    Note:
-        - Publication serializes concurrent updates for the same website page.
-        - A failed replacement rolls back to the previous active version.
-        - CRITICAL: Only URLs in successful_urls should be marked as crawled
-        - CRITICAL: URLs in failures_by_reason should NOT be deleted as stale
-    """
-    from eneo.database.database import sessionmanager
-
     if not page_buffer:
         return 0, 0, [], {}
 
-    # Track failures by reason code for detailed reporting
+    success_count = 0
+    failed_count = 0
+    successful_identities: list[str] = []
     failures_by_reason: dict[str, list[str]] = {}
 
-    def add_failure(reason: FailureReason, url: str) -> None:
-        """Track a failure by reason code."""
-        reason_key = reason.value
-        if reason_key not in failures_by_reason:
-            failures_by_reason[reason_key] = []
-        failures_by_reason[reason_key].append(url)
+    def add_failure(reason: FailureReason, identity: str) -> None:
+        failures_by_reason.setdefault(reason.value, []).append(identity)
 
     if embedding_model is None:
         logger.warning(
@@ -158,62 +457,44 @@ async def persist_batch(
             extra={"website_id": str(ctx.website_id), "batch_size": len(page_buffer)},
         )
         for page in page_buffer:
-            add_failure(FailureReason.NO_EMBEDDING_MODEL, page["url"])
+            add_failure(
+                FailureReason.NO_EMBEDDING_MODEL,
+                page.get("title", page["url"]),
+            )
         return 0, len(page_buffer), [], failures_by_reason
 
-    # Validate embedding model has required provider_id for credential lookup
-    if not getattr(embedding_model, "provider_id", None):
+    # Provider data is resolved during the short bootstrap transaction. A
+    # fallback here would retain a database connection during provider I/O.
+    if (
+        embedding_model.provider_id is None
+        or not embedding_model.provider_type
+        or embedding_model.provider_credentials is None
+    ):
         logger.error(
-            "Embedding model missing provider_id - cannot load API credentials",
+            "Embedding model provider configuration was not resolved",
             extra={
                 "website_id": str(ctx.website_id),
-                "embedding_model_name": getattr(embedding_model, "name", None),
-                "embedding_model_id": str(getattr(embedding_model, "id", None)),
+                "embedding_model_name": embedding_model.name,
+                "embedding_model_id": str(embedding_model.id),
             },
         )
         for page in page_buffer:
-            add_failure(FailureReason.MISSING_PROVIDER, page["url"])
+            add_failure(
+                FailureReason.MISSING_PROVIDER,
+                page.get("title", page["url"]),
+            )
         return 0, len(page_buffer), [], failures_by_reason
 
-    success_count = 0
-    failed_count = 0
-    successful_urls: list[str] = []
-    prepared_pages: list[PreparedPage] = []
-    buffer_embedding_bytes = 0
-
-    # Create a short-lived session for embedding service to load provider credentials
-    embedding_session = sessionmanager.create_session()
-    try:
-        await embedding_session.begin()
-        session_provider = cast(Any, container.session)
-        session_provider.override(providers.Object(embedding_session))
-        create_embeddings_service = container.create_embeddings_service()
-    except Exception as e:
-        logger.error(
-            "Failed to initialize embedding service",
-            extra={
-                "website_id": str(ctx.website_id),
-                "error": str(e),
-                "error_type": type(e).__name__,
-            },
-        )
-        await embedding_session.close()
-        for page in page_buffer:
-            add_failure(FailureReason.EMBEDDING_ERROR, page["url"])
-        return 0, len(page_buffer), [], failures_by_reason
-
-    # Create text splitter (matching datastore.py pattern)
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=_CHUNK_SIZE,
         chunk_overlap=_CHUNK_OVERLAP,
         length_function=count_tokens,
     )
+    plans: list[_EmbeddingPagePlan] = []
+    validator_refreshes: list[CrawlPageData] = []
 
-    # PHASE 1: Compute embeddings (uses embedding_session for provider credentials)
-    # The embedding session is used to load API credentials from DB, but the actual
-    # embedding API calls are external network I/O, not DB operations.
     logger.debug(
-        "Phase 1: Computing embeddings for batch",
+        "Planning page embeddings",
         extra={
             "website_id": str(ctx.website_id),
             "batch_size": len(page_buffer),
@@ -221,393 +502,305 @@ async def persist_batch(
         },
     )
 
-    try:
-        for page_data in page_buffer:
-            url = page_data["url"]
-            content = page_data["content"]
+    for page in page_buffer:
+        url = page["url"]
+        title = page.get("title", url)
+        content = page["content"]
 
-            if not content.strip():
+        if not content.strip():
+            logger.warning(
+                "Skipping page without searchable content",
+                extra={
+                    "website_id": str(ctx.website_id),
+                    "url": url,
+                    "reason": FailureReason.EMPTY_CONTENT.value,
+                    "content_length": len(content),
+                },
+            )
+            failed_count += 1
+            add_failure(FailureReason.EMPTY_CONTENT, title)
+            continue
+
+        try:
+            content_hash = (
+                page.get("content_hash")
+                or hashlib.sha256(content.encode("utf-8")).digest()
+            )
+            if (existing_publications or {}).get(title) == (
+                content_hash,
+                embedding_model.id,
+            ):
+                success_count += 1
+                successful_identities.append(title)
+                if (
+                    page.get("etag") is not None
+                    or page.get("last_modified") is not None
+                ):
+                    validator_refreshes.append(page)
+                continue
+
+            raw_chunks = splitter.split_text(content)
+            chunks = [chunk.strip() for chunk in raw_chunks if chunk.strip()]
+            if not chunks:
                 logger.warning(
-                    f"Skipping empty page {url}",
+                    "Skipping page without searchable chunks",
                     extra={
                         "website_id": str(ctx.website_id),
                         "url": url,
-                        "reason": "empty_content",
-                        "content_length": len(content) if content else 0,
+                        "reason": FailureReason.NO_CHUNKS.value,
+                        "content_length": len(content),
+                        "raw_chunks_count": len(raw_chunks),
                     },
                 )
                 failed_count += 1
-                add_failure(FailureReason.EMPTY_CONTENT, url)
+                add_failure(FailureReason.NO_CHUNKS, title)
                 continue
 
-            try:
-                # 1. Compute content hash (local operation)
-                content_hash = hashlib.sha256(content.encode("utf-8")).digest()
-                if (existing_publications or {}).get(url) == (
-                    content_hash,
-                    embedding_model.id,
-                ):
-                    success_count += 1
-                    successful_urls.append(url)
-                    continue
-
-                # 2. Chunk the text (local operation)
-                raw_chunks = splitter.split_text(content)
-                chunks = [chunk.strip() for chunk in raw_chunks if chunk.strip()]
-
-                if not chunks:
-                    logger.warning(
-                        f"No chunks after splitting for {url}",
-                        extra={
-                            "website_id": str(ctx.website_id),
-                            "url": url,
-                            "reason": "no_chunks",
-                            "content_length": len(content),
-                            "raw_chunks_count": len(raw_chunks),
-                        },
-                    )
-                    failed_count += 1
-                    add_failure(FailureReason.NO_CHUNKS, url)
-                    continue
-
-                # 3. Create InfoBlobChunk objects for embedding service
-                # Note: info_blob_id is a placeholder - will be set in Phase 2
-                chunk_objects = [
-                    InfoBlobChunk(
-                        chunk_no=i,
-                        text=chunk_text,
-                        info_blob_id=ctx.website_id,  # Placeholder, not used by embedding service
-                        tenant_id=ctx.tenant_id,
-                    )
-                    for i, chunk_text in enumerate(chunks)
-                ]
-
-                # 4. Call embedding API with semaphore limit and timeout
-                # This is the expensive network I/O - happens OUTSIDE any DB transaction
-                async with _get_embedding_semaphore():
-                    try:
-                        async with asyncio.timeout(ctx.embedding_timeout_seconds):
-                            chunk_embedding_list = (
-                                await create_embeddings_service.get_embeddings(
-                                    model=cast(Any, embedding_model),
-                                    chunks=chunk_objects,
-                                )
-                            )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            f"Embedding timeout for {url} after {ctx.embedding_timeout_seconds}s",
-                            extra={
-                                "website_id": str(ctx.website_id),
-                                "tenant_id": str(ctx.tenant_id),
-                                "url": url,
-                                "num_chunks": len(chunks),
-                            },
-                        )
-                        failed_count += 1
-                        add_failure(FailureReason.EMBEDDING_TIMEOUT, url)
-                        continue
-
-                # 5. Extract embeddings from ChunkEmbeddingList
-                embeddings: list[list[float]] = []
-                for _, embedding in chunk_embedding_list:
-                    # ChunkEmbeddingList returns numpy arrays, convert to list
-                    embeddings.append(
-                        embedding.tolist()  # type: ignore[attr-defined]
-                        if hasattr(embedding, "tolist")
-                        else list(embedding)
-                    )
-
-                # 6. Track embedding memory for early flush
-                embedding_bytes = sum(
-                    len(e) * 4 for e in embeddings
-                )  # float32 = 4 bytes
-                buffer_embedding_bytes += embedding_bytes
-
-                # 7. Create PreparedPage with all data needed for Phase 2
-                embedding_model_id = ctx.embedding_model_id
-                assert embedding_model_id is not None
-                prepared = PreparedPage(
-                    url=url,
-                    title=url,  # URL as title, matching existing crawler pattern
-                    content=content,
+            plans.append(
+                _EmbeddingPagePlan(
+                    page=page,
+                    title=title,
                     content_hash=content_hash,
                     chunks=chunks,
-                    embeddings=embeddings,
-                    tenant_id=ctx.tenant_id,
-                    website_id=ctx.website_id,
-                    user_id=ctx.user_id,
-                    embedding_model_id=embedding_model_id,
                 )
-                prepared_pages.append(prepared)
+            )
+        except Exception as error:
+            logger.error(
+                "Failed to prepare page text for embeddings",
+                extra={
+                    "website_id": str(ctx.website_id),
+                    "tenant_id": str(ctx.tenant_id),
+                    "url": url,
+                    "error_type": type(error).__name__,
+                },
+            )
+            failed_count += 1
+            add_failure(FailureReason.EMBEDDING_ERROR, title)
 
-                # Check memory cap for early flush
-                if buffer_embedding_bytes >= ctx.max_batch_embedding_bytes:
-                    logger.info(
-                        f"Embedding memory cap reached ({buffer_embedding_bytes} bytes), stopping Phase 1 early",
-                        extra={
-                            "website_id": str(ctx.website_id),
-                            "pages_prepared": len(prepared_pages),
-                        },
-                    )
-                    break
-
-            except Exception as e:
-                logger.error(
-                    f"Phase 1: Failed to prepare page {url}: {e}",
-                    extra={
-                        "website_id": str(ctx.website_id),
-                        "tenant_id": str(ctx.tenant_id),
-                        "url": url,
-                        "error": str(e),
-                    },
-                )
-                failed_count += 1
-                add_failure(FailureReason.EMBEDDING_ERROR, url)
-                continue
-    finally:
-        # Close embedding session after Phase 1 completes
-        # This returns the connection to the pool before Phase 2 starts
-        await embedding_session.close()
-
-    confirmed_unchanged_urls = successful_urls.copy()
-    if not prepared_pages:
-        log = logger.debug if successful_urls else logger.warning
+    if not await _refresh_http_validators(ctx=ctx, rows=validator_refreshes):
+        # These pages were provisionally counted as unchanged. Count each only
+        # once and keep cleanup conservative when their metadata did not commit.
+        failed_identities = {
+            page.get("title", page["url"]) for page in validator_refreshes
+        }
+        successful_identities = [
+            title for title in successful_identities if title not in failed_identities
+        ]
+        success_count -= len(validator_refreshes)
+        failed_count += len(validator_refreshes)
+        for page in validator_refreshes:
+            add_failure(FailureReason.DB_ERROR, page.get("title", page["url"]))
+    if not plans:
+        log = logger.debug if successful_identities else logger.warning
         log(
-            "No pages require publication after Phase 1",
+            "No pages require embedding or publication",
             extra={
                 "website_id": str(ctx.website_id),
-                "unchanged_count": len(successful_urls),
+                "unchanged_count": len(successful_identities),
                 "failed_count": failed_count,
             },
         )
-        return success_count, failed_count, successful_urls, failures_by_reason
-
-    # PHASE 2: Persist to DB (SHORT-LIVED SESSION)
-    # This is the only part that holds a database connection.
-    # Target: ~50-300ms total, returned to pool immediately after.
-    logger.debug(
-        "Phase 2: Persisting batch to database",
-        extra={
-            "website_id": str(ctx.website_id),
-            "pages_to_persist": len(prepared_pages),
-            "total_chunks": sum(len(p.chunks) for p in prepared_pages),
-        },
-    )
+        return (
+            success_count,
+            failed_count,
+            successful_identities,
+            failures_by_reason,
+        )
 
     try:
-        async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
-            async with sessionmanager.session() as session, session.begin():
-                tenant_limit, user_limit = (
-                    await session.execute(
-                        sa.select(Tenants.quota_limit, Users.quota_limit)
-                        .select_from(Users)
-                        .join(Tenants, Tenants.id == Users.tenant_id)
-                        .where(
-                            Users.id == ctx.user_id,
-                            Tenants.id == ctx.tenant_id,
-                        )
-                    )
-                ).one()
-                quota_repo = InfoBlobRepository(session)
-                tenant_usage = await quota_repo.get_retained_size_of_tenant(
-                    ctx.tenant_id
-                )
-                user_usage = (
-                    await quota_repo.get_retained_size_of_user(ctx.user_id)
-                    if user_limit is not None
-                    else 0
-                )
-
-                for prepared in prepared_pages:
-                    # Per-page savepoint keeps the previous complete version visible
-                    # unless the replacement and all of its chunks are ready together.
-                    savepoint = await session.begin_nested()
-                    try:
-                        await session.execute(
-                            sa.text(
-                                "SELECT pg_advisory_xact_lock("
-                                "hashtextextended(:identity, 0))"
-                            ),
-                            {
-                                "identity": (
-                                    f"website:{prepared.website_id}:"
-                                    f"title:{prepared.title}"
-                                )
-                            },
-                        )
-
-                        existing = (
-                            await session.execute(
-                                sa.select(
-                                    InfoBlobs.id,
-                                    InfoBlobs.source_id,
-                                    InfoBlobs.content_hash,
-                                    InfoBlobs.embedding_model_id,
-                                )
-                                .where(
-                                    InfoBlobs.title == prepared.title,
-                                    InfoBlobs.website_id == prepared.website_id,
-                                    active_info_blob_version(),
-                                )
-                                .with_for_update()
-                            )
-                        ).one_or_none()
-                        if (
-                            existing is not None
-                            and existing.content_hash == prepared.content_hash
-                            and existing.embedding_model_id
-                            == prepared.embedding_model_id
-                        ):
-                            await savepoint.commit()
-                            success_count += 1
-                            successful_urls.append(prepared.url)
-                            continue
-
-                        chunk_sizes = [
-                            len(chunk_text.encode("utf-8")) + len(embedding) * 4
-                            for chunk_text, embedding in zip(
-                                prepared.chunks,
-                                prepared.embeddings,
-                            )
-                        ]
-                        stored_size = len(prepared.content.encode("utf-8")) + sum(
-                            chunk_sizes
-                        )
-                        ensure_quota_capacity(
-                            tenant_usage=tenant_usage,
-                            tenant_limit=tenant_limit,
-                            user_usage=user_usage,
-                            user_limit=user_limit,
-                            size_in_bytes=stored_size,
-                        )
-                        source_id = (
-                            existing.source_id if existing is not None else uuid4()
-                        )
-                        if existing is not None:
-                            await session.execute(
-                                sa.update(InfoBlobs)
-                                .where(
-                                    InfoBlobs.id == existing.id,
-                                    active_info_blob_version(),
-                                )
-                                .values(
-                                    version_state=(
-                                        InfoBlobVersionState.SUPERSEDED.value
-                                    )
-                                )
-                            )
-
-                        info_blob_values = {
-                            "text": prepared.content,
-                            "title": prepared.title,
-                            "url": prepared.url,
-                            "size": stored_size,
-                            "content_hash": prepared.content_hash,
-                            "user_id": prepared.user_id,
-                            "tenant_id": prepared.tenant_id,
-                            "website_id": prepared.website_id,
-                            "embedding_model_id": prepared.embedding_model_id,
-                            "group_id": None,  # Website crawls don't have group_id
-                            "integration_knowledge_id": None,
-                            "source_id": source_id,
-                            "version_state": InfoBlobVersionState.ACTIVE.value,
-                        }
-
-                        insert_blob_stmt = (
-                            sa.insert(InfoBlobs)
-                            .values(**info_blob_values)
-                            .returning(InfoBlobs.id)
-                        )
-                        result = await session.execute(insert_blob_stmt)
-                        info_blob_id = result.scalar_one()
-
-                        chunk_values = [
-                            {
-                                "text": chunk_text,
-                                "chunk_no": i,
-                                "size": chunk_size,
-                                "embedding": embedding,
-                                "info_blob_id": info_blob_id,
-                                "tenant_id": prepared.tenant_id,
-                            }
-                            for i, (chunk_text, embedding, chunk_size) in enumerate(
-                                zip(
-                                    prepared.chunks,
-                                    prepared.embeddings,
-                                    chunk_sizes,
-                                )
-                            )
-                        ]
-
-                        if not chunk_values:
-                            raise ValueError(
-                                f"Crawled page {prepared.url} has no searchable chunks"
-                            )
-                        insert_chunks_stmt = sa.insert(InfoBlobChunks).values(
-                            chunk_values
-                        )
-                        await session.execute(insert_chunks_stmt)
-
-                        await savepoint.commit()
-                        tenant_usage += stored_size
-                        user_usage += stored_size
-                        success_count += 1
-                        successful_urls.append(
-                            prepared.url
-                        )  # Track this URL as actually persisted
-
-                    except Exception as e:
-                        await savepoint.rollback()
-                        failed_count += 1
-                        add_failure(FailureReason.DB_ERROR, prepared.url)
-                        logger.error(
-                            f"Phase 2: Failed to persist page {prepared.url}: {e}",
-                            extra={
-                                "website_id": str(ctx.website_id),
-                                "tenant_id": str(ctx.tenant_id),
-                                "url": prepared.url,
-                                "error": str(e),
-                            },
-                        )
-
-        # Connection returned to pool HERE - typically ~50-300ms total
-        logger.debug(
-            "Phase 2: Batch persist complete",
-            extra={
-                "website_id": str(ctx.website_id),
-                "success_count": success_count,
-                "failed_count": failed_count,
-            },
+        embedding_service = container.create_embeddings_service(
+            request_semaphore=_get_embedding_semaphore(),
+            request_timeout_seconds=ctx.embedding_timeout_seconds,
         )
-
-    except asyncio.TimeoutError:
+    except Exception as error:
         logger.error(
-            f"Phase 2: Transaction wall-time exceeded ({ctx.max_transaction_wall_time_seconds}s)",
+            "Failed to initialize embedding service",
             extra={
                 "website_id": str(ctx.website_id),
-                "pages_attempted": len(prepared_pages),
+                "error_type": type(error).__name__,
             },
         )
-        # Mark all unpersisted pages as failed with DB_ERROR
-        successful_urls = confirmed_unchanged_urls
-        success_count = len(confirmed_unchanged_urls)
-        for page in prepared_pages:
-            add_failure(FailureReason.DB_ERROR, page.url)
-        failed_count += len(prepared_pages)
+        for plan in plans:
+            add_failure(FailureReason.EMBEDDING_ERROR, plan.title)
+        return (
+            success_count,
+            failed_count + len(plans),
+            successful_identities,
+            failures_by_reason,
+        )
 
-    except Exception as e:
+    chunks_to_embed = [
+        InfoBlobChunk(
+            chunk_no=chunk_number,
+            text=chunk_text,
+            info_blob_id=ctx.website_id,
+            tenant_id=ctx.tenant_id,
+        )
+        for plan in plans
+        for chunk_number, chunk_text in enumerate(plan.chunks)
+    ]
+
+    provider_failure: Exception | None = None
+    completed_count: int | None = None
+    try:
+        embedding_results = await embedding_service.get_embeddings(
+            model=embedding_model,
+            chunks=chunks_to_embed,
+        )
+    except PartialEmbeddingBatchError as error:
+        embedding_results = error.completed
+        provider_failure = error.cause
+        completed_count = error.completed_count
+        logger.warning(
+            "Embedding provider stopped after a complete chunk prefix",
+            extra={
+                "website_id": str(ctx.website_id),
+                "completed_chunks": error.completed_count,
+                "total_chunks": len(chunks_to_embed),
+                "error_type": type(error.cause).__name__,
+            },
+        )
+    except Exception as error:
         logger.error(
-            f"Phase 2: Session error: {e}",
+            "Embedding provider failed before returning a complete prefix",
             extra={
                 "website_id": str(ctx.website_id),
-                "error": str(e),
+                "total_chunks": len(chunks_to_embed),
+                "error_type": type(error).__name__,
             },
         )
-        # Mark all unpersisted pages as failed with DB_ERROR
-        successful_urls = confirmed_unchanged_urls
-        success_count = len(confirmed_unchanged_urls)
-        for page in prepared_pages:
-            add_failure(FailureReason.DB_ERROR, page.url)
-        failed_count += len(prepared_pages)
+        for plan in plans:
+            add_failure(FailureReason.EMBEDDING_ERROR, plan.title)
+        return (
+            success_count,
+            failed_count + len(plans),
+            successful_identities,
+            failures_by_reason,
+        )
 
-    return success_count, failed_count, successful_urls, failures_by_reason
+    prepared_pages: list[PreparedPage] = []
+    prepared_embedding_bytes = 0
+
+    async def flush_prepared_pages() -> tuple[int, int]:
+        nonlocal prepared_embedding_bytes
+        if not prepared_pages:
+            return 0, 0
+
+        published, publication_failures = await _publish_prepared_pages(
+            prepared_pages=prepared_pages,
+            ctx=ctx,
+        )
+        publication_failed_count: int = 0
+        for identities in publication_failures.values():
+            publication_failed_count += len(identities)
+        successful_identities.extend(published)
+        for reason, identities in publication_failures.items():
+            failures_by_reason.setdefault(reason, []).extend(identities)
+        prepared_pages.clear()
+        prepared_embedding_bytes = 0
+        return len(published), publication_failed_count
+
+    result_iterator = iter(embedding_results)
+    next_chunk_index = 0
+    incomplete_plan_index: int | None = None
+
+    for plan_index, plan in enumerate(plans):
+        page_embeddings: list[Float32Vector] = []
+        for _ in plan.chunks:
+            try:
+                returned_chunk, embedding = next(result_iterator)
+                expected_chunk = chunks_to_embed[next_chunk_index]
+                if returned_chunk is not expected_chunk:
+                    raise ValueError("Embedding results were returned out of order")
+                next_chunk_index += 1
+                page_embeddings.append(np.asarray(embedding, dtype=np.float32))
+            except StopIteration:
+                incomplete_plan_index = plan_index
+                break
+            except Exception as error:
+                provider_failure = provider_failure or error
+                incomplete_plan_index = plan_index
+                logger.error(
+                    "Embedding result stream could not be read",
+                    extra={
+                        "website_id": str(ctx.website_id),
+                        "completed_chunks": next_chunk_index,
+                        "total_chunks": len(chunks_to_embed),
+                        "error_type": type(error).__name__,
+                    },
+                )
+                break
+
+        if incomplete_plan_index is not None:
+            break
+
+        page = plan.page
+        prepared_page = PreparedPage(
+            url=page["url"],
+            title=plan.title,
+            content=page["content"],
+            content_hash=plan.content_hash,
+            http_etag=page.get("etag"),
+            http_last_modified=page.get("last_modified"),
+            chunks=plan.chunks,
+            embeddings=page_embeddings,
+            tenant_id=ctx.tenant_id,
+            website_id=ctx.website_id,
+            user_id=ctx.user_id,
+            embedding_model_id=embedding_model.id,
+        )
+        prepared_pages.append(prepared_page)
+        prepared_embedding_bytes += sum(
+            embedding.nbytes for embedding in page_embeddings
+        )
+
+        # The bound is checked after a complete page so partial pages are never
+        # published. Overshoot is limited to one page, matching the prior guard.
+        if prepared_embedding_bytes >= ctx.max_batch_embedding_bytes:
+            logger.info(
+                "Embedding memory cap reached; publishing complete pages",
+                extra={
+                    "website_id": str(ctx.website_id),
+                    "pages_prepared": len(prepared_pages),
+                    "embedding_bytes": prepared_embedding_bytes,
+                },
+            )
+            published_count, publication_failed_count = await flush_prepared_pages()
+            success_count += published_count
+            failed_count += publication_failed_count
+
+    # Advance once after an exact successful result set so ChunkEmbeddingList
+    # closes its temporary spool at StopIteration.
+    if incomplete_plan_index is None:
+        try:
+            next(result_iterator)
+        except StopIteration:
+            pass
+
+    published_count, publication_failed_count = await flush_prepared_pages()
+    success_count += published_count
+    failed_count += publication_failed_count
+
+    if incomplete_plan_index is not None:
+        failure_reason = (
+            FailureReason.EMBEDDING_TIMEOUT
+            if isinstance(provider_failure, TimeoutError)
+            else FailureReason.EMBEDDING_ERROR
+        )
+        failed_plans = plans[incomplete_plan_index:]
+        for plan in failed_plans:
+            add_failure(failure_reason, plan.title)
+        failed_count += len(failed_plans)
+
+        logger.warning(
+            "Pages after the completed embedding prefix were not published",
+            extra={
+                "website_id": str(ctx.website_id),
+                "completed_chunks": completed_count or next_chunk_index,
+                "total_chunks": len(chunks_to_embed),
+                "failed_pages": len(failed_plans),
+                "failure_reason": failure_reason.value,
+            },
+        )
+
+    return success_count, failed_count, successful_identities, failures_by_reason

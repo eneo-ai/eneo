@@ -311,19 +311,23 @@ curl -fsS https://your-domain.com/version
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `CRAWL_FEEDER_ENABLED` | `true` | Enable optimized crawling (keep `true`) |
     | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (~10 hours) |
-    | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages per crawl |
+    | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages and linked files per crawl |
+    | `CRAWL_JOB_CONCURRENCY_LIMIT` | `WORKER_MAX_JOBS` | Cluster-wide crawl admission limit across crawler replicas |
+    | `CRAWL_HEARTBEAT_INTERVAL_SECONDS` | `300` | PostgreSQL lease renewal interval |
 
     **Background Worker:**
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `WORKER_MAX_JOBS` | `15` | Max concurrent background jobs (should be ≤60% of DB pool size) |
-    | `TENANT_WORKER_CONCURRENCY_LIMIT` | `4` | Max concurrent jobs per tenant (prevents one tenant monopolizing workers) |
+    | `WORKER_MAX_JOBS` | `15` | Max concurrent jobs per worker process; general and crawler services apply it independently |
 
     <Callout type="info">
-      **High CPU usage on worker?** Reduce `WORKER_MAX_JOBS` to limit concurrent document processing.
+      Each API or worker process owns its own database pool. Budget PostgreSQL
+      `max_connections` for the sum of every API, general-worker, and
+      crawler-worker process pool, plus operational headroom. Tune
+      `WORKER_MAX_JOBS` per worker process for its CPU, memory, and
+      database-active workload.
     </Callout>
 
     **Dynamic Credential Management:**
@@ -608,7 +612,7 @@ Configure crawling behavior per tenant.
     curl -X PUT "https://eneo.example.com/api/v1/sysadmin/tenants/{tenant_id}/crawler-settings" \
       -H "X-API-Key: your-super-api-key" \
       -H "Content-Type: application/json" \
-      -d '{"crawl_feeder_enabled": true, "closespider_itemcount": 20000}'
+      -d '{"closespider_itemcount": 20000, "crawl_heartbeat_interval_seconds": 300}'
     ```
   </Tabs.Tab>
   <Tabs.Tab>
@@ -667,24 +671,24 @@ key or a tenant ID.
 
 ### Common Issues
 
-| Symptom                              | Likely Cause                                         | Fix                                                                                 |
-| ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run     | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                 |
-| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                      | Set to `true`, restart backend                                                      |
-| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                  | Set to external URL (not localhost in prod)                                         |
-| Can't upload multiple files          | `MAX_IN_QUESTION=1`                                  | Increase value in backend env                                                       |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > Storage                  |
-| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                  | Set correct key or re-enter credentials                                             |
-| Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
-| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND IdP config                                     |
-| Crawls not processing                | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
-| Crawls/uploads not working           | Worker not running or no embedding model             | Check worker is running, enable embedding model in Admin → Models                   |
-| Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription tab, enable Whisper                                  |
-| JWT token invalid                    | `JWT_SECRET` mismatch                                | Must be identical in backend AND frontend                                           |
-| Worker jobs stuck or slow            | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
-| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service   | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
-| HTTP to HTTPS redirect broken        | Missing Traefik label                                | Ensure `traefik.enable=true` label on traefik service                               |
-| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml            | Replace `your-domain.com` in all 4 locations                                        |
+| Symptom                              | Likely Cause                                           | Fix                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run       | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                                                                   |
+| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                        | Set to `true`, restart backend                                                                                                        |
+| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                    | Set to external URL (not localhost in prod)                                                                                           |
+| Can't upload multiple files          | `MAX_IN_QUESTION=1`                                    | Increase value in backend env                                                                                                         |
+| Large file uploads fail              | Admin policy or applicable operator ceiling is lower   | Review configured, effective, and source values in Admin > Storage                                                                    |
+| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                    | Set correct key or re-enter credentials                                                                                               |
+| Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                     | Set to `true`, requires `ENCRYPTION_KEY`                                                                                              |
+| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                               | Must match in backend, frontend, AND IdP config                                                                                       |
+| Crawls not processing                | Crawler worker unavailable or execution leases expired | Check `/api/healthz/crawler`; an increasing `oldest_active_age_seconds` or nonzero `expired_leases` identifies stalled lifecycle work |
+| Crawls/uploads not working           | Worker not running or no embedding model               | Check both workers are running, enable embedding model in Admin → Models                                                              |
+| Can't create Apps                    | No transcription model enabled                         | Admin → Models → Transcription tab, enable Whisper                                                                                    |
+| JWT token invalid                    | `JWT_SECRET` mismatch                                  | Must be identical in backend AND frontend                                                                                             |
+| Worker jobs stuck or slow            | Worker overloaded                                      | Reduce `WORKER_MAX_JOBS` or increase resources                                                                                        |
+| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service     | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost)                                                   |
+| HTTP to HTTPS redirect broken        | Missing Traefik label                                  | Ensure `traefik.enable=true` label on traefik service                                                                                 |
+| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml              | Replace `your-domain.com` in all 4 locations                                                                                          |
 
 ### Debug Mode
 

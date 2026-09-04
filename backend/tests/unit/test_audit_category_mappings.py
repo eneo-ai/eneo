@@ -152,8 +152,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "integration_events"
         ]
-        assert len(integration_actions) == 19, (
-            f"Expected 19 integration events, got {len(integration_actions)}"
+        assert len(integration_actions) == 20, (
+            f"Expected 20 integration events, got {len(integration_actions)}"
         )
 
     def test_mcp_events_mapping(self):
@@ -265,7 +265,7 @@ class TestCategoryDistribution:
             "user_actions": 45,
             "security_events": 9,
             "file_operations": 5,
-            "integration_events": 19,
+            "integration_events": 20,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
         }

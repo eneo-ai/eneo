@@ -65,7 +65,7 @@ describe("JobListView failure presentation", () => {
       .toBeVisible();
   });
 
-  it("preserves non-knowledge result details used by crawl jobs", async () => {
+  it("uses a localized safe fallback instead of crawl worker details", async () => {
     render(JobListView, {
       jobs: [
         failedJob({
@@ -79,8 +79,48 @@ describe("JobListView failure presentation", () => {
 
     await page.getByRole("button", { name: /intranet\.example/ }).click();
 
+    await expect.element(page.getByText(m.crawl_failure_unknown(), { exact: true })).toBeVisible();
     await expect
       .element(page.getByText("The crawl exceeded its configured time limit", { exact: true }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows the localized typed reason for an unreachable crawl", async () => {
+    render(JobListView, {
+      jobs: [
+        failedJob({
+          name: "offline.example",
+          task: "crawl",
+          failure_code: "remote_unreachable" as Job["failure_code"]
+        })
+      ],
+      title: "Crawls"
+    });
+
+    await page.getByRole("button", { name: /offline\.example/ }).click();
+
+    await expect
+      .element(page.getByText(m.crawl_failure_remote_unreachable(), { exact: true }))
       .toBeVisible();
+  });
+
+  it("presents an intentional crawl cancellation as stopped instead of failed", async () => {
+    render(JobListView, {
+      jobs: [
+        failedJob({
+          name: "intranet.example",
+          task: "crawl",
+          failure_code: "cancelled",
+          result_location: "The crawl was stopped by a user"
+        })
+      ],
+      title: "Crawls"
+    });
+
+    await expect.element(page.getByText(m.crawl_status_cancelled(), { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText("The crawl was stopped by a user", { exact: true }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByText(m.failed(), { exact: true })).not.toBeInTheDocument();
   });
 });

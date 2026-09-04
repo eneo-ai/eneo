@@ -42,10 +42,13 @@ from eneo.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelPublic,
 )
 from eneo.users.user import UserSparse
-from eneo.websites.crawl_dependencies.crawl_models import CrawlRunPublic
 from eneo.websites.domain.crawl_run import CrawlType
 from eneo.websites.domain.website import UpdateInterval
-from eneo.websites.presentation.website_models import WebsiteMetadata, WebsitePublic
+from eneo.websites.presentation.website_models import (
+    CrawlRunPublic,
+    WebsiteMetadata,
+    WebsitePublic,
+)
 
 
 class SpaceRoleValue(str, Enum):

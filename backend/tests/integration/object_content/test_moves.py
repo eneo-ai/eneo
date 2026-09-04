@@ -50,7 +50,10 @@ from eneo.object_content.content import (
     capture_content,
 )
 from eneo.object_content.content_service import ObjectContentService
-from eneo.object_content.deployment_policy import DeploymentPolicyPauseUpdate
+from eneo.object_content.deployment_policy import (
+    DeploymentPolicyPauseUpdate,
+    DeploymentPolicyRepository,
+)
 from eneo.object_content.deployment_policy_router import MoveQueueRequest
 from eneo.object_content.lease import OperationCheckpoint
 from eneo.object_content.move_executor import ObjectContentMoveExecutor
@@ -368,6 +371,9 @@ async def test_admin_command_requires_readiness_before_queueing(
                 == StorageKind.POSTGRES_INLINE.value
             )
             assert await session.get(ObjectContentMoves, content_id) is None
+            initial_revision = (
+                await DeploymentPolicyRepository(session).get()
+            ).revision
 
         runtime.selectable = True
         queued = await deployment_policy_router.queue_object_content_moves(
@@ -376,7 +382,7 @@ async def test_admin_command_requires_readiness_before_queueing(
         )
         paused = await deployment_policy_router.set_object_content_moves_paused(
             DeploymentPolicyPauseUpdate(
-                expected_revision=1,
+                expected_revision=initial_revision,
                 moves_paused=True,
             ),
             container,
@@ -384,7 +390,7 @@ async def test_admin_command_requires_readiness_before_queueing(
         projection = await deployment_policy_router._read_moves(session)
         resumed = await deployment_policy_router.set_object_content_moves_paused(
             DeploymentPolicyPauseUpdate(
-                expected_revision=2,
+                expected_revision=paused.policy_revision,
                 moves_paused=False,
             ),
             container,
@@ -392,9 +398,9 @@ async def test_admin_command_requires_readiness_before_queueing(
 
     assert queued.queued_count == 1
     assert queued.target_too_large_count == 0
-    assert paused.policy_revision == 2
+    assert paused.policy_revision == initial_revision + 1
     assert paused.paused is True
-    assert resumed.policy_revision == 3
+    assert resumed.policy_revision == initial_revision + 2
     assert resumed.paused is False
     assert projection.paused is True
     assert len(projection.moves) == 1

@@ -75,18 +75,6 @@ IGNORED_WARNINGS: list[WarningFilter] = [
         ),
     ),
     WarningFilter(
-        pattern=r"isSet\(\) is deprecated, use is_set\(\) instead",
-        category="DeprecationWarning",
-        reason=(
-            "crochet calls threading.Event.isSet() on Python 3.12+; we transitively "
-            "depend on it via the integration test stack."
-        ),
-        resolution=(
-            "Upgrade crochet once upstream switches to is_set() (track "
-            "https://github.com/itamarst/crochet/) or remove the crochet dependency."
-        ),
-    ),
-    WarningFilter(
         pattern=r"coroutine 'AsyncMockMixin\._execute_mock_call' was never awaited",
         category="RuntimeWarning",
         reason=(

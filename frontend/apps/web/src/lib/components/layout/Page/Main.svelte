@@ -13,7 +13,7 @@
 
     if (div) {
       setTimeout(() => {
-        div.scrollTo({
+        div?.scrollTo({
           top: scrollY,
           behavior: "instant"
         });

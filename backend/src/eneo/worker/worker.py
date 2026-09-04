@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
 import os
 from functools import wraps
 from typing import Any, Callable, cast
 from uuid import UUID
 
-import crochet
 import sqlalchemy as sa
 from arq.cron import cron
 from arq.worker import Function
@@ -82,9 +80,6 @@ def _log_startup_diagnostics(settings: Settings) -> None:
     """
     # Common env var typos and naming mismatches to detect
     typo_checks = [
-        ("CRAWL_STALE_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
-        ("CRAWL_TRESHOLD_MINUTES", "CRAWL_STALE_THRESHOLD_MINUTES"),
-        ("TENANT_WORKER_CONCURENCY_LIMIT", "TENANT_WORKER_CONCURRENCY_LIMIT"),
         ("CRAWL_HEARBEAT_INTERVAL_SECONDS", "CRAWL_HEARTBEAT_INTERVAL_SECONDS"),
         ("WORKER_MAX_CONCURRENT_JOBS", "WORKER_MAX_JOBS"),  # naming mismatch
     ]
@@ -105,10 +100,6 @@ def _log_startup_diagnostics(settings: Settings) -> None:
     logger.info(
         "Worker startup diagnostics - effective settings",
         extra={
-            # Feeder settings
-            "crawl_feeder_enabled": settings.crawl_feeder_enabled,
-            "crawl_feeder_interval_seconds": settings.crawl_feeder_interval_seconds,
-            "crawl_feeder_batch_size": settings.crawl_feeder_batch_size,
             # Redis settings (connection resilience)
             "redis_host": settings.redis_host,
             "redis_port": settings.redis_port,
@@ -120,16 +111,14 @@ def _log_startup_diagnostics(settings: Settings) -> None:
             "redis_health_check_interval": settings.redis_health_check_interval,
             "redis_max_connections": settings.redis_max_connections,
             # Concurrency settings
-            "tenant_worker_concurrency_limit": settings.tenant_worker_concurrency_limit,
-            "tenant_worker_semaphore_ttl_seconds": settings.tenant_worker_semaphore_ttl_seconds,
+            "worker_max_jobs": settings.worker_max_jobs,
+            "crawl_job_concurrency_limit": (
+                settings.effective_crawl_job_concurrency_limit
+            ),
             # Crawl settings
             "crawl_max_length": settings.crawl_max_length,
-            "crawl_stale_threshold_minutes": settings.crawl_stale_threshold_minutes,
             "crawl_heartbeat_interval_seconds": settings.crawl_heartbeat_interval_seconds,
             "crawl_heartbeat_max_failures": settings.crawl_heartbeat_max_failures,
-            "crawl_job_max_age_seconds": settings.crawl_job_max_age_seconds,
-            # Cleanup settings
-            "orphan_crawl_run_timeout_hours": settings.orphan_crawl_run_timeout_hours,
         },
     )
 
@@ -187,8 +176,7 @@ class Worker:
         self.job_serializer = serialize_job
         self.job_deserializer = deserialize_job
         # Job timeout is a safety net - uses global env default as upper bound.
-        # Per-tenant crawl timeouts are enforced by asyncio.wait_for() in crawler.py
-        # which respects tenant-specific crawl_max_length settings.
+        # Per-tenant crawl timeouts are enforced by the async Python crawl engine.
         self.job_timeout = (
             settings.crawl_max_length + 60 * 60
         )  # crawl window + 1h buffer
@@ -204,7 +192,7 @@ class Worker:
         self.health_check_interval = 60  # seconds (default is 3600)
 
         # job_completion_wait: Time to wait for jobs to complete on shutdown
-        # Allows Scrapy/Twisted reactor cleanup via crochet
+        # Give in-process async crawl tasks time to cancel and close HTTP responses.
         self.job_completion_wait = 60  # seconds
 
         # ARQ lifecycle hooks for job observability
@@ -274,60 +262,12 @@ class Worker:
         init_observability()
 
         await lifespan.startup()
-        crochet.setup()
-
         # Log effective settings at startup for observability
         settings = get_settings()
         _log_startup_diagnostics(settings)
 
-        # Start crawl feeder as background task if enabled
-        # Why: Meters job enqueue rate to prevent burst overload during scheduled crawls
-        # Uses leader election to ensure only ONE feeder runs across all workers
-        if settings.crawl_feeder_enabled:
-            from eneo.worker.crawl_feeder import CrawlFeeder
-
-            try:
-                # CrawlFeeder is now container-independent
-                # Why: It manages its own DB sessions and Redis client to avoid
-                # session lifecycle issues (session closing while feeder runs)
-                feeder = CrawlFeeder()
-
-                # Start feeder as background task
-                # Why: Runs concurrently with worker jobs in same event loop
-                task = asyncio.create_task(feeder.run_forever())
-
-                # Store references for cleanup on shutdown
-                # Why: Allows graceful cancellation and prevents GC
-                ctx["feeder_task"] = task
-                ctx["feeder"] = feeder  # Store feeder for proper stop() call
-
-                logger.info(
-                    "Started crawl feeder background task with leader election",
-                    extra={"feeder_enabled": True},
-                )
-            except Exception as exc:
-                logger.error(
-                    f"Failed to start crawl feeder: {exc}. Continuing without feeder.",
-                    extra={"feeder_enabled": False},
-                )
-
     async def shutdown(self, ctx: ARQContext) -> None:
-        # Stop feeder gracefully if running
-        # Why: Prevents orphaned background tasks and closes Redis connection
-        if "feeder" in ctx:
-            feeder = cast(Any, ctx["feeder"])
-            logger.info("Stopping crawl feeder background task")
-            await feeder.stop()  # Gracefully stop and close Redis
-
-        if "feeder_task" in ctx:
-            task = cast(asyncio.Task[Any], ctx["feeder_task"])
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass  # Expected on cancellation
-
+        del ctx
         await lifespan.shutdown()
 
     def function(self, with_user: bool = True, *, keep_result: int | None = None):
@@ -378,7 +318,7 @@ class Worker:
             @worker.long_running_function()
             async def crawl(job_id, params, container):
                 # NO session held here - use session_scope for DB ops:
-                async with container.session_scope() as session:
+                async with Container.session_scope() as session:
                     repo = container.some_repo(session=session)
                     await repo.update(...)
                 # Session returned to pool immediately

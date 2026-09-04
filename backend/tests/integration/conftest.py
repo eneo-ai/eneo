@@ -112,14 +112,9 @@ if not os.getenv("URL_SIGNING_KEY"):
 if not os.getenv("ENCRYPTION_KEY"):
     os.environ["ENCRYPTION_KEY"] = "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs="
 
-# Crawler settings - ensure TTL > max_length to pass validation
-# These must be set BEFORE importing any module that calls get_settings()
+# Use a shorter crawl limit in integration tests.
 if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
-if not os.getenv("TENANT_WORKER_SEMAPHORE_TTL_SECONDS"):
-    os.environ["TENANT_WORKER_SEMAPHORE_TTL_SECONDS"] = (
-        "3600"  # 1 hour (must be > CRAWL_MAX_LENGTH)
-    )
 
 import contextlib
 from typing import AsyncGenerator, Generator
@@ -281,7 +276,6 @@ def test_settings(
         using_access_management=False,
         using_iam=False,
         using_image_generation=False,
-        using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,
         # Note: Set to False for integration tests that need full app functionality

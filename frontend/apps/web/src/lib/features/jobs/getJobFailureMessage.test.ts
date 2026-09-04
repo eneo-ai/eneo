@@ -17,7 +17,8 @@ vi.mock("$lib/paraglide/messages", () => ({
     job_failure_storage_unavailable: () => "storage_unavailable",
     job_failure_storage_verification_failed: () => "storage_verification_failed",
     job_failure_knowledge_source_conflict: () => "knowledge_source_conflict",
-    job_failure_unknown: () => "unknown"
+    job_failure_unknown: () => "unknown",
+    crawl_failure_remote_unreachable: () => "remote_unreachable"
   }
 }));
 
@@ -47,6 +48,10 @@ describe("getJobFailureMessage", () => {
     expect(getJobFailureMessage("no_extractable_text", "transcription")).toBe(
       "no_extractable_audio"
     );
+  });
+
+  it("reuses crawl recovery guidance for typed crawl failures", () => {
+    expect(getJobFailureMessage("remote_unreachable", "crawl")).toBe("remote_unreachable");
   });
 
   it.each([null, undefined, "future_failure_code"])(
