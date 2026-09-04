@@ -1214,23 +1214,40 @@ def _architecture_decision(
         )
         for triple in commit.tuples_chain
     ]
-    # The aggregation intent decides whether many inputs collapse into one
-    # result or stay separate, so it belongs to the disclosed architecture.
-    aggregation = (
-        (
+    # A document report is built with the layout the commit carries, so the
+    # card says that; any other shape says whether many inputs collapse into
+    # one result or stay separate. Both come from the commit, never from a
+    # reading the compiler will not see.
+    if commit.report_disposition is not None:
+        multiplicity = _report_layout_summary(commit.report_disposition, locale)
+    elif locale == "sv":
+        multiplicity = (
             "en gemensam sammanställning"
             if commit.aggregation_intent == "aggregate"
             else "ett resultat per underlag"
         )
-        if locale == "sv"
-        else (
+    else:
+        multiplicity = (
             "one combined result"
             if commit.aggregation_intent == "aggregate"
             else "one result per source"
         )
-    )
     chain = " → ".join(steps)
-    return KeyDecisionPayload(topic=topic, decision=f"{chain} ({aggregation})")
+    return KeyDecisionPayload(topic=topic, decision=f"{chain} ({multiplicity})")
+
+
+def _report_layout_summary(layout: str, locale: Locale) -> str:
+    if locale == "sv":
+        return {
+            "per_source_sections": "ett avsnitt per underlag",
+            "synthesized_overview": "en samlad sammanställning",
+            "both": "ett avsnitt per underlag och en samlad sammanställning",
+        }[layout]
+    return {
+        "per_source_sections": "one section per source",
+        "synthesized_overview": "one combined result",
+        "both": "one section per source and one combined result",
+    }[layout]
 
 
 def _triple_summary(

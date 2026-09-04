@@ -790,7 +790,7 @@ def test_server_builds_confirm_requirements_checkpoint_after_commit() -> None:
     assert {decision.decision for decision in payload.key_decisions} >= {
         "Genererat Word-dokument utan mall",
         "Ibland ett, ibland flera dokument",
-        "Skapa DOCX (ett resultat per underlag)",
+        "Skapa DOCX (ett avsnitt per underlag och en samlad sammanställning)",
     }
     assert {
         (row.question_id, row.topic, row.label) for row in payload.assumption_rows
