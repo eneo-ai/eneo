@@ -628,12 +628,18 @@ class TestToolPathOwnership:
 
 class TestBuiltinProvider:
     """A built-in provider is a row with auth type "internal" on Eneo's own
-    loopback server; the model selection rides in provider_config."""
+    loopback server; it runs on a catalog image model and never carries its
+    own security classification."""
 
-    def _config(self):
-        return {"model_provider_id": str(uuid4()), "model": "gpt-image-1"}
+    def _model(self, tenant_id, *, enabled=True, provider_id=None):
+        model = MagicMock()
+        model.id = uuid4()
+        model.tenant_id = tenant_id
+        model.provider_id = provider_id or uuid4()
+        model.is_org_enabled = enabled
+        return model
 
-    def _patch(self, monkeypatch, service):
+    def _patch(self, monkeypatch, service, model=None):
         import eneo.mcp_servers.application.mcp_server_service as module
 
         monkeypatch.setattr(
@@ -644,12 +650,15 @@ class TestBuiltinProvider:
             "_test_connection_and_discover_tools",
             AsyncMock(return_value=([], ConnectionResult(success=True))),
         )
+        model = model or self._model(service.user.tenant_id)
+        service.image_model_repo = AsyncMock()
+        service.image_model_repo.one_or_none.return_value = model
+        return model
 
-    async def test_create_forces_loopback_url_and_normalizes_config(self, monkeypatch):
+    async def test_create_forces_loopback_url_and_binds_the_model(self, monkeypatch):
         service, mock_repo, _, user = _make_service()
         mock_repo.add.side_effect = lambda obj: obj
-        self._patch(monkeypatch, service)
-        config = self._config()
+        model = self._patch(monkeypatch, service)
 
         result = await service.create_mcp_server(
             name="Inbyggd",
@@ -657,7 +666,7 @@ class TestBuiltinProvider:
             http_auth_type="internal",
             purpose="image_generation",
             forward_identity=True,
-            provider_config=config,
+            image_model_id=model.id,
         )
 
         server = result.server
@@ -665,11 +674,12 @@ class TestBuiltinProvider:
         assert server.forward_identity is False
         assert server.http_auth_config_schema is None
         assert server.is_enabled is False
-        assert server.provider_config == {**config, "size": "auto", "quality": "auto"}
+        assert server.image_model_id == model.id
+        assert server.security_classification is None
 
     async def test_create_rejects_purposes_without_a_builtin(self, monkeypatch):
         service, _, _, _ = _make_service()
-        self._patch(monkeypatch, service)
+        model = self._patch(monkeypatch, service)
 
         with pytest.raises(BadRequestException, match="built-in provider"):
             await service.create_mcp_server(
@@ -677,12 +687,64 @@ class TestBuiltinProvider:
                 http_url="",
                 http_auth_type="internal",
                 purpose="web_search",
-                provider_config=self._config(),
+                image_model_id=model.id,
             )
 
-    async def test_create_rejects_unknown_model_provider(self, monkeypatch):
+    async def test_create_requires_an_image_model(self, monkeypatch):
         service, _, _, _ = _make_service()
         self._patch(monkeypatch, service)
+
+        with pytest.raises(BadRequestException, match="needs an image model"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="image_generation",
+            )
+
+    async def test_create_rejects_unknown_or_foreign_model(self, monkeypatch):
+        service, _, _, user = _make_service()
+        self._patch(monkeypatch, service)
+        service.image_model_repo.one_or_none.return_value = None
+
+        with pytest.raises(BadRequestException, match="not found"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="image_generation",
+                image_model_id=uuid4(),
+            )
+
+        foreign = self._model(uuid4())
+        service.image_model_repo.one_or_none.return_value = foreign
+        with pytest.raises(BadRequestException, match="not found"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="image_generation",
+                image_model_id=foreign.id,
+            )
+
+    async def test_create_rejects_disabled_model(self, monkeypatch):
+        service, _, _, user = _make_service()
+        model = self._patch(
+            monkeypatch, service, self._model(user.tenant_id, enabled=False)
+        )
+
+        with pytest.raises(BadRequestException, match="disabled"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="image_generation",
+                image_model_id=model.id,
+            )
+
+    async def test_create_rejects_inactive_model_provider(self, monkeypatch):
+        service, _, _, _ = _make_service()
+        model = self._patch(monkeypatch, service)
         import eneo.mcp_servers.application.mcp_server_service as module
 
         monkeypatch.setattr(
@@ -697,24 +759,38 @@ class TestBuiltinProvider:
                 http_url="",
                 http_auth_type="internal",
                 purpose="image_generation",
-                provider_config=self._config(),
+                image_model_id=model.id,
             )
 
-    async def test_create_rejects_config_on_external_server(self, monkeypatch):
+    async def test_create_rejects_own_classification_on_builtin(self, monkeypatch):
         service, _, _, _ = _make_service()
-        self._patch(monkeypatch, service)
+        model = self._patch(monkeypatch, service)
+
+        with pytest.raises(BadRequestException, match="from its image model"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="image_generation",
+                image_model_id=model.id,
+                security_classification=MagicMock(),
+            )
+
+    async def test_create_rejects_model_on_external_server(self, monkeypatch):
+        service, _, _, _ = _make_service()
+        model = self._patch(monkeypatch, service)
 
         with pytest.raises(BadRequestException, match="built-in"):
             await service.create_mcp_server(
                 name="Extern",
                 http_url="https://provider.example/mcp",
                 purpose="image_generation",
-                provider_config=self._config(),
+                image_model_id=model.id,
             )
 
     async def test_create_rejects_credentials_on_builtin(self, monkeypatch):
         service, _, _, _ = _make_service()
-        self._patch(monkeypatch, service)
+        model = self._patch(monkeypatch, service)
 
         with pytest.raises(BadRequestException, match="no credentials"):
             await service.create_mcp_server(
@@ -723,26 +799,29 @@ class TestBuiltinProvider:
                 http_auth_type="internal",
                 purpose="image_generation",
                 http_auth_config_schema={"token": "x"},
-                provider_config=self._config(),
+                image_model_id=model.id,
             )
 
-    async def test_converting_an_external_server_drops_stored_credentials(
+    async def test_converting_an_external_server_drops_credentials_and_classification(
         self, monkeypatch
     ):
         service, mock_repo, _, user = _make_service()
         server = _make_server(user.tenant_id, purpose="image_generation")
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "stored-secret"}
+        server.security_classification = MagicMock()
         mock_repo.one.return_value = server
         mock_repo.update.side_effect = lambda obj: obj
-        self._patch(monkeypatch, service)
+        model = self._patch(monkeypatch, service)
 
         result = await service.update_mcp_server(
-            server.id, http_auth_type="internal", provider_config=self._config()
+            server.id, http_auth_type="internal", image_model_id=model.id
         )
 
         assert result.server.http_auth_type == "internal"
         assert result.server.http_auth_config_schema is None
+        assert result.server.security_classification is None
+        assert result.server.image_model_id == model.id
         assert result.server.http_url.endswith("/internal-mcp/image_generation/mcp")
 
     async def test_switching_to_builtin_replaces_the_tool_catalog(self, monkeypatch):
@@ -751,7 +830,7 @@ class TestBuiltinProvider:
         server.http_auth_type = "bearer"
         mock_repo.one.return_value = server
         mock_repo.update.side_effect = lambda obj: obj
-        self._patch(monkeypatch, service)
+        model = self._patch(monkeypatch, service)
         discovered = [{"name": "generate_image", "input_schema": {}}]
         monkeypatch.setattr(
             service,
@@ -764,33 +843,49 @@ class TestBuiltinProvider:
         monkeypatch.setattr(service, "approve_all_tool_changes", approve)
 
         await service.update_mcp_server(
-            server.id, http_auth_type="internal", provider_config=self._config()
+            server.id, http_auth_type="internal", image_model_id=model.id
         )
 
         sync.assert_awaited_once_with(server, discovered)
         approve.assert_awaited_once_with(server.id)
 
-    async def test_editing_a_builtin_row_keeps_its_catalog(self, monkeypatch):
+    async def test_editing_a_builtin_row_keeps_its_catalog_and_model(self, monkeypatch):
         service, mock_repo, _, user = _make_service()
         server = _make_server(user.tenant_id, purpose="image_generation")
         server.http_auth_type = "internal"
         server.http_url = service.builtin_provider_url("image_generation")
-        server.provider_config = {**self._config(), "size": "auto", "quality": "auto"}
+        server.image_model_id = uuid4()
         mock_repo.one.return_value = server
         mock_repo.update.side_effect = lambda obj: obj
         self._patch(monkeypatch, service)
         sync = AsyncMock()
         monkeypatch.setattr(service, "_sync_discovered_tool_definitions", sync)
 
-        await service.update_mcp_server(server.id, description="Renamed")
+        result = await service.update_mcp_server(server.id, description="Renamed")
 
         sync.assert_not_awaited()
+        assert result.server.image_model_id == server.image_model_id
+        service.image_model_repo.one_or_none.assert_not_awaited()
 
-    async def test_leaving_internal_auth_drops_the_config(self, monkeypatch):
+    async def test_update_rejects_own_classification_on_builtin(self, monkeypatch):
         service, mock_repo, _, user = _make_service()
         server = _make_server(user.tenant_id, purpose="image_generation")
         server.http_auth_type = "internal"
-        server.provider_config = {**self._config(), "size": "auto", "quality": "auto"}
+        server.http_url = service.builtin_provider_url("image_generation")
+        server.image_model_id = uuid4()
+        mock_repo.one.return_value = server
+        self._patch(monkeypatch, service)
+
+        with pytest.raises(BadRequestException, match="from its image model"):
+            await service.update_mcp_server(
+                server.id, security_classification=MagicMock()
+            )
+
+    async def test_leaving_internal_auth_drops_the_model(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        server.http_auth_type = "internal"
+        server.image_model_id = uuid4()
         mock_repo.one.return_value = server
         mock_repo.update.side_effect = lambda obj: obj
         self._patch(monkeypatch, service)
@@ -802,23 +897,32 @@ class TestBuiltinProvider:
             http_auth_config_schema={"token": "secret"},
         )
 
-        assert result.server.provider_config is None
+        assert result.server.image_model_id is None
         assert result.server.http_url == "https://provider.example/mcp"
 
-    async def test_update_revalidates_config_and_keeps_loopback_url(self, monkeypatch):
+    async def test_external_update_rejects_a_model(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        mock_repo.one.return_value = server
+        self._patch(monkeypatch, service)
+
+        with pytest.raises(BadRequestException, match="built-in"):
+            await service.update_mcp_server(server.id, image_model_id=uuid4())
+
+    async def test_update_revalidates_model_and_keeps_loopback_url(self, monkeypatch):
         service, mock_repo, _, user = _make_service()
         server = _make_server(user.tenant_id, purpose="image_generation")
         server.http_auth_type = "internal"
         server.http_url = service.builtin_provider_url("image_generation")
-        server.provider_config = {**self._config(), "size": "auto", "quality": "auto"}
+        server.image_model_id = uuid4()
         mock_repo.one.return_value = server
         mock_repo.update.side_effect = lambda obj: obj
-        self._patch(monkeypatch, service)
-        new_config = {**self._config(), "size": "1536x1024"}
+        replacement = self._patch(monkeypatch, service)
 
         result = await service.update_mcp_server(
-            server.id, http_url="https://ignored.example", provider_config=new_config
+            server.id, http_url="https://ignored.example", image_model_id=replacement.id
         )
 
         assert result.server.http_url.endswith("/internal-mcp/image_generation/mcp")
-        assert result.server.provider_config == {**new_config, "quality": "auto"}
+        assert result.server.image_model_id == replacement.id
+        service.image_model_repo.one_or_none.assert_awaited_once_with(replacement.id)

@@ -45,9 +45,7 @@
     type WizardStepId,
     type WizardModelDraft
   } from "./wizardState";
-  import { isCostValueOverflow, MAX_COST_INPUT } from "./models/draft";
-
-  type ModelType = "completion" | "embedding" | "transcription";
+  import { isCostValueOverflow, MAX_COST_INPUT, type ModelType } from "./models/draft";
 
   let {
     openController,
@@ -243,7 +241,8 @@
         if (
           isCostValueOverflow(model.inputCostPerToken) ||
           isCostValueOverflow(model.outputCostPerToken) ||
-          isCostValueOverflow(model.costPerMinute, true)
+          isCostValueOverflow(model.costPerMinute, true) ||
+          isCostValueOverflow(model.costPerImage, true)
         ) {
           throw new Error(m.cost_value_too_large({ max: MAX_COST_INPUT.toLocaleString("en-US") }));
         }
@@ -415,7 +414,22 @@
           : null
       });
     }
-    return eneo.tenantModels.createTranscription({
+    if (modelType === "transcription") {
+      return eneo.tenantModels.createTranscription({
+        provider_id: providerId,
+        name: model.name,
+        display_name: model.displayName,
+        family: model.family ?? "openai",
+        hosting: model.hosting ?? "swe",
+        is_active: true,
+        description: model.description ?? null,
+        cost_per_minute: model.costPerMinute ?? null,
+        security_classification: model.securityClassification
+          ? { id: model.securityClassification.id }
+          : null
+      });
+    }
+    return eneo.tenantModels.createImage({
       provider_id: providerId,
       name: model.name,
       display_name: model.displayName,
@@ -423,7 +437,9 @@
       hosting: model.hosting ?? "swe",
       is_active: true,
       description: model.description ?? null,
-      cost_per_minute: model.costPerMinute ?? null,
+      cost_per_image: model.costPerImage ?? null,
+      default_size: model.defaultSize ?? "auto",
+      default_quality: model.defaultQuality ?? "auto",
       security_classification: model.securityClassification
         ? { id: model.securityClassification.id }
         : null

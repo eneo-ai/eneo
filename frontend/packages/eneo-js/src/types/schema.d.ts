@@ -3540,6 +3540,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/image-models/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Image Models
+     * @description List all image models for the tenant.
+     */
+    get: operations["get_image_models_api_v1_image_models__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/image-models/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Update Image Model
+     * @description Update org settings for an image model.
+     */
+    post: operations["update_image_model_api_v1_image_models__id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/": {
     parameters: {
       query?: never;
@@ -3843,6 +3883,50 @@ export interface paths {
      * @description Delete a tenant-specific transcription model.
      */
     delete: operations["delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/tenant-models/image/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Tenant Image Model
+     * @description Create a new tenant-specific image model.
+     */
+    post: operations["create_tenant_image_model_api_v1_admin_tenant_models_image__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/tenant-models/image/{model_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Tenant Image Model
+     * @description Update a tenant-specific image model.
+     */
+    put: operations["update_tenant_image_model_api_v1_admin_tenant_models_image__model_id___put"];
+    post?: never;
+    /**
+     * Delete Tenant Image Model
+     * @description Delete a tenant-specific image model.
+     */
+    delete: operations["delete_tenant_image_model_api_v1_admin_tenant_models_image__model_id___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -7052,7 +7136,7 @@ export interface paths {
     };
     /**
      * Get all AI models
-     * @description Get all completion, embedding, and transcription models.
+     * @description Get all completion, embedding, transcription and image models.
      */
     get: operations["get_models_api_v1_ai_models__get"];
     put?: never;
@@ -8433,6 +8517,9 @@ export interface components {
       | "transcription_model_updated"
       | "transcription_model_deleted"
       | "transcription_model_migrated"
+      | "image_model_created"
+      | "image_model_updated"
+      | "image_model_deleted"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -10427,29 +10514,6 @@ export interface components {
       file: string;
     };
     /**
-     * BuiltinProviderConfig
-     * @description Model selection for a built-in provider (``http_auth_type = internal``).
-     */
-    BuiltinProviderConfig: {
-      /**
-       * Model Provider Id
-       * Format: uuid
-       */
-      model_provider_id: string;
-      /** Model */
-      model: string;
-      /**
-       * Size
-       * @default auto
-       */
-      size?: string;
-      /**
-       * Quality
-       * @default auto
-       */
-      quality?: string;
-    };
-    /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
      */
@@ -12351,6 +12415,7 @@ export interface components {
       | "completion_model"
       | "embedding_model"
       | "transcription_model"
+      | "image_model"
       | "audit_log"
       | "session"
       | "mcp_server"
@@ -13139,6 +13204,167 @@ export interface components {
        */
       id: string;
     };
+    /** ImageModelPublic */
+    ImageModelPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Family */
+      family?: string | null;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Org */
+      org?: string | null;
+      /** Cost Per Image */
+      cost_per_image?: string | null;
+      /**
+       * Default Size
+       * @default auto
+       */
+      default_size?: string;
+      /**
+       * Default Quality
+       * @default auto
+       */
+      default_quality?: string;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+    };
+    /** ImageModelSecurityStatus */
+    ImageModelSecurityStatus: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Family */
+      family?: string | null;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Org */
+      org?: string | null;
+      /** Cost Per Image */
+      cost_per_image?: string | null;
+      /**
+       * Default Size
+       * @default auto
+       */
+      default_size?: string;
+      /**
+       * Default Quality
+       * @default auto
+       */
+      default_quality?: string;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+      /** Meets Security Classification */
+      meets_security_classification?: boolean | null;
+    };
+    /** ImageModelUpdate */
+    ImageModelUpdate: {
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Is Org Default */
+      is_org_default?: boolean | null;
+      /** Security Classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
     /** InfoBlobAddPublic */
     InfoBlobAddPublic: {
       /** Text */
@@ -13551,6 +13777,25 @@ export interface components {
       name: string;
     };
     /**
+     * MCPServerBackingModelPublic
+     * @description The catalog image model a built-in provider runs on (read-only).
+     */
+    MCPServerBackingModelPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Is Enabled */
+      is_enabled: boolean;
+    };
+    /**
      * MCPServerCreate
      * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
      */
@@ -13577,7 +13822,8 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
-      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
       /**
        * Forward Identity
        * @default false
@@ -13654,7 +13900,9 @@ export interface components {
        * @enum {string}
        */
       purpose?: "general" | "web_search" | "image_generation";
-      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
+      image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
       /**
        * Is Enabled
        * @default true
@@ -13769,7 +14017,9 @@ export interface components {
        * @enum {string}
        */
       purpose?: "general" | "web_search" | "image_generation";
-      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
+      image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
       /**
        * Is Enabled
        * @default true
@@ -13976,8 +14226,8 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
-      /** Provider Config */
-      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
       /** Forward Identity */
       forward_identity?: boolean | null;
       /** Tool Catalog Max Count */
@@ -14655,6 +14905,8 @@ export interface components {
       embedding_models: components["schemas"]["EmbeddingModelSecurityStatus"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
+      /** Image Models */
+      image_models: components["schemas"]["ImageModelSecurityStatus"][];
     };
     /** ModelsRestrictionInput */
     ModelsRestrictionInput: {
@@ -15477,6 +15729,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["HelperTemplatePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[ImageModelPublic] */
+    PaginatedResponse_ImageModelPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ImageModelPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -19084,6 +19349,125 @@ export interface components {
       /** @description Security classification reference (null clears it) */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /** TenantImageModelCreate */
+    TenantImageModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier as served by the provider (e.g. 'gpt-image-1', 'imagen-4.0-generate-001', or the name a vLLM endpoint serves)
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'google')
+       * @default openai
+       */
+      family?: string;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Cost Per Image
+       * @description Indicative USD per generated image
+       */
+      cost_per_image?: number | string | null;
+      /**
+       * Default Size
+       * @description Size used when the assistant does not ask
+       * @default auto
+       * @enum {string}
+       */
+      default_size?: "auto" | "1024x1024" | "1536x1024" | "1024x1536";
+      /**
+       * Default Quality
+       * @description Quality used when the assistant does not ask
+       * @default auto
+       * @enum {string}
+       */
+      default_quality?: "auto" | "low" | "medium" | "high";
+      /** @description Security classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TenantImageModelUpdate */
+    TenantImageModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+      /**
+       * Cost Per Image
+       * @description Indicative USD per generated image
+       */
+      cost_per_image?: number | string | null;
+      /**
+       * Default Size
+       * @description Size used when the assistant does not ask
+       */
+      default_size?: ("auto" | "1024x1024" | "1536x1024" | "1024x1536") | null;
+      /**
+       * Default Quality
+       * @description Quality used when the assistant does not ask
+       */
+      default_quality?: ("auto" | "low" | "medium" | "high") | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
     /** TenantInDB */
     TenantInDB: {
       /** Created At */
@@ -20706,7 +21090,7 @@ export interface components {
       model_name: string;
       /**
        * Model Type
-       * @description Model type: completion, embedding, or transcription
+       * @description Model type: completion, embedding, transcription, or image
        * @default completion
        */
       model_type?: string;
@@ -34283,6 +34667,88 @@ export interface operations {
       };
     };
   };
+  get_image_models_api_v1_image_models__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_ImageModelPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_image_model_api_v1_image_models__id___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImageModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_providers_api_v1_admin_model_providers__get: {
     parameters: {
       query?: never;
@@ -34706,7 +35172,7 @@ export interface operations {
     parameters: {
       query?: {
         /** @description Filter response to a single mode. */
-        mode?: ("completion" | "embedding" | "transcription") | null;
+        mode?: ("completion" | "embedding" | "transcription" | "image") | null;
       };
       header?: never;
       path: {
@@ -35363,6 +35829,195 @@ export interface operations {
     };
   };
   delete_tenant_transcription_model_api_v1_admin_tenant_models_transcription__model_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_tenant_image_model_api_v1_admin_tenant_models_image__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantImageModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_tenant_image_model_api_v1_admin_tenant_models_image__model_id___put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantImageModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_tenant_image_model_api_v1_admin_tenant_models_image__model_id___delete: {
     parameters: {
       query?: never;
       header?: never;

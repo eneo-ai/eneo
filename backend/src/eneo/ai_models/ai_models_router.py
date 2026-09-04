@@ -10,6 +10,9 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelSecurityStatus,
 )
+from eneo.image_models.presentation.image_model_models import (
+    ImageModelSecurityStatus,
+)
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
@@ -24,7 +27,7 @@ router = APIRouter()
     "/",
     response_model=ModelsPresentation,
     summary="Get all AI models",
-    description="Get all completion, embedding, and transcription models. ",
+    description="Get all completion, embedding, transcription and image models.",
     responses=responses.get_responses([404, 500]),
 )
 async def get_models(
@@ -40,6 +43,7 @@ async def get_models(
     completion_model_crud_service = container.completion_model_crud_service()
     transcription_model_crud_service = container.transcription_model_crud_service()
     embedding_model_crud_service = container.embedding_model_crud_service()
+    image_model_crud_service = container.image_model_crud_service()
     user = container.user()
     space_service = container.space_service()
     space = None
@@ -49,6 +53,7 @@ async def get_models(
     cms = await completion_model_crud_service.get_completion_models()
     tms = await transcription_model_crud_service.get_transcription_models()
     ems = await embedding_model_crud_service.get_embedding_models()
+    ims = await image_model_crud_service.get_image_models()
 
     completion_models: list[CompletionModelSecurityStatus] = []
     for cm in cms:
@@ -103,8 +108,26 @@ async def get_models(
                 embedding_model_public.meets_security_classification = None
         embedding_models.append(embedding_model_public)
 
+    image_models: list[ImageModelSecurityStatus] = []
+    for im in ims:
+        image_model_public = ImageModelSecurityStatus.from_domain(im)
+        if space:
+            if user.tenant.security_enabled:
+                if space.security_classification is None:
+                    image_model_public.meets_security_classification = True
+                else:
+                    image_model_public.meets_security_classification = (
+                        not space.security_classification.is_greater_than(
+                            im.security_classification
+                        )
+                    )
+            else:
+                image_model_public.meets_security_classification = None
+        image_models.append(image_model_public)
+
     return ModelsPresentation(
         completion_models=completion_models,
         embedding_models=embedding_models,
         transcription_models=transcription_models,
+        image_models=image_models,
     )

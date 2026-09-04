@@ -3,15 +3,20 @@
 <script lang="ts">
   import { invalidate } from "$app/navigation";
   import { getEneo } from "$lib/core/Eneo";
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
-  type LockableModel = (CompletionModel | EmbeddingModel | TranscriptionModel) & {
+  type LockableModel = (CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel) & {
     is_locked?: boolean | null | undefined;
     lock_reason?: string | null | undefined;
   };
@@ -32,6 +37,9 @@
     }
     if (type === "embeddingModel") {
       return eneo.models.update({ embeddingModel: { id: model.id }, update });
+    }
+    if (type === "imageModel") {
+      return eneo.models.update({ imageModel: { id: model.id }, update });
     }
     return eneo.models.update({ transcriptionModel: { id: model.id }, update });
   }

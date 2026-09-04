@@ -15,7 +15,12 @@
       description?: string | null;
       http_url: string;
       http_auth_type: string;
-      provider_config?: { model?: string | null } | null;
+      image_model?: {
+        nickname?: string | null;
+        name?: string | null;
+        provider_name?: string | null;
+        is_enabled?: boolean;
+      } | null;
       purpose?: string | null;
       audience?: string | null;
       user_groups?: Array<{ id: string; name: string }> | null;
@@ -127,10 +132,17 @@
   {/if}
   {#if mcpServer.http_auth_type === "internal"}
     <!-- A built-in provider's endpoint is Eneo's own loopback: plumbing, not
-         something the admin chose. The model is what they configured. -->
+         something the admin chose. The image model is what they configured. -->
     <span class="text-dimmer inline-flex items-center gap-1.5 truncate text-xs">
-      <span class="text-muted">{m.mcp_builtin_model()}:</span>
-      <span class="font-mono">{mcpServer.provider_config?.model}</span>
+      <span class="text-muted">{m.mcp_builtin_image_model()}:</span>
+      {#if mcpServer.image_model}
+        <span>{mcpServer.image_model.nickname || mcpServer.image_model.name}</span>
+        {#if mcpServer.image_model.provider_name}
+          <span class="text-muted">· {mcpServer.image_model.provider_name}</span>
+        {/if}
+      {:else}
+        <span class="text-warning-default">{m.mcp_builtin_no_model_selected()}</span>
+      {/if}
     </span>
   {:else}
     <span

@@ -19,6 +19,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     CAPABILITY_PURPOSES,
     MCPServer,
     MCPServerAudienceGroup,
+    MCPServerBackingModel,
     MCPServerTool,
     allowed_capability_purposes,
     capability_permission,
@@ -38,6 +39,7 @@ def _server(
     priority: int = 100,
     group_ids: list | None = None,
     security_level: int | None = None,
+    backing_model: MCPServerBackingModel | None = None,
 ) -> MCPServer:
     server = MCPServer(
         id=uuid4(),
@@ -55,9 +57,26 @@ def _server(
         security_classification=(
             _classification(security_level) if security_level is not None else None
         ),
+        image_model=backing_model,
     )
     server.tools = tools or [_tool()]
     return server
+
+
+def _backing_model(
+    *, enabled: bool = True, security_level: int | None = None
+) -> MCPServerBackingModel:
+    return MCPServerBackingModel(
+        id=uuid4(),
+        name="gpt-image-1",
+        nickname="GPT Image",
+        provider_name="OpenAI",
+        is_enabled=enabled,
+        is_deleted=False,
+        security_classification=(
+            _classification(security_level) if security_level is not None else None
+        ),
+    )
 
 
 def _classification(level: int, *, enabled: bool = True) -> SecurityClassification:
@@ -387,3 +406,59 @@ class TestResolveCapabilityServers:
         )
 
         assert resolution.capability_servers == []
+
+
+class TestBackingModel:
+    """A built-in provider runs on a catalog image model: the model's
+    classification is what the space check sees, and a disabled model makes
+    the provider unavailable."""
+
+    def test_space_check_uses_the_backing_models_classification(self):
+        provider = _server(
+            "image_generation", backing_model=_backing_model(security_level=1)
+        )
+
+        assert not meets_security_classification(provider, _classification(2))
+        assert meets_security_classification(provider, _classification(1))
+
+    async def test_query_loads_the_backing_model(self, monkeypatch):
+        session = AsyncMock()
+        session.scalars.return_value = MagicMock(all=lambda: [])
+
+        await get_active_capability_servers(session, uuid4(), "image_generation")
+
+        query = session.scalars.await_args.args[0]
+        loaded = [str(getattr(opt, "path", "")) for opt in query._with_options]
+        assert any("image_model" in path for path in loaded)
+
+    async def test_disabled_backing_model_is_silently_unavailable(self, monkeypatch):
+        purpose = "image_generation"
+        marker = _server(purpose)
+        provider = _server(purpose, backing_model=_backing_model(enabled=False))
+        monkeypatch.setattr(
+            capability_resolver,
+            "get_active_capability_servers",
+            AsyncMock(return_value=[provider]),
+        )
+
+        resolution = await resolve_capability_servers(
+            AsyncMock(), uuid4(), [marker], supports_tool_calling=True
+        )
+
+        assert resolution.capability_servers == []
+
+    async def test_enabled_backing_model_resolves(self, monkeypatch):
+        purpose = "image_generation"
+        marker = _server(purpose)
+        provider = _server(purpose, backing_model=_backing_model())
+        monkeypatch.setattr(
+            capability_resolver,
+            "get_active_capability_servers",
+            AsyncMock(return_value=[provider]),
+        )
+
+        resolution = await resolve_capability_servers(
+            AsyncMock(), uuid4(), [marker], supports_tool_calling=True
+        )
+
+        assert resolution.capability_servers == [provider]

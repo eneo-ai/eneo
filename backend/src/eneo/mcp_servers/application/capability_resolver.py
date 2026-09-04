@@ -37,6 +37,9 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
+from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
+    backing_model_options,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,7 +72,8 @@ async def get_active_capability_servers(
 
     Tools carry the tenant-level enablement overlay so downstream consumers
     (the MCP proxy, usability checks) see effective enablement. Audience
-    groups and security classification are loaded for resolution.
+    groups, security classification and the backing model (built-in
+    providers) are loaded for resolution.
     """
     query = (
         sa.select(MCPServersTable)
@@ -84,6 +88,7 @@ async def get_active_capability_servers(
             selectinload(MCPServersTable.security_classification).selectinload(
                 SecurityClassificationDBModel.tenant
             ),
+            *backing_model_options(),
         )
         .order_by(MCPServersTable.created_at, MCPServersTable.id)
     )
@@ -136,11 +141,14 @@ def meets_security_classification(
     provider: "MCPServer",
     space_security_classification: "SecurityClassification | None",
 ) -> bool:
-    """False when the space's classification is stricter than the provider's."""
+    """False when the space's classification is stricter than the provider's.
+
+    A built-in provider's classification is the one of the model it runs on.
+    """
     if space_security_classification is None:
         return True
     return not space_security_classification.is_greater_than(
-        provider.security_classification
+        provider.effective_security_classification
     )
 
 
@@ -169,9 +177,10 @@ async def resolve_capability_servers(
     ``CAPABILITY_PURPOSES`` order, the provider serving the user is attached
     in its place when the user's role allows the purpose (``allowed_purposes``,
     None meaning every purpose), a provider exists for the user's groups or
-    the tenant default, it has usable tools, it meets the space's security
-    classification, and the model can call tools. Anything else leaves the
-    purpose silently unavailable this turn.
+    the tenant default, its backing model (if any) is enabled, it has usable
+    tools, it meets the space's security classification, and the model can
+    call tools. Anything else leaves the purpose silently unavailable this
+    turn.
     """
     general_servers = [
         server
@@ -194,6 +203,7 @@ async def resolve_capability_servers(
             provider = select_provider_for_user(providers, user_group_ids or set())
             if (
                 provider is not None
+                and provider.is_backing_model_available
                 and usable_capability_tools(provider)
                 and meets_security_classification(
                     provider, space_security_classification

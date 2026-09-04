@@ -2,9 +2,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.mcp_servers.presentation.models import (
-    BuiltinProviderConfig,
     MCPServerAudience,
     MCPServerAudienceGroupPublic,
+    MCPServerBackingModelPublic,
     MCPServerList,
     MCPServerPublic,
     MCPServerPurpose,
@@ -50,6 +50,21 @@ def _compute_credential_preview(
     return None
 
 
+def _backing_model_public(
+    mcp_server: MCPServer,
+) -> MCPServerBackingModelPublic | None:
+    model = mcp_server.image_model
+    if model is None:
+        return None
+    return MCPServerBackingModelPublic(
+        id=model.id,
+        name=model.name,
+        nickname=model.nickname,
+        provider_name=model.provider_name,
+        is_enabled=model.is_enabled and not model.is_deleted,
+    )
+
+
 class MCPServerAssembler:
     """Assembler for converting MCP domain entities to presentation DTOs."""
 
@@ -66,7 +81,7 @@ class MCPServerAssembler:
         # Sort tools by name for consistent ordering
         sorted_tools = sorted(mcp_server.tools, key=lambda t: t.name)
 
-        sc = mcp_server.security_classification
+        sc = mcp_server.effective_security_classification
         sc_dict = None
         if sc is not None:
             sc_public = SecurityClassificationPublic.from_domain(sc)
@@ -109,11 +124,8 @@ class MCPServerAssembler:
             is_enabled=mcp_server.is_enabled,
             audience=cast(MCPServerAudience, mcp_server.audience),
             audience_priority=mcp_server.audience_priority,
-            provider_config=(
-                BuiltinProviderConfig.model_validate(mcp_server.provider_config)
-                if mcp_server.provider_config
-                else None
-            ),
+            image_model_id=mcp_server.image_model_id,
+            image_model=_backing_model_public(mcp_server),
             user_groups=[
                 MCPServerAudienceGroupPublic(id=group.id, name=group.name)
                 for group in mcp_server.user_groups
@@ -130,7 +142,7 @@ class MCPServerAssembler:
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
             security_classification=SecurityClassificationPublic.from_domain(
-                mcp_server.security_classification,
+                mcp_server.effective_security_classification,
             ),
         )
 
@@ -183,11 +195,8 @@ class MCPServerSettingsAssembler:
             is_enabled=mcp_server.is_enabled,
             audience=cast(MCPServerAudience, mcp_server.audience),
             audience_priority=mcp_server.audience_priority,
-            provider_config=(
-                BuiltinProviderConfig.model_validate(mcp_server.provider_config)
-                if mcp_server.provider_config
-                else None
-            ),
+            image_model_id=mcp_server.image_model_id,
+            image_model=_backing_model_public(mcp_server),
             user_groups=[
                 MCPServerAudienceGroupPublic(id=group.id, name=group.name)
                 for group in mcp_server.user_groups
@@ -206,7 +215,7 @@ class MCPServerSettingsAssembler:
             is_org_enabled=mcp_server.is_enabled,
             tools=tools,
             security_classification=SecurityClassificationPublic.from_domain(
-                mcp_server.security_classification,
+                mcp_server.effective_security_classification,
             ),
         )
 

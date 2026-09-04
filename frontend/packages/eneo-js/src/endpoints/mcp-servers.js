@@ -60,7 +60,7 @@ export function initMCPServers(client) {
      * @param {"everyone" | "groups"} [params.audience] Capability providers: who this provider serves
      * @param {number} [params.audience_priority] Lowest number wins when a user matches several group providers
      * @param {string[]} [params.user_group_ids] User groups served when audience is "groups"
-     * @param {{model_provider_id: string, model: string, size?: string, quality?: string} | null} [params.provider_config] Built-in providers only: the tenant model provider and model to call
+     * @param {string} [params.image_model_id] Built-in providers only: the catalog image model to call
      * @throws {EneoError}
      * */
     create: async ({
@@ -82,7 +82,7 @@ export function initMCPServers(client) {
       audience,
       audience_priority,
       user_group_ids,
-      provider_config
+      image_model_id
     }) => {
       /** @type {any} */
       const body = {
@@ -104,7 +104,7 @@ export function initMCPServers(client) {
         audience,
         audience_priority,
         user_group_ids,
-        provider_config
+        image_model_id
       };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
@@ -137,7 +137,7 @@ export function initMCPServers(client) {
      * @param {"everyone" | "groups"} [params.audience] Capability providers: who this provider serves
      * @param {number} [params.audience_priority] Lowest number wins when a user matches several group providers
      * @param {string[]} [params.user_group_ids] User groups served when audience is "groups"
-     * @param {{model_provider_id: string, model: string, size?: string, quality?: string} | null} [params.provider_config] Built-in providers only: the tenant model provider and model to call; null clears it
+     * @param {string | null} [params.image_model_id] Built-in providers only: the catalog image model to call; absent keeps the current one, null clears it
      * @throws {EneoError}
      * */
     update: async ({
@@ -160,7 +160,7 @@ export function initMCPServers(client) {
       audience,
       audience_priority,
       user_group_ids,
-      provider_config
+      image_model_id
     }) => {
       /** @type {any} */
       const body = {
@@ -182,7 +182,7 @@ export function initMCPServers(client) {
         audience,
         audience_priority,
         user_group_ids,
-        provider_config
+        image_model_id
       };
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",

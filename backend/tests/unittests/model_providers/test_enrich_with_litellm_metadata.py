@@ -182,9 +182,13 @@ def test_filters_latest_aliases(name: str) -> None:
         )
 
 
-def test_filters_image_and_tts_modes() -> None:
+def test_filters_tts_modes_and_surfaces_image_generation() -> None:
     fake = {
-        "dall-e-3": {"litellm_provider": "openai", "mode": "image_generation"},
+        "dall-e-3": {
+            "litellm_provider": "openai",
+            "mode": "image_generation",
+            "input_cost_per_image": 0.04,
+        },
         "tts-1": {"litellm_provider": "openai", "mode": "audio_speech"},
         "omni-moderation-latest": {
             "litellm_provider": "openai",
@@ -192,10 +196,9 @@ def test_filters_image_and_tts_modes() -> None:
         },
     }
     with _patch_cost_map(fake):
-        assert (
-            model_provider_service._enrich_with_litellm_metadata("dall-e-3", "openai")
-            is None
-        )
+        assert model_provider_service._enrich_with_litellm_metadata(
+            "dall-e-3", "openai"
+        ) == {"name": "dall-e-3", "mode": "image", "cost_per_image": 0.04}
         assert (
             model_provider_service._enrich_with_litellm_metadata("tts-1", "openai")
             is None
@@ -228,9 +231,9 @@ def test_unknown_embedding_inferred_as_embedding() -> None:
     assert result == {"name": "future-embedding-1", "mode": "embedding"}
 
 
-def test_unknown_image_model_dropped() -> None:
+def test_unknown_image_model_inferred_as_image() -> None:
     with _patch_cost_map({}):
         result = model_provider_service._enrich_with_litellm_metadata(
             "dall-e-99", "openai"
         )
-    assert result is None
+    assert result == {"name": "dall-e-99", "mode": "image"}

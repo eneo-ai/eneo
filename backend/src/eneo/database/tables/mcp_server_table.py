@@ -19,6 +19,7 @@ from eneo.database.tables.base_class import BaseCrossReference, BasePublic
 from eneo.database.tables.tenant_table import Tenants
 
 if TYPE_CHECKING:
+    from eneo.database.tables.ai_models_table import ImageModels
     from eneo.database.tables.security_classifications_table import (
         SecurityClassification,
     )
@@ -42,9 +43,15 @@ class MCPServers(BasePublic):
         # one DEFAULT provider (audience = everyone) may be active at a time;
         # activation is an explicit transactional switch. Group-targeted
         # providers coexist with the default and with each other.
+        # A built-in provider runs on exactly one catalog image model and
+        # takes its security classification from that model, never its own.
         CheckConstraint(
-            "(http_auth_type = 'internal') = (provider_config IS NOT NULL)",
-            name="ck_mcp_servers_internal_provider_config",
+            "(http_auth_type = 'internal') = (image_model_id IS NOT NULL)",
+            name="ck_mcp_servers_internal_image_model",
+        ),
+        CheckConstraint(
+            "http_auth_type <> 'internal' OR security_classification_id IS NULL",
+            name="ck_mcp_servers_internal_no_classification",
         ),
         Index(
             "uq_mcp_servers_tenant_active_capability",
@@ -77,9 +84,13 @@ class MCPServers(BasePublic):
         String, nullable=False, server_default="none"
     )
     http_auth_config_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
-    # Built-in providers (http_auth_type = "internal") only: which tenant
-    # model provider and model the loopback tool calls, plus defaults.
-    provider_config: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    # Built-in providers (http_auth_type = "internal") only: the catalog image
+    # model the loopback tool calls. RESTRICT: the model's soft delete is
+    # refused while referenced, so a hard delete can never reach a live ref.
+    image_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("image_models.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    image_model: Mapped[Optional["ImageModels"]] = relationship()
 
     # Tenant enablement and credentials
     is_enabled: Mapped[bool] = mapped_column(

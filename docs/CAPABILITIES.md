@@ -15,6 +15,7 @@ Eneo has no built-in search engine or image generator. Each *capability* is serv
 | **Provider** | An MCP server with a capability purpose. Registered under **Admin → MCP servers** like any other server, but activated rather than enabled. |
 | **Marker** | A capability server attached to a space or assistant. It requests the capability; it does not pin the provider. |
 | **Resolution** | At ask time every marker is replaced by the provider that serves the current user (see §3). Switching providers never requires editing spaces or assistants. |
+| **Image model** | A catalog entry under **Admin → Models → Image models**: which model a model provider serves for image generation, plus its default size and quality, cost per image, enablement and security classification. The built-in image provider runs on one of these. |
 
 Only one marker per capability can be attached to a space or assistant.
 
@@ -37,9 +38,11 @@ An active default cannot be narrowed to user groups in place. Deactivate it firs
 
 ### Built-in image provider
 
-Image generation does not need an external MCP server. In the server dialog, set **Used for** to image generation and **Source** to *Built-in, via a model provider*. Pick one of the tenant's active model providers (**Admin → Models**) and enter the image model or deployment name, for example `gpt-image-1` on OpenAI or Azure OpenAI, or `imagen-4.0-generate-001` on Gemini. Default size and quality are optional; the assistant may override them per request.
+Image generation does not need an external MCP server. First add the image model under **Admin → Models → Image models**: pick the model provider and enter the model name the provider serves, for example `gpt-image-1` on OpenAI or Azure OpenAI, `imagen-4.0-generate-001` on Gemini, or whatever name a vLLM or other OpenAI-compatible endpoint exposes on its `/v1/images/generations` route. Default size and quality, cost per image and the security classification live on the model, like on any other catalog model. Then, in the MCP server dialog, set **Used for** to image generation, **Source** to *Built-in, via an image model*, and select the model.
 
-Under the hood the row is an ordinary provider whose endpoint is Eneo's own loopback MCP server (`/internal-mcp/image_generation`) and whose auth type is `internal`. It carries no credentials: on every request the ask path mints a short-lived token naming the provider row, and the loopback tool calls the model through LiteLLM with the credentials stored on the selected model provider. Activation, audiences, permissions and classification work exactly as for external providers, and its tool is approved automatically on sync because it is Eneo's own code. Switching an existing external server to the built-in source replaces its tool catalog with the loopback's tools in the same save, so no manual sync is needed. Web search has no built-in provider.
+Under the hood the row is an ordinary provider whose endpoint is Eneo's own loopback MCP server (`/internal-mcp/image_generation`), whose auth type is `internal`, and which references the image model through a foreign key. It carries no credentials and no classification of its own: on every request the ask path mints a short-lived token naming the provider row, and the loopback tool calls the model through LiteLLM with the credentials stored on the model's provider, using the model's defaults unless the assistant asks for a size or quality. The classification check at ask time uses the image model's classification. Every provider is reached through the same OpenAI Images API shaped call, so a self-hosted GPU endpoint and a hosted API take the identical path.
+
+Activation, audiences and permissions work exactly as for external providers, and the provider's tool is approved automatically on sync because it is Eneo's own code. Switching an existing external server to the built-in source replaces its tool catalog with the loopback's tools in the same save. Disabling the image model makes the capability unavailable until it is re-enabled or the provider is pointed at another model; deleting the model is refused while a provider runs on it. Web search has no built-in provider.
 
 The backend must be able to reach its own loopback URL (`INTERNAL_MCP_BASE_URL`, the same requirement as the knowledge and files servers).
 
@@ -50,7 +53,8 @@ For each capability an assistant requests, the provider is attached only when al
 - the user's role grants the capability permission (`web_search` or `image_generation`; roles can be edited under **Admin → Roles**);
 - a provider serves the user: a group-targeted provider covering one of their groups, else the tenant default;
 - the provider has at least one enabled, approved tool;
-- the provider's security classification meets the space's classification;
+- for a built-in provider, its image model is enabled;
+- the provider's security classification (for a built-in provider, its image model's) meets the space's classification;
 - the completion model supports tool calling.
 
 Otherwise the capability is silently unavailable for that turn. Service API keys can use web search but not image generation: a generated image is stored as a file owned by a user, and a service key has no user.

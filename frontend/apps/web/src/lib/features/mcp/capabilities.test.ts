@@ -11,6 +11,7 @@ import {
   CAPABILITIES,
   canUseCapability,
   getCapability,
+  hasBuiltinProvider,
   isCapabilityPurpose,
   qualifyingProviders
 } from "./capabilities";
@@ -23,12 +24,21 @@ describe("capability descriptors", () => {
     ]);
   });
 
+  it("offers a built-in provider for image generation only", () => {
+    expect(hasBuiltinProvider("image_generation")).toBe(true);
+    expect(hasBuiltinProvider("web_search")).toBe(false);
+    expect(hasBuiltinProvider("general")).toBe(false);
+    expect(hasBuiltinProvider(null)).toBe(false);
+    expect(hasBuiltinProvider(undefined)).toBe(false);
+  });
+
   it("gives every capability an icon and non-empty messages", () => {
     for (const capability of CAPABILITIES) {
       expect(capability.icon).toBeTruthy();
-      const { purpose, icon, ...messages } = capability;
+      const { purpose, icon, builtinProvider, ...messages } = capability;
       void purpose;
       void icon;
+      void builtinProvider;
       for (const [key, message] of Object.entries(messages)) {
         expect(typeof message, `${capability.purpose}.${key}`).toBe("function");
         expect(message().length, `${capability.purpose}.${key}`).toBeGreaterThan(0);

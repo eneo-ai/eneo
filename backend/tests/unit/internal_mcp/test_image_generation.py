@@ -1,7 +1,7 @@
 """Unit tests for the built-in image generation loopback server.
 
-Covers the request-parameter resolution (caller choice over provider default,
-``auto`` sends nothing), the response-to-bytes adapter, the MCP content and
+Covers the request-parameter resolution (caller choice over the model's
+default, ``auto`` sends nothing), the response-to-bytes adapter, the MCP content and
 usage ``_meta`` the tool returns, the public error mapping, and the server mount.
 """
 
@@ -24,30 +24,29 @@ from eneo.internal_mcp.registry import internal_mcp_mounts
 from eneo.main.exceptions import OpenAIException
 from eneo.model_providers.infrastructure import litellm_transport
 
-CONFIG = {
-    "model_provider_id": "0" * 32,
-    "model": "gpt-image-1",
-    "size": "1024x1024",
-    "quality": "high",
-}
+DEFAULTS = {"default_size": "1024x1024", "default_quality": "high"}
 
 
 class TestResolveRequestParams:
-    def test_caller_choice_wins_over_provider_default(self):
-        assert resolve_request_params(CONFIG, "1536x1024", "low") == {
+    def test_caller_choice_wins_over_model_default(self):
+        assert resolve_request_params(**DEFAULTS, size="1536x1024", quality="low") == {
             "size": "1536x1024",
             "quality": "low",
         }
 
-    def test_provider_default_fills_missing_or_invalid_choice(self):
-        assert resolve_request_params(CONFIG, None, "enormous") == {
+    def test_model_default_fills_missing_or_invalid_choice(self):
+        assert resolve_request_params(**DEFAULTS, size=None, quality="enormous") == {
             "size": "1024x1024",
             "quality": "high",
         }
 
     def test_auto_sends_nothing(self):
-        config = {**CONFIG, "size": "auto", "quality": "auto"}
-        assert resolve_request_params(config, "auto", None) == {}
+        assert (
+            resolve_request_params(
+                default_size="auto", default_quality="auto", size="auto", quality=None
+            )
+            == {}
+        )
 
 
 class TestImageBytesFromResponse:

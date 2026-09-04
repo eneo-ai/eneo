@@ -28,7 +28,7 @@ def _provider(**kwargs) -> MCPServer:
 def _builtin_provider() -> MCPServer:
     return _provider(
         http_auth_type=INTERNAL_AUTH_TYPE,
-        provider_config={"model_provider_id": str(uuid4()), "model": "gpt-image-1"},
+        image_model_id=uuid4(),
     )
 
 

@@ -31,6 +31,8 @@ export type CapabilityDescriptor = {
   notAvailableHereHint: () => string;
   /** Space-level hint when no active provider meets the space's classification. */
   classificationHint: () => string;
+  /** Eneo can serve this capability itself, through a catalog image model. */
+  builtinProvider?: boolean;
 };
 
 export const CAPABILITIES: readonly CapabilityDescriptor[] = [
@@ -58,9 +60,15 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     spaceHint: m.image_generation_space_group_hint,
     noActiveProviderHint: m.image_generation_no_active_provider_hint,
     notAvailableHereHint: m.image_generation_not_available_here_hint,
-    classificationHint: m.image_generation_classification_hint
+    classificationHint: m.image_generation_classification_hint,
+    builtinProvider: true
   }
 ];
+
+/** Whether Eneo offers a built-in provider (no external MCP server) for the purpose. */
+export function hasBuiltinProvider(purpose: string | null | undefined): boolean {
+  return getCapability(purpose)?.builtinProvider === true;
+}
 
 /**
  * Whether the signed-in user may USE a capability. The role permission value

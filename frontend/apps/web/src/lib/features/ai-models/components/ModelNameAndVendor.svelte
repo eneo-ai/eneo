@@ -30,7 +30,12 @@
 </script>
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import { Tooltip } from "@eneo/ui";
   import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
@@ -39,6 +44,7 @@
     | CompletionModel
     | EmbeddingModel
     | TranscriptionModel
+    | ImageModel
     | { org: string; nickname: string; name: string; description: string };
   export let size: "card" | "table" = "table";
   /** Controls the description info-button next to the model name.

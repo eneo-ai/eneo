@@ -8,16 +8,12 @@
   import { Dialog, Button, Select } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";
-  import type { SecurityClassification, UserGroup, components } from "@eneo/eneo-js";
+  import type { ImageModel, SecurityClassification, UserGroup, components } from "@eneo/eneo-js";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
-  import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
-  import {
-    BUILTIN_IMAGE_QUALITIES,
-    BUILTIN_IMAGE_SIZES,
-    hasBuiltinProvider,
-    suggestedImageModels
-  } from "$lib/features/mcp/builtinImageModels";
+  import { CAPABILITIES, getCapability, hasBuiltinProvider } from "$lib/features/mcp/capabilities";
+  import { imageQualityLabel, imageSizeLabel } from "$lib/features/ai-models/imageModelOptions";
+  import { resolve } from "$app/paths";
   import { untrack } from "svelte";
   import type { Writable } from "svelte/store";
 
@@ -119,32 +115,42 @@
   let api_key_token = $state("");
 
   // Built-in provider (image generation only): Eneo's own loopback server
-  // calls the selected tenant model provider; the admin picks the model here.
-  type ModelProviderOption = components["schemas"]["ModelProviderPublic"];
-  let modelProviders = $state<ModelProviderOption[] | null>(null);
-  let loadingModelProviders = $state(false);
-  let builtinProviderId = $state("");
-  let builtinModel = $state("");
-  let builtinSize = $state<string>("auto");
-  let builtinQuality = $state<string>("auto");
+  // calls a catalog image model; the admin picks the model here. Credentials,
+  // defaults and the security classification come from that model.
+  let imageModels = $state<ImageModel[] | null>(null);
+  let loadingImageModels = $state(false);
+  let imageModelId = $state("");
 
   const builtinAvailable = $derived(hasBuiltinProvider(selectedPurpose));
   const isBuiltin = $derived(builtinAvailable && http_auth_type === "internal");
-  const selectedModelProvider = $derived(
-    modelProviders?.find((provider) => provider.id === builtinProviderId) ?? null
+  // Enabled, current tenant models, plus the persisted one when it no
+  // longer qualifies so editing an existing row never silently drops it.
+  const imageModelOptions = $derived.by(() => {
+    const options = (imageModels ?? []).filter(
+      (model) => model.provider_id && model.is_org_enabled && !model.is_deprecated
+    );
+    const persistedId = mcpServer?.image_model_id;
+    if (persistedId && !options.some((model) => model.id === persistedId)) {
+      const persisted = imageModels?.find((model) => model.id === persistedId);
+      if (persisted) options.push(persisted);
+    }
+    return options;
+  });
+  const selectedImageModel = $derived(
+    imageModelOptions.find((model) => model.id === imageModelId) ?? null
   );
-  const builtinIncomplete = $derived(isBuiltin && (!builtinProviderId || !builtinModel.trim()));
+  const builtinIncomplete = $derived(isBuiltin && !imageModelId);
 
-  async function ensureModelProviders() {
-    if (modelProviders !== null || loadingModelProviders) return;
-    loadingModelProviders = true;
+  async function ensureImageModels() {
+    if (imageModels !== null || loadingImageModels) return;
+    loadingImageModels = true;
     try {
-      modelProviders = await eneo.modelProviders.list({ activeOnly: true });
+      imageModels = (await eneo.models.list()).imageModels;
     } catch (error) {
-      console.error("Failed to load model providers:", error);
-      modelProviders = [];
+      console.error("Failed to load image models:", error);
+      imageModels = [];
     } finally {
-      loadingModelProviders = false;
+      loadingImageModels = false;
     }
   }
 
@@ -165,7 +171,7 @@
 
   $effect(() => {
     if (isBuiltin && $openController) {
-      ensureModelProviders();
+      ensureImageModels();
     }
   });
 
@@ -190,10 +196,7 @@
       http_auth_type =
         (mcpServer.http_auth_type as "none" | "bearer" | "api_key_header" | "internal") || "none";
       source = mcpServer.http_auth_type === "internal" ? "builtin" : "external";
-      builtinProviderId = mcpServer.provider_config?.model_provider_id ?? "";
-      builtinModel = mcpServer.provider_config?.model ?? "";
-      builtinSize = mcpServer.provider_config?.size ?? "auto";
-      builtinQuality = mcpServer.provider_config?.quality ?? "auto";
+      imageModelId = mcpServer.image_model_id ?? "";
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
       audience = (mcpServer.audience as "everyone" | "groups") ?? "everyone";
@@ -215,10 +218,7 @@
       http_url = "";
       http_auth_type = "none";
       source = hasBuiltinProvider(initialPurpose) ? "builtin" : "external";
-      builtinProviderId = "";
-      builtinModel = "";
-      builtinSize = "auto";
-      builtinQuality = "auto";
+      imageModelId = "";
       documentation_url = "";
       security_classification = null;
       audience = "everyone";
@@ -262,14 +262,9 @@
         data.http_auth_type = http_auth_type;
       }
       if (isBuiltin) {
-        data.provider_config = {
-          model_provider_id: builtinProviderId,
-          model: builtinModel.trim(),
-          size: builtinSize,
-          quality: builtinQuality
-        };
+        data.image_model_id = imageModelId;
       } else if (isEditMode && mcpServer?.http_auth_type === "internal") {
-        data.provider_config = null;
+        data.image_model_id = null;
       }
 
       // Add optional fields with actual values
@@ -280,10 +275,13 @@
       data.tool_catalog_max_bytes = tool_catalog_max_mib * 1024 * 1024;
       data.tool_definition_max_bytes = tool_definition_max_kib * 1024;
 
-      // Security classification — send id or null
-      data.security_classification = security_classification
-        ? { id: security_classification.id }
-        : null;
+      // Security classification — send id or null. A built-in provider takes
+      // its classification from the image model and never carries its own.
+      if (!isBuiltin) {
+        data.security_classification = security_classification
+          ? { id: security_classification.id }
+          : null;
+      }
 
       // Audience only applies to capability providers; a general server is
       // always for everyone and the backend rejects anything else.
@@ -597,94 +595,46 @@
 
               <div>
                 <label
-                  for="mcp-builtin-provider"
+                  for="mcp-builtin-image-model"
                   class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
                 >
-                  {m.mcp_builtin_model_provider()}
+                  {m.mcp_builtin_image_model()}
                   <span class="text-negative-default" aria-hidden="true">*</span>
                 </label>
                 <select
-                  id="mcp-builtin-provider"
-                  bind:value={builtinProviderId}
+                  id="mcp-builtin-image-model"
+                  bind:value={imageModelId}
                   required
                   aria-required="true"
-                  disabled={loadingModelProviders}
+                  disabled={loadingImageModels}
                   class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
                 >
                   <option value="" disabled>{m.select()}</option>
-                  {#each modelProviders ?? [] as provider (provider.id)}
-                    <option value={provider.id}>{provider.name} ({provider.provider_type})</option>
+                  {#each imageModelOptions as model (model.id)}
+                    <option value={model.id}>
+                      {model.nickname || model.name}{model.provider_name
+                        ? ` · ${model.provider_name}`
+                        : ""}
+                    </option>
                   {/each}
                 </select>
-                {#if modelProviders !== null && modelProviders.length === 0}
-                  <p class="text-warning-default mt-1.5 text-xs">{m.mcp_builtin_no_providers()}</p>
+                {#if imageModels !== null && imageModelOptions.length === 0}
+                  <p class="text-warning-default mt-1.5 text-xs">
+                    {m.mcp_builtin_no_image_models()}
+                    <a href={resolve("/admin/models?tab=image_models")} class="underline"
+                      >{m.mcp_builtin_go_to_image_models()}</a
+                    >
+                  </p>
                 {/if}
-              </div>
-
-              <div>
-                <label
-                  for="mcp-builtin-model"
-                  class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
-                >
-                  {m.mcp_builtin_model()}
-                  <span class="text-negative-default" aria-hidden="true">*</span>
-                </label>
-                <input
-                  id="mcp-builtin-model"
-                  type="text"
-                  bind:value={builtinModel}
-                  required
-                  aria-required="true"
-                  list="mcp-builtin-model-suggestions"
-                  autocomplete="off"
-                  aria-describedby="mcp-builtin-model-hint"
-                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm focus:ring-2 focus:outline-none"
-                />
-                <datalist id="mcp-builtin-model-suggestions">
-                  {#each suggestedImageModels(selectedModelProvider?.provider_type) as suggestion (suggestion)}
-                    <option value={suggestion}></option>
-                  {/each}
-                </datalist>
-                <p id="mcp-builtin-model-hint" class="text-muted mt-1.5 text-xs">
-                  {m.mcp_builtin_model_hint()}
-                </p>
-              </div>
-
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label
-                    for="mcp-builtin-size"
-                    class="text-default mb-1.5 block text-sm font-medium"
-                    >{m.mcp_builtin_size()}</label
-                  >
-                  <select
-                    id="mcp-builtin-size"
-                    bind:value={builtinSize}
-                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
-                  >
-                    {#each BUILTIN_IMAGE_SIZES as size (size)}
-                      <option value={size}>{size === "auto" ? m.mcp_builtin_auto() : size}</option>
-                    {/each}
-                  </select>
-                </div>
-                <div>
-                  <label
-                    for="mcp-builtin-quality"
-                    class="text-default mb-1.5 block text-sm font-medium"
-                    >{m.mcp_builtin_quality()}</label
-                  >
-                  <select
-                    id="mcp-builtin-quality"
-                    bind:value={builtinQuality}
-                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
-                  >
-                    {#each BUILTIN_IMAGE_QUALITIES as quality (quality)}
-                      <option value={quality}
-                        >{quality === "auto" ? m.mcp_builtin_auto() : quality}</option
-                      >
-                    {/each}
-                  </select>
-                </div>
+                {#if selectedImageModel}
+                  <p class="text-muted mt-1.5 text-xs">
+                    <span class="font-mono">{selectedImageModel.name}</span>
+                    · {m.image_default_size()}: {imageSizeLabel(selectedImageModel.default_size)}
+                    · {m.image_default_quality()}: {imageQualityLabel(
+                      selectedImageModel.default_quality
+                    )}
+                  </p>
+                {/if}
               </div>
               {#if builtinIncomplete}
                 <p class="text-warning-default text-xs">{m.mcp_builtin_incomplete()}</p>
@@ -998,12 +948,22 @@
               {m.security_classification()}
             </legend>
 
-            <div class="classification-select border-default w-full rounded-lg border">
-              <SelectSecurityClassification
-                {classifications}
-                bind:value={security_classification}
-              />
-            </div>
+            {#if isBuiltin}
+              <!-- Inherited from the image model; shown for reference only. -->
+              <p class="text-default text-sm">
+                {selectedImageModel?.security_classification?.name ??
+                  mcpServer?.security_classification?.name ??
+                  m.no_classification()}
+              </p>
+              <p class="text-muted text-xs">{m.mcp_builtin_classification_inherited()}</p>
+            {:else}
+              <div class="classification-select border-default w-full rounded-lg border">
+                <SelectSecurityClassification
+                  {classifications}
+                  bind:value={security_classification}
+                />
+              </div>
+            {/if}
           </fieldset>
         {/if}
       </form>

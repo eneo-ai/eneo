@@ -5,10 +5,13 @@
 
 The built-in image provider is an ordinary ``mcp_servers`` row with
 ``http_auth_type = "internal"`` whose endpoint is this loopback server. Its
-``provider_config`` names the tenant model provider and model to call; the
-ask path mints a scoped token that carries the row id, so the tool reads its
-configuration from a row the caller cannot choose and uses the credentials
-the tenant already manages under model providers.
+``image_model_id`` names the catalog image model to call; the ask path mints
+a scoped token that carries the row id, so the tool reads its configuration
+from a row the caller cannot choose and uses the credentials of the model's
+provider, which the tenant already manages under model providers. Every
+provider is reached through the same OpenAI Images API shaped call (LiteLLM
+adapts the few that differ), so a vLLM endpoint on a local GPU and OpenAI
+take the identical path.
 
 The generated image is returned as an MCP ``image`` content block, which the
 proxy caps and the ask path persists as a generated file like any other
@@ -26,24 +29,23 @@ from __future__ import annotations
 import base64
 import logging
 from typing import Any
-from uuid import UUID
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from eneo.image_models.domain.image_model import (
+    AUTO_IMAGE_OPTION,
+    IMAGE_QUALITIES,
+    IMAGE_SIZES,
+)
 from eneo.internal_mcp.constants import IMAGE_GENERATION_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     bearer_from_ctx,
     internal_tool_context,
     mcp_server_id_from_token,
 )
-from eneo.mcp_servers.domain.entities.mcp_server import (
-    BUILTIN_IMAGE_QUALITIES,
-    BUILTIN_IMAGE_SIZES,
-    is_builtin_provider,
-    validate_builtin_provider_config,
-)
+from eneo.mcp_servers.domain.entities.mcp_server import is_builtin_provider
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -64,7 +66,7 @@ mcp = FastMCP(
 
 NOT_CONFIGURED_MESSAGE = (
     "Image generation is not configured for this provider. Ask an "
-    "administrator to check the built-in provider's model selection."
+    "administrator to check the built-in provider's image model."
 )
 NO_IMAGE_MESSAGE = "The image model returned no image."
 DEFAULT_MIME_TYPE = "image/png"
@@ -75,18 +77,20 @@ _OTEL_PROVIDER_NAMES = {"azure": "azure.ai.openai"}
 
 
 def resolve_request_params(
-    config: dict[str, Any], size: str | None, quality: str | None
+    *,
+    default_size: str,
+    default_quality: str,
+    size: str | None,
+    quality: str | None,
 ) -> dict[str, str]:
     """Size and quality for one call: the caller's valid choice, else the
-    provider's default, and nothing at all for ``auto`` so the model decides."""
+    model's default, and nothing at all for ``auto`` so the model decides."""
     params: dict[str, str] = {}
-    chosen_size = size if size in BUILTIN_IMAGE_SIZES else config.get("size")
-    if chosen_size and chosen_size != "auto":
+    chosen_size = size if size in IMAGE_SIZES else default_size
+    if chosen_size and chosen_size != AUTO_IMAGE_OPTION:
         params["size"] = chosen_size
-    chosen_quality = (
-        quality if quality in BUILTIN_IMAGE_QUALITIES else config.get("quality")
-    )
-    if chosen_quality and chosen_quality != "auto":
+    chosen_quality = quality if quality in IMAGE_QUALITIES else default_quality
+    if chosen_quality and chosen_quality != AUTO_IMAGE_OPTION:
         params["quality"] = chosen_quality
     return params
 
@@ -246,31 +250,37 @@ async def generate_image(
         if (
             server.tenant_id != tool_ctx.user.tenant_id
             or not is_builtin_provider(server.http_auth_type)
-            or not server.provider_config
+            or server.image_model_id is None
         ):
             raise ValueError(NOT_CONFIGURED_MESSAGE)
-        try:
-            config = validate_builtin_provider_config(server.provider_config)
-        except ValueError:
-            raise ValueError(NOT_CONFIGURED_MESSAGE) from None
+        # The repo is tenant-bound and hides soft-deleted rows; a disabled
+        # model is already skipped at ask time, this is defence in depth.
+        model = await container.image_model_repo().one_or_none(server.image_model_id)
+        if model is None or not model.is_org_enabled or model.provider_id is None:
+            raise ValueError(NOT_CONFIGURED_MESSAGE)
         provider = await load_active_litellm_provider(
             session=container.session(),
-            provider_id=UUID(config["model_provider_id"]),
+            provider_id=model.provider_id,
             tenant_id=tool_ctx.user.tenant_id,
         )
         resolver = provider.create_credential_resolver(container.encryption_service())
         provider_kwargs = build_litellm_provider_kwargs(resolver)
         route = resolve_model_route(
-            model_name=config["model"], provider_type=provider.provider_type
+            model_name=model.name, provider_type=provider.provider_type
+        )
+        params = resolve_request_params(
+            default_size=model.default_size,
+            default_quality=model.default_quality,
+            size=size,
+            quality=quality,
         )
     # The provider call runs outside the request-scoped DB transaction.
     return await generate_with_litellm(
         route=route,
         provider_kwargs=provider_kwargs,
         prompt=prompt,
-        params=resolve_request_params(config, size, quality),
+        params=params,
         provider_type=provider.provider_type,
-        model=config["model"],
     )
 
 

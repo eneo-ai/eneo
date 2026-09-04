@@ -308,11 +308,7 @@ async def create_mcp_server(
         audience=data.audience,
         audience_priority=data.audience_priority,
         user_group_ids=data.user_group_ids,
-        provider_config=(
-            data.provider_config.model_dump(mode="json")
-            if data.provider_config
-            else None
-        ),
+        image_model_id=data.image_model_id,
     )
 
     # If connection failed, return 400 error with message
@@ -395,12 +391,7 @@ async def update_mcp_server(
         audience=data.audience,
         audience_priority=data.audience_priority,
         user_group_ids=data.user_group_ids,
-        provider_config=(
-            data.provider_config
-            if isinstance(data.provider_config, NotProvided)
-            or data.provider_config is None
-            else data.provider_config.model_dump(mode="json")
-        ),
+        image_model_id=data.image_model_id,
     )
 
     # If connection validation failed, return 400 error with message
@@ -434,6 +425,16 @@ async def update_mcp_server(
         }
     if data.tags is not None and data.tags != old_server.tags:
         changes["tags"] = {"old": old_server.tags, "new": data.tags}
+    if (
+        not isinstance(data.image_model_id, NotProvided)
+        and data.image_model_id != old_server.image_model_id
+    ):
+        changes["image_model_id"] = {
+            "old": str(old_server.image_model_id)
+            if old_server.image_model_id
+            else None,
+            "new": str(data.image_model_id) if data.image_model_id else None,
+        }
     if (
         data.forward_identity is not None
         and data.forward_identity != old_server.forward_identity

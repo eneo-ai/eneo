@@ -7,6 +7,7 @@ from eneo.database.tables.mcp_server_table import MCPServers as MCPServersTable
 from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerAudienceGroup,
+    MCPServerBackingModel,
     MCPServerTool,
 )
 from eneo.security_classifications.domain.entities.security_classification import (
@@ -97,6 +98,35 @@ class MCPServerMapper:
                     for group in groups_loaded
                 ]
 
+        # The backing image model (built-in providers) is projected only when
+        # the reader eager-loaded it; its own relationships are read the same
+        # way so an unloaded classification never triggers a lazy load.
+        image_model = None
+        if inspector is not None:
+            model_loaded = inspector.attrs.image_model.loaded_value
+            if model_loaded is not NEVER_SET and model_loaded is not None:
+                model_inspector = inspect(model_loaded)
+                model_sc = None
+                provider_name = None
+                if model_inspector is not None:
+                    sc_value = (
+                        model_inspector.attrs.security_classification.loaded_value
+                    )
+                    if sc_value is not NEVER_SET and sc_value is not None:
+                        model_sc = SecurityClassification.to_domain(sc_value)
+                    provider_value = model_inspector.attrs.provider.loaded_value
+                    if provider_value is not NEVER_SET and provider_value is not None:
+                        provider_name = provider_value.name
+                image_model = MCPServerBackingModel(
+                    id=model_loaded.id,
+                    name=model_loaded.name,
+                    nickname=model_loaded.nickname,
+                    provider_name=provider_name,
+                    is_enabled=model_loaded.is_enabled,
+                    is_deleted=model_loaded.deleted_at is not None,
+                    security_classification=model_sc,
+                )
+
         return MCPServer(
             id=db_model.id,  # type: ignore[arg-type]
             created_at=db_model.created_at,  # type: ignore[arg-type]
@@ -112,7 +142,8 @@ class MCPServerMapper:
             audience=db_model.audience,
             audience_priority=db_model.audience_priority,
             user_groups=user_groups,
-            provider_config=db_model.provider_config,
+            image_model_id=db_model.image_model_id,
+            image_model=image_model,
             forward_identity=db_model.forward_identity,
             tool_catalog_max_count=db_model.tool_catalog_max_count,
             tool_catalog_max_bytes=db_model.tool_catalog_max_bytes,
@@ -145,7 +176,7 @@ class MCPServerMapper:
             "is_enabled": entity.is_enabled,
             "audience": entity.audience,
             "audience_priority": entity.audience_priority,
-            "provider_config": entity.provider_config,
+            "image_model_id": entity.image_model_id,
             "forward_identity": entity.forward_identity,
             "tool_catalog_max_count": entity.tool_catalog_max_count,
             "tool_catalog_max_bytes": entity.tool_catalog_max_bytes,

@@ -32,7 +32,6 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServerTool,
     is_builtin_provider,
     is_capability_purpose,
-    validate_builtin_provider_config,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -72,6 +71,8 @@ def _raise_for_integrity_error(error: IntegrityError) -> None:
 
 
 if TYPE_CHECKING:
+    from eneo.image_models.domain.image_model import ImageModel
+    from eneo.image_models.domain.image_model_repo import ImageModelRepository
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -192,12 +193,14 @@ class MCPServerService:
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
         user_groups_repo: "UserGroupsRepository | None" = None,
+        image_model_repo: "ImageModelRepository | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
         self.encryption_service = encryption_service
+        self.image_model_repo = image_model_repo
         self.user_groups_repo = user_groups_repo
 
     async def _resolve_audience(
@@ -305,32 +308,42 @@ class MCPServerService:
         base = get_settings().internal_mcp_base_url.rstrip("/")
         return f"{base}/internal-mcp/{purpose}/mcp"
 
-    async def _resolve_builtin_provider_config(
-        self, purpose: str, provider_config: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        """Validate a built-in provider's purpose and model selection.
+    async def _resolve_builtin_image_model(
+        self, purpose: str, image_model_id: UUID | None
+    ) -> "ImageModel":
+        """Validate a built-in provider's purpose and image model selection.
 
-        The model provider must exist in the tenant and be active; the loopback
-        tool loads credentials from it at call time.
+        The image model must be one of the tenant's own enabled catalog rows
+        and its model provider must be active; the loopback tool loads the
+        credentials from that provider at call time.
         """
         if purpose not in BUILTIN_PROVIDER_PURPOSES:
             raise BadRequestException(
                 "A built-in provider is available for: "
                 + ", ".join(BUILTIN_PROVIDER_PURPOSES)
             )
-        try:
-            resolved = validate_builtin_provider_config(provider_config)
-        except ValueError as exc:
-            raise BadRequestException(str(exc)) from exc
+        if image_model_id is None:
+            raise BadRequestException("A built-in provider needs an image model")
+        if self.image_model_repo is None:
+            raise RuntimeError("MCPServerService requires image_model_repo")
+        model = await self.image_model_repo.one_or_none(image_model_id)
+        if (
+            model is None
+            or model.tenant_id != self.user.tenant_id
+            or model.provider_id is None
+        ):
+            raise BadRequestException("Image model not found in this organisation")
+        if not model.is_org_enabled:
+            raise BadRequestException("Image model is disabled")
         try:
             await load_active_litellm_provider(
                 session=self.repo.session,
-                provider_id=UUID(resolved["model_provider_id"]),
+                provider_id=model.provider_id,
                 tenant_id=self.user.tenant_id,
             )
         except (ProviderNotFoundException, ProviderInactiveException) as exc:
             raise BadRequestException(str(exc)) from exc
-        return resolved
+        return model
 
     async def _get_server_for_tenant(self, mcp_server_id: UUID) -> MCPServer:
         """Fetch an MCP server and verify it belongs to the current user's tenant."""
@@ -414,7 +427,7 @@ class MCPServerService:
         audience: str = AUDIENCE_EVERYONE,
         audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
         user_group_ids: list[UUID] | None = None,
-        provider_config: dict[str, Any] | None = None,
+        image_model_id: UUID | None = None,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
@@ -422,7 +435,8 @@ class MCPServerService:
 
         A built-in provider (``http_auth_type = "internal"``) ignores the given
         URL and identity forwarding: its endpoint is Eneo's own loopback server
-        for the purpose, and ``provider_config`` selects the model it calls.
+        for the purpose, ``image_model_id`` selects the catalog model it calls,
+        and its security classification is that model's, never its own.
         """
         if icon_url is not None:
             icon_url = str(icon_url)
@@ -431,14 +445,18 @@ class MCPServerService:
 
         self._validate_auth_config(http_auth_type, http_auth_config_schema)
         if is_builtin_provider(http_auth_type):
-            provider_config = await self._resolve_builtin_provider_config(
-                purpose, provider_config
-            )
+            model = await self._resolve_builtin_image_model(purpose, image_model_id)
+            image_model_id = model.id
+            if security_classification is not None:
+                raise BadRequestException(
+                    "A built-in provider takes its security classification "
+                    "from its image model"
+                )
             http_url = self.builtin_provider_url(purpose)
             forward_identity = False
-        elif provider_config is not None:
+        elif image_model_id is not None:
             raise BadRequestException(
-                "provider_config applies only to built-in providers"
+                "image_model_id applies only to built-in providers"
             )
         elif not http_url:
             raise BadRequestException("http_url is required")
@@ -460,7 +478,7 @@ class MCPServerService:
             audience=audience,
             audience_priority=audience_priority,
             user_groups=user_groups,
-            provider_config=provider_config,
+            image_model_id=image_model_id,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -536,7 +554,7 @@ class MCPServerService:
         audience: str | None = None,
         audience_priority: int | None = None,
         user_group_ids: list[UUID] | None = None,
-        provider_config: "dict[str, Any] | None | NotProvided" = NOT_PROVIDED,
+        image_model_id: "UUID | None | NotProvided" = NOT_PROVIDED,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
@@ -595,21 +613,28 @@ class MCPServerService:
                 self._decrypt_auth_config(mcp_server.http_auth_config_schema),
             )
 
-        # Built-in providers: the URL is Eneo's loopback endpoint and the model
-        # selection is validated whenever it (or the auth type, or the purpose)
-        # changes. Leaving the internal auth type drops the selection.
+        # Built-in providers: the URL is Eneo's loopback endpoint and the image
+        # model is validated whenever it (or the auth type, or the purpose)
+        # changes. The row never carries its own classification. Leaving the
+        # internal auth type drops the model.
         effective_purpose = purpose if purpose is not None else mcp_server.purpose
         if is_builtin_provider(effective_auth_type):
-            config_changing = not isinstance(provider_config, NotProvided)
-            if auth_type_changed or config_changing or purpose is not None:
-                mcp_server.provider_config = (
-                    await self._resolve_builtin_provider_config(
-                        effective_purpose,
-                        provider_config
-                        if config_changing
-                        else mcp_server.provider_config,
-                    )
+            model_changing = not isinstance(image_model_id, NotProvided)
+            if auth_type_changed or model_changing or purpose is not None:
+                model = await self._resolve_builtin_image_model(
+                    effective_purpose,
+                    image_model_id if model_changing else mcp_server.image_model_id,
                 )
+                mcp_server.image_model_id = model.id
+            if (
+                not isinstance(security_classification, NotProvided)
+                and security_classification is not None
+            ):
+                raise BadRequestException(
+                    "A built-in provider takes its security classification "
+                    "from its image model"
+                )
+            security_classification = None
             builtin_url = self.builtin_provider_url(effective_purpose)
             url_changed = builtin_url != mcp_server.http_url
             http_url = builtin_url
@@ -618,13 +643,14 @@ class MCPServerService:
                 mcp_server.forward_identity
             )
         else:
-            if not isinstance(provider_config, NotProvided) and (
-                provider_config is not None
+            if not isinstance(image_model_id, NotProvided) and (
+                image_model_id is not None
             ):
                 raise BadRequestException(
-                    "provider_config applies only to built-in providers"
+                    "image_model_id applies only to built-in providers"
                 )
-            mcp_server.provider_config = None
+            mcp_server.image_model_id = None
+            mcp_server.image_model = None
 
         # Apply changes to domain object
         if name is not None:
