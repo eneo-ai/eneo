@@ -35,7 +35,10 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_error_event,
 )
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStatusEvent,
+    AIBuilderStreamEvent,
+)
 from eneo.flows.ai_builder.ai_builder_events import (
     build_committed_turn_replay_events,
     build_done_event,
@@ -192,39 +195,45 @@ class AIBuilderPlanner:
     ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
         try:
             assistant_metadata = build_assistant_message_metadata(conversation)
-            events = [
-                event
-                async for event in self._proposal_submission.run_active_submission_attempt(
-                    turn=turn,
-                    conversation=conversation,
-                    new_messages_start=new_messages_start,
-                    message_groups=proposal_request.message_groups,
-                    completion_model_route=completion_model_route,
-                    available_model_refs=proposal_request.resource_catalog.model_refs,
-                    available_kb_refs=(
-                        proposal_request.resource_catalog.knowledge_base_refs
-                    ),
-                    resource_catalog=proposal_request.resource_catalog,
-                    proposal_tool_schema=proposal_request.proposal_tool_schema,
-                    decline_tool_schema=proposal_request.decline_tool_schema,
-                    obligation_projection=proposal_request.obligation_projection,
-                    proposal_temperature=self.planner_temperature,
+            # Transient status events tell the user what is happening now and
+            # carry no persistence guarantee, so they go out the moment they
+            # arrive; durable plan and error events wait for the turn to be
+            # recorded, as before.
+            events: list[AIBuilderStreamEvent] = []
+            async for event in self._proposal_submission.run_active_submission_attempt(
+                turn=turn,
+                conversation=conversation,
+                new_messages_start=new_messages_start,
+                message_groups=proposal_request.message_groups,
+                completion_model_route=completion_model_route,
+                available_model_refs=proposal_request.resource_catalog.model_refs,
+                available_kb_refs=(
+                    proposal_request.resource_catalog.knowledge_base_refs
+                ),
+                resource_catalog=proposal_request.resource_catalog,
+                proposal_tool_schema=proposal_request.proposal_tool_schema,
+                decline_tool_schema=proposal_request.decline_tool_schema,
+                obligation_projection=proposal_request.obligation_projection,
+                proposal_temperature=self.planner_temperature,
+                request_id=request_id,
+                usage_tracker=usage_tracker,
+                flow=flow,
+                assistant_snapshots=assistant_snapshots,
+                assistant_metadata=assistant_metadata,
+                planning_state=proposal_request.planning_state,
+                compile_context=proposal_request.compile_context,
+                plan_edit_context=proposal_request.plan_edit_context,
+                prior_spec_for_revision=proposal_request.prior_spec_for_revision,
+                before_provider_call=before_provider_call,
+                proposal_request_budget=replace(
+                    proposal_request.request_budget,
                     request_id=request_id,
-                    usage_tracker=usage_tracker,
-                    flow=flow,
-                    assistant_snapshots=assistant_snapshots,
-                    assistant_metadata=assistant_metadata,
-                    planning_state=proposal_request.planning_state,
-                    compile_context=proposal_request.compile_context,
-                    plan_edit_context=proposal_request.plan_edit_context,
-                    prior_spec_for_revision=proposal_request.prior_spec_for_revision,
-                    before_provider_call=before_provider_call,
-                    proposal_request_budget=replace(
-                        proposal_request.request_budget,
-                        request_id=request_id,
-                    ),
-                )
-            ]
+                ),
+            ):
+                if isinstance(event, AIBuilderStatusEvent):
+                    yield event
+                    continue
+                events.append(event)
         except PlanningStatePayloadTooLargeError as error:
             yield await self._complete_planning_state_payload_too_large(
                 turn=turn,
@@ -564,7 +573,14 @@ class AIBuilderPlanner:
                         yield build_done_event()
                         return
 
-                    pending_events = list(dispatch_result.events)
+                    # Transient statuses go out now; durable events wait for the
+                    # turn to be recorded, as before.
+                    pending_events: list[AIBuilderStreamEvent] = []
+                    for dispatched in dispatch_result.events:
+                        if isinstance(dispatched, AIBuilderStatusEvent):
+                            yield dispatched
+                        else:
+                            pending_events.append(dispatched)
                     if dispatch_result.proposal_continuation is not None:
                         continuation_turn = replace(
                             turn,
@@ -600,25 +616,24 @@ class AIBuilderPlanner:
                                 dispatch_result.action_kind == "revise_architecture"
                             ),
                         )
-                        pending_events.extend(
-                            [
-                                event
-                                async for event in self._stream_proposal_events(
-                                    turn=continuation_turn,
-                                    conversation=conversation,
-                                    new_messages_start=(
-                                        dispatch_result.proposal_continuation.new_messages_start
-                                    ),
-                                    proposal_request=proposal_request,
-                                    completion_model_route=completion_model_route,
-                                    request_id=request_id,
-                                    usage_tracker=usage_tracker,
-                                    flow=flow,
-                                    assistant_snapshots=assistant_snapshots,
-                                    before_provider_call=mark_provider_work_started,
-                                )
-                            ]
-                        )
+                        async for event in self._stream_proposal_events(
+                            turn=continuation_turn,
+                            conversation=conversation,
+                            new_messages_start=(
+                                dispatch_result.proposal_continuation.new_messages_start
+                            ),
+                            proposal_request=proposal_request,
+                            completion_model_route=completion_model_route,
+                            request_id=request_id,
+                            usage_tracker=usage_tracker,
+                            flow=flow,
+                            assistant_snapshots=assistant_snapshots,
+                            before_provider_call=mark_provider_work_started,
+                        ):
+                            if isinstance(event, AIBuilderStatusEvent):
+                                yield event
+                            else:
+                                pending_events.append(event)
                     else:
                         error = next(
                             (
