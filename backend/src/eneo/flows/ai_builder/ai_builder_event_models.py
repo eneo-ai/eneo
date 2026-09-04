@@ -35,8 +35,13 @@ JsonScalar: TypeAlias = str | int | float | bool | None
 
 
 class AIBuilderStatus(StrEnum):
+    """What the Builder is doing right now. Transient: delivered as it happens,
+    never persisted, never a percentage."""
+
     ARCHITECTURE_COMMITTED = "architecture_committed"
     ARCHITECTURE_REVISED = "architecture_revised"
+    DRAFTING_FLOW = "drafting_flow"
+    CHECKING_FLOW = "checking_flow"
     REPAIRING = "repairing"
 
 

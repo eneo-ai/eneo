@@ -1648,8 +1648,13 @@ class TestSendMessage:
                 )
             )
 
-        assert [event["event"] for event in events] == [SSE_EVENT_ERROR, SSE_EVENT_DONE]
-        public_error = json.loads(events[0]["data"])
+        # Drafting was announced before the request hit the context limit.
+        assert [event["event"] for event in events] == [
+            "status",
+            SSE_EVENT_ERROR,
+            SSE_EVENT_DONE,
+        ]
+        public_error = json.loads(events[1]["data"])
         assert public_error["code"] == "planner_context_limit_exceeded"
         assert public_error["details"] == {
             "another_call_permitted": False,

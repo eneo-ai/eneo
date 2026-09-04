@@ -30,7 +30,9 @@
     switch (status) {
       case "architecture_committed":
       case "architecture_revised":
+      case "drafting_flow":
         return m.ai_builder_build_narration_steps();
+      case "checking_flow":
       case "repairing":
         return m.ai_builder_build_narration_checking();
       default:
