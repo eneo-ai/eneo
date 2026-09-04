@@ -10422,9 +10422,16 @@ export interface components {
     };
     /**
      * AIBuilderStatus
+     * @description What the Builder is doing right now. Transient: delivered as it happens,
+     *     never persisted, never a percentage.
      * @enum {string}
      */
-    AIBuilderStatus: "architecture_committed" | "architecture_revised" | "repairing";
+    AIBuilderStatus:
+      | "architecture_committed"
+      | "architecture_revised"
+      | "drafting_flow"
+      | "checking_flow"
+      | "repairing";
     /** AIBuilderStatusEvent */
     AIBuilderStatusEvent: {
       data: components["schemas"]["AIBuilderStatusEventData"];

@@ -408,7 +408,13 @@ const textEventDataSchema = z.object({
 }) satisfies z.ZodType<AIBuilderTextEventData>;
 
 const statusEventDataSchema = z.object({
-  status: z.enum(["architecture_committed", "architecture_revised", "repairing"])
+  status: z.enum([
+    "architecture_committed",
+    "architecture_revised",
+    "drafting_flow",
+    "checking_flow",
+    "repairing"
+  ])
 }) satisfies z.ZodType<AIBuilderStatusEventData>;
 
 // The disclosure's input and output are non-blank at the backend model, which

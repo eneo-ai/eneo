@@ -420,7 +420,12 @@ async def test_complex_authoring_spec_submits_once_without_repairs() -> None:
         )
     elapsed_ms = (perf_counter_ns() - started_ns) // 1_000_000
 
-    assert [event["event"] for event in events] == ["plan"]
+    # The two phases are said before the plan, while the provider works.
+    assert [event["event"] for event in events] == ["status", "status", "plan"]
+    assert [json.loads(event["data"])["status"] for event in events[:2]] == [
+        "drafting_flow",
+        "checking_flow",
+    ]
     provider_calls = submission.litellm_client.acompletion.await_count
     assert provider_calls == 1
     compiled = captured_compiled[0]
@@ -532,7 +537,7 @@ async def test_initial_text_then_forced_tool_submits_with_exactly_two_calls() ->
             ]
         )
 
-    assert [event["event"] for event in events] == ["plan"]
+    assert [event["event"] for event in events] == ["status", "status", "plan"]
     assert submission.litellm_client.acompletion.await_count == 2
     assert failed == []
 
@@ -568,8 +573,8 @@ async def test_initial_text_twice_ends_typed_after_exactly_two_calls() -> None:
             ]
         )
 
-    assert [event["event"] for event in events] == ["error"]
-    assert json.loads(events[0]["data"])["code"] == "proposal_tool_missing"
+    assert [event["event"] for event in events] == ["status", "status", "error"]
+    assert json.loads(events[-1]["data"])["code"] == "proposal_tool_missing"
     assert submission.litellm_client.acompletion.await_count == 2
     assert [record["final_failure_kind"] for record in failed] == [
         "missing_submission_tool"

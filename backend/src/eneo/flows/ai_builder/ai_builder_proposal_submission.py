@@ -33,7 +33,11 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderOutcomeUnknownException,
     build_ai_builder_error_event,
 )
-from eneo.flows.ai_builder.ai_builder_event_models import AIBuilderStreamEvent
+from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStatus,
+    AIBuilderStreamEvent,
+)
+from eneo.flows.ai_builder.ai_builder_events import build_status_event
 from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     LLMCompletionMessage,
     LLMCompletionToolCall,
@@ -256,6 +260,9 @@ class ProposalSubmissionOwner:
             before_provider_call=before_provider_call,
             proposal_request_budget=proposal_request_budget,
         )
+        # Said before the provider is asked, so the client learns what is
+        # happening while it happens; the planner forwards statuses at once.
+        yield build_status_event(AIBuilderStatus.DRAFTING_FLOW)
         try:
             response = await call_proposal_completion(
                 litellm_client=self.litellm_client,
@@ -334,6 +341,7 @@ class ProposalSubmissionOwner:
             )
             return
 
+        yield build_status_event(AIBuilderStatus.CHECKING_FLOW)
         message = choice.message
         forced_response = _forced_submission_response(
             message=message,
