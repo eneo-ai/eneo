@@ -82,14 +82,16 @@ async def reconcile_crawl_work(
                     extra={"dispatch_count": len(cleanup_dispatch_ids)},
                 )
 
+    settings = get_settings()
     limit = (
         concurrency_limit
         if concurrency_limit is not None
-        else get_settings().effective_crawl_job_concurrency_limit
+        else settings.effective_crawl_job_concurrency_limit
     )
     async with sessionmanager.session() as session, session.begin():
         candidates = await CrawlRunRepository(session).claim_dispatch_candidates(
             concurrency_limit=limit,
+            tenant_concurrency_limit=settings.crawl_job_tenant_concurrency_limit,
             retry_after=DISPATCH_RETRY_AFTER,
             redeliver_after=QUEUE_REDELIVERY_AFTER,
         )

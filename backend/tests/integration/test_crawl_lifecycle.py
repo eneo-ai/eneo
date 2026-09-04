@@ -333,6 +333,14 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
             pages_failed=1,
             files_failed=0,
         )
+        assert (
+            await session.scalar(
+                sa.select(CrawlRunsTable.pages_crawled).where(
+                    CrawlRunsTable.id == run.id
+                )
+            )
+            == 12
+        )
         progress = await repo.one(run.id)
         assert progress.pages_crawled == 12
         assert progress.files_downloaded == 2
@@ -439,6 +447,57 @@ async def test_attempt_token_fences_claim_renewal_and_terminalization(
             )
             is None
         )
+
+
+async def test_progress_read_refreshes_a_previously_loaded_run(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+        run_id = run.id
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run_id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(website=website, run_id=run_id, attempt_id=attempt_id, job=job),
+        )
+        assert await repo.claim_attempt(
+            attempt_id,
+            dispatch_id=job.id,
+            lease_owner="crawler-1",
+            lease_duration=timedelta(minutes=5),
+        )
+
+    async with db_session() as reader:
+        cached = await reader.get(CrawlRunsTable, run_id)
+        assert cached is not None
+        assert cached.pages_crawled is None
+
+        async with db_session() as writer:
+            assert await CrawlRunRepository(writer).renew_attempt_lease(
+                attempt_id,
+                lease_owner="crawler-1",
+                lease_duration=timedelta(minutes=5),
+                pages_crawled=12,
+            )
+
+        # PostgreSQL has the new count while this session retains an older row.
+        assert (
+            await reader.scalar(
+                sa.select(CrawlRunsTable.pages_crawled).where(
+                    CrawlRunsTable.id == run_id
+                )
+            )
+            == 12
+        )
+        progress = await CrawlRunRepository(reader).one(run_id)
+        assert progress.pages_crawled == 12
 
 
 async def test_cancel_queued_attempt_is_immediate_and_idempotent(

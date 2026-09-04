@@ -42,6 +42,7 @@ from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.models import Status
 from eneo.users.user import UserInDB
@@ -719,10 +720,17 @@ async def test_deleted_job_projection_does_not_invalidate_durable_dispatch(
     assert task.user_id == admin_user.id
 
 
+@pytest.mark.parametrize("tenant_limit", [None, 1])
 async def test_delivery_failure_remains_repairable_and_retry_is_idempotent(
     db_session,
     admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_limit: int | None,
 ) -> None:
+    settings = get_settings().model_copy(
+        update={"crawl_job_tenant_concurrency_limit": tenant_limit}
+    )
+    monkeypatch.setattr(crawl_dispatch, "get_settings", lambda: settings)
     async with db_session() as session:
         website = await _persist_website(
             session,
@@ -1966,10 +1974,17 @@ async def test_dispatch_capacity_serves_another_tenant_before_one_tenant_backlog
     assert len(dispatched_websites & {website.id for website in tenant_a_websites}) == 1
 
 
+@pytest.mark.parametrize("tenant_limit", [None, 1])
 async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
     db_session,
     admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_limit: int | None,
 ) -> None:
+    settings = get_settings().model_copy(
+        update={"crawl_job_tenant_concurrency_limit": tenant_limit}
+    )
+    monkeypatch.setattr(crawl_dispatch, "get_settings", lambda: settings)
     async with db_session() as session:
         second_tenant = Tenants(
             name=f"crawl-fairness-{uuid4()}",
@@ -2013,10 +2028,18 @@ async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
         concurrency_limit=2,
     )
 
-    assert (initial.claimed, initial.dispatched) == (2, 2)
+    expected_initial = tenant_limit or 2
+    assert (initial.claimed, initial.dispatched) == (expected_initial, expected_initial)
     assert {call.args[2].website_id for call in initial_enqueue.await_args_list} <= {
         website.id for website in tenant_a_websites
     }
+
+    # Reconciliation must count existing reservations toward the same ceiling.
+    full = await crawl_dispatch.reconcile_crawl_work(
+        enqueue=initial_enqueue,
+        concurrency_limit=2,
+    )
+    assert (full.claimed, full.dispatched) == (0, 0)
 
     async with db_session() as session:
         await _admit(
@@ -2024,9 +2047,13 @@ async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
             website=tenant_b_website,
             user=_user(second_user_id, second_tenant_id),
         )
-        first_task = initial_enqueue.await_args_list[0].args[2]
-        cancelled = await CrawlRunRepository(session).request_cancel(first_task.run_id)
-        assert cancelled.run.outcome == CrawlOutcome.CANCELLED
+        if tenant_limit is None:
+            # The default uses all slots; a late tenant waits for one to finish.
+            first_task = initial_enqueue.await_args_list[0].args[2]
+            cancelled = await CrawlRunRepository(session).request_cancel(
+                first_task.run_id
+            )
+            assert cancelled.run.outcome == CrawlOutcome.CANCELLED
 
     next_enqueue = AsyncMock(return_value=None)
     next_result = await crawl_dispatch.reconcile_crawl_work(

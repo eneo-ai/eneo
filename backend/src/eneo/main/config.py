@@ -300,6 +300,9 @@ class Settings(BaseSettings):
     # Optional cluster-wide crawl admission limit. The dedicated crawler queue
     # uses WORKER_MAX_JOBS when unset.
     crawl_job_concurrency_limit: int | None = Field(default=None, gt=0)
+    # Shared installations can leave headroom for other tenants. Unset preserves
+    # full capacity for single-tenant installations; existing work is not stopped.
+    crawl_job_tenant_concurrency_limit: int | None = Field(default=None, gt=0)
     crawl_heartbeat_interval_seconds: int = (
         300  # Heartbeat every 5 minutes (time-based, not count-based)
     )

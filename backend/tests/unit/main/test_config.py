@@ -1,6 +1,9 @@
 import re
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from eneo.main.config import Settings, get_settings
 
 
@@ -36,6 +39,33 @@ def test_explicit_crawl_capacity_supports_multi_worker_clusters() -> None:
     )
 
     assert settings.effective_crawl_job_concurrency_limit == 30
+
+
+def test_single_tenant_has_no_separate_crawl_ceiling_by_default() -> None:
+    values = get_settings().model_dump()
+    values.pop("crawl_job_tenant_concurrency_limit", None)
+    settings = Settings.model_validate(values)
+
+    assert settings.crawl_job_tenant_concurrency_limit is None
+
+
+@pytest.mark.parametrize("limit", [None, 1, 7])
+def test_tenant_crawl_ceiling_accepts_unset_or_positive_values(
+    limit: int | None,
+) -> None:
+    settings = Settings.model_validate(
+        {**get_settings().model_dump(), "crawl_job_tenant_concurrency_limit": limit}
+    )
+
+    assert settings.crawl_job_tenant_concurrency_limit == limit
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_tenant_crawl_ceiling_rejects_nonpositive_values(limit: int) -> None:
+    with pytest.raises(ValidationError, match="crawl_job_tenant_concurrency_limit"):
+        Settings.model_validate(
+            {**get_settings().model_dump(), "crawl_job_tenant_concurrency_limit": limit}
+        )
 
 
 def test_crawler_env_templates_only_publish_runtime_settings() -> None:

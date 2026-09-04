@@ -123,7 +123,9 @@ class CrawlRunRepository:
 
     async def one_or_none(self, id: UUID) -> CrawlRun | None:
         record = await self.session.scalar(
-            sa.select(CrawlRunsTable).where(CrawlRunsTable.id == id)
+            sa.select(CrawlRunsTable)
+            .where(CrawlRunsTable.id == id)
+            .execution_options(populate_existing=True)
         )
         return CrawlRun.to_domain(record=record) if record is not None else None
 
@@ -419,9 +421,12 @@ class CrawlRunRepository:
         concurrency_limit: int,
         retry_after: timedelta,
         redeliver_after: timedelta,
+        tenant_concurrency_limit: int | None = None,
     ) -> list[CrawlDispatchCandidate]:
         if concurrency_limit <= 0:
             return []
+        if tenant_concurrency_limit is not None and tenant_concurrency_limit <= 0:
+            raise ValueError("Per-tenant crawl concurrency limit must be positive")
         if retry_after <= timedelta(0):
             raise ValueError("Dispatch retry interval must be positive")
         if redeliver_after <= retry_after:
@@ -586,13 +591,20 @@ class CrawlRunRepository:
                 )
                 .cte("ranked_fresh_crawl_dispatches")
             )
-            fresh_chosen = (
-                sa.select(fresh_ranked.c.attempt_id)
-                .outerjoin(
-                    tenant_load,
-                    tenant_load.c.tenant_id == fresh_ranked.c.tenant_id,
+            fresh_selection = sa.select(fresh_ranked.c.attempt_id).outerjoin(
+                tenant_load,
+                tenant_load.c.tenant_id == fresh_ranked.c.tenant_id,
+            )
+            if tenant_concurrency_limit is not None:
+                # Repairs already own a reservation and bypass this ceiling.
+                # Include batch position so a single claim cannot overfill it.
+                fresh_selection = fresh_selection.where(
+                    sa.func.coalesce(tenant_load.c.units, 0)
+                    + fresh_ranked.c.tenant_position
+                    <= tenant_concurrency_limit
                 )
-                .order_by(
+            fresh_chosen = (
+                fresh_selection.order_by(
                     (
                         sa.func.coalesce(tenant_load.c.units, 0)
                         + fresh_ranked.c.tenant_position

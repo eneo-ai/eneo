@@ -323,6 +323,12 @@ WORKER_MAX_JOBS=15
 # Set an aggregate value when the dedicated crawler worker has multiple replicas.
 # CRAWL_JOB_CONCURRENCY_LIMIT=15
 
+# Optional positive per-tenant ceiling for shared installations. Leave unset for
+# single-tenant deployments. Set below the global limit to leave shared headroom.
+# Already reserved jobs can still be repaired or redelivered at the ceiling.
+# Use the same value on the backend and all workers.
+# CRAWL_JOB_TENANT_CONCURRENCY_LIMIT=
+
 # ============================================================================
 # WEB CRAWLER SETTINGS
 # ============================================================================
