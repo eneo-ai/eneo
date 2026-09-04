@@ -2895,6 +2895,112 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
 
 
 @pytest.mark.asyncio
+async def test_a_transient_status_reaches_the_client_before_the_provider_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Progress is only honest if it is delivered while the work is happening:
+    # a status event yielded by the submission must reach the stream before
+    # the provider completes, while the durable events still wait for the turn
+    # to be recorded.
+    planner = _make_planner()
+    session_id = uuid4()
+    continuation_state = PlanningState.empty()
+    _configure_minimal_send_message(
+        planner,
+        monkeypatch,
+        replace(
+            _server_output_prepared(),
+            requirements_state=_requirements_state_confirmed(),
+            server_decision=ReviseArchitecture(
+                architecture_commit=_architecture_commit()
+            ),
+            planning_state=continuation_state,
+        ),
+    )
+
+    async def fake_dispatch(
+        request: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        return ServerDecisionDispatchResult(
+            action_kind="revise_architecture",
+            events=(build_status_event(AIBuilderStatus.ARCHITECTURE_REVISED),),
+            new_planning_state_version=9,
+            proposal_continuation=ServerDecisionProposalContinuation(
+                planning_state=continuation_state,
+                new_messages_start=0,
+            ),
+        )
+
+    provider_released = asyncio.Event()
+
+    async def fake_propose_plan(
+        **_: object,
+    ) -> AsyncGenerator[AIBuilderStreamEvent, None]:
+        yield build_status_event(AIBuilderStatus.REPAIRING)
+        await provider_released.wait()
+        yield build_text_event("proposal result")
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(
+        planner._proposal_submission,
+        "run_active_submission_attempt",
+        fake_propose_plan,
+    )
+
+    client_turn_id = uuid4()
+    stream = planner.send_message(
+        session_id=session_id,
+        client_turn_id=client_turn_id,
+        request_fingerprint="a" * 64,
+        request_snapshot={
+            "client_turn_id": str(client_turn_id),
+            "message": "Build a flow",
+        },
+        message="Build a flow",
+        completion_model_route=_route(),
+        available_models=None,
+        available_kbs=None,
+        flow=None,
+        assistant_snapshots=None,
+        attachment_files=None,
+        max_input_tokens=100_000,
+        max_output_tokens=4_096,
+        budget_policy=_budget_policy(),
+    )
+    seen: list[str] = []
+    # Bounded waits: a regression that buffers the status would otherwise hang
+    # here forever instead of failing.
+    seen.append(
+        encode_ai_builder_stream_event(await asyncio.wait_for(anext(stream), 5))[
+            "event"
+        ]
+    )
+    seen.append(
+        encode_ai_builder_stream_event(await asyncio.wait_for(anext(stream), 5))[
+            "event"
+        ]
+    )
+    # Two statuses arrived while the provider is still blocked, and the turn
+    # has not been recorded yet.
+    assert seen == ["status", "status"]
+    planner.repo.complete_session_turn.assert_not_awaited()
+
+    provider_released.set()
+
+    async def drain() -> list[str]:
+        return [
+            encode_ai_builder_stream_event(event)["event"] async for event in stream
+        ]
+
+    rest = await asyncio.wait_for(drain(), 5)
+    assert rest == ["text", "done"]
+    planner.repo.complete_session_turn.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_send_message_server_continuation_commits_the_exact_proposal_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
