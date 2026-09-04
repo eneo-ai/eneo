@@ -18,17 +18,20 @@ Run with: pytest tests/unittests/worker/test_persist_batch_logic.py -v
 
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from hashlib import sha256
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import numpy as np
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from eneo.embedding_models.infrastructure.adapters.base import (
     PartialEmbeddingBatchError,
 )
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
+from eneo.worker.crawl.heartbeat import CrawlLeaseLostError
 from eneo.worker.crawl_context import (
     CrawlContext,
     EmbeddingModelSpec,
@@ -1039,6 +1042,106 @@ class TestPhaseIsolation:
         assert (success, failed, persisted_titles, failures) == (1, 0, [title], {})
         mock_embeddings_service.get_embeddings.assert_not_awaited()
         mock_sm.session.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["database", "timeout"])
+    async def test_validator_failure_is_limited_to_its_pages_and_other_pages_continue(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service, failure
+    ):
+        from eneo.worker.crawl.persistence import persist_batch
+
+        cached_url = "https://example.com/cached"
+        unchanged_url = "https://example.com/unchanged"
+        changed_url = "https://example.com/changed"
+        content = "Already published content"
+        session = create_mock_session()
+        session.execute = AsyncMock(return_value=create_mock_result())
+
+        async def fail_validator_update(*args, **kwargs):
+            if failure == "timeout":
+                await asyncio.Event().wait()
+            raise OperationalError("UPDATE", {}, RuntimeError("Connection lost"))
+
+        connection = MagicMock(execute=AsyncMock(side_effect=fail_validator_update))
+        session.connection = AsyncMock(return_value=connection)
+        ctx = replace(crawl_context, max_transaction_wall_time_seconds=1)
+        with (
+            patch(
+                "eneo.database.database.sessionmanager",
+                create_mock_sessionmanager(session),
+            ),
+            patch(
+                "eneo.worker.crawl.persistence._get_embedding_semaphore",
+                return_value=asyncio.Semaphore(1),
+            ),
+        ):
+            # The outer timeout makes a missing transaction bound fail promptly.
+            async with asyncio.timeout(3):
+                success, failed, published, failures = await persist_batch(
+                    page_buffer=[
+                        {"url": cached_url, "content": content, "etag": '"new"'},
+                        {"url": unchanged_url, "content": content},
+                        {"url": changed_url, "content": "New searchable content"},
+                    ],
+                    ctx=ctx,
+                    embedding_model=embedding_model_spec,
+                    container=create_mock_container(mock_embeddings_service),
+                    existing_publications={
+                        url: (
+                            sha256(content.encode()).digest(),
+                            embedding_model_spec.id,
+                        )
+                        for url in (cached_url, unchanged_url)
+                    },
+                )
+
+        assert (success, failed) == (2, 1)
+        assert published == [unchanged_url, changed_url]
+        assert failures == {FailureReason.DB_ERROR.value: [cached_url]}
+        mock_embeddings_service.get_embeddings.assert_awaited_once()
+        chunks = mock_embeddings_service.get_embeddings.call_args.kwargs["chunks"]
+        assert [chunk.text for chunk in chunks] == ["New searchable content"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["lease", "cancel", "unexpected"])
+    async def test_validator_refresh_does_not_swallow_lease_loss_cancellation_or_bugs(
+        self, crawl_context, embedding_model_spec, mock_embeddings_service, failure
+    ):
+        from eneo.worker.crawl.persistence import persist_batch
+
+        url = "https://example.com/cached"
+        content = "Already published content"
+        expected_error = {
+            "lease": CrawlLeaseLostError,
+            "cancel": asyncio.CancelledError,
+            "unexpected": ValueError,
+        }[failure]
+        session = create_mock_session()
+        connection = MagicMock(execute=AsyncMock(side_effect=expected_error))
+        session.connection = AsyncMock(return_value=connection)
+        with (
+            patch(
+                "eneo.database.database.sessionmanager",
+                create_mock_sessionmanager(session),
+            ),
+            patch(
+                "eneo.websites.domain.crawl_run_repo.CrawlRunRepository.lock_attempt_lease",
+                AsyncMock(return_value=failure != "lease"),
+            ),
+            pytest.raises(expected_error),
+        ):
+            await persist_batch(
+                page_buffer=[{"url": url, "content": content, "etag": '"new"'}],
+                ctx=crawl_context,
+                embedding_model=embedding_model_spec,
+                container=create_mock_container(mock_embeddings_service),
+                existing_publications={
+                    url: (sha256(content.encode()).digest(), embedding_model_spec.id)
+                },
+            )
+        mock_embeddings_service.get_embeddings.assert_not_awaited()
+        if failure == "lease":
+            connection.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_matching_content_with_a_new_model_is_reembedded(

@@ -202,15 +202,19 @@ async def test_crawler_float32_vector_round_trips_through_postgres(
     )
 
 
+@pytest.mark.parametrize("database_failure", [False, True])
 async def test_validator_refresh_updates_only_the_existing_website_version(
     db_container,
     monkeypatch,
+    database_failure,
 ) -> None:
     title = "https://validator-refresh.example.com/page"
     original_text = "Unchanged page content"
 
     async with db_container() as container:
         session = container.session()
+        engine = session.bind
+        assert engine is not None
         user = container.user()
         tenant = container.tenant()
         embedding_model_id = await session.scalar(
@@ -326,17 +330,38 @@ async def test_validator_refresh_updates_only_the_existing_website_version(
         lease_check,
     )
 
-    await _refresh_http_validators(
-        ctx=ctx,
-        rows=[
-            {
-                "url": title,
-                "content": original_text,
-                "etag": '"new"',
-                "last_modified": "Thu, 13 Aug 2026 10:00:00 GMT",
-            }
-        ],
-    )
+    aborted = False
+
+    def abort_after_update(
+        connection, cursor, statement, parameters, context, executemany
+    ):
+        nonlocal aborted
+        if statement.startswith("UPDATE info_blobs SET http_etag"):
+            # Fail in PostgreSQL after the UPDATE, proving its transaction rolls back.
+            aborted = True
+            connection.exec_driver_sql("SELECT 1 / 0")
+
+    if database_failure:
+        sa.event.listen(engine.sync_engine, "after_cursor_execute", abort_after_update)
+    try:
+        refreshed = await _refresh_http_validators(
+            ctx=ctx,
+            rows=[
+                {
+                    "url": title,
+                    "content": original_text,
+                    "etag": '"new"',
+                    "last_modified": "Thu, 13 Aug 2026 10:00:00 GMT",
+                }
+            ],
+        )
+    finally:
+        if database_failure:
+            sa.event.remove(
+                engine.sync_engine, "after_cursor_execute", abort_after_update
+            )
+    assert refreshed is not database_failure
+    assert aborted is database_failure
 
     lease_check.assert_awaited_once()
     async with db_container() as container:
@@ -360,8 +385,9 @@ async def test_validator_refresh_updates_only_the_existing_website_version(
         )
 
     assert stored[target_website_id] == (
-        '"new"',
-        "Thu, 13 Aug 2026 10:00:00 GMT",
+        ('"old"', "Wed, 12 Aug 2026 10:00:00 GMT")
+        if database_failure
+        else ('"new"', "Thu, 13 Aug 2026 10:00:00 GMT")
     )
     assert stored[other_website_id] == (
         '"old"',

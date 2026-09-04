@@ -33,6 +33,7 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobVersionState,
 )
 from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlAttempts
@@ -1325,6 +1326,130 @@ async def test_page_only_crawl_forwards_conditional_validators(
     assert engine.request.conditional_gets == (
         ConditionalGet(url=website.url, etag='"page-v1"'),
     )
+
+
+async def test_validator_database_failure_finishes_partial_and_preserves_existing_content(
+    db_session,
+    admin_user,
+) -> None:
+    content = "Published municipal guidance"
+    async with db_session() as session:
+        engine = session.bind
+        assert engine is not None
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Validator database failure",
+        )
+        record = await session.get(WebsitesTable, website.id)
+        assert record is not None
+        provider = ModelProviders(
+            tenant_id=admin_user.tenant_id,
+            name=f"Validator test {uuid4()}",
+            provider_type="openai",
+            credentials={"api_key": "test-only"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+        model = EmbeddingModels(
+            tenant_id=admin_user.tenant_id,
+            provider_id=provider.id,
+            name=f"validator-test-{uuid4()}",
+            open_source=False,
+            family="openai",
+            stability="stable",
+            hosting="eu",
+            max_input=512,
+        )
+        session.add(model)
+        await session.flush()
+        record.embedding_model_id = model.id
+        blobs = [
+            InfoBlobs(
+                text=content,
+                title=f"{website.url}/{path}",
+                url=f"{website.url}/{path}",
+                size=len(content.encode()),
+                content_hash=sha256(content.encode()).digest(),
+                http_etag='"old"',
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.ACTIVE.value,
+                user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                website_id=website.id,
+                embedding_model_id=model.id,
+            )
+            for path in ("cached", "unchanged", "not-seen")
+        ]
+        session.add_all(blobs)
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+
+    class ReobservedPages:
+        async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+            yield PageCrawled(
+                url=f"{request.url}/cached",
+                title="Guidance",
+                content=content,
+                etag='"new"',
+                last_modified=None,
+            )
+            yield PageUnchanged(url=f"{request.url}/unchanged")
+            yield CrawlFinished(
+                status="completed", pages_crawled=1, pages_failed=0, pages_unchanged=1
+            )
+
+    failed_updates = 0
+
+    def fail_after_update(
+        connection, cursor, statement, parameters, context, executemany
+    ):
+        nonlocal failed_updates
+        if statement.startswith("UPDATE info_blobs SET http_etag"):
+            failed_updates += 1
+            connection.exec_driver_sql("SELECT 1 / 0")
+
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(ReobservedPages()))
+    embeddings = Mock(
+        get_embeddings=AsyncMock(side_effect=AssertionError("No changed text"))
+    )
+    container.create_embeddings_service.override(providers.Object(embeddings))
+    sa.event.listen(engine.sync_engine, "after_cursor_execute", fail_after_update)
+    try:
+        result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+    finally:
+        sa.event.remove(engine.sync_engine, "after_cursor_execute", fail_after_update)
+
+    assert failed_updates == 1
+    assert result["status"] == CrawlOutcome.PARTIAL.value
+    embeddings.get_embeddings.assert_not_awaited()
+    async with db_session() as session:
+        finished = await CrawlRunRepository(session).one(run_id)
+        assert finished.phase == CrawlPhase.TERMINAL
+        assert finished.outcome == CrawlOutcome.PARTIAL
+        assert finished.pages_failed == 1
+        stored = (
+            await session.scalars(
+                sa.select(InfoBlobs).where(InfoBlobs.website_id == website.id)
+            )
+        ).all()
+        assert (
+            len(stored) == 3
+        )  # Includes the unvisited page: partial crawls must not prune it.
+        assert all(blob.http_etag == '"old"' for blob in stored)
+        assert all(
+            blob.version_state == InfoBlobVersionState.ACTIVE.value for blob in stored
+        )
 
 
 async def test_truncated_page_validators_preserve_omitted_active_content(

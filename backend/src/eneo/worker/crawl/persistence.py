@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 import numpy as np
 import sqlalchemy as sa
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy.exc import SQLAlchemyError
 from typing_extensions import NotRequired, TypedDict
 
 from eneo.admin.quota_service import ensure_quota_capacity
@@ -110,9 +111,10 @@ async def _refresh_http_validators(
     *,
     ctx: CrawlContext,
     rows: list[CrawlPageData],
-) -> None:
+) -> bool:
+    """Refresh one batch atomically; report database failure without losing content."""
     if not rows:
-        return
+        return True
 
     from eneo.database.database import sessionmanager
 
@@ -124,24 +126,38 @@ async def _refresh_http_validators(
         }
         for row in rows
     ]
-    async with sessionmanager.session() as session, session.begin():
-        await _require_current_publication_lease(session, ctx)
-        # A mapping list on AsyncSession would select ORM bulk-by-primary-key mode.
-        connection = await session.connection()
-        await connection.execute(
-            sa.update(InfoBlobs)
-            .where(
-                InfoBlobs.website_id == ctx.website_id,
-                InfoBlobs.tenant_id == ctx.tenant_id,
-                InfoBlobs.title == sa.bindparam("b_title"),
-                active_info_blob_version(),
-            )
-            .values(
-                http_etag=sa.bindparam("b_etag"),
-                http_last_modified=sa.bindparam("b_last_modified"),
-            ),
-            values,
+    try:
+        async with asyncio.timeout(ctx.max_transaction_wall_time_seconds):
+            async with sessionmanager.session() as session, session.begin():
+                await _require_current_publication_lease(session, ctx)
+                # AsyncSession would select ORM bulk-by-primary-key mode here.
+                connection = await session.connection()
+                await connection.execute(
+                    sa.update(InfoBlobs)
+                    .where(
+                        InfoBlobs.website_id == ctx.website_id,
+                        InfoBlobs.tenant_id == ctx.tenant_id,
+                        InfoBlobs.title == sa.bindparam("b_title"),
+                        active_info_blob_version(),
+                    )
+                    .values(
+                        http_etag=sa.bindparam("b_etag"),
+                        http_last_modified=sa.bindparam("b_last_modified"),
+                    ),
+                    values,
+                )
+    except (SQLAlchemyError, TimeoutError) as error:
+        logger.error(
+            "Failed to save crawl HTTP cache metadata; existing content is retained",
+            extra={
+                "website_id": str(ctx.website_id),
+                "attempt_id": str(ctx.attempt_id),
+                "page_count": len(rows),
+                "error_type": type(error).__name__,
+            },
         )
+        return False
+    return True
 
 
 async def _publish_prepared_pages(
@@ -561,7 +577,19 @@ async def persist_batch(
             failed_count += 1
             add_failure(FailureReason.EMBEDDING_ERROR, title)
 
-    await _refresh_http_validators(ctx=ctx, rows=validator_refreshes)
+    if not await _refresh_http_validators(ctx=ctx, rows=validator_refreshes):
+        # These pages were provisionally counted as unchanged. Count each only
+        # once and keep cleanup conservative when their metadata did not commit.
+        failed_identities = {
+            page.get("title", page["url"]) for page in validator_refreshes
+        }
+        successful_identities = [
+            title for title in successful_identities if title not in failed_identities
+        ]
+        success_count -= len(validator_refreshes)
+        failed_count += len(validator_refreshes)
+        for page in validator_refreshes:
+            add_failure(FailureReason.DB_ERROR, page.get("title", page["url"]))
     if not plans:
         log = logger.debug if successful_identities else logger.warning
         log(
