@@ -346,3 +346,69 @@ def test_get_group_member(space: Space):
     result = space.get_group_member(group_id)
 
     assert result == group
+
+
+def _classification(level: int):
+    from eneo.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
+
+    return SecurityClassification(
+        tenant_id=uuid4(),
+        name=f"K{level}",
+        description="",
+        security_level=level,
+        security_enabled=True,
+    )
+
+
+def _model(level: int):
+    return SimpleNamespace(
+        id=uuid4(),
+        can_access=True,
+        is_deprecated=False,
+        security_classification=_classification(level),
+    )
+
+
+def _space_with(classification, completion_models):
+    return Space(
+        id=None,
+        tenant_id=None,
+        tenant_space_id=None,
+        user_id=None,
+        name=MagicMock(),
+        description=None,
+        embedding_models=[],
+        completion_models=completion_models,
+        transcription_models=[],
+        mcp_servers=[],
+        default_assistant=MagicMock(),
+        assistants=[],
+        apps=[],
+        services=[],
+        websites=[],
+        collections=[],
+        integration_knowledge_list=[],
+        members={},
+        security_classification=classification,
+    )
+
+
+def test_a_hydrated_model_list_is_held_to_the_spaces_classification():
+    # A stored list can outlive a reclassification; the space owns the rule, so
+    # a model below its level is not usable anywhere the list is read.
+    allowed = _model(3)
+    below = _model(1)
+    space = _space_with(_classification(3), [allowed, below])
+    assert [model.id for model in space.completion_models] == [allowed.id]
+
+
+def test_adding_a_model_below_the_spaces_classification_is_refused():
+    space = _space_with(_classification(3), [])
+    with pytest.raises(BadRequestException):
+        space.add_completion_model(_model(1))
+    assert space.completion_models == []
+    at_level = _model(3)
+    space.add_completion_model(at_level)
+    assert [model.id for model in space.completion_models] == [at_level.id]

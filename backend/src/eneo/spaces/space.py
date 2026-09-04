@@ -110,6 +110,26 @@ class Space:
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
+        # A stored model list can outlive a reclassification of the space or of
+        # a model. The space's classification is the one owner of which models
+        # it may use, so a hydrated list is held to it here, once, instead of
+        # every chooser asking again.
+        if security_classification is not None:
+            self._completion_models = [
+                model
+                for model in self._completion_models
+                if self.allows_model_security_classification(model)
+            ]
+            self._embedding_models = [
+                model
+                for model in self._embedding_models
+                if self.allows_model_security_classification(model)
+            ]
+            self._transcription_models = [
+                model
+                for model in self._transcription_models
+                if self.allows_model_security_classification(model)
+            ]
         self.data_retention_days = data_retention_days
         self.icon_id = icon_id
         self.group_members = group_members if group_members is not None else {}
@@ -722,6 +742,8 @@ class Space:
 
         if hasattr(model, "can_access") and not model.can_access:
             raise BadRequestException("Completion model is not accessible")
+
+        self.validate_model_security_compatibility(model)
 
         if any(m.id == model.id for m in self.completion_models):
             return
