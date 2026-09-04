@@ -124,11 +124,11 @@ def normalize_url(url: str, *, base_url: str | None = None) -> str | None:
 def is_in_scope(url: str, seed_url: str) -> bool:
     """Match Eneo's existing same-host, path-prefix crawl semantics."""
 
-    candidate = urlsplit(url)
-    seed = urlsplit(seed_url)
-    if candidate.hostname != seed.hostname or candidate.port != seed.port:
+    if not is_same_origin(url, seed_url, allow_https_upgrade=True):
         return False
 
+    candidate = urlsplit(url)
+    seed = urlsplit(seed_url)
     seed_path = seed.path or "/"
     if seed_path == "/":
         return True
@@ -136,11 +136,25 @@ def is_in_scope(url: str, seed_url: str) -> bool:
     return candidate.path == prefix or candidate.path.startswith(f"{prefix}/")
 
 
-def is_same_origin(url: str, seed_url: str) -> bool:
+def is_same_origin(
+    url: str, seed_url: str, *, allow_https_upgrade: bool = False
+) -> bool:
+    """Compare normalized origins; optionally allow only a same-host HTTPS upgrade.
+
+    Normalization removes default ports. Non-default ports must still match.
+    Authorization uses the strict default, even when fetching permits an upgrade.
+    """
     candidate = urlsplit(url)
     seed = urlsplit(seed_url)
     return (
-        candidate.scheme == seed.scheme
+        (
+            candidate.scheme == seed.scheme
+            or (
+                allow_https_upgrade
+                and seed.scheme == "http"
+                and candidate.scheme == "https"
+            )
+        )
         and candidate.hostname == seed.hostname
         and candidate.port == seed.port
     )

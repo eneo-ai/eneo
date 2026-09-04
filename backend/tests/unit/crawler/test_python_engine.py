@@ -3,10 +3,12 @@ import hashlib
 import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
+import aiohttp
 import pytest
 from aiohttp import web
 
@@ -97,6 +99,35 @@ def test_terminal_page_owner_compresses_the_handoff_path() -> None:
         "second": "terminal",
         "third": "terminal",
     }
+
+
+@asynccontextmanager
+async def _serve_origins(
+    app: web.Application, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[list[tuple[str, dict[str, str]]]]:
+    """Exercise real HTTP responses for multiple origins without external DNS/TLS."""
+    requests: list[tuple[str, dict[str, str]]] = []
+    original_get = aiohttp.ClientSession.get
+    async with _serve(app) as base_url:
+
+        async def get_local(
+            session: aiohttp.ClientSession,
+            url: str,
+            *,
+            allow_redirects: bool,
+            headers: dict[str, str],
+        ) -> aiohttp.ClientResponse:
+            requests.append((url, headers))
+            return await original_get(
+                session,
+                f"{base_url}{urlsplit(url).path}",
+                allow_redirects=allow_redirects,
+                headers={**headers, "X-Test-URL": url},
+            )
+
+        with monkeypatch.context() as patch:
+            patch.setattr(aiohttp.ClientSession, "get", get_local)
+            yield requests
 
 
 async def test_crawl_emits_pages_incrementally_and_follows_scoped_links() -> None:
@@ -728,6 +759,56 @@ async def test_link_reorder_window_stays_bounded_behind_slow_page() -> None:
     )
 
 
+@pytest.mark.parametrize("kind", ["page_redirect", "file", "file_redirect"])
+@pytest.mark.parametrize("obey_robots", [True, False])
+async def test_robots_policy_is_checked_before_each_target_request(
+    kind: str, obey_robots: bool
+) -> None:
+    requested: list[str] = []
+    blocked_path = "/start/blocked" if kind == "page_redirect" else "/files/blocked.pdf"
+
+    async def handler(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        if request.path == "/robots.txt":
+            return web.Response(text=f"User-agent: *\nDisallow: {blocked_path}\n")
+        if request.path == "/start":
+            if kind == "page_redirect":
+                return web.Response(status=302, headers={"Location": blocked_path})
+            link = "/files/alias.pdf" if kind == "file_redirect" else blocked_path
+            return web.Response(
+                text=f'<main><a href="{link}">Document</a></main>',
+                content_type="text/html",
+            )
+        if request.path == "/files/alias.pdf":
+            return web.Response(status=302, headers={"Location": blocked_path})
+        return web.Response(
+            body=b"<main>Protected content</main>",
+            content_type="text/html" if kind == "page_redirect" else "application/pdf",
+        )
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", obey_robots=obey_robots)
+            )
+        ]
+
+    failures = [
+        event for event in events if isinstance(event, (PageFailed, FileFailed))
+    ]
+    if obey_robots:
+        assert blocked_path not in requested
+        assert len(failures) == 1
+        assert failures[0].reason == "robots_disallowed"
+        assert not failures[0].retryable
+    else:
+        assert blocked_path in requested
+        assert not failures
+
+
 async def test_crawl_honors_robots_rules() -> None:
     async def robots(_: web.Request) -> web.Response:
         return web.Response(
@@ -963,6 +1044,73 @@ async def test_sitemap_marks_only_an_additional_valid_page_as_truncated() -> Non
         pages_crawled=1,
         pages_failed=0,
         reason="item_limit",
+    )
+
+
+@pytest.mark.parametrize(
+    "target_cached,unsolicited_304", [(False, False), (True, False), (False, True)]
+)
+async def test_redirect_validators_belong_to_each_requested_url(
+    target_cached: bool, unsolicited_304: bool
+) -> None:
+    headers_seen: dict[str, tuple[str | None, str | None]] = {}
+
+    async def sitemap(request: web.Request) -> web.Response:
+        return web.Response(
+            text=f"<urlset><url><loc>{request.scheme}://{request.host}/start</loc></url></urlset>"
+        )
+
+    async def page(request: web.Request) -> web.Response:
+        headers_seen[request.path] = (
+            request.headers.get("If-None-Match"),
+            request.headers.get("If-Modified-Since"),
+        )
+        if request.path == "/start":
+            return web.Response(status=302, headers={"Location": "/canonical"})
+        if request.headers.get("If-None-Match") or unsolicited_304:
+            return web.Response(status=304)
+        return web.Response(
+            text="<main>New destination content</main>", content_type="text/html"
+        )
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/start", page)
+    app.router.add_get("/canonical", page)
+    async with _serve(app) as base_url:
+        hints = [
+            ConditionalGet(
+                url=f"{base_url}/start",
+                etag='"source"',
+                last_modified="Mon, 01 Sep 2025 10:00:00 GMT",
+            )
+        ]
+        if target_cached:
+            hints.append(ConditionalGet(url=f"{base_url}/canonical", etag='"target"'))
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(
+                    f"{base_url}/sitemap.xml",
+                    crawl_type=CrawlType.SITEMAP,
+                    conditional_gets=tuple(hints),
+                )
+            )
+        ]
+
+    assert headers_seen["/start"] == ('"source"', "Mon, 01 Sep 2025 10:00:00 GMT")
+    assert headers_seen["/canonical"] == ('"target"' if target_cached else None, None)
+    if target_cached:
+        assert events[0] == PageUnchanged(url=f"{base_url}/canonical")
+    elif unsolicited_304:
+        assert events[0] == PageFailed(
+            url=f"{base_url}/canonical", status_code=304, reason="http_304"
+        )
+    else:
+        assert isinstance(events[0], PageCrawled)
+        assert "New destination content" in events[0].content
+    assert (
+        not any(isinstance(event, PageUnchanged) for event in events) or target_cached
     )
 
 
@@ -2198,6 +2346,158 @@ async def test_redirect_is_validated_before_out_of_scope_target_is_requested() -
     assert not target_requested
     assert isinstance(events[0], PageFailed)
     assert events[0].reason == "redirect_rejected"
+
+
+@pytest.mark.parametrize("http_robots_status", [200, 302, 404])
+async def test_https_upgrade_checks_the_target_origins_robots_policy(
+    http_robots_status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def handler(request: web.Request) -> web.Response:
+        url = request.headers["X-Test-URL"]
+        if url == "http://example.test/robots.txt":
+            if http_robots_status == 302:
+                return web.Response(
+                    status=302,
+                    headers={"Location": "https://example.test/http-policy.txt"},
+                )
+            return web.Response(
+                status=http_robots_status, text="User-agent: *\nAllow: /\n"
+            )
+        if url == "https://example.test/http-policy.txt":
+            return web.Response(text="User-agent: *\nAllow: /\n")
+        if url == "https://example.test/robots.txt":
+            return web.Response(text="User-agent: *\nDisallow: /start\n")
+        if url == "http://example.test/start":
+            return web.Response(
+                status=301, headers={"Location": "https://example.test/start"}
+            )
+        return web.Response(text="Must not be fetched", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+
+    # One global HTTP slot also proves that policy loading cannot deadlock
+    # behind the page request that needs that policy.
+    async def collect_events() -> list[CrawlEvent]:
+        engine = PythonCrawlEngine(allow_private_network=True, global_concurrency=1)
+        return [
+            event
+            async for event in engine.crawl(
+                _request("http://example.test/start", obey_robots=True)
+            )
+        ]
+
+    async with _serve_origins(app, monkeypatch) as requests:
+        events = await asyncio.wait_for(collect_events(), timeout=2)
+        assert "https://example.test/start" not in [url for url, _ in requests]
+        assert [url for url, _ in requests].count(
+            "https://example.test/robots.txt"
+        ) == 1
+    assert isinstance(events[0], PageFailed)
+    assert events[0].reason == "robots_disallowed"
+    assert not events[0].retryable
+
+
+@pytest.mark.parametrize("crawl_type", [CrawlType.CRAWL, CrawlType.SITEMAP])
+async def test_https_upgrade_keeps_files_and_nested_sitemaps_without_forwarding_auth(
+    crawl_type: CrawlType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin = "http://example.test"
+    secure_origin = "https://example.test"
+    seed_path = "/start" if crawl_type == CrawlType.CRAWL else "/sitemap.xml"
+
+    async def handler(request: web.Request) -> web.Response:
+        url = request.headers["X-Test-URL"]
+        if url in {f"{origin}/robots.txt", f"{origin}{seed_path}"}:
+            return web.Response(
+                status=301, headers={"Location": url.replace(origin, secure_origin, 1)}
+            )
+        if url == f"{secure_origin}/robots.txt":
+            return web.Response(text="User-agent: *\nDisallow: /blocked\n")
+        if url == f"{secure_origin}/sitemap.xml":
+            return web.Response(
+                text="<sitemapindex><sitemap><loc>/section.xml</loc></sitemap></sitemapindex>"
+            )
+        if url == f"{secure_origin}/section.xml":
+            return web.Response(text="<urlset><url><loc>/start</loc></url></urlset>")
+        if url == f"{secure_origin}/files/report.pdf":
+            return web.Response(body=b"PDF content", content_type="application/pdf")
+        if url != f"{secure_origin}/start":
+            return web.Response(status=404)
+        return web.Response(
+            text=(
+                '<main>Page<a href="/files/report.pdf">Report</a>'
+                '<a href="http://example.test/files/insecure.pdf">Insecure</a>'
+                '<a href="https://other.test/report.pdf">External</a>'
+                '<a href="https://example.test:8443/report.pdf">Other port</a></main>'
+            ),
+            content_type="text/html",
+        )
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+    async with _serve_origins(app, monkeypatch) as requests:
+        request = replace(
+            _request(f"{origin}{seed_path}", crawl_type=crawl_type, obey_robots=True),
+            http_user="crawler",
+            http_pass="password",
+        )
+        events: list[CrawlEvent] = []
+        async for event in PythonCrawlEngine(allow_private_network=True).crawl(request):
+            if isinstance(event, FileDownloaded):
+                assert event.path.read_bytes() == b"PDF content"
+            events.append(event)
+
+        assert len({url for url, _ in requests}) == len(requests)
+        for url, headers in requests:
+            assert bool(headers.get("Authorization")) is (
+                urlsplit(url).scheme == "http"
+            )
+        assert f"{secure_origin}/robots.txt" in [url for url, _ in requests]
+    pages = [event for event in events if isinstance(event, PageCrawled)]
+    assert len(pages) == 1
+    assert pages[0].file_links == (f"{secure_origin}/files/report.pdf",)
+    assert isinstance(events[-1], CrawlFinished)
+    assert events[-1].status == "completed"
+    assert events[-1].pages_failed == 0
+    assert events[-1].files_failed == 0
+    assert events[-1].files_downloaded == 1
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://example.test/start/insecure",
+        "https://other.test/start",
+        "https://example.test:8443/start",
+    ],
+)
+async def test_https_upgrade_does_not_allow_downgrades_or_new_authorities(
+    target: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def redirect(request: web.Request) -> web.Response:
+        location = (
+            "https://example.test/start"
+            if request.headers["X-Test-URL"].startswith("http:")
+            else target
+        )
+        return web.Response(status=302, headers={"Location": location})
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", redirect)
+    async with _serve_origins(app, monkeypatch) as requests:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request("http://example.test/start")
+            )
+        ]
+        assert all(url != target for url, _ in requests)
+
+    assert isinstance(events[0], PageFailed)
+    assert events[0].reason == "redirect_rejected"
+    assert not events[0].retryable
 
 
 async def test_basic_auth_is_not_sent_after_origin_change() -> None:

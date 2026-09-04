@@ -14,6 +14,7 @@ import socket
 import unicodedata
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -70,6 +71,7 @@ _MAX_SUFFIX_BYTES = 16
 _CRAWL_TEMP_PREFIX = "eneo-crawl-"
 
 _ResponseResult = TypeVar("_ResponseResult")
+_RobotsLookup = Callable[[str], Awaitable[RobotFileParser | None]]
 
 _process_capacity: asyncio.Semaphore | None = None
 _process_capacity_loop: asyncio.AbstractEventLoop | None = None
@@ -121,6 +123,10 @@ class _RedirectRejected(aiohttp.ClientError):
     pass
 
 
+class _RobotsDisallowed(aiohttp.ClientError):
+    pass
+
+
 class _RedirectHandedOff(Exception):
     pass
 
@@ -137,6 +143,8 @@ def _terminal_page_owner(owner: str, handoffs: dict[str, str]) -> str:
 
 
 def _request_failure_reason(exc: BaseException) -> str:
+    if isinstance(exc, _RobotsDisallowed):
+        return "robots_disallowed"
     if isinstance(exc, _UnsafeTarget):
         return "unsafe_target"
     if isinstance(exc, _RedirectRejected):
@@ -318,11 +326,39 @@ class PythonCrawlEngine:
                 timeout=timeout,
                 connector=connector,
             ) as session:
+                robots_by_origin: dict[str, RobotFileParser | None] = {}
+                robots_lock = asyncio.Lock()
+
+                async def robots_for_url(url: str) -> RobotFileParser | None:
+                    if not request.obey_robots:
+                        return None
+                    origin = (
+                        urlsplit(url)._replace(path="", query="", fragment="").geturl()
+                    )
+                    # The request boundary checks scope first, so this cache
+                    # contains only the seed origin and its permitted HTTPS upgrade.
+                    async with robots_lock:
+                        if origin not in robots_by_origin:
+                            loaded = await self._load_robots(
+                                session, url, seed_url, request, origin_authorization
+                            )
+                            policy = loaded[0] if loaded is not None else None
+                            robots_by_origin[origin] = policy
+                            if loaded is not None:
+                                policy_origin = (
+                                    urlsplit(loaded[1])
+                                    ._replace(path="", query="", fragment="")
+                                    .geturl()
+                                )
+                                # A custom redirect destination is policy for
+                                # the requesting origin, not necessarily its host.
+                                if loaded[1] == f"{policy_origin}/robots.txt":
+                                    robots_by_origin.setdefault(policy_origin, policy)
+                        return robots_by_origin[origin]
+
                 try:
                     robots = await asyncio.wait_for(
-                        self._load_robots(
-                            session, seed_url, request, origin_authorization
-                        ),
+                        robots_for_url(seed_url),
                         timeout=self._remaining_seconds(started_at, request),
                     )
                     if request.crawl_type == CrawlType.SITEMAP:
@@ -333,7 +369,11 @@ class PythonCrawlEngine:
                             sitemap_truncated,
                         ) = await asyncio.wait_for(
                             self._sitemap_urls(
-                                session, seed_url, request, origin_authorization
+                                session,
+                                seed_url,
+                                request,
+                                origin_authorization,
+                                robots_for_url,
                             ),
                             timeout=self._remaining_seconds(started_at, request),
                         )
@@ -421,7 +461,7 @@ class PythonCrawlEngine:
                                 url,
                                 seed_url,
                                 request,
-                                robots,
+                                robots_for_url,
                                 validators,
                                 origin_authorization,
                                 path_scope=follow_page_links,
@@ -577,6 +617,7 @@ class PythonCrawlEngine:
                             request=request,
                             directory=Path(files_dir.name),
                             origin_authorization=origin_authorization,
+                            robots=robots_for_url,
                             started_at=started_at,
                             max_items=remaining_file_items,
                         ):
@@ -611,9 +652,10 @@ class PythonCrawlEngine:
         self,
         session: aiohttp.ClientSession,
         seed_url: str,
+        scope_url: str,
         request: CrawlRequest,
         origin_authorization: str | None,
-    ) -> RobotFileParser | None:
+    ) -> tuple[RobotFileParser, str] | None:
         if not request.obey_robots:
             return None
         parsed = urlsplit(seed_url)
@@ -621,20 +663,20 @@ class PythonCrawlEngine:
         parser = RobotFileParser()
         parser.set_url(robots_url)
         try:
-            async with self._capacity:
-                response, _ = await self._request_with_redirects(
-                    session,
-                    robots_url,
-                    seed_url,
-                    origin_authorization,
-                    path_scope=False,
+            async with self._request_with_redirects(
+                session,
+                robots_url,
+                scope_url,
+                origin_authorization,
+                path_scope=False,
+                robots=None,  # Bootstrap the policy without recursively checking it.
+            ) as (response, final_url):
+                if response.status != 200:
+                    return None
+                body = await self._read_bounded(
+                    response, request.limits.max_response_bytes
                 )
-                async with response:
-                    if response.status != 200:
-                        return None
-                    body = await self._read_bounded(
-                        response, request.limits.max_response_bytes
-                    )
+                parser.set_url(final_url)
         except (
             aiohttp.ClientError,
             asyncio.TimeoutError,
@@ -645,7 +687,7 @@ class PythonCrawlEngine:
         parser.parse(
             body.decode(response.charset or "utf-8", errors="replace").splitlines()
         )
-        return parser
+        return parser, final_url
 
     async def _request_with_retries(
         self,
@@ -656,10 +698,11 @@ class PythonCrawlEngine:
         origin_authorization: str | None,
         *,
         path_scope: bool,
+        robots: _RobotsLookup | None,
         consume_response: Callable[
             [aiohttp.ClientResponse, str], Awaitable[_ResponseResult]
         ],
-        headers: dict[str, str] | None = None,
+        validators: dict[str, ConditionalGet] | None = None,
         claim_redirect_target: Callable[[str], bool] | None = None,
     ) -> _ResponseResult:
         """Consume one response under capacity, retrying transport/status failures.
@@ -669,25 +712,24 @@ class PythonCrawlEngine:
         attempts = retries + 1
         for attempt in range(attempts):
             try:
-                async with self._capacity:
-                    response, final_url = await self._request_with_redirects(
-                        session,
-                        url,
-                        scope_url,
-                        origin_authorization,
-                        path_scope=path_scope,
-                        headers=headers,
-                        claim_redirect_target=claim_redirect_target,
-                    )
-                    async with response:
-                        if (
-                            response.status in _RETRYABLE_STATUSES
-                            and attempt + 1 < attempts
-                        ):
-                            retry_delay = self._retry_delay(response, attempt)
-                        else:
-                            return await consume_response(response, final_url)
-            except (_UnsafeTarget, _RedirectRejected):
+                async with self._request_with_redirects(
+                    session,
+                    url,
+                    scope_url,
+                    origin_authorization,
+                    path_scope=path_scope,
+                    robots=robots,
+                    validators=validators,
+                    claim_redirect_target=claim_redirect_target,
+                ) as (response, final_url):
+                    if (
+                        response.status in _RETRYABLE_STATUSES
+                        and attempt + 1 < attempts
+                    ):
+                        retry_delay = self._retry_delay(response, attempt)
+                    else:
+                        return await consume_response(response, final_url)
+            except (_UnsafeTarget, _RedirectRejected, _RobotsDisallowed):
                 raise
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 if attempt + 1 == attempts:
@@ -705,7 +747,7 @@ class PythonCrawlEngine:
         url: str,
         scope_url: str,
         request: CrawlRequest,
-        robots: RobotFileParser | None,
+        robots: _RobotsLookup | None,
         validators: dict[str, ConditionalGet],
         origin_authorization: str | None,
         *,
@@ -713,9 +755,6 @@ class PythonCrawlEngine:
         page_owners: dict[str, str],
         owner_handoffs: dict[str, str],
     ) -> _FetchResult | _FetchHandoff:
-        if robots is not None and not robots.can_fetch(_USER_AGENT, url):
-            return _FetchResult(PageFailed(url=url, reason="robots_disallowed"))
-
         redirect_chain = {url}
 
         def claim_redirect_target(target_url: str) -> bool:
@@ -737,19 +776,21 @@ class PythonCrawlEngine:
             owner_handoffs[url] = target_owner
             return False
 
-        request_headers: dict[str, str] = {}
-        validator = validators.get(url)
-        if validator is not None and validator.etag:
-            request_headers["If-None-Match"] = validator.etag
-        if validator is not None and validator.last_modified:
-            request_headers["If-Modified-Since"] = validator.last_modified
-
         async def consume_response(
             response: aiohttp.ClientResponse,
             final_url: str,
         ) -> _FetchResult:
             if response.status == 304:
-                return _FetchResult(PageUnchanged(url=final_url))
+                validator = validators.get(final_url)
+                if validator is not None and (
+                    validator.etag or validator.last_modified
+                ):
+                    return _FetchResult(PageUnchanged(url=final_url))
+                # A 304 without a validator for this exact URL proves nothing
+                # about stored content, especially after an alias redirects.
+                return _FetchResult(
+                    PageFailed(url=final_url, status_code=304, reason="http_304")
+                )
             if response.status >= 400:
                 return _FetchResult(
                     PageFailed(
@@ -787,7 +828,7 @@ class PythonCrawlEngine:
                 tuple(
                     file_url
                     for file_url in extracted.file_links
-                    if is_same_origin(file_url, scope_url)
+                    if is_same_origin(file_url, final_url, allow_https_upgrade=True)
                 )
                 if request.download_files
                 else ()
@@ -801,7 +842,11 @@ class PythonCrawlEngine:
                     last_modified=response.headers.get("Last-Modified"),
                     file_links=scoped_file_links,
                 ),
-                links=extracted.links,
+                links=tuple(
+                    link
+                    for link in extracted.links
+                    if is_same_origin(link, final_url, allow_https_upgrade=True)
+                ),
             )
 
         try:
@@ -812,15 +857,21 @@ class PythonCrawlEngine:
                 request.limits.retries,
                 origin_authorization,
                 path_scope=path_scope,
+                robots=robots,
                 consume_response=consume_response,
-                headers=request_headers,
+                validators=validators,
                 claim_redirect_target=claim_redirect_target,
             )
         except _RedirectHandedOff:
             return _FetchHandoff()
         except _ResponseTooLarge:
             return _FetchResult(PageFailed(url=url, reason="response_too_large"))
-        except (_UnsafeTarget, _RedirectRejected, LookupError) as exc:
+        except (
+            _UnsafeTarget,
+            _RedirectRejected,
+            _RobotsDisallowed,
+            LookupError,
+        ) as exc:
             return _FetchResult(
                 PageFailed(url=url, reason=_request_failure_reason(exc))
             )
@@ -842,6 +893,7 @@ class PythonCrawlEngine:
         request: CrawlRequest,
         directory: Path,
         origin_authorization: str | None,
+        robots: _RobotsLookup | None,
         started_at: float,
         max_items: int,
     ) -> AsyncIterator[FileDownloaded | FileFailed]:
@@ -867,6 +919,7 @@ class PythonCrawlEngine:
                             directory,
                             taken_names,
                             origin_authorization,
+                            robots,
                         )
                     )
                 )
@@ -917,9 +970,12 @@ class PythonCrawlEngine:
         directory: Path,
         taken_names: set[str],
         origin_authorization: str | None,
+        robots: _RobotsLookup | None,
     ) -> FileDownloaded | FileFailed:
         normalized = normalize_url(url)
-        if normalized is None or not is_same_origin(normalized, scope_url):
+        if normalized is None or not is_same_origin(
+            normalized, scope_url, allow_https_upgrade=True
+        ):
             return FileFailed(url=url, reason="file_out_of_scope")
 
         filename = self._filename_for_url(normalized, taken_names)
@@ -965,8 +1021,11 @@ class PythonCrawlEngine:
                 request.limits.retries,
                 origin_authorization,
                 path_scope=False,
+                robots=robots,
                 consume_response=consume_response,
             )
+        except (_UnsafeTarget, _RedirectRejected, _RobotsDisallowed) as exc:
+            return FileFailed(url=normalized, reason=_request_failure_reason(exc))
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             return FileFailed(
                 url=normalized,
@@ -1014,6 +1073,7 @@ class PythonCrawlEngine:
         sitemap_url: str,
         request: CrawlRequest,
         origin_authorization: str | None,
+        robots: _RobotsLookup | None,
     ) -> tuple[list[str], list[PageFailed], SitemapSnapshot | None, bool]:
         sitemap_frontier = deque([sitemap_url])
         seen_sitemaps = {sitemap_url}
@@ -1054,6 +1114,7 @@ class PythonCrawlEngine:
                     request.limits.retries,
                     origin_authorization,
                     path_scope=False,
+                    robots=robots,
                     consume_response=consume_response,
                 )
             except _ResponseTooLarge:
@@ -1061,6 +1122,11 @@ class PythonCrawlEngine:
                 continue
             except InvalidSitemap:
                 failures.append(PageFailed(url=current, reason="invalid_sitemap"))
+                continue
+            except (_UnsafeTarget, _RedirectRejected, _RobotsDisallowed) as exc:
+                failures.append(
+                    PageFailed(url=current, reason=_request_failure_reason(exc))
+                )
                 continue
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 failures.append(
@@ -1084,7 +1150,9 @@ class PythonCrawlEngine:
                     normalized = normalize_url(location, base_url=final_url)
                     if (
                         normalized is None
-                        or not is_same_origin(normalized, sitemap_url)
+                        or not is_same_origin(
+                            normalized, final_url, allow_https_upgrade=True
+                        )
                         or normalized in seen_sitemaps
                     ):
                         ignored_entries += 1
@@ -1102,7 +1170,9 @@ class PythonCrawlEngine:
                 normalized = normalize_url(location, base_url=final_url)
                 if (
                     normalized is None
-                    or not is_same_origin(normalized, sitemap_url)
+                    or not is_same_origin(
+                        normalized, final_url, allow_https_upgrade=True
+                    )
                     or normalized in seen_pages
                 ):
                     ignored_entries += 1
@@ -1136,6 +1206,7 @@ class PythonCrawlEngine:
         snapshot = snapshot_sitemap(sitemap_entries) if snapshot_is_complete else None
         return page_urls, failures, snapshot, sitemap_truncated
 
+    @asynccontextmanager
     async def _request_with_redirects(
         self,
         session: aiohttp.ClientSession,
@@ -1144,57 +1215,62 @@ class PythonCrawlEngine:
         origin_authorization: str | None,
         *,
         path_scope: bool,
-        headers: dict[str, str] | None = None,
+        robots: _RobotsLookup | None,
+        validators: dict[str, ConditionalGet] | None = None,
         claim_redirect_target: Callable[[str], bool] | None = None,
-    ) -> tuple[aiohttp.ClientResponse, str]:
+    ) -> AsyncGenerator[tuple[aiohttp.ClientResponse, str], None]:
         current = normalize_url(url)
         if current is None:
             raise _RedirectRejected("invalid request URL")
 
-        original_origin = urlsplit(scope_url)
+        previous = scope_url
         for redirect_count in range(_MAX_REDIRECTS + 1):
             in_scope = (
                 is_in_scope(current, scope_url)
                 if path_scope
-                else is_same_origin(current, scope_url)
+                else is_same_origin(current, scope_url, allow_https_upgrade=True)
             )
-            if not in_scope:
+            if not in_scope or not is_same_origin(
+                current, previous, allow_https_upgrade=True
+            ):
                 raise _RedirectRejected("redirect target is outside crawl scope")
-
             _reject_disallowed_literal(
                 current, allow_private_network=self._allow_private_network
             )
+            # Resolve the policy before holding HTTP capacity: loading robots
+            # itself needs a slot, including after an HTTP-to-HTTPS redirect.
+            policy = await robots(current) if robots is not None else None
+            if policy is not None and not policy.can_fetch(_USER_AGENT, current):
+                raise _RobotsDisallowed("request target is disallowed by robots.txt")
+            if (
+                redirect_count
+                and claim_redirect_target is not None
+                and not claim_redirect_target(current)
+            ):
+                raise _RedirectHandedOff
 
-            parsed = urlsplit(current)
             request_authorization = (
-                origin_authorization
-                if (
-                    parsed.scheme,
-                    parsed.hostname,
-                    parsed.port,
-                )
-                == (
-                    original_origin.scheme,
-                    original_origin.hostname,
-                    original_origin.port,
-                )
-                else None
+                origin_authorization if is_same_origin(current, scope_url) else None
             )
-            request_headers = dict(headers or {})
+            request_headers: dict[str, str] = {}
+            validator = validators.get(current) if validators is not None else None
+            if validator is not None and validator.etag:
+                request_headers["If-None-Match"] = validator.etag
+            if validator is not None and validator.last_modified:
+                request_headers["If-Modified-Since"] = validator.last_modified
             if request_authorization is not None:
                 request_headers["Authorization"] = request_authorization
-            else:
-                request_headers.pop("Authorization", None)
-            response = await session.get(
-                current,
-                allow_redirects=False,
-                headers=request_headers,
-            )
-            if response.status not in _REDIRECT_STATUSES:
-                return response, current
-
-            location = response.headers.get("Location")
-            response.release()
+            async with self._capacity:
+                response = await session.get(
+                    current,
+                    allow_redirects=False,
+                    headers=request_headers,
+                )
+                async with response:
+                    if response.status not in _REDIRECT_STATUSES:
+                        yield response, current
+                        return
+                    location = response.headers.get("Location")
             if not location:
                 raise _RedirectRejected("redirect response has no Location header")
             if redirect_count >= _MAX_REDIRECTS:
@@ -1202,11 +1278,7 @@ class PythonCrawlEngine:
             redirected = normalize_url(location, base_url=current)
             if redirected is None:
                 raise _RedirectRejected("invalid redirect URL")
-            if claim_redirect_target is not None and not claim_redirect_target(
-                redirected
-            ):
-                raise _RedirectHandedOff
-            current = redirected
+            previous, current = current, redirected
 
         raise AssertionError("redirect loop exhausted without a result")
 
