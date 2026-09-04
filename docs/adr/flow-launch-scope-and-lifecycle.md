@@ -416,7 +416,8 @@ WI-MKT-02.
   audit/compliance posture, or `report_disposition` where the multi-document
   scope is the user's own evidence. Where that scope is itself a disclosed
   assumption, the layout is a disclosed, vetoable assumption confirmed with
-  the requirements (revised 2026-09-04, A0-Q3). Benign formatting defaults may
+  the requirements (revision proposed 2026-09-04 by A0-Q3; confirmation by the
+  decision owners pending). Benign formatting defaults may
   be visible, typed, vetoable assumptions.
 - **Consequences:** Accepted state must preserve provenance and replay these choices
   deterministically. A human review request maps approve/reject to `view`, maps
