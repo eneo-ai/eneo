@@ -285,3 +285,36 @@ def test_planner_context_reuses_admin_builder_attachment_limits() -> None:
         == 64 * 1024 * 1024
     )
     assert context.attachment_context_policy.max_template_placeholders == 73
+
+
+def test_an_evidence_floor_narrows_the_candidates_and_refuses_a_lower_named_model():
+    provider_id = uuid4()
+    low = _model(provider_id=provider_id, name="low", classification=_classification(1))
+    high = _model(
+        provider_id=provider_id, name="high", classification=_classification(3)
+    )
+    space = _space([low, high], classification=_classification(1))
+    assert [
+        m.name
+        for m in eligible_planner_models(space, active_provider_ids={provider_id})
+    ] == [
+        "low",
+        "high",
+    ]
+    assert [
+        m.name
+        for m in eligible_planner_models(
+            space, active_provider_ids={provider_id}, minimum_level=3
+        )
+    ] == ["high"]
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        resolve_requested_model(
+            space, model_id=low.id, active_provider_ids={provider_id}, minimum_level=3
+        )
+    assert refused.value.code == AIBuilderErrorCode.PLANNER_MODEL_BELOW_EVIDENCE_LEVEL
+    assert (
+        resolve_requested_model(
+            space, model_id=high.id, active_provider_ids={provider_id}, minimum_level=3
+        ).name
+        == "high"
+    )

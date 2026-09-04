@@ -53,6 +53,10 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    FlowReviewEvidence,
+    render_review_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
@@ -172,6 +176,7 @@ class PlannerRequestPreparationInput:
     before_provider_call: Callable[[], Awaitable[None]] | None = None
     prepared_attachment_context: AIBuilderAttachmentContext | None = None
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None
+    review_evidence: FlowReviewEvidence | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +349,7 @@ async def prepare_planner_request(
         conversation=request.conversation,
         flow=request.flow,
         assistant_snapshots=request.assistant_snapshots,
+        review_evidence=request.review_evidence,
     )
     prior_resource_bindings = (
         request.prior_plan_for_revision.resource_bindings
@@ -947,17 +953,21 @@ def _build_flow_context_if_needed(
     conversation: list[ConversationMessage],
     flow: Flow | None,
     assistant_snapshots: AssistantAuthoringSnapshots | None,
+    review_evidence: FlowReviewEvidence | None = None,
 ) -> str | None:
     if flow is None:
         return None
     discovery_profile = build_discovery_profile(conversation, flow=flow)
-    return build_flow_context(
+    context = build_flow_context(
         flow,
         assistant_snapshots=assistant_snapshots,
         is_edit_mode=True,
         capabilities=discovery_profile.capabilities,
         edit_scope=discovery_profile.edit_scope,
     )
+    if review_evidence is None:
+        return context
+    return f"{context}\n\n{render_review_evidence(review_evidence)}"
 
 
 def _prepare_prompt_messages(

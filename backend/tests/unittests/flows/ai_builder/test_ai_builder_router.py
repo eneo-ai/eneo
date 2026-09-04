@@ -413,6 +413,8 @@ def _make_container(
         warnings=[],
     )
     service.prepare_message_context.return_value = SimpleNamespace(
+        review_context=None,
+        review_evidence=None,
         planner_context=SimpleNamespace(
             available_models=[],
             available_kbs=[],
@@ -2306,6 +2308,8 @@ class TestSendMessageEndpoint:
         flow = MagicMock()
         flow.id = session.flow_id
         service.prepare_message_context.return_value = SimpleNamespace(
+            review_context=None,
+            review_evidence=None,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "openai"}
@@ -2376,6 +2380,8 @@ class TestSendMessageEndpoint:
         space.get_default_completion_model.return_value = model
 
         service.prepare_message_context.return_value = SimpleNamespace(
+            review_context=None,
+            review_evidence=None,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "azure"}

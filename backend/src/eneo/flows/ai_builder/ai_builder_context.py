@@ -73,8 +73,17 @@ def serialize_space_kbs(
     ]
 
 
+def _model_level(model: "CompletionModel") -> int:
+    classification = getattr(model, "security_classification", None)
+    level = getattr(classification, "security_level", None)
+    return level if isinstance(level, int) else 0
+
+
 def eligible_planner_models(
-    space: "Space", *, active_provider_ids: AbstractSet[UUID]
+    space: "Space",
+    *,
+    active_provider_ids: AbstractSet[UUID],
+    minimum_level: int = 0,
 ) -> list["CompletionModel"]:
     """The planner models a caller may use, listed or sent.
 
@@ -88,6 +97,9 @@ def eligible_planner_models(
 
     Listing and sending share this rule, or the session advertises one set of
     models and runs another.
+
+    `minimum_level` is the evidence floor of a turn that reads run evidence:
+    a model below the level the runs were recorded at never sees them.
     """
     return [
         model
@@ -95,11 +107,15 @@ def eligible_planner_models(
         if model.can_access
         and model.provider_id in active_provider_ids
         and space.allows_model_security_classification(model)
+        and _model_level(model) >= minimum_level
     ]
 
 
 def select_default_planner_model(
-    space: "Space", *, active_provider_ids: AbstractSet[UUID]
+    space: "Space",
+    *,
+    active_provider_ids: AbstractSet[UUID],
+    minimum_level: int = 0,
 ) -> "CompletionModel | None":
     """The model an omitted `model_id` resolves to, or None if there is none.
 
@@ -107,18 +123,26 @@ def select_default_planner_model(
     models are allowed to be candidates.
     """
     return space.select_default_completion_model(
-        eligible_planner_models(space, active_provider_ids=active_provider_ids)
+        eligible_planner_models(
+            space, active_provider_ids=active_provider_ids, minimum_level=minimum_level
+        )
     )
 
 
 def resolve_planner_model(
-    space: "Space", *, active_provider_ids: AbstractSet[UUID]
+    space: "Space",
+    *,
+    active_provider_ids: AbstractSet[UUID],
+    minimum_level: int = 0,
 ) -> "CompletionModel":
-    model = select_default_planner_model(space, active_provider_ids=active_provider_ids)
+    model = select_default_planner_model(
+        space, active_provider_ids=active_provider_ids, minimum_level=minimum_level
+    )
     if model is None:
         raise AIBuilderBadRequestException(
             "No AI builder planner model is available in this space.",
             code=AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE,
+            context={"required_level": minimum_level} if minimum_level else None,
         )
     return model
 
@@ -128,24 +152,31 @@ def resolve_requested_model(
     *,
     model_id: UUID | None,
     active_provider_ids: AbstractSet[UUID],
+    minimum_level: int = 0,
 ) -> "CompletionModel":
     if model_id is None:
-        return resolve_planner_model(space, active_provider_ids=active_provider_ids)
-
+        return resolve_planner_model(
+            space, active_provider_ids=active_provider_ids, minimum_level=minimum_level
+        )
+    candidates = eligible_planner_models(space, active_provider_ids=active_provider_ids)
     model = next(
-        (
-            candidate
-            for candidate in eligible_planner_models(
-                space, active_provider_ids=active_provider_ids
-            )
-            if candidate.id == model_id
-        ),
-        None,
+        (candidate for candidate in candidates if candidate.id == model_id), None
     )
     if model is None:
         raise AIBuilderBadRequestException(
             "Selected model not available in this space",
             code=AIBuilderErrorCode.MODEL_NOT_AVAILABLE,
+        )
+    if _model_level(model) < minimum_level:
+        # The evidence was recorded at a higher level than this model clears;
+        # the turn is refused rather than quietly run without its evidence.
+        raise AIBuilderBadRequestException(
+            "Selected model does not clear the security classification of the run evidence.",
+            code=AIBuilderErrorCode.PLANNER_MODEL_BELOW_EVIDENCE_LEVEL,
+            context={
+                "required_level": minimum_level,
+                "model_level": _model_level(model),
+            },
         )
     return model
 
@@ -156,9 +187,13 @@ def build_planner_context(
     active_provider_ids: AbstractSet[UUID],
     model_id: UUID | None = None,
     tenant_flow_settings: dict[str, Any] | None = None,
+    minimum_level: int = 0,
 ) -> AIBuilderPlannerContext:
     model = resolve_requested_model(
-        space, model_id=model_id, active_provider_ids=active_provider_ids
+        space,
+        model_id=model_id,
+        active_provider_ids=active_provider_ids,
+        minimum_level=minimum_level,
     )
     defaults = lookup_model_defaults(
         getattr(model, "litellm_model_name", None),

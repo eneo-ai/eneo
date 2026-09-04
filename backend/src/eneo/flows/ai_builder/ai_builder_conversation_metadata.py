@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
+from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderReviewContext
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
     ResolvedAIBuilderEditContext,
@@ -97,6 +98,9 @@ logger = get_logger(__name__)
 _EDIT_CONTEXT_ADAPTER: TypeAdapter[AIBuilderEditContext] = TypeAdapter(
     AIBuilderEditContext
 )
+_REVIEW_CONTEXT_ADAPTER: TypeAdapter[AIBuilderReviewContext] = TypeAdapter(
+    AIBuilderReviewContext
+)
 
 QUESTION_ANSWER_METADATA_KEY = "question_answer"
 QUESTION_RESPONSE_METADATA_KEY = "question_response"
@@ -106,6 +110,7 @@ REQUIREMENTS_VERSION_METADATA_KEY = "requirements_version"
 UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
+REVIEW_CONTEXT_METADATA_KEY = "review_context"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
@@ -2240,6 +2245,20 @@ def edit_context_from_metadata(metadata: object) -> AIBuilderEditContext | None:
         return None
 
 
+def review_context_from_metadata(metadata: object) -> AIBuilderReviewContext | None:
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    raw_context = metadata_map.get(REVIEW_CONTEXT_METADATA_KEY)
+    if raw_context is None:
+        return None
+    try:
+        return _REVIEW_CONTEXT_ADAPTER.validate_python(raw_context)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(REVIEW_CONTEXT_METADATA_KEY, error)
+        return None
+
+
 class _ConversationMetadataMessage(Protocol):
     @property
     def role(self) -> str: ...
@@ -2259,12 +2278,31 @@ def latest_user_edit_context(
     return None
 
 
+def latest_user_review_context(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> AIBuilderReviewContext | None:
+    """The review a session is acting on: the last user turn that named one.
+
+    Unlike edit scope, a review outlives the turn that opened it — the user
+    discusses the findings over several messages — so any earlier user turn
+    counts, not only the latest.
+    """
+
+    for message in reversed(conversation):
+        if message.role == "user":
+            context = review_context_from_metadata(message.metadata)
+            if context is not None:
+                return context
+    return None
+
+
 def metadata_for_user_message(
     *,
     question_answer: AIBuilderQuestionAnswerInput | None = None,
     ui_language: str | None = None,
     file_ids: Sequence[UUID] | None = None,
     edit_context: AIBuilderEditContext | ResolvedAIBuilderEditContext | None = None,
+    review_context: AIBuilderReviewContext | None = None,
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:
@@ -2287,6 +2325,8 @@ def metadata_for_user_message(
         metadata[FILE_IDS_METADATA_KEY] = [str(file_id) for file_id in file_ids]
     if edit_context is not None:
         metadata[EDIT_CONTEXT_METADATA_KEY] = edit_context.to_metadata()
+    if review_context is not None:
+        metadata[REVIEW_CONTEXT_METADATA_KEY] = review_context.to_metadata()
     return metadata or None
 
 

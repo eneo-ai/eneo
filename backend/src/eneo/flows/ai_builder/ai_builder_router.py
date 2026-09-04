@@ -1126,6 +1126,7 @@ async def send_message(
                             ),
                             message=body.message,
                             message_file_ids=body.file_ids,
+                            review_context=body.review_context,
                         )
                     )
             except Exception:
@@ -1173,6 +1174,8 @@ async def send_message(
                     file_ids=body.file_ids,
                     question_answer=body.question_answer,
                     edit_context=body.edit_context,
+                    review_context=prepared_context.review_context,
+                    review_evidence=prepared_context.review_evidence,
                     ui_language=body.ui_language,
                     completion_model_route=prepared_context.completion_model_route,
                     available_models=(

@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
+    latest_user_review_context,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -67,6 +68,12 @@ from eneo.flows.ai_builder.ai_builder_events import (
 from eneo.flows.ai_builder.ai_builder_events import (
     SSE_EVENT_USAGE as _SSE_EVENT_USAGE,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    AIBuilderFlowReviewService,
+    AIBuilderReviewContext,
+    FlowReviewEvidence,
+    resolve_review_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
 )
@@ -88,6 +95,7 @@ from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.main.exceptions import NotFoundException
+from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure.litellm_runtime_config import (
     configure_litellm_runtime,
 )
@@ -104,6 +112,8 @@ if TYPE_CHECKING:
     from eneo.spaces.space import Space
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
+
+logger = get_logger(__name__)
 
 PLANNER_TEMPERATURE = 0.4  # Lower for precise proposal generation
 SELF_CORRECTION_TEMPERATURE = 0.35
@@ -155,6 +165,8 @@ class PreparedMessageContext:
     assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
     session_attachment_file_ids: tuple[UUID, ...]
+    review_context: AIBuilderReviewContext | None = None
+    review_evidence: FlowReviewEvidence | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +198,7 @@ class AIBuilderService:
         space_service: "SpaceService",
         template_asset_service: "FlowTemplateAssetService",
         file_service: "FileService | None" = None,
+        flow_review_service: AIBuilderFlowReviewService | None = None,
     ) -> None:
         self.user = user
         self.repo = repo
@@ -194,6 +207,7 @@ class AIBuilderService:
         self.file_service = file_service
         self.space_service = space_service
         self.template_asset_service = template_asset_service
+        self.flow_review_service = flow_review_service
 
     async def create_session(
         self,
@@ -374,13 +388,22 @@ class AIBuilderService:
         reasoning_effort: str | None = None,
         message: str | None = None,
         message_file_ids: list[UUID] | None = None,
+        review_context: AIBuilderReviewContext | None = None,
     ) -> PreparedMessageContext:
         """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
+        review_evidence = await self._resolve_review_evidence(
+            session=session, review_context=review_context
+        )
         planner_context = build_planner_context(
             space,
             model_id=model_id,
             active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant_flow_settings,
+            minimum_level=(
+                review_evidence.evidence_classification_level
+                if review_evidence is not None
+                else 0
+            ),
         )
         if (
             message is not None
@@ -487,6 +510,8 @@ class AIBuilderService:
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files,
             session_attachment_file_ids=tuple(session_file_ids),
+            review_context=review_context,
+            review_evidence=review_evidence,
         )
 
     @staticmethod
@@ -496,6 +521,42 @@ class AIBuilderService:
                 "Flow space does not match the AI builder session space.",
                 code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH,
             )
+
+    async def _resolve_review_evidence(
+        self,
+        *,
+        session: BuilderSession,
+        review_context: AIBuilderReviewContext | None,
+    ) -> FlowReviewEvidence | None:
+        """The findings this turn acts on, rebuilt from the runs.
+
+        A turn that names findings is held to them: a republished flow or an
+        unknown id is a typed refusal. A later turn in the same review inherits
+        the last named findings; if the flow moved on since, the turn simply
+        proceeds without evidence rather than failing a conversation mid-way.
+        """
+        explicit = review_context is not None
+        if review_context is None:
+            review_context = latest_user_review_context(session.conversation)
+        if review_context is None or session.flow_id is None:
+            return None
+        if self.flow_review_service is None:
+            raise RuntimeError("AIBuilderFlowReviewService is required for reviews.")
+        packet = await self.flow_review_service.build_packet(
+            flow_id=session.flow_id, space_id=session.space_id
+        )
+        try:
+            return resolve_review_evidence(packet, review_context)
+        except AIBuilderBadRequestException:
+            if explicit:
+                raise
+            logger.info(
+                "ai_builder.review_evidence_dropped session_id=%s reviewed_version=%s published_version=%s",
+                session.id,
+                review_context.flow_version,
+                packet.flow_version,
+            )
+            return None
 
     async def send_message(
         self,
@@ -509,6 +570,8 @@ class AIBuilderService:
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderEditContext | None = None,
+        review_context: AIBuilderReviewContext | None = None,
+        review_evidence: FlowReviewEvidence | None = None,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
@@ -542,6 +605,8 @@ class AIBuilderService:
             message=message,
             question_answer=question_answer,
             edit_context=edit_context,
+            review_context=review_context,
+            review_evidence=review_evidence,
             ui_language=ui_language,
             completion_model_route=completion_model_route,
             available_models=available_models,

@@ -49,6 +49,8 @@ COHORT_FAILED_LIMIT = 10
 # averaged over the completed runs, is worth pointing at.
 STEP_SHARE_THRESHOLD = 0.5
 REPEATED_ERROR_MIN_RUNS = 2
+# Findings one turn may name; the packet is small and the prompt stays bounded.
+MAX_REVIEW_FINDINGS_PER_TURN = 10
 
 
 class FlowReviewStep(BaseModel):
@@ -137,6 +139,122 @@ class FlowReviewPacket(BaseModel):
     steps: list[FlowReviewStep]
     cohort: FlowReviewCohort
     facts: list[FlowReviewFact]
+
+
+class AIBuilderReviewContext(BaseModel):
+    """What a turn says about the review it acts on: the exact reviewed
+    version and the findings it names. Ids only; the facts are rebuilt from
+    the runs on every turn, so run data never lives in the conversation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["flow_review"] = "flow_review"
+    flow_version: int = Field(ge=1)
+    definition_checksum: str = Field(min_length=1, max_length=128)
+    finding_ids: list[str] = Field(
+        min_length=1, max_length=MAX_REVIEW_FINDINGS_PER_TURN
+    )
+
+    def to_metadata(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
+
+class FlowReviewEvidence(BaseModel):
+    """The named findings of one review, resolved for one turn."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    flow_version: int
+    definition_checksum: str
+    evidence_classification_level: int = Field(ge=0)
+    completed_run_count: int
+    failed_run_count: int
+    steps: list[FlowReviewStep]
+    facts: list[FlowReviewFact]
+
+
+def resolve_review_evidence(
+    packet: FlowReviewPacket, context: AIBuilderReviewContext
+) -> FlowReviewEvidence:
+    """The facts a turn names, or a typed refusal when they no longer exist.
+
+    A republished flow gets a new packet with new ids; a turn still naming the
+    old ones is told so rather than handed facts about a different version.
+    """
+    if (
+        packet.flow_version != context.flow_version
+        or packet.definition_checksum != context.definition_checksum
+    ):
+        raise AIBuilderBadRequestException(
+            "The flow was published again after this review; review it anew.",
+            code=AIBuilderErrorCode.REVIEW_STALE,
+            context={
+                "reviewed_version": context.flow_version,
+                "published_version": packet.flow_version,
+            },
+        )
+    by_id = {fact.finding_id: fact for fact in packet.facts}
+    unknown = [fid for fid in context.finding_ids if fid not in by_id]
+    if unknown:
+        raise AIBuilderBadRequestException(
+            "A named finding is not part of this flow's review.",
+            code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+            context={"finding_ids": unknown},
+        )
+    facts = [by_id[fid] for fid in dict.fromkeys(context.finding_ids)]
+    return FlowReviewEvidence(
+        flow_version=packet.flow_version,
+        definition_checksum=packet.definition_checksum,
+        evidence_classification_level=packet.evidence_classification_level,
+        completed_run_count=len(packet.cohort.completed_run_ids),
+        failed_run_count=len(packet.cohort.failed_run_ids),
+        steps=list(packet.steps),
+        facts=facts,
+    )
+
+
+def render_review_evidence(evidence: FlowReviewEvidence) -> str:
+    """The findings as prompt lines for the planner, in the product's language."""
+    labels = {
+        step.step_id: f"steg {step.step_order}"
+        + (f" ({step.label})" if step.label else "")
+        for step in evidence.steps
+    }
+    lines = [
+        "## Underlag från körningar",
+        f"Publicerad version {evidence.flow_version}: "
+        f"{evidence.completed_run_count} lyckade och "
+        f"{evidence.failed_run_count} misslyckade körningar lästes.",
+    ]
+    for fact in evidence.facts:
+        if isinstance(fact, OutputNotObservedConsumedFact):
+            lines.append(
+                f"- {labels.get(fact.step_id, 'okänt steg')}: utdata användes "
+                f"inte av något senare steg i {fact.run_count} lyckade körningar."
+            )
+        elif isinstance(fact, RepeatedErrorCodeFact):
+            lines.append(
+                f"- {labels.get(fact.step_id, 'okänt steg')}: felkoden "
+                f"{fact.error_code} återkom i {fact.run_count} misslyckade körningar."
+            )
+        elif isinstance(fact, StepShareFact):
+            what = "tokens" if fact.kind == "token_share" else "tid"
+            lines.append(
+                f"- {labels.get(fact.step_id, 'okänt steg')}: står för "
+                f"{round(fact.share * 100)} % av körningens {what} "
+                f"(medel över {fact.run_count} körningar)."
+            )
+        else:
+            lines.append(
+                f"- Underlag: {fact.runs_with_all_step_results} körningar med "
+                f"resultat för alla steg, {fact.runs_missing_step_results} utan, "
+                f"{fact.runs_without_lineage} utan spårad indata."
+            )
+    lines.append(
+        "Föreslå en ändring som åtgärdar punkterna ovan. Hänvisa till steg "
+        "med deras nummer och ändra inget som underlaget inte motiverar."
+    )
+    return "\n".join(lines)
 
 
 def finding_id(

@@ -8,6 +8,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderSession,
+    ConversationMessage,
+    TargetKind,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -15,12 +20,20 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     COHORT_COMPLETED_LIMIT,
     AIBuilderFlowReviewService,
+    AIBuilderReviewContext,
     EvidenceCompletenessFact,
+    FlowReviewCohort,
+    FlowReviewOmittedRuns,
+    FlowReviewPacket,
+    FlowReviewStep,
     OutputNotObservedConsumedFact,
     RepeatedErrorCodeFact,
     StepShareFact,
+    render_review_evidence,
+    resolve_review_evidence,
     review_facts,
 )
+from eneo.flows.ai_builder.ai_builder_service import AIBuilderService
 from eneo.flows.domain.flow import FlowRunStatusSnapshot
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowRunStatus
@@ -357,3 +370,159 @@ async def test_packet_refuses_an_unpublished_flow_and_a_flow_outside_the_space(u
     with pytest.raises(AIBuilderBadRequestException) as mismatch:
         await service.build_packet(flow_id=flow_id, space_id=uuid4())
     assert mismatch.value.code == AIBuilderErrorCode.FLOW_SPACE_MISMATCH
+
+
+def _packet(*, version: int = 2, checksum: str = "sum") -> FlowReviewPacket:
+    s1, s2 = _step(1), _step(2)
+    run_id = uuid4()
+    facts = review_facts(
+        flow_id=uuid4(),
+        flow_version=version,
+        definition_checksum=checksum,
+        steps=[s1, s2],
+        completed_run_ids=[run_id],
+        failed_run_ids=[],
+        metrics=[_metric(run_id, s1, tokens=900), _metric(run_id, s2, tokens=100)],
+        lineage=[],
+    )
+    return FlowReviewPacket(
+        flow_id=uuid4(),
+        flow_version=version,
+        definition_checksum=checksum,
+        generated_at=_T0,
+        evidence_classification_level=2,
+        steps=[
+            FlowReviewStep(
+                step_id=s.step_id, step_order=s.step_order, label=s.user_description
+            )
+            for s in (s1, s2)
+        ],
+        cohort=FlowReviewCohort(
+            completed_run_ids=[run_id],
+            failed_run_ids=[],
+            omitted=FlowReviewOmittedRuns(),
+        ),
+        facts=list(facts),
+    )
+
+
+def test_a_turn_gets_exactly_the_findings_it_names_rendered_in_swedish():
+    packet = _packet()
+    unconsumed = next(
+        f for f in packet.facts if f.kind == "output_not_observed_consumed"
+    )
+    share = next(f for f in packet.facts if f.kind == "token_share")
+    evidence = resolve_review_evidence(
+        packet,
+        AIBuilderReviewContext(
+            flow_version=2,
+            definition_checksum="sum",
+            finding_ids=[share.finding_id, unconsumed.finding_id, share.finding_id],
+        ),
+    )
+    assert [f.finding_id for f in evidence.facts] == [
+        share.finding_id,
+        unconsumed.finding_id,
+    ]
+    assert evidence.evidence_classification_level == 2
+    text = render_review_evidence(evidence)
+    assert "## Underlag från körningar" in text
+    assert "steg 1 (Steg 1): står för 90 % av körningens tokens" in text
+    assert "steg 1 (Steg 1): utdata användes inte av något senare steg" in text
+    assert "Hänvisa till steg med deras nummer" in text
+
+
+def test_a_turn_naming_a_republished_review_or_an_unknown_finding_is_refused():
+    packet = _packet()
+    known = packet.facts[0].finding_id
+    with pytest.raises(AIBuilderBadRequestException) as stale:
+        resolve_review_evidence(
+            packet,
+            AIBuilderReviewContext(
+                flow_version=1, definition_checksum="old", finding_ids=[known]
+            ),
+        )
+    assert stale.value.code == AIBuilderErrorCode.REVIEW_STALE
+    with pytest.raises(AIBuilderBadRequestException) as unknown:
+        resolve_review_evidence(
+            packet,
+            AIBuilderReviewContext(
+                flow_version=2, definition_checksum="sum", finding_ids=["0" * 16]
+            ),
+        )
+    assert unknown.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
+
+
+def _edit_session(user, *, review_metadata: dict | None):
+    conversation = []
+    if review_metadata is not None:
+        conversation.append(
+            ConversationMessage(
+                role="user",
+                content="Förbered ändring",
+                metadata={"review_context": review_metadata},
+            )
+        )
+    return BuilderSession(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+        flow_id=uuid4(),
+        conversation=conversation,
+    )
+
+
+def _builder_service(user, packet):
+    review = SimpleNamespace(build_packet=AsyncMock(return_value=packet))
+    return AIBuilderService(
+        user=user,
+        repo=AsyncMock(),
+        flow_service=AsyncMock(),
+        completion_service=AsyncMock(),
+        space_service=AsyncMock(),
+        template_asset_service=AsyncMock(),
+        flow_review_service=review,
+    ), review
+
+
+@pytest.mark.asyncio
+async def test_a_named_review_is_held_to_its_version_but_an_inherited_one_is_dropped(
+    user,
+):
+    packet = _packet(version=3, checksum="new")
+    finding = packet.facts[0].finding_id
+    service, review = _builder_service(user, packet)
+    stale = AIBuilderReviewContext(
+        flow_version=2, definition_checksum="old", finding_ids=[finding]
+    )
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await service._resolve_review_evidence(
+            session=_edit_session(user, review_metadata=None), review_context=stale
+        )
+    assert refused.value.code == AIBuilderErrorCode.REVIEW_STALE
+    # The same stale reference inherited from an earlier turn is dropped, not refused.
+    assert (
+        await service._resolve_review_evidence(
+            session=_edit_session(user, review_metadata=stale.to_metadata()),
+            review_context=None,
+        )
+        is None
+    )
+    current = AIBuilderReviewContext(
+        flow_version=3, definition_checksum="new", finding_ids=[finding]
+    )
+    evidence = await service._resolve_review_evidence(
+        session=_edit_session(user, review_metadata=current.to_metadata()),
+        review_context=None,
+    )
+    assert evidence is not None and [f.finding_id for f in evidence.facts] == [finding]
+    assert review.build_packet.await_count == 3
+    # A session without any review never builds a packet.
+    assert (
+        await service._resolve_review_evidence(
+            session=_edit_session(user, review_metadata=None), review_context=None
+        )
+        is None
+    )
+    assert review.build_packet.await_count == 3

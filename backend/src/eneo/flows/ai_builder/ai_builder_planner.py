@@ -40,6 +40,10 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_committed_turn_replay_events,
     build_done_event,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    AIBuilderReviewContext,
+    FlowReviewEvidence,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
     resolve_plan_edit_context,
@@ -255,6 +259,8 @@ class AIBuilderPlanner:
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderEditContext | None = None,
+        review_context: AIBuilderReviewContext | None = None,
+        review_evidence: FlowReviewEvidence | None = None,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
@@ -332,6 +338,11 @@ class AIBuilderPlanner:
             initial_metadata = {
                 **(initial_metadata or {}),
                 **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
+            }
+        if review_context is not None:
+            initial_metadata = {
+                **(initial_metadata or {}),
+                **(metadata_for_user_message(review_context=review_context) or {}),
             }
         user_message_metadata = (
             {
@@ -456,6 +467,7 @@ class AIBuilderPlanner:
                         attachment_context_policy=attachment_context_policy,
                         mapped_execution_policy=mapped_execution_policy,
                         plan_edit_context=plan_edit_context,
+                        review_evidence=review_evidence,
                         prior_plan_for_revision=prior_plan_for_revision,
                         persisted_planning_state=persisted_planning_state,
                         base_planning_state_version=turn.base_planning_state_version,

@@ -129,6 +129,9 @@ class AIBuilderErrorCode(StrEnum):
     EDIT_SESSION_FLOW_REQUIRED = "edit_session_flow_required"
     FLOW_IS_PUBLISHED = "flow_is_published"
     FLOW_NOT_PUBLISHED = "flow_not_published"
+    REVIEW_STALE = "review_stale"
+    REVIEW_FINDING_UNKNOWN = "review_finding_unknown"
+    PLANNER_MODEL_BELOW_EVIDENCE_LEVEL = "planner_model_below_evidence_level"
     FLOW_SPACE_MISMATCH = "flow_space_mismatch"
     INVALID_AI_BUILDER_SETTINGS = "invalid_ai_builder_settings"
     INSUFFICIENT_SCOPE = "insufficient_scope"
@@ -708,6 +711,21 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.FLOW_NOT_PUBLISHED: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.REVIEW_STALE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.PLANNER_MODEL_BELOW_EVIDENCE_LEVEL: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,

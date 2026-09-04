@@ -1608,6 +1608,7 @@ class Container(containers.DeclarativeContainer):
         file_service=file_service,
         space_service=space_service,
         template_asset_service=flow_template_asset_service,
+        flow_review_service=ai_builder_flow_review_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
