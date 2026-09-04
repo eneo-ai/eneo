@@ -8,6 +8,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    conversation_evidence_floor,
+    metadata_for_user_message,
+    review_context_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderSession,
     ConversationMessage,
@@ -19,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     COHORT_COMPLETED_LIMIT,
+    MAX_REVIEWABLE_STEPS,
     AIBuilderFlowReviewService,
     AIBuilderReviewContext,
     EvidenceCompletenessFact,
@@ -133,7 +139,11 @@ def test_facts_name_the_unconsumed_output_the_repeated_error_and_the_dominant_st
             _metric(run_id, s2, tokens=100, seconds=1.0),
             _metric(run_id, s3, tokens=100, seconds=1.0),
         ]
-        lineage += [_lineage(run_id, s2, s1), _lineage(run_id, s3, s1)]
+        lineage += [
+            _lineage(run_id, s1),
+            _lineage(run_id, s2, s1),
+            _lineage(run_id, s3, s1),
+        ]
     for run_id in failed:
         metrics += [
             _metric(run_id, s1),
@@ -150,6 +160,7 @@ def test_facts_name_the_unconsumed_output_the_repeated_error_and_the_dominant_st
     for fact in facts:
         by_kind.setdefault(fact.kind, []).append(fact)
     assert [f.step_order for f in by_kind["output_not_observed_consumed"]] == [2]
+    assert by_kind["output_not_observed_consumed"][0].run_count == 2
     assert isinstance(
         by_kind["output_not_observed_consumed"][0], OutputNotObservedConsumedFact
     )
@@ -200,6 +211,42 @@ def test_finding_ids_are_stable_for_a_version_and_change_with_it():
     )
     assert [f.finding_id for f in first] == [f.finding_id for f in again]
     assert {f.finding_id for f in first}.isdisjoint({f.finding_id for f in other})
+
+
+def test_missing_lineage_or_metrics_yield_no_affirmative_fact():
+    s1, s2 = _step(1), _step(2)
+    tracked, untracked = uuid4(), uuid4()
+    # Only the tracked run has lineage for every step; the untracked run has
+    # none, and its metrics miss a step, so neither fact may count it.
+    facts = _facts(
+        steps=[s1, s2],
+        completed_run_ids=[tracked, untracked],
+        failed_run_ids=[],
+        metrics=[
+            _metric(tracked, s1, tokens=900),
+            _metric(tracked, s2, tokens=100),
+            _metric(untracked, s1, tokens=900),
+        ],
+        lineage=[_lineage(tracked, s1), _lineage(tracked, s2)],
+    )
+    by_kind = {fact.kind: fact for fact in facts}
+    # Step 1's output was not observed consumed in the one observed run.
+    assert by_kind["output_not_observed_consumed"].run_count == 1
+    assert by_kind["token_share"].run_count == 1
+    [completeness] = [f for f in facts if f.kind == "evidence_completeness"]
+    assert (
+        completeness.runs_missing_step_results,
+        completeness.runs_without_lineage,
+    ) == (1, 1)
+    # With no tracked lineage at all there is no consumption fact.
+    none = _facts(
+        steps=[s1, s2],
+        completed_run_ids=[untracked],
+        failed_run_ids=[],
+        metrics=[_metric(untracked, s1), _metric(untracked, s2)],
+        lineage=[],
+    )
+    assert "output_not_observed_consumed" not in {f.kind for f in none}
 
 
 def test_a_single_step_flow_has_no_consumption_or_share_facts():
@@ -315,6 +362,7 @@ async def test_packet_reads_only_viewable_runs_of_the_published_version_and_reco
         "other_version": 1,
         "not_viewable": 1,
         "level_unknown": 1,
+        "overflow": 0,
     }
     assert packet.evidence_classification_level == 3
     assert (packet.flow_version, packet.definition_checksum) == (2, "sum-2")
@@ -352,6 +400,8 @@ async def test_packet_caps_the_cohort_at_the_newest_completed_runs(user):
     assert packet.cohort.completed_run_ids == [
         s.id for s in snapshots[:COHORT_COMPLETED_LIMIT]
     ]
+    # Every scanned run lands in exactly one place: selected or counted.
+    assert packet.cohort.omitted.overflow == 5
 
 
 @pytest.mark.asyncio
@@ -383,7 +433,7 @@ def _packet(*, version: int = 2, checksum: str = "sum") -> FlowReviewPacket:
         completed_run_ids=[run_id],
         failed_run_ids=[],
         metrics=[_metric(run_id, s1, tokens=900), _metric(run_id, s2, tokens=100)],
-        lineage=[],
+        lineage=[_lineage(run_id, s1), _lineage(run_id, s2)],
     )
     return FlowReviewPacket(
         flow_id=uuid4(),
@@ -429,12 +479,25 @@ def test_a_turn_gets_exactly_the_findings_it_names_rendered_in_swedish():
     assert "## Underlag från körningar" in text
     assert "steg 1 (Steg 1): står för 90 % av körningens tokens" in text
     assert "steg 1 (Steg 1): utdata användes inte av något senare steg" in text
-    assert "Hänvisa till steg med deras nummer" in text
+    assert "hänvisa till steg med deras nummer" in text
+    assert "ta inte bort ett sådant steg utan att fråga" in text
 
 
 def test_a_turn_naming_a_republished_review_or_an_unknown_finding_is_refused():
     packet = _packet()
     known = packet.facts[0].finding_id
+    completeness = next(f for f in packet.facts if f.kind == "evidence_completeness")
+    # Completeness describes the evidence and is never a finding to act on.
+    with pytest.raises(AIBuilderBadRequestException) as diagnostic:
+        resolve_review_evidence(
+            packet,
+            AIBuilderReviewContext(
+                flow_version=2,
+                definition_checksum="sum",
+                finding_ids=[completeness.finding_id],
+            ),
+        )
+    assert diagnostic.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
     with pytest.raises(AIBuilderBadRequestException) as stale:
         resolve_review_evidence(
             packet,
@@ -526,3 +589,61 @@ async def test_a_named_review_is_held_to_its_version_but_an_inherited_one_is_dro
         is None
     )
     assert review.build_packet.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_packet_refuses_a_flow_with_more_steps_than_it_reads(user):
+    flow_id, space_id = uuid4(), uuid4()
+    version = _published(flow_id, version=1)
+    first = version.definition_json["steps"][0]
+    version.definition_json["steps"] = [
+        {
+            **first,
+            "step_id": str(uuid4()),
+            "step_order": index + 1,
+            "input_source": "flow_input" if index == 0 else "previous_step",
+        }
+        for index in range(MAX_REVIEWABLE_STEPS + 1)
+    ]
+    service, _ = _service(
+        user,
+        flow=SimpleNamespace(id=flow_id, space_id=space_id, published_version=1),
+        version=version,
+        snapshots=[],
+        denied=set(),
+    )
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await service.build_packet(flow_id=flow_id, space_id=space_id)
+    assert refused.value.code == AIBuilderErrorCode.REVIEW_FLOW_TOO_LARGE
+
+
+@pytest.mark.asyncio
+async def test_the_evidence_floor_persists_with_the_turn_and_never_drops(user):
+    """The level a turn was held to is written by the server next to the
+    review reference; later turns are held to the highest level seen, even
+    after the review itself went stale and yields no evidence."""
+    packet = _packet(version=3, checksum="new")
+    finding = packet.facts[0].finding_id
+    context = AIBuilderReviewContext(
+        flow_version=2, definition_checksum="old", finding_ids=[finding]
+    )
+    metadata = metadata_for_user_message(
+        review_context=context, review_evidence_level=3
+    )
+    assert metadata is not None
+    persisted = review_context_from_metadata(metadata)
+    assert persisted is not None and persisted.evidence_classification_level == 3
+    # A client cannot lower the level: the request model has no such field.
+    assert "evidence_classification_level" not in AIBuilderReviewContext.model_fields
+    session = _edit_session(user, review_metadata=metadata["review_context"])
+    session.conversation.append(
+        ConversationMessage(role="user", content="Och nu?", metadata=None)
+    )
+    assert conversation_evidence_floor(session.conversation) == 3
+    service, _ = _builder_service(user, packet)
+    assert (
+        await service._resolve_review_evidence(session=session, review_context=None)
+        is None
+    )
+    # The stale review yields no evidence, yet the floor for this session stays 3.
+    assert conversation_evidence_floor(session.conversation) == 3

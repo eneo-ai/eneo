@@ -567,6 +567,7 @@ const aiBuilderErrorCodes = [
   "flow_not_published",
   "review_stale",
   "review_finding_unknown",
+  "review_flow_too_large",
   "planner_model_below_evidence_level",
   "flow_space_mismatch",
   "invalid_ai_builder_settings",

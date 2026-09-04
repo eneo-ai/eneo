@@ -51,7 +51,9 @@
   );
   const omittedCount = $derived(
     packet
-      ? (packet.cohort.omitted.not_viewable ?? 0) + (packet.cohort.omitted.level_unknown ?? 0)
+      ? (packet.cohort.omitted.not_viewable ?? 0) +
+          (packet.cohort.omitted.level_unknown ?? 0) +
+          (packet.cohort.omitted.overflow ?? 0)
       : 0
   );
 

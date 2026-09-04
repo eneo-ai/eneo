@@ -35,7 +35,10 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     StructuredQuestionPayload,
 )
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
-from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderReviewContext
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    AIBuilderReviewContext,
+    PersistedReviewContext,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
     ResolvedAIBuilderEditContext,
@@ -98,8 +101,8 @@ logger = get_logger(__name__)
 _EDIT_CONTEXT_ADAPTER: TypeAdapter[AIBuilderEditContext] = TypeAdapter(
     AIBuilderEditContext
 )
-_REVIEW_CONTEXT_ADAPTER: TypeAdapter[AIBuilderReviewContext] = TypeAdapter(
-    AIBuilderReviewContext
+_REVIEW_CONTEXT_ADAPTER: TypeAdapter[PersistedReviewContext] = TypeAdapter(
+    PersistedReviewContext
 )
 
 QUESTION_ANSWER_METADATA_KEY = "question_answer"
@@ -2245,7 +2248,7 @@ def edit_context_from_metadata(metadata: object) -> AIBuilderEditContext | None:
         return None
 
 
-def review_context_from_metadata(metadata: object) -> AIBuilderReviewContext | None:
+def review_context_from_metadata(metadata: object) -> PersistedReviewContext | None:
     metadata_map = _metadata_mapping(metadata)
     if metadata_map is None:
         return None
@@ -2280,7 +2283,7 @@ def latest_user_edit_context(
 
 def latest_user_review_context(
     conversation: Sequence[_ConversationMetadataMessage],
-) -> AIBuilderReviewContext | None:
+) -> PersistedReviewContext | None:
     """The review a session is acting on: the last user turn that named one.
 
     Unlike edit scope, a review outlives the turn that opened it — the user
@@ -2296,6 +2299,25 @@ def latest_user_review_context(
     return None
 
 
+def conversation_evidence_floor(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> int:
+    """The highest evidence level any turn of this conversation was held to.
+
+    Once run evidence of a level has been read into a conversation, whatever
+    was said since may carry it; the floor therefore only ever rises, whether
+    or not the review it came from is still current.
+    """
+    floor = 0
+    for message in conversation:
+        if message.role != "user":
+            continue
+        context = review_context_from_metadata(message.metadata)
+        if context is not None:
+            floor = max(floor, context.evidence_classification_level)
+    return floor
+
+
 def metadata_for_user_message(
     *,
     question_answer: AIBuilderQuestionAnswerInput | None = None,
@@ -2303,6 +2325,7 @@ def metadata_for_user_message(
     file_ids: Sequence[UUID] | None = None,
     edit_context: AIBuilderEditContext | ResolvedAIBuilderEditContext | None = None,
     review_context: AIBuilderReviewContext | None = None,
+    review_evidence_level: int | None = None,
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:
@@ -2326,7 +2349,10 @@ def metadata_for_user_message(
     if edit_context is not None:
         metadata[EDIT_CONTEXT_METADATA_KEY] = edit_context.to_metadata()
     if review_context is not None:
-        metadata[REVIEW_CONTEXT_METADATA_KEY] = review_context.to_metadata()
+        metadata[REVIEW_CONTEXT_METADATA_KEY] = PersistedReviewContext(
+            **review_context.model_dump(),
+            evidence_classification_level=review_evidence_level or 0,
+        ).to_metadata()
     return metadata or None
 
 

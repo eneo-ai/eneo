@@ -344,6 +344,8 @@
       }
       case "confirm":
         return m.ai_builder_requirements_title();
+      case "findings":
+        return m.ai_builder_review_title();
       case "build":
         return m.ai_builder_rail_planning();
       case "review":
@@ -540,15 +542,53 @@
     await activateSavedFlowStep(scope);
   }
 
+  // Opening the run review is one transition: it waits for the session like a
+  // saved-step launch, asks before replacing an ongoing edit, drops any
+  // saved-step scope, and lands on the first phase where the findings render.
+  let pendingReviewLaunch = $state(false);
+  let pendingReviewReplacement = $state(false);
+  $effect(() => {
+    if (pendingReviewLaunch && service.hasSession && !service.isInitializing) {
+      pendingReviewLaunch = false;
+      void launchReview();
+    }
+  });
+
+  async function launchReview() {
+    if (
+      service.messages.length > 0 ||
+      service.currentPlan !== null ||
+      service.session?.latest_plan_id != null
+    ) {
+      pendingReviewReplacement = true;
+      showReplaceEditSessionDialog = true;
+      return;
+    }
+    await activateReview();
+  }
+
+  async function activateReview() {
+    service.clearActiveStepScope();
+    peekPhase = null;
+    await service.openReview();
+  }
+
   /** Open the run review from outside the Builder (the run history tab). */
   export async function openReview() {
-    await service.openReview();
+    if (!service.hasSession || service.isInitializing) {
+      pendingReviewLaunch = true;
+      return;
+    }
+    await launchReview();
   }
 
   function prepareChangeFromFinding(detail: {
     message: string;
     reviewContext: AIBuilderReviewContext;
   }) {
+    // A finding is the whole change request; a lingering saved-step scope
+    // would otherwise re-attach itself to the next message.
+    service.clearActiveStepScope();
     void service.sendMessage(detail.message, undefined, undefined, null, detail.reviewContext);
   }
 
@@ -562,15 +602,22 @@
 
   function cancelSavedFlowStepReplacement() {
     pendingSavedFlowStepScope = null;
+    pendingReviewReplacement = false;
   }
 
   async function confirmSavedFlowStepReplacement() {
     const scope = pendingSavedFlowStepScope;
-    if (scope === null) return;
+    const review = pendingReviewReplacement;
+    if (scope === null && !review) return;
     conversationRef?.resetComposerContext();
     await service.startFreshSession("edit");
     pendingSavedFlowStepScope = null;
-    await activateSavedFlowStep(scope);
+    pendingReviewReplacement = false;
+    if (scope !== null) {
+      await activateSavedFlowStep(scope);
+    } else {
+      await activateReview();
+    }
   }
 
   const canStartOver = $derived(
@@ -704,7 +751,7 @@
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}
           oncleareditcontext={() => service.clearActiveStepScope()}
-          onopenreview={() => void service.openReview()}
+          onopenreview={() => void launchReview()}
         />
       {:else if screen === "question" && questionMessage}
         <BuilderQuestionScreen
@@ -823,9 +870,11 @@
     <AlertDialog.Header>
       <AlertDialog.Title>{m.ai_builder_replace_edit_title()}</AlertDialog.Title>
       <AlertDialog.Description>
-        {m.ai_builder_replace_edit_description({
-          stepName: pendingSavedFlowStepScope?.stepName ?? m.flow_step_unnamed()
-        })}
+        {pendingReviewReplacement
+          ? m.ai_builder_replace_edit_description_review()
+          : m.ai_builder_replace_edit_description({
+              stepName: pendingSavedFlowStepScope?.stepName ?? m.flow_step_unnamed()
+            })}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>

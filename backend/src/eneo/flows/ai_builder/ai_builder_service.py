@@ -35,6 +35,7 @@ from eneo.flows.ai_builder.ai_builder_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
+    conversation_evidence_floor,
     latest_user_review_context,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -399,10 +400,15 @@ class AIBuilderService:
             model_id=model_id,
             active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant_flow_settings,
-            minimum_level=(
-                review_evidence.evidence_classification_level
-                if review_evidence is not None
-                else 0
+            minimum_level=max(
+                (
+                    review_evidence.evidence_classification_level
+                    if review_evidence is not None
+                    else 0
+                ),
+                # Evidence read on an earlier turn may live on in the
+                # conversation; the floor never drops below what it was.
+                conversation_evidence_floor(session.conversation),
             ),
         )
         if (

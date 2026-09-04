@@ -339,11 +339,20 @@ class AIBuilderPlanner:
                 **(initial_metadata or {}),
                 **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
             }
-        if review_context is not None:
-            initial_metadata = {
-                **(initial_metadata or {}),
-                **(metadata_for_user_message(review_context=review_context) or {}),
-            }
+        review_metadata = (
+            metadata_for_user_message(
+                review_context=review_context,
+                review_evidence_level=(
+                    review_evidence.evidence_classification_level
+                    if review_evidence is not None
+                    else None
+                ),
+            )
+            if review_context is not None
+            else None
+        )
+        if review_metadata:
+            initial_metadata = {**(initial_metadata or {}), **review_metadata}
         user_message_metadata = (
             {
                 **(initial_metadata or {}),
@@ -442,6 +451,10 @@ class AIBuilderPlanner:
                     **(metadata or {}),
                     **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
                 }
+            if review_metadata:
+                # The accepted turn's metadata is what later turns read; the
+                # review reference and its level must survive into it.
+                metadata = {**(metadata or {}), **review_metadata}
             user_message.metadata = (
                 {
                     **(metadata or {}),

@@ -1444,9 +1444,11 @@
           optimisticHistoryRuns = optimisticHistoryRuns.filter((run) => !confirmedIds.has(run.id));
         }}
         onreview={canUseAIBuilder && $resource.published_version != null
-          ? () => {
+          ? async () => {
+              ensureAIBuilder();
               setActiveTab("ai-builder");
-              void aiBuilderHost?.openReview();
+              await tick();
+              await aiBuilderHost?.openReview();
             }
           : undefined}
       />

@@ -6712,16 +6712,18 @@
   "ai_builder_review_prepare": "Prepare change",
   "ai_builder_review_prepare_message": "Prepare a change that addresses: {finding}",
   "ai_builder_review_completeness": "{complete} runs had results for every step, {incomplete} were missing some.",
-  "ai_builder_review_omitted": "{count} runs could not be read (older than tracking or not permitted).",
+  "ai_builder_review_omitted": "{count} runs were not read (outside the selection, older than tracking, or not permitted).",
   "ai_builder_review_step": "step {number}",
   "ai_builder_review_step_labelled": "step {number} ({label})",
   "ai_builder_review_unknown_step": "a removed step",
   "ai_builder_review_unconsumed_title": "Output from {step} is not used",
-  "ai_builder_review_unconsumed_evidence": "No later step read the output in {runs} successful runs. The step can be removed or connected.",
-  "ai_builder_review_repeated_error_title": "{step} fails often",
+  "ai_builder_review_unconsumed_evidence": "No later step read the output in {runs} successful runs with tracked input. The step may still do something else, such as a request.",
+  "ai_builder_review_repeated_error_title": "{step} failed with the same error",
   "ai_builder_review_repeated_error_evidence": "The error {code} recurred in {runs} failed runs.",
   "ai_builder_review_token_share_title": "{step} accounts for {percent} % of tokens",
   "ai_builder_review_latency_share_title": "{step} accounts for {percent} % of time",
-  "ai_builder_review_share_evidence": "Average over {runs} successful runs. A shorter or split step can make the flow cheaper and faster.",
-  "flow_history_review_with_builder": "Review with the AI builder"
+  "ai_builder_review_share_evidence": "Average over {runs} successful runs where every step was measured.",
+  "flow_history_review_with_builder": "Review with the AI builder",
+  "ai_builder_review_flow_too_large": "The flow has more steps than the review reads. Review a smaller flow or split it.",
+  "ai_builder_replace_edit_description_review": "You have a conversation or AI proposal in progress that has not been approved. Continuing will replace it with a review of the runs."
 }

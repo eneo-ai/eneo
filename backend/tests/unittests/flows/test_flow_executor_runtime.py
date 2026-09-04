@@ -1041,17 +1041,27 @@ async def test_duplicate_worker_exits_when_step_already_claimed(user):
     assert result == {"status": "skipped", "reason": "step_already_claimed"}
 
 
-def _execute_setup_for_security(user, *, space_level: int, model_level: int):
+def _execute_setup_for_security(
+    user, *, space_level: int, model_level: int, model_levels: list[int] | None = None
+):
+    """One step by default; `model_levels` gives one step per assistant level."""
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
     step_id = uuid4()
-    assistant = _security_assistant(uuid4(), model_level=model_level)
+    assistants = [
+        _security_assistant(uuid4(), model_level=level)
+        for level in (model_levels or [model_level])
+    ]
+    assistant = assistants[0]
     space = _security_space(
-        space_id=uuid4(), assistants=[assistant], security_level=space_level
+        space_id=uuid4(), assistants=assistants, security_level=space_level
     )
+    by_id = {candidate.id: candidate for candidate in assistants}
     executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
-    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._load_assistant = AsyncMock(
+        side_effect=lambda assistant_id, state=None: by_id[assistant_id]
+    )
     flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
@@ -1073,12 +1083,13 @@ def _execute_setup_for_security(user, *, space_level: int, model_level: int):
             definition_json={
                 "steps": [
                     {
-                        "step_id": str(step_id),
-                        "step_order": 1,
-                        "assistant_id": str(assistant.id),
-                        "input_source": "flow_input",
+                        "step_id": str(step_id if index == 0 else uuid4()),
+                        "step_order": index + 1,
+                        "assistant_id": str(candidate.id),
+                        "input_source": "flow_input" if index == 0 else "previous_step",
                         "output_mode": "pass_through",
                     }
+                    for index, candidate in enumerate(assistants)
                 ]
             },
             created_at=datetime.now(timezone.utc),
@@ -1112,8 +1123,9 @@ async def test_execute_records_the_runs_evidence_level_before_the_first_step(use
 
 @pytest.mark.asyncio
 async def test_execute_fails_a_security_mismatch_before_any_step_runs(user):
+    # Steps one and two clear the space; step three does not. Nothing runs.
     executor, flow_run_repo, queued_run = _execute_setup_for_security(
-        user, space_level=3, model_level=1
+        user, space_level=3, model_level=3, model_levels=[3, 3, 1]
     )
     result = await executor.execute(
         run_id=queued_run.id,

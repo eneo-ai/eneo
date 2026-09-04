@@ -29,7 +29,8 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
-from eneo.flows.domain.flow import FlowRunStatusSnapshot
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
+from eneo.flows.domain.flow import Flow, FlowRunStatusSnapshot, FlowVersion
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowRunStatus
 from eneo.flows.infrastructure.flow_run_repo import (
@@ -51,6 +52,9 @@ STEP_SHARE_THRESHOLD = 0.5
 REPEATED_ERROR_MIN_RUNS = 2
 # Findings one turn may name; the packet is small and the prompt stays bounded.
 MAX_REVIEW_FINDINGS_PER_TURN = 10
+# Steps a review reads; the readers return rows per run and step, and the
+# planner is handed every step's label, so a flow beyond this is refused.
+MAX_REVIEWABLE_STEPS = 40
 
 
 class FlowReviewStep(BaseModel):
@@ -69,6 +73,7 @@ class FlowReviewOmittedRuns(BaseModel):
     other_version: int = 0
     not_viewable: int = 0
     level_unknown: int = 0
+    overflow: int = 0
 
 
 class FlowReviewCohort(BaseModel):
@@ -159,6 +164,14 @@ class AIBuilderReviewContext(BaseModel):
         return self.model_dump(mode="json")
 
 
+class PersistedReviewContext(AIBuilderReviewContext):
+    """The reference as the server stores it on the user message: the
+    request plus the evidence level the server resolved for that turn. The
+    level is never taken from a client; it is what later turns are held to."""
+
+    evidence_classification_level: int = Field(default=0, ge=0)
+
+
 class FlowReviewEvidence(BaseModel):
     """The named findings of one review, resolved for one turn."""
 
@@ -193,7 +206,12 @@ def resolve_review_evidence(
                 "published_version": packet.flow_version,
             },
         )
-    by_id = {fact.finding_id: fact for fact in packet.facts}
+    # Completeness describes the evidence; it is never something to act on.
+    by_id = {
+        fact.finding_id: fact
+        for fact in packet.facts
+        if not isinstance(fact, EvidenceCompletenessFact)
+    }
     unknown = [fid for fid in context.finding_ids if fid not in by_id]
     if unknown:
         raise AIBuilderBadRequestException(
@@ -201,7 +219,9 @@ def resolve_review_evidence(
             code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
             context={"finding_ids": unknown},
         )
-    facts = [by_id[fid] for fid in dict.fromkeys(context.finding_ids)]
+    facts: list[FlowReviewFact] = [
+        by_id[fid] for fid in dict.fromkeys(context.finding_ids)
+    ]
     return FlowReviewEvidence(
         flow_version=packet.flow_version,
         definition_checksum=packet.definition_checksum,
@@ -251,8 +271,11 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
                 f"{fact.runs_without_lineage} utan spårad indata."
             )
     lines.append(
-        "Föreslå en ändring som åtgärdar punkterna ovan. Hänvisa till steg "
-        "med deras nummer och ändra inget som underlaget inte motiverar."
+        "Punkterna är observationer från körningarna, inte slutsatser. Ett "
+        "steg vars utdata inte används kan ändå ha en verkan (till exempel "
+        "ett anrop); ta inte bort ett sådant steg utan att fråga. Föreslå en "
+        "ändring som svarar på punkterna, hänvisa till steg med deras nummer "
+        "och ändra inget som underlaget inte motiverar."
     )
     return "\n".join(lines)
 
@@ -315,17 +338,29 @@ def review_facts(
     # Consumption: a step's output is observed consumed when any current
     # attempt in a completed run cites it as a step_result source. The final
     # step's output is the run's result and is never in question.
-    consumed_step_ids: set[UUID] = set()
-    runs_with_lineage: set[UUID] = set()
+    # A run counts as observed for consumption only when every step's current
+    # attempt has tracked lineage; untracked or corrupt lineage is absence of
+    # evidence, never evidence of absence.
+    tracked_steps_by_run: dict[UUID, set[UUID]] = defaultdict(set)
+    consumed_by_run: dict[UUID, set[UUID]] = defaultdict(set)
     for item in lineage:
-        runs_with_lineage.add(item.flow_run_id)
         aggregate = item.edges.aggregate
-        if item.flow_run_id not in completed or aggregate is None:
+        if item.edges.status != "tracked" or aggregate is None:
             continue
+        tracked_steps_by_run[item.flow_run_id].add(item.step_id)
         for edge in aggregate.edges:
             if edge.source.kind == "step_result":
-                consumed_step_ids.add(edge.source.source_step_id)
-    if completed and len(ordered_steps) > 1:
+                consumed_by_run[item.flow_run_id].add(edge.source.source_step_id)
+    runs_with_lineage = {
+        run_id
+        for run_id, tracked in tracked_steps_by_run.items()
+        if step_ids <= tracked
+    }
+    observed_for_consumption = completed & runs_with_lineage
+    if observed_for_consumption and len(ordered_steps) > 1:
+        consumed_step_ids: set[UUID] = set()
+        for run_id in observed_for_consumption:
+            consumed_step_ids |= consumed_by_run[run_id]
         for step in ordered_steps[:-1]:
             if step.step_id not in consumed_step_ids:
                 facts.append(
@@ -333,7 +368,7 @@ def review_facts(
                         finding_id=_id("output_not_observed_consumed", step.step_id),
                         step_id=step.step_id,
                         step_order=step.step_order,
-                        run_count=len(completed),
+                        run_count=len(observed_for_consumption),
                     )
                 )
 
@@ -377,12 +412,15 @@ def review_facts(
                     step_id: measure(metric)
                     for step_id, metric in metrics_by_run.get(run_id, {}).items()
                 }
+                # Only a run measured on every step yields a share; a missing
+                # measurement would otherwise hand its share to the others.
+                if any(per_step.get(step.step_id) is None for step in ordered_steps):
+                    continue
                 total = sum(value for value in per_step.values() if value is not None)
                 if total <= 0:
                     continue
                 for step in ordered_steps:
-                    value = per_step.get(step.step_id)
-                    shares[step.step_id].append((value or 0.0) / total)
+                    shares[step.step_id].append((per_step[step.step_id] or 0.0) / total)
             for step in ordered_steps:
                 samples = shares.get(step.step_id)
                 if not samples:
@@ -431,11 +469,13 @@ def _seconds(metric: FlowStepResultMetrics) -> float | None:
 
 
 class FlowReviewFlowRepository(Protocol):
-    async def get(self, *, flow_id: UUID, tenant_id: UUID) -> object: ...
+    async def get(self, *, flow_id: UUID, tenant_id: UUID) -> Flow: ...
 
 
 class FlowReviewVersionRepository(Protocol):
-    async def get(self, flow_id: UUID, version: int, tenant_id: UUID) -> object: ...
+    async def get(
+        self, flow_id: UUID, version: int, tenant_id: UUID
+    ) -> FlowVersion: ...
 
 
 class FlowReviewRunRepository(Protocol):
@@ -462,7 +502,7 @@ class FlowReviewRunRepository(Protocol):
 
 class FlowReviewAccessPolicy(Protocol):
     async def ensure_can_access_run(
-        self, run: FlowRunStatusSnapshot, *, access_kind: str
+        self, run: FlowRunStatusSnapshot, *, access_kind: FlowRunAccessKind
     ) -> None: ...
 
 
@@ -485,12 +525,12 @@ class AIBuilderFlowReviewService:
     async def build_packet(self, *, flow_id: UUID, space_id: UUID) -> FlowReviewPacket:
         tenant_id = self.user.tenant_id
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=tenant_id)
-        if getattr(flow, "space_id", None) != space_id:
+        if flow.space_id != space_id:
             raise AIBuilderBadRequestException(
                 "Flow space does not match the AI builder session space.",
                 code=AIBuilderErrorCode.FLOW_SPACE_MISMATCH,
             )
-        published_version = getattr(flow, "published_version", None)
+        published_version = flow.published_version
         if published_version is None:
             raise AIBuilderBadRequestException(
                 "The flow has no published version to review runs of.",
@@ -499,10 +539,16 @@ class AIBuilderFlowReviewService:
         version = await self.flow_version_repo.get(
             flow_id, published_version, tenant_id
         )
-        definition_checksum = str(getattr(version, "definition_checksum"))
+        definition_checksum = version.definition_checksum
         steps = parse_published_runtime_steps(
-            getattr(version, "definition_json"), flow_version=published_version
+            version.definition_json, flow_version=published_version
         )
+        if len(steps) > MAX_REVIEWABLE_STEPS:
+            raise AIBuilderBadRequestException(
+                "The flow has more steps than a run review reads.",
+                code=AIBuilderErrorCode.REVIEW_FLOW_TOO_LARGE,
+                context={"step_count": len(steps), "max_steps": MAX_REVIEWABLE_STEPS},
+            )
 
         snapshots = await self.flow_run_repo.list_statuses(
             tenant_id=tenant_id,
@@ -512,7 +558,12 @@ class AIBuilderFlowReviewService:
         )
         completed: list[UUID] = []
         failed: list[UUID] = []
-        omitted = {"other_version": 0, "not_viewable": 0, "level_unknown": 0}
+        omitted = {
+            "other_version": 0,
+            "not_viewable": 0,
+            "level_unknown": 0,
+            "overflow": 0,
+        }
         level = 0
         for run in snapshots:
             if run.flow_version != published_version:
@@ -525,6 +576,7 @@ class AIBuilderFlowReviewService:
                 else COHORT_FAILED_LIMIT
             )
             if len(bucket) >= limit:
+                omitted["overflow"] += 1
                 continue
             try:
                 await self.access_policy.ensure_can_access_run(

@@ -21,7 +21,7 @@ function makePacket(overrides: Partial<AIBuilderFlowReviewPacket> = {}): AIBuild
     cohort: {
       completed_run_ids: ["r1", "r2", "r3"],
       failed_run_ids: ["r4"],
-      omitted: { other_version: 0, not_viewable: 1, level_unknown: 0 }
+      omitted: { other_version: 0, not_viewable: 1, level_unknown: 0, overflow: 0 }
     },
     facts: [
       {
@@ -164,7 +164,7 @@ describe("BuilderFindingsScreen", () => {
           cohort: {
             completed_run_ids: [],
             failed_run_ids: [],
-            omitted: { other_version: 2, not_viewable: 0, level_unknown: 0 }
+            omitted: { other_version: 2, not_viewable: 0, level_unknown: 0, overflow: 0 }
           },
           facts: []
         })
