@@ -811,8 +811,17 @@ def _build_slot_classification_prompt(
         "quotes, and use only as many quotes as needed. Report only additions or "
         "removals explicitly requested in the cited current evidence; do not attempt "
         "to reconstruct a complete field snapshot. "
-        "For unquoted names, emit the exact cited phrase and let the server normalize "
-        "it to a stable key. Preserve a quoted or backticked literal without changes. "
+        "For unquoted names, the name is the head noun of the deliverable, taken "
+        'as whole words exactly as written inside the quote: "brådska" from '
+        '"bedöma brådska", "personuppgifter" from "om personuppgifter verkar '
+        'förekomma", "frågor" from "frågor som behöver skickas tillbaka"; the '
+        "quote stays the whole enumerated item. Never a part of a word, so "
+        '"motiveringen" stays "motiveringen". One name per requested result; a '
+        "coordinated phrase is one name unless the user asks for separate "
+        "results. Never a verb, a "
+        "clause, or a question as a name; a head noun taken from the quote is not "
+        "a renamed identifier. The server normalizes the name to a stable key. "
+        "Preserve a quoted or backticked literal without changes. "
         "Treat unquoted trailing [] or {} as JSON shape notation "
         "and emit the base property name; preserve that punctuation only when the "
         "user quotes or backticks it as part of the literal property name. Return a "

@@ -746,6 +746,49 @@ def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
     assert parse_fields(quote=quote, names=["sökta insatser", "beslut"]) is None
 
 
+def test_parser_admits_a_head_noun_inside_a_longer_enumerated_quote() -> None:
+    quote = (
+        "Flödet ska bedöma brådska, lista saknade uppgifter och samla frågor som "
+        "behöver skickas tillbaka, med motiveringen sist."
+    )
+
+    def parse_fields(names: list[str]) -> tuple[str, ...] | None:
+        result = parse_slot_classification_response(
+            json.dumps(
+                {
+                    **_VALID_CLASSIFICATION_RESPONSE,
+                    "named_result_evidence": {
+                        "operation": "update",
+                        "upserts": _named_result_locations(names, [_evidence(quote)]),
+                        "removals": [],
+                        "confidence": "high",
+                        "reason": "The user enumerated the deliverables.",
+                        "evidence": [_evidence(quote)],
+                    },
+                }
+            ),
+            allowed_slot_values={},
+            classification_input=_classification_input(quote),
+        )
+        assert result is not None
+        return (
+            tuple(item.name for item in result.named_result_evidence.upserts)
+            if result.named_result_evidence is not None
+            else None
+        )
+
+    # The head noun is a whole word inside the enumerated item: admitted and
+    # keyed from the noun, not from the clause around it.
+    assert parse_fields(["brådska", "saknade uppgifter", "frågor"]) == (
+        "bradska",
+        "saknade_uppgifter",
+        "fragor",
+    )
+    # A base form that only occurs as part of a longer word is not a mention
+    # of it; the whole delta is refused rather than a key invented.
+    assert parse_fields(["brådska", "motivering"]) is None
+
+
 @pytest.mark.parametrize(
     "evidence_quote",
     ['JSON output field: "id".', '"id"'],
@@ -4593,6 +4636,23 @@ def test_slot_classification_prompt_defines_every_file_role_by_runtime_use() -> 
     assert "material the Builder reads while designing the flow" in prompt
     assert "not carried into runs" in prompt
     assert "the flow never reads" in prompt
+
+
+def test_slot_classification_prompt_names_deliverables_by_head_noun() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input(
+            "Flödet ska bedöma brådska och lista saknade uppgifter."
+        ),
+        allowed_slot_values={"terminal_output": frozenset({"structured_json"})},
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "head noun of the deliverable" in prompt
+    assert '"brådska" from "bedöma brådska"' in prompt
+    assert "Never a part of a word" in prompt
+    assert "Never a verb, a clause, or a question as a name" in prompt
+    assert "emit the exact cited phrase" not in prompt
 
 
 def test_slot_classification_prompt_explains_example_output_evidence() -> None:
