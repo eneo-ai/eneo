@@ -344,6 +344,30 @@ def test_question_recommends_nothing_when_the_slot_is_unread() -> None:
     assert followup.question_data.recommended_option_id is None
 
 
+def test_question_recommends_the_policy_default_when_the_slot_is_unread() -> None:
+    # The layout question is asked, not assumed, once the multi-document scope
+    # is the user's own answer; the value Eneo would otherwise have assumed is
+    # still the suggestion, with no words behind it.
+    followup = build_registry_question_followup(
+        "report_disposition",
+        [
+            ConversationMessage(
+                role="user", content="Skapa en PDF-rapport av dokumenten"
+            )
+        ],
+        planning_state=PlanningState.empty(),
+    )
+
+    assert followup is not None
+    recommended = next(
+        option
+        for option in followup.question_data.options
+        if option.id == followup.question_data.recommended_option_id
+    )
+    assert recommended.value == "synthesized_overview"
+    assert followup.question_data.recommended_option_evidence is None
+
+
 def test_question_does_not_recommend_an_unsupported_pdf_template() -> None:
     planning_state = PlanningState.empty()
     planning_state.resolved_slots = {
