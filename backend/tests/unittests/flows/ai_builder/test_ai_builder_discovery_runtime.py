@@ -2386,7 +2386,11 @@ async def test_runtime_persists_classifier_attempt_outcomes_before_state_mutatio
             context.planning_state.resolved_slots["primary_runtime_input"].source
             == "model"
         )
-    litellm_client.acompletion.assert_awaited_once()
+    # An unreadable completion is retried once before the outcome is persisted;
+    # a readable one is not.
+    assert litellm_client.acompletion.await_count == (
+        1 if expected_outcome == "resolved" else 2
+    )
     assert context.slot_classification_metadata.prompt_hash is not None
 
 

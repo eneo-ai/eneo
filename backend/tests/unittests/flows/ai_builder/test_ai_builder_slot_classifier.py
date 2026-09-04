@@ -755,9 +755,82 @@ async def test_non_string_response_records_parse_failure_with_usage_telemetry() 
         usage_tracker=usage_tracker,
     )
 
+    # One retry, then the failure stands; both requests are telemetry calls.
     assert attempt.outcome == "parse_failed"
-    assert usage_tracker.llm_calls_made == 1
+    assert usage_tracker.llm_calls_made == 2
     assert usage_tracker.token_usages[0].source == "litellm_estimate"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_classifier_response_is_retried_once() -> None:
+    # A garbled JSON tail leaves every slot absent for the turn, so the same
+    # request is sent once more before the reading is given up.
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(
+        side_effect=[
+            _make_response('{"slots": {"primary_runtime_input": {"outcome": "res'),
+            _make_response(
+                json.dumps(
+                    {
+                        **_VALID_CLASSIFICATION_RESPONSE,
+                        "slots": {
+                            "primary_runtime_input": {
+                                "outcome": "resolved",
+                                "value": "text",
+                                "confidence": "high",
+                                "reason": "typed prose",
+                                "evidence": [_evidence("Build a text flow.")],
+                                "evidence_level": "explicit",
+                            }
+                        },
+                    }
+                )
+            ),
+        ]
+    )
+    usage_tracker = ProposalTurnTelemetry(
+        request_id="req-slot-retry",
+        model="gpt-test",
+        target_kind=TargetKind.CREATE,
+    )
+
+    attempt = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(model="gpt-test"),
+        classification_input=_classification_input("Build a text flow."),
+        allowed_slot_values={"primary_runtime_input": {"text"}},
+        tenant_id=uuid4(),
+        usage_tracker=usage_tracker,
+    )
+
+    assert attempt.outcome == "resolved"
+    assert attempt.result is not None
+    outcome = attempt.result.slot_outcomes["primary_runtime_input"]
+    assert isinstance(outcome, ResolvedSlotClassificationOutcome)
+    assert outcome.value == "text"
+    assert litellm_client.acompletion.await_count == 2
+    assert usage_tracker.llm_calls_made == 2
+
+
+@pytest.mark.asyncio
+async def test_two_unreadable_classifier_responses_end_as_parse_failed() -> None:
+    litellm_client = MagicMock()
+    litellm_client.acompletion = AsyncMock(
+        side_effect=[_make_response("{not json"), _make_response("{still not json")]
+    )
+
+    attempt = await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=_route(model="gpt-test"),
+        # A different brief than the retried test above: a successful reading is
+        # cached by prompt, and this test must reach the provider.
+        classification_input=_classification_input("Build a flow from pasted text."),
+        allowed_slot_values={"primary_runtime_input": {"text"}},
+        tenant_id=uuid4(),
+    )
+
+    assert attempt.outcome == "parse_failed"
+    assert litellm_client.acompletion.await_count == 2
 
 
 def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
