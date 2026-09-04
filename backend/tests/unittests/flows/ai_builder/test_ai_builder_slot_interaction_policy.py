@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from eneo.flows.ai_builder.ai_builder_architecture_derivation import (
+    architecture_required_slot_names,
+)
 from eneo.flows.ai_builder.ai_builder_slot_interaction_policy import (
     POLICY_COVERED_SLOT_NAMES,
     SLOT_INTERACTION_POLICIES,
@@ -174,17 +177,80 @@ def test_a_slot_the_shape_has_no_place_for_is_neither_asked_nor_assumed() -> Non
     )
 
 
-def test_a_quality_slot_the_architecture_needs_is_architectural_here() -> None:
-    """The derivation, not the table, decides whether a missing answer blocks."""
+def test_the_derivation_decides_whether_a_missing_layout_blocks() -> None:
+    """The table calls the layout architectural; the derivation says when an
+    answer is required rather than assumed."""
+
+    policy = SLOT_INTERACTION_POLICIES["report_disposition"]
+    assert policy.impact == "architecture"
+    assert (policy.when_unknown, policy.default_value) == (
+        "assume",
+        "synthesized_overview",
+    )
 
     state = _document_report_state()
     state.resolved_slots["document_material_scope"] = _slot(
         "document_material_scope", "multiple_documents_case"
     )
-    policy = SLOT_INTERACTION_POLICIES["report_disposition"]
-    assert policy.impact == "quality"
-
     assert effective_slot_impact(policy, state) == "architecture"
+    assert "report_disposition" in architecture_required_slot_names(state)
+
+
+def test_a_weak_layout_that_is_not_the_default_is_asked_even_on_an_assumed_scope() -> (
+    None
+):
+    policy = SLOT_INTERACTION_POLICIES["report_disposition"]
+    state = _document_report_state()
+    state.resolved_slots["document_material_scope"] = ResolvedSlot(
+        name="document_material_scope",
+        value="flexible_document_case",
+        source="policy_default",
+        evidence=["policy_default:document_material_scope=flexible_document_case"],
+        confidence="medium",
+    )
+    state.resolved_slots["report_disposition"] = ResolvedSlot(
+        name="report_disposition",
+        value="per_source_sections",
+        source="model",
+        evidence=["quote:user_message:m1:avsnitt"],
+        confidence="medium",
+        evidence_level="inferred",
+    )
+    assert evaluate_slot_interaction(policy, state) == "ask"
+
+    state.resolved_slots["report_disposition"] = ResolvedSlot(
+        name="report_disposition",
+        value="synthesized_overview",
+        source="model",
+        evidence=["quote:user_message:m1:samlad"],
+        confidence="medium",
+        evidence_level="inferred",
+    )
+    # A weak reading that agrees with the default is the default.
+    assert evaluate_slot_interaction(policy, state) == "accept"
+
+
+def test_the_report_layout_is_assumed_with_an_assumed_scope_and_asked_with_an_answered_one() -> (
+    None
+):
+    policy = SLOT_INTERACTION_POLICIES["report_disposition"]
+
+    assumed = _document_report_state()
+    assumed.resolved_slots["document_material_scope"] = ResolvedSlot(
+        name="document_material_scope",
+        value="flexible_document_case",
+        source="policy_default",
+        evidence=["policy_default:document_material_scope=flexible_document_case"],
+        confidence="medium",
+    )
+    assert evaluate_slot_interaction(policy, assumed) == "assume"
+
+    answered = _document_report_state()
+    answered.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope", "multiple_documents_case"
+    )
+    # The derivation requires the layout here, so no default is taken.
+    assert evaluate_slot_interaction(policy, answered) == "ask"
 
 
 def test_the_mapped_ceiling_is_a_question_only_once_it_has_been_proposed() -> None:

@@ -133,13 +133,16 @@ _POLICIES: tuple[SlotInteractionPolicy, ...] = (
         order=60,
         default_value="flexible_document_case",
     ),
-    # Quality for one document, architecture for several: the derivation says
-    # which, so the impact override rather than the table decides per state.
+    # The layout selects the report's topology, so a weak reading that is not
+    # the default is asked, never accepted. Unknown, it is one combined
+    # overview, shown as a row; the derivation requires an answer only where
+    # the multi-document scope is the user's own evidence.
     SlotInteractionPolicy(
         slot_name="report_disposition",
-        impact="quality",
-        when_unknown="ask",
+        impact="architecture",
+        when_unknown="assume",
         order=70,
+        default_value="synthesized_overview",
     ),
     # Asked before the input and output questions whose answers depend on it.
     SlotInteractionPolicy(
@@ -349,7 +352,8 @@ def evaluate_slot_interaction(
       question (it shapes the architecture, or the table asks about it).
       The architecture readers commit nothing weaker, so an accepted guess
       would disclose one flow and build another.
-    - `assume`: the default is taken, silently, as a reopenable row.
+    - `assume`: the default is taken, silently, as a reopenable row; never
+      for a slot the derivation requires, which is asked instead.
 
     `freeform_text` is the user's own wording, read only through the policy's
     explicit-text guard; the defaults writer passes the same text, so what the
@@ -396,6 +400,10 @@ def evaluate_slot_interaction(
     if policy.slot_name in state.slot_uncertainties:
         return "ask"
     if policy.when_unknown == "ask":
+        return "ask"
+    if policy.slot_name in architecture_required_slot_names(state):
+        # The derivation cannot commit without it: no default is taken
+        # behind a decision the architecture is built on.
         return "ask"
     if policy.has_explicit_text(freeform_text):
         # The user's own words speak to a slot the table would otherwise

@@ -148,10 +148,12 @@ def architecture_required_slot_names(state: PlanningState) -> frozenset[str]:
     Audio-to-text purpose distinguishes a transcript from a derived written
     result. Relevant report disposition distinguishes per-source sections from
     an overview or both. Those choices select different topologies; other
-    resolved shapes do not make the slots architectural. Shape relevance uses
-    raw resolved values so policy defaults and classifier evidence can expose
-    the requirement; action policy separately requires commit-grade evidence
-    for the disposition before admitting an architecture commit.
+    resolved shapes do not make the slots architectural. The layout is the
+    user's decision only when the multi-document scope is theirs too: a scope
+    the policy assumed carries an assumed layout, shown as a row the user can
+    reopen, never a question about an assumption. Action policy requires
+    commit-grade evidence for a required disposition before admitting an
+    architecture commit.
     """
 
     required = CORE_ARCHITECTURAL_SLOTS
@@ -160,9 +162,14 @@ def architecture_required_slot_names(state: PlanningState) -> frozenset[str]:
         and _output_type_from_state(state) is FlowOutputType.TEXT
     ):
         required = required | {"post_processing_goal"}
-    if report_disposition_is_relevant_for_state(
-        state,
-        unresolved_values_are_relevant=False,
+    scope = state.resolved_slots.get("document_material_scope")
+    if (
+        report_disposition_is_relevant_for_state(
+            state,
+            unresolved_values_are_relevant=False,
+        )
+        and scope is not None
+        and scope.is_commit_grade
     ):
         required = required | {"report_disposition"}
     return required
@@ -382,15 +389,25 @@ def _primary_pattern_id(
 
 
 def _report_disposition_from_state(state: PlanningState) -> ReportDisposition | None:
-    value = state.commit_grade_slot_value("report_disposition")
     if not report_disposition_is_relevant_for_state(
         state,
         unresolved_values_are_relevant=False,
     ):
         return None
-    match value:
-        case "per_source_sections" | "synthesized_overview" | "both":
-            return value
+    slot = state.resolved_slots.get("report_disposition")
+    if slot is None:
+        return None
+    if not slot.is_commit_grade and (
+        slot.source != "policy_default"
+        or "report_disposition" in architecture_required_slot_names(state)
+    ):
+        # The commit is built on the user's own evidence, or on the policy
+        # default where the layout is not required; a weaker reading is asked
+        # about, never built on.
+        return None
+    match slot.value:
+        case "per_source_sections" | "synthesized_overview" | "both" as layout:
+            return layout
         case _:
             return None
 
