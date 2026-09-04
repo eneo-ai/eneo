@@ -416,6 +416,80 @@ def test_keyed_slot_outcomes_require_the_exact_discriminated_shape(
     )
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {
+            "outcome": "pdf_document",
+            "value": "pdf_document",
+            "confidence": "high",
+            "reason": "requested PDF",
+            "evidence": [_evidence("I need a PDF")],
+            "evidence_level": "explicit",
+        },
+        {
+            "outcome": "pdf_document",
+            "confidence": "high",
+            "reason": "requested PDF",
+            "evidence": [_evidence("I need a PDF")],
+            "evidence_level": "explicit",
+        },
+    ],
+    ids=["option-repeated-in-outcome", "option-only-in-outcome"],
+)
+def test_a_slot_option_written_as_the_outcome_still_resolves(
+    entry: dict[str, object],
+) -> None:
+    # The model sometimes writes the chosen option where the literal word
+    # "resolved" belongs. That entry has one reading, so the slot resolves and
+    # the habit is recorded instead of costing the reading.
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": {"terminal_output": entry},
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        classification_input=_classification_input("I need a PDF"),
+    )
+
+    assert result is not None
+    outcome = result.slot_outcomes["terminal_output"]
+    assert isinstance(outcome, ResolvedSlotClassificationOutcome)
+    assert outcome.value == "pdf_document"
+    assert outcome.confidence == "high"
+    assert [item.code for item in result.diagnostics] == [
+        "slot_outcome_value_as_outcome"
+    ]
+
+
+def test_a_slot_option_in_outcome_that_contradicts_value_stays_malformed() -> None:
+    result = parse_slot_classification_response(
+        json.dumps(
+            {
+                **_VALID_CLASSIFICATION_RESPONSE,
+                "slots": {
+                    "terminal_output": {
+                        "outcome": "pdf_document",
+                        "value": "docx_document",
+                        "confidence": "high",
+                        "reason": "requested PDF",
+                        "evidence": [_evidence("I need a PDF")],
+                        "evidence_level": "explicit",
+                    }
+                },
+            }
+        ),
+        allowed_slot_values={"terminal_output": {"pdf_document", "docx_document"}},
+        classification_input=_classification_input("I need a PDF"),
+    )
+
+    assert result is not None
+    assert result.slot_outcomes["terminal_output"].kind == "absent"
+    assert [item.code for item in result.diagnostics] == ["slot_outcome_malformed"]
+
+
 def test_keyed_duplicate_slot_is_a_typed_duplicate_outcome() -> None:
     absent = json.dumps({"outcome": "absent"})
     resolved = json.dumps(
@@ -4612,6 +4686,18 @@ def test_slot_classification_prompt_explains_report_disposition_values() -> None
     assert "synthesized_overview" in prompt
     assert "both" in prompt
     assert "each uploaded source" in prompt
+
+
+def test_slot_classification_prompt_keeps_the_option_out_of_the_outcome_field() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input("Jag vill ha en PDF."),
+        allowed_slot_values={"terminal_output": frozenset({"pdf_document"})},
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "The outcome field holds only that literal word" in prompt
+    assert "carries its chosen option in value, never in outcome" in prompt
 
 
 def test_slot_classification_prompt_defines_every_file_role_by_its_place_in_the_flow() -> (

@@ -49,6 +49,7 @@ SlotClassificationDiagnosticCode = Literal[
     "slot_outcome_duplicate",
     "slot_outcome_malformed",
     "slot_outcome_omitted",
+    "slot_outcome_value_as_outcome",
 ]
 SlotClassificationSourceKind = Literal[
     "user_message",
@@ -511,9 +512,21 @@ def parse_slot_classification_response(
                 )
             )
             continue
+        raw_entry = entries[0].value
+        normalized = _slot_value_written_as_outcome(
+            raw_entry, allowed_values=slot_values[slot_name]
+        )
+        if normalized is not None:
+            raw_entry = normalized
+            diagnostics.append(
+                SlotClassificationDiagnostic(
+                    code="slot_outcome_value_as_outcome",
+                    slot_name=slot_name,
+                )
+            )
         outcome = _parse_slot_outcome(
             slot_name=slot_name,
-            raw_value=entries[0].value,
+            raw_value=raw_entry,
             legacy_entry=entries[0].legacy_entry,
             allowed_values=slot_values[slot_name],
             classification_input=classification_input,
@@ -699,6 +712,27 @@ def _raw_slot_entries_by_name(
             _RawSlotEntry(value=item_dict, legacy_entry=True)
         )
     return {slot_name: tuple(values) for slot_name, values in entries.items()}
+
+
+def _slot_value_written_as_outcome(
+    raw_value: object, *, allowed_values: Collection[str]
+) -> dict[str, object] | None:
+    """Read an entry whose outcome field carries the slot's own option.
+
+    The model sometimes writes the chosen option where the literal word
+    "resolved" belongs, with "value" equal or missing. That entry has one
+    reading, so it resolves; a different option in "value" stays malformed.
+    """
+
+    if not isinstance(raw_value, dict):
+        return None
+    item = cast(dict[str, object], raw_value)
+    outcome = item.get("outcome")
+    if not isinstance(outcome, str) or outcome.strip() not in allowed_values:
+        return None
+    if item.get("value") not in (None, outcome):
+        return None
+    return {**item, "outcome": "resolved", "value": outcome}
 
 
 def _parse_slot_outcome(
