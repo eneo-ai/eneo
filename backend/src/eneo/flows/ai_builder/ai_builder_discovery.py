@@ -594,15 +594,28 @@ def recommended_option_for_suggestion(
     The reading travels with the words it was read from when the user supplied
     them, and with nothing when a policy default, a heuristic or an attachment
     did, so a user weighing the recommendation can see whether their own
-    sentence is behind it.
+    sentence is behind it. A slot nobody has read yet recommends the table's
+    default when it has one: the value Eneo would assume is the value it
+    suggests.
     """
     if planning_state is None:
         return None
-    slot = planning_state.resolved_slots.get(
-        canonical_question_id(suggestion.question_id)
-    )
+    slot_name = canonical_question_id(suggestion.question_id)
+    slot = planning_state.resolved_slots.get(slot_name)
     if slot is None:
-        return None
+        # Nothing was read, but the table knows what Eneo would have
+        # assumed had it not needed to ask: that default is the
+        # recommendation, with no words behind it.
+        policy = SLOT_INTERACTION_POLICIES.get(slot_name)
+        default_value = policy.default_value if policy is not None else None
+        if default_value is None:
+            return None
+        defaulted = [
+            option for option in suggestion.options if option.value == default_value
+        ]
+        if len(defaulted) != 1:
+            return None
+        return RecommendedOption(option_id=defaulted[0].id)
     if (
         suggestion.question_id == "pdf_generation_mode"
         and slot.value == "pdf_template_requested"
