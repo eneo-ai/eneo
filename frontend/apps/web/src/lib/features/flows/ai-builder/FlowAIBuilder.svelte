@@ -18,12 +18,18 @@
   import BuilderConversationScreen from "./BuilderConversationScreen.svelte";
   import BuilderSessionStatus from "./BuilderSessionStatus.svelte";
   import BuilderReviewScreen from "./BuilderReviewScreen.svelte";
+  import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { summaryTerm } from "./aiBuilderSummaryText";
   import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
   import type { StructuredInputFieldAnswer } from "./structuredQuestionAnswer";
   import { reopenQuestionRequest } from "./structuredQuestionAnswer";
-  import type { AIBuilderSavedFlowStepScope, ChatMessage, RequirementsSummary } from "./protocol";
+  import type {
+    AIBuilderSavedFlowStepScope,
+    ChatMessage,
+    RequirementsSummary,
+    AIBuilderReviewContext
+  } from "./protocol";
   import {
     delegatedQuestionAnswer,
     type StructuredQuestionAnswerPayload
@@ -270,12 +276,16 @@
     return null;
   });
 
-  type Screen = "task" | "question" | "reply" | "confirm" | "build" | "review" | "conversation";
+  type Screen =
+    "task" | "question" | "reply" | "confirm" | "build" | "review" | "conversation" | "findings";
   const screen = $derived<Screen>(
     (() => {
       // The transcript is a screen of its own; it replaces the phase screen
       // instead of covering it.
       if (service.conversationOpen) return "conversation";
+      // The run review is opened on purpose and closes itself when a finding
+      // becomes a message; while open it owns the first phase's screen.
+      if (service.review.status !== "closed" && viewingPhase === 0) return "findings";
       if (viewingPhase === 2) return "review";
       if (viewingPhase === 1) return "build";
       // Changing an earlier answer happens on the confirmation, above the card
@@ -301,6 +311,8 @@
         return "max-w-[53.75rem] 2xl:max-w-[62.5rem]";
       case "task":
         return "max-w-[40.625rem] 2xl:max-w-[45rem]";
+      case "findings":
+        return "max-w-[43.75rem] 2xl:max-w-[48.125rem]";
       case "question":
       case "reply":
         return "max-w-[41.25rem] 2xl:max-w-[45.625rem]";
@@ -528,6 +540,18 @@
     await activateSavedFlowStep(scope);
   }
 
+  /** Open the run review from outside the Builder (the run history tab). */
+  export async function openReview() {
+    await service.openReview();
+  }
+
+  function prepareChangeFromFinding(detail: {
+    message: string;
+    reviewContext: AIBuilderReviewContext;
+  }) {
+    void service.sendMessage(detail.message, undefined, undefined, null, detail.reviewContext);
+  }
+
   export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
     if (!service.hasSession || service.isInitializing) {
       pendingSavedFlowStepLaunch = scope;
@@ -663,6 +687,14 @@
           oneditanswer={handleEditAnswer}
           onclose={() => service.closeConversation()}
         />
+      {:else if screen === "findings"}
+        <BuilderFindingsScreen
+          review={service.review}
+          disabled={!service.canSendMessage}
+          onprepare={prepareChangeFromFinding}
+          onclose={() => service.closeReview()}
+          onretry={() => void service.openReview()}
+        />
       {:else if screen === "task"}
         <BuilderTaskScreen
           bind:this={taskScreenRef}
@@ -672,6 +704,7 @@
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}
           oncleareditcontext={() => service.clearActiveStepScope()}
+          onopenreview={() => void service.openReview()}
         />
       {:else if screen === "question" && questionMessage}
         <BuilderQuestionScreen

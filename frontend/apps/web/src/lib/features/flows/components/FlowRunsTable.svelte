@@ -66,7 +66,8 @@
     visible = true,
     optimisticRuns = [],
     reloadTrigger = 0,
-    onOptimisticRunsConfirmed
+    onOptimisticRunsConfirmed,
+    onreview
   }: {
     flow: Flow;
     careDataPolicy?: FlowCareDataPolicy;
@@ -75,6 +76,8 @@
     optimisticRuns?: FlowRun[];
     reloadTrigger?: number;
     onOptimisticRunsConfirmed?: (runIds: string[]) => void;
+    /** Offered when the AI builder can review these runs; opens it. */
+    onreview?: () => void;
   } = $props();
 
   let history = $state(createFlowRunHistoryState());
@@ -337,7 +340,7 @@
 {/snippet}
 
 <section class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
-  <header>
+  <header class="flex flex-wrap items-start justify-between gap-3">
     <div class="min-w-0">
       <h2 class="text-primary text-base font-semibold tracking-tight sm:text-lg">
         {m.flow_history()}
@@ -346,6 +349,11 @@
         {historyModeDescription}
       </p>
     </div>
+    {#if onreview}
+      <Button variant="outline" size="sm" class="h-9" onclick={() => onreview?.()}>
+        {m.flow_history_review_with_builder()}
+      </Button>
+    {/if}
   </header>
 
   {#if history.loading}

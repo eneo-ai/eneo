@@ -4007,6 +4007,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/ai-builder/flows/{flow_id}/review-packet": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get AI Builder Flow Review Packet
+     * @description The bounded, deterministic facts the AI builder may read about a published flow's recent runs before it proposes an edit: which step outputs were observed consumed, repeated error codes, token and latency share, and evidence completeness. Runs the caller may not view are counted, never named.
+     */
+    get: operations["get_ai_builder_flow_review_packet"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/ai-builder/plans/{plan_id}": {
     parameters: {
       query?: never;
@@ -10162,6 +10182,10 @@ export interface components {
       | "builder_attachment_unavailable"
       | "edit_session_flow_required"
       | "flow_is_published"
+      | "flow_not_published"
+      | "review_stale"
+      | "review_finding_unknown"
+      | "planner_model_below_evidence_level"
       | "flow_space_mismatch"
       | "invalid_ai_builder_settings"
       | "insufficient_scope"
@@ -10357,6 +10381,26 @@ export interface components {
        * @enum {string}
        */
       event: "requirements_summary";
+    };
+    /**
+     * AIBuilderReviewContext
+     * @description What a turn says about the review it acts on: the exact reviewed
+     *     version and the findings it names. Ids only; the facts are rebuilt from
+     *     the runs on every turn, so run data never lives in the conversation.
+     */
+    AIBuilderReviewContext: {
+      /** Definition Checksum */
+      definition_checksum: string;
+      /** Finding Ids */
+      finding_ids: string[];
+      /** Flow Version */
+      flow_version: number;
+      /**
+       * Kind
+       * @default flow_review
+       * @constant
+       */
+      kind?: "flow_review";
     };
     /**
      * AIBuilderSavedFlowStepEditContext
@@ -15077,6 +15121,22 @@ export interface components {
       /** Tenant Id */
       tenant_id: string;
     };
+    /** EvidenceCompletenessFact */
+    EvidenceCompletenessFact: {
+      /** Finding Id */
+      finding_id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "evidence_completeness";
+      /** Runs Missing Step Results */
+      runs_missing_step_results: number;
+      /** Runs With All Step Results */
+      runs_with_all_step_results: number;
+      /** Runs Without Lineage */
+      runs_without_lineage: number;
+    };
     /** EvidenceExportManifest */
     EvidenceExportManifest: {
       /** Actor */
@@ -17674,6 +17734,76 @@ export interface components {
        * @description POST template for resuming a run after checkpoint approval. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling, then send the approved checkpoint `expected_checkpoint_revision`.
        */
       resume_template: string;
+    };
+    /** FlowReviewCohort */
+    FlowReviewCohort: {
+      /** Completed Run Ids */
+      completed_run_ids: string[];
+      /** Failed Run Ids */
+      failed_run_ids: string[];
+      omitted: components["schemas"]["FlowReviewOmittedRuns"];
+    };
+    /**
+     * FlowReviewOmittedRuns
+     * @description Runs the packet did not read, by reason. Counts only, never ids.
+     */
+    FlowReviewOmittedRuns: {
+      /**
+       * Level Unknown
+       * @default 0
+       */
+      level_unknown?: number;
+      /**
+       * Not Viewable
+       * @default 0
+       */
+      not_viewable?: number;
+      /**
+       * Other Version
+       * @default 0
+       */
+      other_version?: number;
+    };
+    /** FlowReviewPacket */
+    FlowReviewPacket: {
+      cohort: components["schemas"]["FlowReviewCohort"];
+      /** Definition Checksum */
+      definition_checksum: string;
+      /** Evidence Classification Level */
+      evidence_classification_level: number;
+      /** Facts */
+      facts: (
+        | components["schemas"]["OutputNotObservedConsumedFact"]
+        | components["schemas"]["RepeatedErrorCodeFact"]
+        | components["schemas"]["StepShareFact"]
+        | components["schemas"]["EvidenceCompletenessFact"]
+      )[];
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      /** Steps */
+      steps: components["schemas"]["FlowReviewStep"][];
+    };
+    /** FlowReviewStep */
+    FlowReviewStep: {
+      /** Label */
+      label: string | null;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
     };
     /** FlowReviewStepContractPublic */
     FlowReviewStepContractPublic: {
@@ -25711,6 +25841,28 @@ export interface components {
      * @enum {string}
      */
     Outcome: "success" | "failure";
+    /**
+     * OutputNotObservedConsumedFact
+     * @description No later step's resolved input cited this step's output in any completed run.
+     */
+    OutputNotObservedConsumedFact: {
+      /** Finding Id */
+      finding_id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "output_not_observed_consumed";
+      /** Run Count */
+      run_count: number;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+    };
     /** PaginatedPermissions[AppSparse] */
     PaginatedPermissions_AppSparse_: {
       /**
@@ -27778,6 +27930,27 @@ export interface components {
       /** Requirements Version */
       requirements_version: string;
     };
+    /** RepeatedErrorCodeFact */
+    RepeatedErrorCodeFact: {
+      /** Error Code */
+      error_code: string;
+      /** Finding Id */
+      finding_id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "repeated_error_code";
+      /** Run Count */
+      run_count: number;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+    };
     /**
      * ReportClientErrorRequest
      * @description One client-observed Builder failure, in the UI's own error identity.
@@ -28714,6 +28887,8 @@ export interface components {
        * @description Optional reasoning effort advertised by the selected model. Omit it to use provider defaults; unsupported values are rejected before provider work.
        */
       reasoning_effort?: string | null;
+      /** @description The flow review this turn acts on: the reviewed published version and the finding ids it names. The findings are rebuilt from the runs on the server; a republished flow is refused as review_stale. */
+      review_context?: components["schemas"]["AIBuilderReviewContext"] | null;
       /** Ui Language */
       ui_language?: string | null;
     };
@@ -30479,6 +30654,30 @@ export interface components {
        * @description Uploaded file ids to attach to this specific step. Use the step ids from `GET /api/v1/flows/{id}/run-contract/` rather than sending all files to the first step. File order is preserved for this step after duplicate ids are collapsed by first occurrence.
        */
       file_ids?: string[];
+    };
+    /**
+     * StepShareFact
+     * @description A step's mean share of the run's tokens or wall time over completed runs.
+     */
+    StepShareFact: {
+      /** Finding Id */
+      finding_id: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "latency_share" | "token_share";
+      /** Run Count */
+      run_count: number;
+      /** Share */
+      share: number;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
     };
     /** StepSpec */
     StepSpec: {
@@ -48188,6 +48387,94 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9001,
            *       "message": "You do not have permission to use Flow AI Builder.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_ai_builder_flow_review_packet: {
+    parameters: {
+      query: {
+        space_id: string;
+      };
+      header?: never;
+      path: {
+        flow_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowReviewPacket"];
+        };
+      };
+      /** @description The flow has no published version, or is not in the given space. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "bad_request",
+           *       "code": "flow_not_published",
+           *       "diagnostic_context": {
+           *         "error_category": "bad_request",
+           *         "error_code": "flow_not_published",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "The flow has no published version to review runs of.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "unauthorized",
+           *       "code": "insufficient_scope",
+           *       "details": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "diagnostic_context": {
+           *         "error_category": "unauthorized",
+           *         "error_code": "insufficient_scope",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested AI builder resource.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2

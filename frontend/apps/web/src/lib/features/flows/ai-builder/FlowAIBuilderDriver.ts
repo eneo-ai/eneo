@@ -39,7 +39,9 @@ import type {
   ProposedPlan,
   RequirementsSummary,
   RecoverableAIBuilderDraftSession,
-  TargetKind
+  TargetKind,
+  AIBuilderFlowReviewPacket,
+  AIBuilderReviewContext
 } from "./protocol";
 
 export interface AIBuilderClientTransport {
@@ -60,6 +62,7 @@ const FLOW_AI_BUILDER_ROUTES = {
   planCreate: "/api/v1/flows/ai-builder/plans/{plan_id}/create",
   planRevise: "/api/v1/flows/ai-builder/plans/{plan_id}/revise",
   clientErrors: "/api/v1/flows/ai-builder/client-errors",
+  flowReviewPacket: "/api/v1/flows/ai-builder/flows/{flow_id}/review-packet",
   flowUnpublish: "/api/v1/flows/{id}/unpublish/"
 } as const;
 
@@ -622,11 +625,25 @@ export class FlowAIBuilderDriver {
     }
   }
 
+  /** The facts the Builder may read about the published flow's recent runs.
+   *  Fetched on demand; the packet is deterministic, so it is never cached
+   *  across turns and a republished flow simply yields a new one. */
+  async fetchFlowReviewPacket(): Promise<AIBuilderFlowReviewPacket> {
+    if (!this.#flowId) {
+      throw new Error("A flow review needs an edit session's flow.");
+    }
+    return (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowReviewPacket, {
+      method: "get",
+      params: { path: { flow_id: this.#flowId }, query: { space_id: this.#spaceId } }
+    })) as AIBuilderFlowReviewPacket;
+  }
+
   async sendMessage(
     message: string,
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
-    editContext?: AIBuilderEditContext | null
+    editContext?: AIBuilderEditContext | null,
+    reviewContext?: AIBuilderReviewContext | null
   ): Promise<AIBuilderSendOutcome> {
     if (
       !this.#state.session ||
@@ -686,6 +703,10 @@ export class FlowAIBuilderDriver {
     }
     if (editContext) {
       requestBody.edit_context = editContext;
+    }
+    if (reviewContext) {
+      requestBody.review_context = reviewContext;
+      userMsg.metadata = { ...(userMsg.metadata ?? {}), review_context: reviewContext };
     }
 
     return await this.#streamMessageRequest(requestBody, userMsg);

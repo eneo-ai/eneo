@@ -51,6 +51,16 @@ export type AIBuilderTurnRecoveryState = Extract<
 >;
 
 export type AIBuilderEditContext = NonNullable<AIBuilderSendMessageRequest["edit_context"]>;
+export type AIBuilderReviewContext = NonNullable<AIBuilderSendMessageRequest["review_context"]>;
+export type AIBuilderFlowReviewPacket = components["schemas"]["FlowReviewPacket"];
+export type AIBuilderFlowReviewStep = AIBuilderFlowReviewPacket["steps"][number];
+export type AIBuilderFlowReviewFact = AIBuilderFlowReviewPacket["facts"][number];
+/** The review the Builder shows: closed, loading, the packet, or why it failed. */
+export type AIBuilderFlowReviewState =
+  | { status: "closed" }
+  | { status: "loading" }
+  | { status: "ready"; packet: AIBuilderFlowReviewPacket }
+  | { status: "failed"; error: AIBuilderError };
 
 export type AIBuilderPlanEditContext = Extract<AIBuilderEditContext, { kind: "proposed_plan" }>;
 
@@ -554,6 +564,10 @@ const aiBuilderErrorCodes = [
   "builder_attachment_unavailable",
   "edit_session_flow_required",
   "flow_is_published",
+  "flow_not_published",
+  "review_stale",
+  "review_finding_unknown",
+  "planner_model_below_evidence_level",
   "flow_space_mismatch",
   "invalid_ai_builder_settings",
   "insufficient_scope",

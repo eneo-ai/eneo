@@ -1,3 +1,4 @@
+import { m } from "$lib/paraglide/messages";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import type { Eneo } from "@eneo/eneo-js";
 import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswer";
@@ -11,6 +12,7 @@ import {
   type PendingPlanOperationKind
 } from "./FlowAIBuilderDriver";
 import { classifyAIBuilderConflict, type AIBuilderConflict } from "./aiBuilderConflict";
+import { parseAIBuilderError } from "./aiBuilderError";
 import type {
   AIBuilderDraftSession,
   AIBuilderError,
@@ -32,7 +34,9 @@ import type {
   RecoverableAIBuilderDraftSession,
   RequirementsSummary,
   SessionStatus,
-  TargetKind
+  TargetKind,
+  AIBuilderFlowReviewState,
+  AIBuilderReviewContext
 } from "./protocol";
 
 export class FlowAIBuilderService {
@@ -378,13 +382,48 @@ export class FlowAIBuilderService {
     await this.#driver.refreshSession();
   }
 
+  /** The flow review the user opened from the task screen or run history:
+   *  closed, loading, the packet, or the load failure. */
+  review: AIBuilderFlowReviewState = $state({ status: "closed" });
+
+  async openReview(): Promise<void> {
+    this.review = { status: "loading" };
+    try {
+      const packet = await this.#driver.fetchFlowReviewPacket();
+      this.review = { status: "ready", packet };
+    } catch (error) {
+      this.review = {
+        status: "failed",
+        error: parseAIBuilderError({
+          transport: "apply",
+          payload: error,
+          fallbackMessage: m.ai_builder_review_load_failed()
+        })
+      };
+    }
+  }
+
+  closeReview(): void {
+    this.review = { status: "closed" };
+  }
+
   async sendMessage(
     message: string,
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
-    editContext?: AIBuilderEditContext | null
+    editContext?: AIBuilderEditContext | null,
+    reviewContext?: AIBuilderReviewContext | null
   ): Promise<AIBuilderSendOutcome> {
-    const outcome = await this.#driver.sendMessage(message, questionAnswer, fileIds, editContext);
+    const outcome = await this.#driver.sendMessage(
+      message,
+      questionAnswer,
+      fileIds,
+      editContext,
+      reviewContext
+    );
+    if (outcome !== "not_started" && reviewContext) {
+      this.review = { status: "closed" };
+    }
     if (this.#state.error?.code === "invalid_existing_step_ref") {
       this.clearSavedFlowStepScope();
     }

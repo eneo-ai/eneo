@@ -25,6 +25,11 @@
     return service.messages.length > 0 || service.currentPlan !== null;
   }
 
+  export async function openReview() {
+    await tick();
+    await builder?.openReview();
+  }
+
   export async function focusSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
     // The host and its lazily rendered Builder child bind in separate update
     // flushes when the user opens the tab for the first time.

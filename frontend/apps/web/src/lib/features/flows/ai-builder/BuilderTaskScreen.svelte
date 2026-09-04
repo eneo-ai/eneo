@@ -12,10 +12,12 @@
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
     oncleareditcontext?: () => void;
+    onopenreview?: () => void;
   }
 
   let {
     targetKind,
+    onopenreview,
     otherDraftCount = 0,
     flowsHref,
     editContext = null,
@@ -69,6 +71,25 @@
       />
     </div>
     <p class="text-secondary mt-2 px-0.5 text-xs">{m.ai_builder_task_model_note()}</p>
+
+    {#if isEdit && onopenreview}
+      <div
+        class="border-default mt-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t pt-4"
+      >
+        <span class="text-secondary max-w-[44ch] text-xs text-pretty">
+          {m.ai_builder_review_entry_hint()}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          class="rounded-full font-normal max-sm:h-[44px]"
+          data-testid="open-review"
+          onclick={() => onopenreview?.()}
+        >
+          {m.ai_builder_review_entry()}
+        </Button>
+      </div>
+    {/if}
 
     {#if !isEdit}
       <div class="mt-4 flex flex-wrap items-center gap-2">

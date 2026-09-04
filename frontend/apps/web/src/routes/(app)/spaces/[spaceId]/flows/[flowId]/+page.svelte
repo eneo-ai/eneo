@@ -1443,6 +1443,12 @@
           const confirmedIds = new Set(runIds);
           optimisticHistoryRuns = optimisticHistoryRuns.filter((run) => !confirmedIds.has(run.id));
         }}
+        onreview={canUseAIBuilder && $resource.published_version != null
+          ? () => {
+              setActiveTab("ai-builder");
+              void aiBuilderHost?.openReview();
+            }
+          : undefined}
       />
     </div>
   </Page.Main>
