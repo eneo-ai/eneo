@@ -911,7 +911,9 @@ def test_policy_asks_unresolved_report_disposition_before_architecture_commit() 
     assert policy.allowed_ask_question_targets == ("report_disposition",)
 
 
-def test_policy_default_multi_source_scope_still_requires_report_disposition() -> None:
+def test_policy_default_multi_source_scope_carries_an_assumed_report_layout() -> None:
+    # A scope the policy assumed is not the user's decision, so the layout
+    # that depends on it is assumed with it and shown as a row, not asked.
     state = _state_with_resolved_slots("primary_runtime_input")
     state.resolved_slots["terminal_output"] = _slot(
         "terminal_output",
@@ -920,13 +922,17 @@ def test_policy_default_multi_source_scope_still_requires_report_disposition() -
     apply_policy_defaults_from_resolved_slots(state, freeform_text="")
 
     assert state.resolved_slots["document_material_scope"].source == "policy_default"
+    layout = state.resolved_slots["report_disposition"]
+    assert (layout.source, layout.value) == ("policy_default", "synthesized_overview")
     policy = build_planner_action_policy(
         session_state=state,
         selected_discovery_question_ids=(),
     )
+    draft = derive_architecture_commit_draft(state)
 
-    assert policy.allowed_action_kinds == ("ask_question",)
-    assert policy.allowed_ask_question_targets == ("report_disposition",)
+    assert policy.allowed_action_kinds == ("commit_architecture",)
+    assert draft is not None
+    assert draft.report_disposition == "synthesized_overview"
 
 
 def test_resolved_disposition_commits_with_policy_default_multi_source_scope() -> None:
