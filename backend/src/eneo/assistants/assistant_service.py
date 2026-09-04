@@ -1,3 +1,4 @@
+import copy
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
@@ -73,6 +74,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     GENERAL_PURPOSE,
     allowed_capability_purposes,
     duplicate_capability_purposes,
+    is_builtin_provider,
     is_capability_purpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate
@@ -354,6 +356,25 @@ class AssistantService:
         self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
+
+    def _with_builtin_provider_token(
+        self, server: "MCPServer", *, assistant_id: UUID
+    ) -> "MCPServer":
+        """Authenticate a built-in capability provider for this completion.
+
+        A built-in provider stores no credentials: its endpoint is Eneo's own
+        loopback server, which reads the provider row named by the token. The
+        token is minted per completion on a copy, so the persisted entity
+        never carries it. External providers pass through untouched.
+        """
+        if not is_builtin_provider(server.http_auth_type):
+            return server
+        token = self.auth_service.create_scoped_mcp_token(
+            self.user, assistant_id=assistant_id, mcp_server_id=server.id
+        )
+        authenticated = copy.copy(server)
+        authenticated.http_auth_config_schema = {"token": token}
+        return authenticated
 
     async def _save_generated_image(self, image: "GeneratedImage") -> "File":
         """Persist a tool-produced image as a generated file."""
@@ -2899,7 +2920,12 @@ class AssistantService:
                 space_security_classification=space.security_classification,
             )
             mcp_servers_override = resolution.general_servers
-            capability_mcp_servers = resolution.capability_servers
+            capability_mcp_servers = [
+                self._with_builtin_provider_token(
+                    server, assistant_id=assistant_to_ask.id
+                )
+                for server in resolution.capability_servers
+            ]
 
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question

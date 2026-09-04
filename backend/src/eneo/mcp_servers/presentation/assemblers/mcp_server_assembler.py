@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.mcp_servers.presentation.models import (
+    BuiltinProviderConfig,
     MCPServerAudience,
     MCPServerAudienceGroupPublic,
     MCPServerList,
@@ -108,6 +109,11 @@ class MCPServerAssembler:
             is_enabled=mcp_server.is_enabled,
             audience=cast(MCPServerAudience, mcp_server.audience),
             audience_priority=mcp_server.audience_priority,
+            provider_config=(
+                BuiltinProviderConfig.model_validate(mcp_server.provider_config)
+                if mcp_server.provider_config
+                else None
+            ),
             user_groups=[
                 MCPServerAudienceGroupPublic(id=group.id, name=group.name)
                 for group in mcp_server.user_groups
@@ -177,6 +183,11 @@ class MCPServerSettingsAssembler:
             is_enabled=mcp_server.is_enabled,
             audience=cast(MCPServerAudience, mcp_server.audience),
             audience_priority=mcp_server.audience_priority,
+            provider_config=(
+                BuiltinProviderConfig.model_validate(mcp_server.provider_config)
+                if mcp_server.provider_config
+                else None
+            ),
             user_groups=[
                 MCPServerAudienceGroupPublic(id=group.id, name=group.name)
                 for group in mcp_server.user_groups

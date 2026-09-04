@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
@@ -41,6 +41,66 @@ AUDIENCE_EVERYONE = "everyone"
 AUDIENCE_GROUPS = "groups"
 AUDIENCES: tuple[str, ...] = (AUDIENCE_EVERYONE, AUDIENCE_GROUPS)
 DEFAULT_AUDIENCE_PRIORITY = 100
+
+# A built-in provider is an ordinary row whose endpoint is one of Eneo's own
+# loopback MCP servers. It differs from an external server only by this auth
+# type: the ask path mints a scoped token for it instead of sending stored
+# credentials, and ``provider_config`` tells the loopback tool which tenant
+# model provider and model to call. Today only image generation has one.
+INTERNAL_AUTH_TYPE = "internal"
+BUILTIN_PROVIDER_PURPOSES: tuple[str, ...] = ("image_generation",)
+BUILTIN_IMAGE_SIZES: tuple[str, ...] = ("auto", "1024x1024", "1536x1024", "1024x1536")
+BUILTIN_IMAGE_QUALITIES: tuple[str, ...] = ("auto", "low", "medium", "high")
+BUILTIN_MODEL_NAME_MAX_LENGTH = 200
+
+
+def is_builtin_provider(http_auth_type: str | None) -> bool:
+    return http_auth_type == INTERNAL_AUTH_TYPE
+
+
+def validate_builtin_provider_config(config: Any) -> dict[str, Any]:
+    """Normalize the ``provider_config`` of a built-in provider.
+
+    Returns ``{"model_provider_id", "model", "size", "quality"}`` with the id
+    as a UUID string. Raises ``ValueError`` with an admin-readable message.
+    Whether the model provider exists in the tenant is the service's check.
+    """
+    if not isinstance(config, dict):
+        raise ValueError("provider_config must be an object")
+    values = cast(dict[str, object], config)
+    raw_id = values.get("model_provider_id")
+    try:
+        model_provider_id = str(UUID(str(raw_id)))
+    except (TypeError, ValueError):
+        raise ValueError("provider_config.model_provider_id must be a UUID") from None
+    raw_model = values.get("model")
+    if not isinstance(raw_model, str) or not raw_model.strip():
+        raise ValueError("provider_config.model is required")
+    model = raw_model.strip()
+    if len(model) > BUILTIN_MODEL_NAME_MAX_LENGTH:
+        raise ValueError(
+            f"provider_config.model must be at most "
+            f"{BUILTIN_MODEL_NAME_MAX_LENGTH} characters"
+        )
+    raw_size = values.get("size")
+    size = raw_size if isinstance(raw_size, str) and raw_size else "auto"
+    if size not in BUILTIN_IMAGE_SIZES:
+        raise ValueError(
+            "provider_config.size must be one of " + ", ".join(BUILTIN_IMAGE_SIZES)
+        )
+    raw_quality = values.get("quality")
+    quality = raw_quality if isinstance(raw_quality, str) and raw_quality else "auto"
+    if quality not in BUILTIN_IMAGE_QUALITIES:
+        raise ValueError(
+            "provider_config.quality must be one of "
+            + ", ".join(BUILTIN_IMAGE_QUALITIES)
+        )
+    return {
+        "model_provider_id": model_provider_id,
+        "model": model,
+        "size": size,
+        "quality": quality,
+    }
 
 
 def is_capability_purpose(purpose: str | None) -> bool:
@@ -182,6 +242,7 @@ class MCPServer(Entity):
         audience: str = AUDIENCE_EVERYONE,
         audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
         user_groups: Optional[list[MCPServerAudienceGroup]] = None,
+        provider_config: Optional[dict[str, Any]] = None,
         forward_identity: bool = False,
         tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
         tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -208,6 +269,7 @@ class MCPServer(Entity):
         self.audience = audience
         self.audience_priority = audience_priority
         self.user_groups = list(user_groups or [])
+        self.provider_config = provider_config
         self.forward_identity = forward_identity
         self.tool_catalog_max_count = tool_catalog_max_count
         self.tool_catalog_max_bytes = tool_catalog_max_bytes

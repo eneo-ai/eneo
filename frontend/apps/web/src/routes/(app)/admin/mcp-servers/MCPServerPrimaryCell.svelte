@@ -6,7 +6,7 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Globe, KeyRound, Shield, ShieldCheck, UsersRound } from "lucide-svelte";
+  import { Globe, KeyRound, Shield, ShieldCheck, Sparkles, UsersRound } from "lucide-svelte";
   import { getCapability } from "$lib/features/mcp/capabilities";
 
   type Props = {
@@ -15,6 +15,7 @@
       description?: string | null;
       http_url: string;
       http_auth_type: string;
+      provider_config?: { model?: string | null } | null;
       purpose?: string | null;
       audience?: string | null;
       user_groups?: Array<{ id: string; name: string }> | null;
@@ -43,6 +44,13 @@
         return {
           label: "API key",
           icon: KeyRound,
+          classes: "bg-accent-dimmer text-accent-stronger"
+        };
+      case "internal":
+        // Built-in provider: Eneo's own loopback server, no stored credentials.
+        return {
+          label: m.mcp_auth_internal(),
+          icon: Sparkles,
           classes: "bg-accent-dimmer text-accent-stronger"
         };
       default:
@@ -117,14 +125,23 @@
   {#if mcpServer.description}
     <p class="text-muted line-clamp-1 text-sm leading-snug">{mcpServer.description}</p>
   {/if}
-  <span
-    class="text-dimmer inline-flex items-center gap-1.5 truncate font-mono text-xs"
-    aria-label={m.mcp_server_url_aria()}
-  >
+  {#if mcpServer.http_auth_type === "internal"}
+    <!-- A built-in provider's endpoint is Eneo's own loopback: plumbing, not
+         something the admin chose. The model is what they configured. -->
+    <span class="text-dimmer inline-flex items-center gap-1.5 truncate text-xs">
+      <span class="text-muted">{m.mcp_builtin_model()}:</span>
+      <span class="font-mono">{mcpServer.provider_config?.model}</span>
+    </span>
+  {:else}
     <span
-      class="bg-positive-default inline-block h-1.5 w-1.5 animate-pulse rounded-full"
-      aria-hidden="true"
-    ></span>
-    {mcpServer.http_url}
-  </span>
+      class="text-dimmer inline-flex items-center gap-1.5 truncate font-mono text-xs"
+      aria-label={m.mcp_server_url_aria()}
+    >
+      <span
+        class="bg-positive-default inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+        aria-hidden="true"
+      ></span>
+      {mcpServer.http_url}
+    </span>
+  {/if}
 </div>

@@ -8,7 +8,7 @@
   import { Page, Settings } from "$lib/components/layout";
   import { Button } from "@eneo/ui";
   import { invalidate } from "$app/navigation";
-  import { Plus } from "lucide-svelte";
+  import { KeyRound, Plus, Sparkles, Wrench } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
@@ -22,6 +22,14 @@
   setSecurityContext(untrack(() => data.securityClassifications));
 
   let showAddDialog = writable(false);
+  // The dialog opens on this purpose: "general" from the page header, a
+  // capability from its card so the admin never has to find "Used for".
+  let presetPurpose = $state("general");
+
+  function openAddDialog(purpose = "general") {
+    presetPurpose = purpose;
+    $showAddDialog = true;
+  }
 
   async function handleAddMCP(mcpData: Record<string, unknown>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,6 +39,22 @@
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mcpServers = $derived((data.mcpSettings?.items || []) as any[]);
+
+  const explainerCards = [
+    {
+      icon: Sparkles,
+      title: m.mcp_capability_feature,
+      description: m.mcp_capability_feature_description,
+      wide: true
+    },
+    { icon: KeyRound, title: m.mcp_auth_feature, description: m.mcp_auth_description, wide: false },
+    {
+      icon: Wrench,
+      title: m.mcp_tool_discovery_feature,
+      description: m.mcp_tool_discovery_description,
+      wide: false
+    }
+  ];
 </script>
 
 <svelte:head>
@@ -41,7 +65,7 @@
   <Page.Header>
     <Page.Title title={m.mcp_servers()}></Page.Title>
     <div class="flex gap-2">
-      <Button variant="primary" size="sm" onclick={() => ($showAddDialog = true)}>
+      <Button variant="primary" size="sm" onclick={() => openAddDialog()}>
         <Plus class="mr-2 h-4 w-4" />
         {m.add_mcp_server()}
       </Button>
@@ -51,55 +75,71 @@
     <Settings.Page>
       <Settings.Group title={m.available_mcp_servers()}>
         <!-- Which provider is live for each capability, at a glance. -->
-        <div
-          class="border-dimmer bg-secondary/20 mb-4 grid gap-4 rounded-xl border p-4 sm:grid-cols-2"
-          aria-label={m.capabilities()}
+        <section
+          aria-labelledby="capability-overview-title"
+          class="border-dimmer bg-secondary/20 mb-4 rounded-xl border p-4"
         >
-          {#each CAPABILITIES as capability (capability.purpose)}
-            {@const activeProviders = mcpServers.filter(
-              (server) => server.purpose === capability.purpose && server.is_enabled
-            )}
-            {@const active = activeProviders.find((server) => server.audience !== "groups")}
-            {@const groupProviders = activeProviders.filter(
-              (server) => server.audience === "groups"
-            )}
-            <div class="flex items-center gap-3">
-              <span
-                class="bg-accent-dimmer flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-              >
-                <capability.icon class="text-accent-default h-4 w-4" aria-hidden="true" />
-              </span>
-              <div class="min-w-0">
-                <p class="text-default text-sm font-medium">{capability.label()}</p>
-                {#if active}
-                  <p class="text-muted flex items-center gap-1.5 truncate text-xs">
-                    <span
-                      class="bg-positive-dimmer text-positive-stronger inline-flex rounded-md px-1.5 py-0.5 font-medium"
+          <div class="mb-4 flex max-w-[72ch] flex-col gap-1">
+            <h3 id="capability-overview-title" class="text-default text-sm font-semibold">
+              {m.capability_overview_title()}
+            </h3>
+            <p class="text-secondary text-sm leading-5">{m.capability_overview_lead()}</p>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            {#each CAPABILITIES as capability (capability.purpose)}
+              {@const labelInSentence = capability.label().toLocaleLowerCase()}
+              {@const activeProviders = mcpServers.filter(
+                (server) => server.purpose === capability.purpose && server.is_enabled
+              )}
+              {@const active = activeProviders.find((server) => server.audience !== "groups")}
+              {@const groupProviders = activeProviders.filter(
+                (server) => server.audience === "groups"
+              )}
+              {@const groupNames = groupProviders.map((server) => server.name).join(", ")}
+              <div class="flex items-start gap-3">
+                <span
+                  class="bg-accent-dimmer flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                >
+                  <capability.icon class="text-accent-default h-4 w-4" aria-hidden="true" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="text-default text-sm font-medium">{capability.label()}</p>
+                  {#if active}
+                    <p class="text-secondary flex items-center gap-1.5 text-sm">
+                      <span
+                        class="bg-positive-dimmer text-positive-stronger inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium"
+                      >
+                        {m.capability_default_provider()}
+                      </span>
+                      <span aria-hidden="true">·</span>
+                      <span class="truncate">{active.name}</span>
+                    </p>
+                  {:else}
+                    <p class="text-secondary text-sm">
+                      {m.capability_no_active_provider({ capability: labelInSentence })}
+                    </p>
+                    <Button
+                      variant="primary-outlined"
+                      size="sm"
+                      class="mt-2 text-sm"
+                      onclick={() => openAddDialog(capability.purpose)}
                     >
-                      {m.capability_default_provider()}
-                    </span>
-                    {active.name}
-                  </p>
-                {:else}
-                  <p class="text-muted text-xs">{m.capability_no_active_provider()}</p>
-                {/if}
-                {#if groupProviders.length > 0}
-                  <p
-                    class="text-muted truncate text-xs"
-                    title={groupProviders
-                      .map(
-                        (server) =>
-                          `${server.name}: ${(server.user_groups ?? []).map((group: { name: string }) => group.name).join(", ")}`
-                      )
-                      .join("\n")}
-                  >
-                    {m.capability_group_providers({ count: groupProviders.length })}
-                  </p>
-                {/if}
+                      {m.capability_configure({ capability: labelInSentence })}
+                    </Button>
+                  {/if}
+                  {#if groupProviders.length > 0}
+                    <p class="text-secondary truncate text-sm">
+                      {m.capability_group_providers({
+                        count: groupProviders.length,
+                        names: groupNames
+                      })}
+                    </p>
+                  {/if}
+                </div>
               </div>
-            </div>
-          {/each}
-        </div>
+            {/each}
+          </div>
+        </section>
         {#if mcpServers.length > 0}
           <MCPServersTable {mcpServers} />
         {:else}
@@ -116,7 +156,7 @@
             <p class="text-muted mb-6 max-w-sm text-center text-sm">
               {m.add_mcp_server_to_get_started()}
             </p>
-            <Button variant="primary" size="sm" onclick={() => ($showAddDialog = true)}>
+            <Button variant="primary" size="sm" onclick={() => openAddDialog()}>
               <Plus class="mr-2 h-4 w-4" />
               {m.add_mcp_server()}
             </Button>
@@ -126,56 +166,29 @@
 
       <Settings.Group title={m.what_are_mcp_servers()}>
         <div class="border-default bg-secondary/50 rounded-xl border p-6">
-          <p class="text-secondary mb-4 text-sm leading-relaxed">
+          <p class="text-secondary mb-4 max-w-[72ch] text-sm leading-relaxed">
             {m.mcp_servers_description_paragraph()}
           </p>
           <div class="grid gap-3 sm:grid-cols-2">
-            <div class="border-dimmer bg-primary/50 flex gap-3 rounded-lg border p-4">
+            {#each explainerCards as card (card.title)}
               <div
-                class="bg-amethyst-100 dark:bg-amethyst-900 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                class="border-dimmer bg-primary/50 flex gap-3 rounded-lg border p-4 {card.wide
+                  ? 'sm:col-span-2'
+                  : ''}"
               >
-                <svg
-                  class="text-amethyst-500 h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
+                <div
+                  class="bg-accent-dimmer flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-                  />
-                </svg>
+                  <card.icon class="text-accent-default h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <h3 class="text-default text-sm font-medium">{card.title()}</h3>
+                  <p class="text-secondary mt-0.5 max-w-[72ch] text-sm leading-5">
+                    {card.description()}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 class="text-default text-sm font-medium">{m.mcp_auth_feature()}</h4>
-                <p class="text-muted mt-0.5 text-xs">{m.mcp_auth_description()}</p>
-              </div>
-            </div>
-            <div class="border-dimmer bg-primary/50 flex gap-3 rounded-lg border p-4">
-              <div
-                class="bg-pine-100 dark:bg-pine-900 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-              >
-                <svg
-                  class="text-pine-500 h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                  />
-                </svg>
-              </div>
-              <div>
-                <h4 class="text-default text-sm font-medium">{m.mcp_tool_discovery_feature()}</h4>
-                <p class="text-muted mt-0.5 text-xs">{m.mcp_tool_discovery_description()}</p>
-              </div>
-            </div>
+            {/each}
           </div>
         </div>
       </Settings.Group>
@@ -184,4 +197,8 @@
 </Page.Root>
 
 <!-- Add MCP Dialog -->
-<MCPServerDialog openController={showAddDialog} onSubmit={handleAddMCP} />
+<MCPServerDialog
+  openController={showAddDialog}
+  onSubmit={handleAddMCP}
+  initialPurpose={presetPurpose}
+/>

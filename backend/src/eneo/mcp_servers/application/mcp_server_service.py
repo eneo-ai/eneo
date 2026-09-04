@@ -6,10 +6,13 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
+    ProviderInactiveException,
+    ProviderNotFoundException,
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
@@ -17,21 +20,28 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
     AUDIENCE_GROUPS,
     AUDIENCES,
+    BUILTIN_PROVIDER_PURPOSES,
     DEFAULT_AUDIENCE_PRIORITY,
     GENERAL_PURPOSE,
+    INTERNAL_AUTH_TYPE,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
     MCPServer,
     MCPServerAudienceGroup,
     MCPServerTool,
+    is_builtin_provider,
     is_capability_purpose,
+    validate_builtin_provider_config,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
+from eneo.model_providers.infrastructure.litellm_provider import (
+    load_active_litellm_provider,
+)
 from eneo.roles.permissions import Permission, validate_permissions
 
 _NAME_CONSTRAINT = "uq_mcp_servers_tenant_name_purpose"
@@ -251,6 +261,13 @@ class MCPServerService:
         """
         if http_auth_type == "none":
             return
+        if http_auth_type == INTERNAL_AUTH_TYPE:
+            if config:
+                raise BadRequestException(
+                    "A built-in provider carries no credentials; the ask path "
+                    "authenticates it with a scoped token."
+                )
+            return
 
         token = (config or {}).get("token")
         if token is not None:
@@ -281,6 +298,39 @@ class MCPServerService:
             raise BadRequestException(
                 f"Header '{header_name}' is reserved and cannot carry credentials"
             )
+
+    @staticmethod
+    def builtin_provider_url(purpose: str) -> str:
+        """Loopback endpoint of the built-in provider for ``purpose``."""
+        base = get_settings().internal_mcp_base_url.rstrip("/")
+        return f"{base}/internal-mcp/{purpose}/mcp"
+
+    async def _resolve_builtin_provider_config(
+        self, purpose: str, provider_config: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Validate a built-in provider's purpose and model selection.
+
+        The model provider must exist in the tenant and be active; the loopback
+        tool loads credentials from it at call time.
+        """
+        if purpose not in BUILTIN_PROVIDER_PURPOSES:
+            raise BadRequestException(
+                "A built-in provider is available for: "
+                + ", ".join(BUILTIN_PROVIDER_PURPOSES)
+            )
+        try:
+            resolved = validate_builtin_provider_config(provider_config)
+        except ValueError as exc:
+            raise BadRequestException(str(exc)) from exc
+        try:
+            await load_active_litellm_provider(
+                session=self.repo.session,
+                provider_id=UUID(resolved["model_provider_id"]),
+                tenant_id=self.user.tenant_id,
+            )
+        except (ProviderNotFoundException, ProviderInactiveException) as exc:
+            raise BadRequestException(str(exc)) from exc
+        return resolved
 
     async def _get_server_for_tenant(self, mcp_server_id: UUID) -> MCPServer:
         """Fetch an MCP server and verify it belongs to the current user's tenant."""
@@ -364,18 +414,35 @@ class MCPServerService:
         audience: str = AUDIENCE_EVERYONE,
         audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
         user_group_ids: list[UUID] | None = None,
+        provider_config: dict[str, Any] | None = None,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
         Validates connection BEFORE saving to database to avoid orphaned entries.
+
+        A built-in provider (``http_auth_type = "internal"``) ignores the given
+        URL and identity forwarding: its endpoint is Eneo's own loopback server
+        for the purpose, and ``provider_config`` selects the model it calls.
         """
-        http_url = str(http_url)
         if icon_url is not None:
             icon_url = str(icon_url)
         if documentation_url is not None:
             documentation_url = str(documentation_url)
 
         self._validate_auth_config(http_auth_type, http_auth_config_schema)
+        if is_builtin_provider(http_auth_type):
+            provider_config = await self._resolve_builtin_provider_config(
+                purpose, provider_config
+            )
+            http_url = self.builtin_provider_url(purpose)
+            forward_identity = False
+        elif provider_config is not None:
+            raise BadRequestException(
+                "provider_config applies only to built-in providers"
+            )
+        elif not http_url:
+            raise BadRequestException("http_url is required")
+        http_url = str(http_url)
         user_groups = await self._resolve_audience(
             purpose, audience, list(user_group_ids or [])
         )
@@ -393,6 +460,7 @@ class MCPServerService:
             audience=audience,
             audience_priority=audience_priority,
             user_groups=user_groups,
+            provider_config=provider_config,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -468,6 +536,7 @@ class MCPServerService:
         audience: str | None = None,
         audience_priority: int | None = None,
         user_group_ids: list[UUID] | None = None,
+        provider_config: "dict[str, Any] | None | NotProvided" = NOT_PROVIDED,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
@@ -517,11 +586,45 @@ class MCPServerService:
                     **http_auth_config_schema,
                 }
             self._validate_auth_config(effective_auth_type, http_auth_config_schema)
-        elif auth_type_changed:
+        elif auth_type_changed and not is_builtin_provider(effective_auth_type):
+            # Stored credentials are re-validated against the new type. A move
+            # to built-in drops them instead (below), so there is nothing to
+            # validate.
             self._validate_auth_config(
                 effective_auth_type,
                 self._decrypt_auth_config(mcp_server.http_auth_config_schema),
             )
+
+        # Built-in providers: the URL is Eneo's loopback endpoint and the model
+        # selection is validated whenever it (or the auth type, or the purpose)
+        # changes. Leaving the internal auth type drops the selection.
+        effective_purpose = purpose if purpose is not None else mcp_server.purpose
+        if is_builtin_provider(effective_auth_type):
+            config_changing = not isinstance(provider_config, NotProvided)
+            if auth_type_changed or config_changing or purpose is not None:
+                mcp_server.provider_config = (
+                    await self._resolve_builtin_provider_config(
+                        effective_purpose,
+                        provider_config
+                        if config_changing
+                        else mcp_server.provider_config,
+                    )
+                )
+            builtin_url = self.builtin_provider_url(effective_purpose)
+            url_changed = builtin_url != mcp_server.http_url
+            http_url = builtin_url
+            forward_identity = False
+            identity_mode_changed = identity_mode_changed and bool(
+                mcp_server.forward_identity
+            )
+        else:
+            if not isinstance(provider_config, NotProvided) and (
+                provider_config is not None
+            ):
+                raise BadRequestException(
+                    "provider_config applies only to built-in providers"
+                )
+            mcp_server.provider_config = None
 
         # Apply changes to domain object
         if name is not None:
@@ -530,8 +633,8 @@ class MCPServerService:
             mcp_server.http_url = str(http_url)
         if http_auth_type is not None:
             mcp_server.http_auth_type = http_auth_type
-            # If switching to "none", clear credentials
-            if http_auth_type == "none":
+            # Switching to a type without stored credentials clears them
+            if http_auth_type in ("none", INTERNAL_AUTH_TYPE):
                 mcp_server.http_auth_config_schema = None
         if description is not None:
             mcp_server.description = description
@@ -604,7 +707,7 @@ class MCPServerService:
             or credentials_changed
             or identity_mode_changed
         ):
-            if mcp_server.http_auth_type == "none":
+            if mcp_server.http_auth_type in ("none", INTERNAL_AUTH_TYPE):
                 test_credentials = None
             elif http_auth_config_schema is not None:
                 # New credentials provided — use plaintext for test
@@ -625,6 +728,16 @@ class MCPServerService:
                 return MCPServerUpdateResult(
                     server=mcp_server, connection=connection_result
                 )
+            if is_builtin_provider(mcp_server.http_auth_type) and (
+                auth_type_changed or url_changed
+            ):
+                # Moving onto the loopback replaces whatever catalog served
+                # this row before, and the definitions are Eneo's own code:
+                # reconcile and approve them within the same update.
+                await self._sync_discovered_tool_definitions(
+                    mcp_server, discovered_tools
+                )
+                await self.approve_all_tool_changes(mcp_server.id)
             if identity_mode_changed and not mcp_server.forward_identity:
                 try:
                     await self._sync_discovered_tool_definitions(
@@ -907,7 +1020,12 @@ class MCPServerService:
                 mcp_server.http_auth_config_schema
             )
 
-        return await self.discover_and_sync_tools(mcp_server, auth_credentials)
+        result = await self.discover_and_sync_tools(mcp_server, auth_credentials)
+        if is_builtin_provider(mcp_server.http_auth_type):
+            # The approval gate guards against a compromised remote; a built-in
+            # provider's definitions are Eneo's own code.
+            await self.approve_all_tool_changes(mcp_server_id)
+        return result
 
     @validate_permissions(Permission.ADMIN)
     async def approve_tool_changes(

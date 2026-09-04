@@ -663,7 +663,10 @@ class MCPClient:
         """Build authentication headers for this connection."""
         headers: dict[str, str] = {}
 
-        if self.mcp_server.http_auth_type == "bearer":
+        if self.mcp_server.http_auth_type in ("bearer", "internal"):
+            # "internal" is a built-in provider on Eneo's own loopback server:
+            # the token is a per-request scoped access token minted by the
+            # ask path, never a stored credential.
             token = self.auth_credentials.get("token")
             if token:
                 headers["Authorization"] = f"Bearer {token}"

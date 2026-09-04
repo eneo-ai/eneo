@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     ForeignKey,
     Index,
     Integer,
@@ -41,6 +42,10 @@ class MCPServers(BasePublic):
         # one DEFAULT provider (audience = everyone) may be active at a time;
         # activation is an explicit transactional switch. Group-targeted
         # providers coexist with the default and with each other.
+        CheckConstraint(
+            "(http_auth_type = 'internal') = (provider_config IS NOT NULL)",
+            name="ck_mcp_servers_internal_provider_config",
+        ),
         Index(
             "uq_mcp_servers_tenant_active_capability",
             "tenant_id",
@@ -72,6 +77,9 @@ class MCPServers(BasePublic):
         String, nullable=False, server_default="none"
     )
     http_auth_config_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    # Built-in providers (http_auth_type = "internal") only: which tenant
+    # model provider and model the loopback tool calls, plus defaults.
+    provider_config: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
 
     # Tenant enablement and credentials
     is_enabled: Mapped[bool] = mapped_column(

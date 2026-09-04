@@ -36,7 +36,7 @@
     mcpServers.filter((server) => {
       if (!filterValue) return true;
       const searchStr =
-        `${server.name} ${server.description || ""} ${server.http_url} ${server.security_classification?.name || ""} ${getCapability(server.purpose)?.label() || ""} ${(server.user_groups ?? []).map((group) => group.name).join(" ")}`.toLowerCase();
+        `${server.name} ${server.description || ""} ${server.http_auth_type === "internal" ? server.provider_config?.model || "" : server.http_url} ${server.security_classification?.name || ""} ${getCapability(server.purpose)?.label() || ""} ${(server.user_groups ?? []).map((group) => group.name).join(" ")}`.toLowerCase();
       return searchStr.includes(filterValue.toLowerCase());
     })
   );

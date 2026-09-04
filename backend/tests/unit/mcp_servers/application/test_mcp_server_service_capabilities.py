@@ -27,6 +27,7 @@ from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
     NotFoundException,
+    ProviderNotFoundException,
 )
 from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
@@ -623,3 +624,201 @@ class TestToolPathOwnership:
             await service.update_tool_default_enabled(other.id, tool.id, False)
 
         mock_tool_repo.update.assert_not_awaited()
+
+
+class TestBuiltinProvider:
+    """A built-in provider is a row with auth type "internal" on Eneo's own
+    loopback server; the model selection rides in provider_config."""
+
+    def _config(self):
+        return {"model_provider_id": str(uuid4()), "model": "gpt-image-1"}
+
+    def _patch(self, monkeypatch, service):
+        import eneo.mcp_servers.application.mcp_server_service as module
+
+        monkeypatch.setattr(
+            module, "load_active_litellm_provider", AsyncMock(return_value=object())
+        )
+        monkeypatch.setattr(
+            service,
+            "_test_connection_and_discover_tools",
+            AsyncMock(return_value=([], ConnectionResult(success=True))),
+        )
+
+    async def test_create_forces_loopback_url_and_normalizes_config(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        mock_repo.add.side_effect = lambda obj: obj
+        self._patch(monkeypatch, service)
+        config = self._config()
+
+        result = await service.create_mcp_server(
+            name="Inbyggd",
+            http_url="https://ignored.example/mcp",
+            http_auth_type="internal",
+            purpose="image_generation",
+            forward_identity=True,
+            provider_config=config,
+        )
+
+        server = result.server
+        assert server.http_url.endswith("/internal-mcp/image_generation/mcp")
+        assert server.forward_identity is False
+        assert server.http_auth_config_schema is None
+        assert server.is_enabled is False
+        assert server.provider_config == {**config, "size": "auto", "quality": "auto"}
+
+    async def test_create_rejects_purposes_without_a_builtin(self, monkeypatch):
+        service, _, _, _ = _make_service()
+        self._patch(monkeypatch, service)
+
+        with pytest.raises(BadRequestException, match="built-in provider"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="web_search",
+                provider_config=self._config(),
+            )
+
+    async def test_create_rejects_unknown_model_provider(self, monkeypatch):
+        service, _, _, _ = _make_service()
+        self._patch(monkeypatch, service)
+        import eneo.mcp_servers.application.mcp_server_service as module
+
+        monkeypatch.setattr(
+            module,
+            "load_active_litellm_provider",
+            AsyncMock(side_effect=ProviderNotFoundException("missing")),
+        )
+
+        with pytest.raises(BadRequestException, match="missing"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="image_generation",
+                provider_config=self._config(),
+            )
+
+    async def test_create_rejects_config_on_external_server(self, monkeypatch):
+        service, _, _, _ = _make_service()
+        self._patch(monkeypatch, service)
+
+        with pytest.raises(BadRequestException, match="built-in"):
+            await service.create_mcp_server(
+                name="Extern",
+                http_url="https://provider.example/mcp",
+                purpose="image_generation",
+                provider_config=self._config(),
+            )
+
+    async def test_create_rejects_credentials_on_builtin(self, monkeypatch):
+        service, _, _, _ = _make_service()
+        self._patch(monkeypatch, service)
+
+        with pytest.raises(BadRequestException, match="no credentials"):
+            await service.create_mcp_server(
+                name="Inbyggd",
+                http_url="",
+                http_auth_type="internal",
+                purpose="image_generation",
+                http_auth_config_schema={"token": "x"},
+                provider_config=self._config(),
+            )
+
+    async def test_converting_an_external_server_drops_stored_credentials(
+        self, monkeypatch
+    ):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        server.http_auth_type = "bearer"
+        server.http_auth_config_schema = {"token": "stored-secret"}
+        mock_repo.one.return_value = server
+        mock_repo.update.side_effect = lambda obj: obj
+        self._patch(monkeypatch, service)
+
+        result = await service.update_mcp_server(
+            server.id, http_auth_type="internal", provider_config=self._config()
+        )
+
+        assert result.server.http_auth_type == "internal"
+        assert result.server.http_auth_config_schema is None
+        assert result.server.http_url.endswith("/internal-mcp/image_generation/mcp")
+
+    async def test_switching_to_builtin_replaces_the_tool_catalog(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        server.http_auth_type = "bearer"
+        mock_repo.one.return_value = server
+        mock_repo.update.side_effect = lambda obj: obj
+        self._patch(monkeypatch, service)
+        discovered = [{"name": "generate_image", "input_schema": {}}]
+        monkeypatch.setattr(
+            service,
+            "_test_connection_and_discover_tools",
+            AsyncMock(return_value=(discovered, ConnectionResult(success=True))),
+        )
+        sync = AsyncMock()
+        approve = AsyncMock(return_value=[])
+        monkeypatch.setattr(service, "_sync_discovered_tool_definitions", sync)
+        monkeypatch.setattr(service, "approve_all_tool_changes", approve)
+
+        await service.update_mcp_server(
+            server.id, http_auth_type="internal", provider_config=self._config()
+        )
+
+        sync.assert_awaited_once_with(server, discovered)
+        approve.assert_awaited_once_with(server.id)
+
+    async def test_editing_a_builtin_row_keeps_its_catalog(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        server.http_auth_type = "internal"
+        server.http_url = service.builtin_provider_url("image_generation")
+        server.provider_config = {**self._config(), "size": "auto", "quality": "auto"}
+        mock_repo.one.return_value = server
+        mock_repo.update.side_effect = lambda obj: obj
+        self._patch(monkeypatch, service)
+        sync = AsyncMock()
+        monkeypatch.setattr(service, "_sync_discovered_tool_definitions", sync)
+
+        await service.update_mcp_server(server.id, description="Renamed")
+
+        sync.assert_not_awaited()
+
+    async def test_leaving_internal_auth_drops_the_config(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        server.http_auth_type = "internal"
+        server.provider_config = {**self._config(), "size": "auto", "quality": "auto"}
+        mock_repo.one.return_value = server
+        mock_repo.update.side_effect = lambda obj: obj
+        self._patch(monkeypatch, service)
+
+        result = await service.update_mcp_server(
+            server.id,
+            http_url="https://provider.example/mcp",
+            http_auth_type="bearer",
+            http_auth_config_schema={"token": "secret"},
+        )
+
+        assert result.server.provider_config is None
+        assert result.server.http_url == "https://provider.example/mcp"
+
+    async def test_update_revalidates_config_and_keeps_loopback_url(self, monkeypatch):
+        service, mock_repo, _, user = _make_service()
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        server.http_auth_type = "internal"
+        server.http_url = service.builtin_provider_url("image_generation")
+        server.provider_config = {**self._config(), "size": "auto", "quality": "auto"}
+        mock_repo.one.return_value = server
+        mock_repo.update.side_effect = lambda obj: obj
+        self._patch(monkeypatch, service)
+        new_config = {**self._config(), "size": "1536x1024"}
+
+        result = await service.update_mcp_server(
+            server.id, http_url="https://ignored.example", provider_config=new_config
+        )
+
+        assert result.server.http_url.endswith("/internal-mcp/image_generation/mcp")
+        assert result.server.provider_config == {**new_config, "quality": "auto"}

@@ -43,8 +43,8 @@ export function initMCPServers(client) {
      * Create a new MCP server in the global catalog (admin only, HTTP-only).
      * @param {Object} params
      * @param {string} params.name Name of the MCP server
-     * @param {string} params.http_url HTTP URL to the MCP server
-     * @param {"none" | "bearer" | "api_key_header"} [params.http_auth_type] Authentication type (default: none)
+     * @param {string} [params.http_url] HTTP URL to the MCP server (not used by built-in providers)
+     * @param {"none" | "bearer" | "api_key_header" | "internal"} [params.http_auth_type] Authentication type (default: none); "internal" is a built-in provider on Eneo's loopback server
      * @param {"general" | "web_search" | "image_generation"} [params.purpose] Server purpose (default: general)
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
@@ -60,6 +60,7 @@ export function initMCPServers(client) {
      * @param {"everyone" | "groups"} [params.audience] Capability providers: who this provider serves
      * @param {number} [params.audience_priority] Lowest number wins when a user matches several group providers
      * @param {string[]} [params.user_group_ids] User groups served when audience is "groups"
+     * @param {{model_provider_id: string, model: string, size?: string, quality?: string} | null} [params.provider_config] Built-in providers only: the tenant model provider and model to call
      * @throws {EneoError}
      * */
     create: async ({
@@ -80,7 +81,8 @@ export function initMCPServers(client) {
       security_classification,
       audience,
       audience_priority,
-      user_group_ids
+      user_group_ids,
+      provider_config
     }) => {
       /** @type {any} */
       const body = {
@@ -101,7 +103,8 @@ export function initMCPServers(client) {
         security_classification,
         audience,
         audience_priority,
-        user_group_ids
+        user_group_ids,
+        provider_config
       };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
@@ -118,7 +121,7 @@ export function initMCPServers(client) {
      * @param {string} params.id The MCP server ID
      * @param {string} [params.name] Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server
-     * @param {"none" | "bearer" | "api_key_header"} [params.http_auth_type] Authentication type
+     * @param {"none" | "bearer" | "api_key_header" | "internal"} [params.http_auth_type] Authentication type; "internal" is a built-in provider on Eneo's loopback server
      * @param {"general" | "web_search" | "image_generation"} [params.purpose] Server purpose; moving into a capability purpose saves it as an inactive provider
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
@@ -134,6 +137,7 @@ export function initMCPServers(client) {
      * @param {"everyone" | "groups"} [params.audience] Capability providers: who this provider serves
      * @param {number} [params.audience_priority] Lowest number wins when a user matches several group providers
      * @param {string[]} [params.user_group_ids] User groups served when audience is "groups"
+     * @param {{model_provider_id: string, model: string, size?: string, quality?: string} | null} [params.provider_config] Built-in providers only: the tenant model provider and model to call; null clears it
      * @throws {EneoError}
      * */
     update: async ({
@@ -155,7 +159,8 @@ export function initMCPServers(client) {
       security_classification,
       audience,
       audience_priority,
-      user_group_ids
+      user_group_ids,
+      provider_config
     }) => {
       /** @type {any} */
       const body = {
@@ -176,7 +181,8 @@ export function initMCPServers(client) {
         security_classification,
         audience,
         audience_priority,
-        user_group_ids
+        user_group_ids,
+        provider_config
       };
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",

@@ -12,6 +12,13 @@
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
+  import {
+    BUILTIN_IMAGE_QUALITIES,
+    BUILTIN_IMAGE_SIZES,
+    hasBuiltinProvider,
+    suggestedImageModels
+  } from "$lib/features/mcp/builtinImageModels";
+  import { untrack } from "svelte";
   import type { Writable } from "svelte/store";
 
   type MCPServerSettings = components["schemas"]["MCPServerSettingsPublic"];
@@ -22,20 +29,19 @@
   type Props = {
     openController: Writable<boolean>;
     mcpServer?: MCPServerSettings | null;
+    /** Purpose preselected in add mode (a capability card opens on its own purpose). */
+    initialPurpose?: string;
     onSubmit: (data: Record<string, unknown>, id?: string) => Promise<void>;
   };
 
-  const { openController, mcpServer, onSubmit }: Props = $props();
+  const { openController, mcpServer, onSubmit, initialPurpose = "general" }: Props = $props();
 
   const isEditMode = $derived(!!mcpServer);
-  const dialogTitle = $derived(isEditMode ? m.edit_mcp_server() : m.add_mcp_server());
-  const submitLabel = $derived(isEditMode ? m.save() : m.add_mcp_server());
-
   // What the server is for: an ordinary tool server, or the tenant's
   // provider for one capability (web search, image generation). Changing it
   // on an existing server re-homes it; the backend saves a new provider
   // inactive and turns a demoted provider back into an enabled server.
-  let selectedPurpose = $state("general");
+  let selectedPurpose = $state(untrack(() => initialPurpose));
   const purposeOptions = $derived([
     { value: "general", label: m.general() },
     ...CAPABILITIES.map((capability) => ({
@@ -45,6 +51,19 @@
   ]);
   const capability = $derived(getCapability(selectedPurpose));
   const purposeChanged = $derived(isEditMode && selectedPurpose !== mcpServer?.purpose);
+
+  // A capability provider is edited as the feature it serves, not as an MCP
+  // server; the transport is an implementation detail to the admin.
+  const dialogTitle = $derived.by(() => {
+    if (capability) {
+      const label = capability.label().toLocaleLowerCase();
+      return isEditMode
+        ? m.capability_edit_title({ capability: label })
+        : m.capability_add_title({ capability: label });
+    }
+    return isEditMode ? m.edit_mcp_server() : m.add_mcp_server();
+  });
+  const submitLabel = $derived(isEditMode || capability ? m.save() : m.add_mcp_server());
 
   const classifications = getSecurityContext().security_classifications;
   const eneo = getEneo();
@@ -86,7 +105,7 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer" | "api_key_header">("none");
+  let http_auth_type = $state<"none" | "bearer" | "api_key_header" | "internal">("none");
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
@@ -99,6 +118,65 @@
   let api_key_header_name = $state("");
   let api_key_token = $state("");
 
+  // Built-in provider (image generation only): Eneo's own loopback server
+  // calls the selected tenant model provider; the admin picks the model here.
+  type ModelProviderOption = components["schemas"]["ModelProviderPublic"];
+  let modelProviders = $state<ModelProviderOption[] | null>(null);
+  let loadingModelProviders = $state(false);
+  let builtinProviderId = $state("");
+  let builtinModel = $state("");
+  let builtinSize = $state<string>("auto");
+  let builtinQuality = $state<string>("auto");
+
+  const builtinAvailable = $derived(hasBuiltinProvider(selectedPurpose));
+  const isBuiltin = $derived(builtinAvailable && http_auth_type === "internal");
+  const selectedModelProvider = $derived(
+    modelProviders?.find((provider) => provider.id === builtinProviderId) ?? null
+  );
+  const builtinIncomplete = $derived(isBuiltin && (!builtinProviderId || !builtinModel.trim()));
+
+  async function ensureModelProviders() {
+    if (modelProviders !== null || loadingModelProviders) return;
+    loadingModelProviders = true;
+    try {
+      modelProviders = await eneo.modelProviders.list({ activeOnly: true });
+    } catch (error) {
+      console.error("Failed to load model providers:", error);
+      modelProviders = [];
+    } finally {
+      loadingModelProviders = false;
+    }
+  }
+
+  // The source select is a plain bound value; the auth type follows it.
+  // Selects read their bound value at mount, so the preset must be the
+  // initial state and not only applied by the reset effect below.
+  let source = $state<"external" | "builtin">(
+    untrack(() => hasBuiltinProvider(initialPurpose)) ? "builtin" : "external"
+  );
+
+  $effect(() => {
+    if (source === "builtin") {
+      if (http_auth_type !== "internal") http_auth_type = "internal";
+    } else if (http_auth_type === "internal") {
+      http_auth_type = "none";
+    }
+  });
+
+  $effect(() => {
+    if (isBuiltin && $openController) {
+      ensureModelProviders();
+    }
+  });
+
+  // Leaving a purpose that has no built-in provider drops the internal auth
+  // type so the connection and authentication sections come back.
+  $effect(() => {
+    if (!builtinAvailable && source === "builtin") {
+      source = "external";
+    }
+  });
+
   let submitting = $state(false);
   let errorMessage = $state("");
 
@@ -109,7 +187,13 @@
       selectedPurpose = mcpServer.purpose ?? "general";
       description = mcpServer.description || "";
       http_url = mcpServer.http_url || "";
-      http_auth_type = (mcpServer.http_auth_type as "none" | "bearer" | "api_key_header") || "none";
+      http_auth_type =
+        (mcpServer.http_auth_type as "none" | "bearer" | "api_key_header" | "internal") || "none";
+      source = mcpServer.http_auth_type === "internal" ? "builtin" : "external";
+      builtinProviderId = mcpServer.provider_config?.model_provider_id ?? "";
+      builtinModel = mcpServer.provider_config?.model ?? "";
+      builtinSize = mcpServer.provider_config?.size ?? "auto";
+      builtinQuality = mcpServer.provider_config?.quality ?? "auto";
       documentation_url = mcpServer.documentation_url || "";
       security_classification = mcpServer.security_classification ?? null;
       audience = (mcpServer.audience as "everyone" | "groups") ?? "everyone";
@@ -126,10 +210,15 @@
       );
     } else {
       name = "";
-      selectedPurpose = "general";
+      selectedPurpose = initialPurpose;
       description = "";
       http_url = "";
       http_auth_type = "none";
+      source = hasBuiltinProvider(initialPurpose) ? "builtin" : "external";
+      builtinProviderId = "";
+      builtinModel = "";
+      builtinSize = "auto";
+      builtinQuality = "auto";
       documentation_url = "";
       security_classification = null;
       audience = "everyone";
@@ -165,11 +254,22 @@
 
       // Only send connection-affecting fields when actually changed to avoid
       // unnecessary connection validation on the backend for simple edits
-      if (!isEditMode || http_url !== mcpServer?.http_url) {
+      // A built-in provider's URL is Eneo's loopback endpoint, set server-side.
+      if (!isBuiltin && (!isEditMode || http_url !== mcpServer?.http_url)) {
         data.http_url = http_url;
       }
       if (!isEditMode || http_auth_type !== mcpServer?.http_auth_type) {
         data.http_auth_type = http_auth_type;
+      }
+      if (isBuiltin) {
+        data.provider_config = {
+          model_provider_id: builtinProviderId,
+          model: builtinModel.trim(),
+          size: builtinSize,
+          quality: builtinQuality
+        };
+      } else if (isEditMode && mcpServer?.http_auth_type === "internal") {
+        data.provider_config = null;
       }
 
       // Add optional fields with actual values
@@ -213,7 +313,7 @@
       // Reset form on success (for add mode)
       if (!isEditMode) {
         name = "";
-        selectedPurpose = "general";
+        selectedPurpose = initialPurpose;
         description = "";
         http_url = "";
         http_auth_type = "none";
@@ -276,20 +376,24 @@
     <Dialog.Title>
       <span class="flex items-center gap-3">
         <span class="bg-accent-dimmer flex h-10 w-10 items-center justify-center rounded-xl">
-          <svg
-            class="text-accent-default h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-            aria-hidden="true"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"
-            />
-          </svg>
+          {#if capability}
+            <capability.icon class="text-accent-default h-5 w-5" aria-hidden="true" />
+          {:else}
+            <svg
+              class="text-accent-default h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z"
+              />
+            </svg>
+          {/if}
         </span>
         {dialogTitle}
       </span>
@@ -360,7 +464,9 @@
               id="mcp-description"
               bind:value={description}
               rows="2"
-              placeholder={m.mcp_description_placeholder()}
+              placeholder={capability
+                ? m.capability_description_placeholder()
+                : m.mcp_description_placeholder()}
               class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
             ></textarea>
           </div>
@@ -467,168 +573,290 @@
         {/if}
 
         <!-- Connection Section -->
-        <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
-          <legend
-            class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
-          >
-            <svg
-              class="h-3 w-3"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="2"
-              aria-hidden="true"
+        {#if builtinAvailable}
+          <!-- Source: an external MCP server, or Eneo's built-in provider that
+               calls a tenant model provider directly. -->
+          <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
+            <legend
+              class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
-              />
-            </svg>
-            {m.mcp_connection_legend()}
-          </legend>
+              {m.mcp_source_label()}
+            </legend>
+            <Select.Simple
+              options={[
+                { value: "external", label: m.mcp_source_external() },
+                { value: "builtin", label: m.mcp_source_builtin() }
+              ]}
+              bind:value={source}
+            >
+              {m.mcp_source_label()}
+            </Select.Simple>
 
-          <div>
-            <label
-              for="mcp-http_url"
-              class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
-            >
-              {m.server_url_required()}
-              <span class="text-negative-default" aria-hidden="true">*</span>
-            </label>
-            <div class="relative">
-              <input
-                id="mcp-http_url"
-                type="url"
-                bind:value={http_url}
-                required
-                aria-required="true"
-                aria-describedby="url-hint"
-                placeholder={m.mcp_url_placeholder()}
-                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border py-2.5 pr-10 pl-3 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-              />
-              {#if http_url}
-                <div class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2">
-                  <span
-                    class="bg-positive-dimmer flex h-5 w-5 items-center justify-center rounded-full"
+            {#if isBuiltin}
+              <p class="text-muted text-xs leading-relaxed">{m.mcp_builtin_hint()}</p>
+
+              <div>
+                <label
+                  for="mcp-builtin-provider"
+                  class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
+                >
+                  {m.mcp_builtin_model_provider()}
+                  <span class="text-negative-default" aria-hidden="true">*</span>
+                </label>
+                <select
+                  id="mcp-builtin-provider"
+                  bind:value={builtinProviderId}
+                  required
+                  aria-required="true"
+                  disabled={loadingModelProviders}
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                >
+                  <option value="" disabled>{m.select()}</option>
+                  {#each modelProviders ?? [] as provider (provider.id)}
+                    <option value={provider.id}>{provider.name} ({provider.provider_type})</option>
+                  {/each}
+                </select>
+                {#if modelProviders !== null && modelProviders.length === 0}
+                  <p class="text-warning-default mt-1.5 text-xs">{m.mcp_builtin_no_providers()}</p>
+                {/if}
+              </div>
+
+              <div>
+                <label
+                  for="mcp-builtin-model"
+                  class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
+                >
+                  {m.mcp_builtin_model()}
+                  <span class="text-negative-default" aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="mcp-builtin-model"
+                  type="text"
+                  bind:value={builtinModel}
+                  required
+                  aria-required="true"
+                  list="mcp-builtin-model-suggestions"
+                  autocomplete="off"
+                  aria-describedby="mcp-builtin-model-hint"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm focus:ring-2 focus:outline-none"
+                />
+                <datalist id="mcp-builtin-model-suggestions">
+                  {#each suggestedImageModels(selectedModelProvider?.provider_type) as suggestion (suggestion)}
+                    <option value={suggestion}></option>
+                  {/each}
+                </datalist>
+                <p id="mcp-builtin-model-hint" class="text-muted mt-1.5 text-xs">
+                  {m.mcp_builtin_model_hint()}
+                </p>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label
+                    for="mcp-builtin-size"
+                    class="text-default mb-1.5 block text-sm font-medium"
+                    >{m.mcp_builtin_size()}</label
                   >
-                    <svg
-                      class="text-positive-default h-3 w-3"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      stroke-width="3"
-                      aria-hidden="true"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M4.5 12.75l6 6 9-13.5"
-                      />
-                    </svg>
-                  </span>
+                  <select
+                    id="mcp-builtin-size"
+                    bind:value={builtinSize}
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                  >
+                    {#each BUILTIN_IMAGE_SIZES as size (size)}
+                      <option value={size}>{size === "auto" ? m.mcp_builtin_auto() : size}</option>
+                    {/each}
+                  </select>
                 </div>
+                <div>
+                  <label
+                    for="mcp-builtin-quality"
+                    class="text-default mb-1.5 block text-sm font-medium"
+                    >{m.mcp_builtin_quality()}</label
+                  >
+                  <select
+                    id="mcp-builtin-quality"
+                    bind:value={builtinQuality}
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                  >
+                    {#each BUILTIN_IMAGE_QUALITIES as quality (quality)}
+                      <option value={quality}
+                        >{quality === "auto" ? m.mcp_builtin_auto() : quality}</option
+                      >
+                    {/each}
+                  </select>
+                </div>
+              </div>
+              {#if builtinIncomplete}
+                <p class="text-warning-default text-xs">{m.mcp_builtin_incomplete()}</p>
               {/if}
-            </div>
-            <p id="url-hint" class="text-muted mt-1.5 text-xs">{m.server_url_hint()}</p>
-          </div>
-        </fieldset>
+            {/if}
+          </fieldset>
+        {/if}
 
-        <!-- Authentication Section -->
-        <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
-          <legend
-            class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
-          >
-            <svg
-              class="h-3 w-3"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="2"
-              aria-hidden="true"
+        {#if !isBuiltin}
+          <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
+            <legend
+              class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
-              />
-            </svg>
-            {m.mcp_authentication_legend()}
-          </legend>
+              <svg
+                class="h-3 w-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
+                />
+              </svg>
+              {m.mcp_connection_legend()}
+            </legend>
 
-          <Select.Simple
-            options={[
-              { value: "none", label: "Publik (ingen autentisering)" },
-              { value: "bearer", label: "Bearer Token" },
-              { value: "api_key_header", label: m.api_key_header_auth() }
-            ]}
-            bind:value={http_auth_type}
-          >
-            {m.authentication_type()}
-          </Select.Simple>
-
-          {#if http_auth_type === "api_key_header"}
             <div>
               <label
-                for="mcp-api_key_header_name"
-                class="text-default mb-1.5 block text-sm font-medium"
-                >{m.api_key_header_name()}</label
+                for="mcp-http_url"
+                class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
               >
-              <input
-                id="mcp-api_key_header_name"
-                type="text"
-                bind:value={api_key_header_name}
-                placeholder={m.api_key_header_name_placeholder()}
-                autocomplete="off"
-                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-              />
-              {#if isEditMode}
-                <p class="text-muted mt-1.5 text-xs">{m.api_key_header_name_keep_hint()}</p>
-              {/if}
+                {m.server_url_required()}
+                <span class="text-negative-default" aria-hidden="true">*</span>
+              </label>
+              <div class="relative">
+                <input
+                  id="mcp-http_url"
+                  type="url"
+                  bind:value={http_url}
+                  required
+                  aria-required="true"
+                  aria-describedby="url-hint"
+                  placeholder={m.mcp_url_placeholder()}
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border py-2.5 pr-10 pl-3 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                />
+                {#if http_url}
+                  <div class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2">
+                    <span
+                      class="bg-positive-dimmer flex h-5 w-5 items-center justify-center rounded-full"
+                    >
+                      <svg
+                        class="text-positive-default h-3 w-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        stroke-width="3"
+                        aria-hidden="true"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          d="M4.5 12.75l6 6 9-13.5"
+                        />
+                      </svg>
+                    </span>
+                  </div>
+                {/if}
+              </div>
+              <p id="url-hint" class="text-muted mt-1.5 text-xs">{m.server_url_hint()}</p>
             </div>
-            <div>
-              <label for="mcp-api_key_token" class="text-default mb-1.5 block text-sm font-medium"
-                >{m.api_key()}</label
-              >
-              <input
-                id="mcp-api_key_token"
-                type="password"
-                bind:value={api_key_token}
-                placeholder={authPlaceholder}
-                autocomplete="off"
-                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-              />
-              <p class="text-muted mt-1.5 text-xs">
-                {#if isEditMode}<span class="text-warning-default"
-                    >{m.leave_empty_keep_existing()}.
-                  </span>{/if}
-                {m.api_key_header_sent_as()}
-              </p>
-            </div>
-          {/if}
+          </fieldset>
 
-          {#if http_auth_type === "bearer"}
-            <div>
-              <label for="mcp-bearer_token" class="text-default mb-1.5 block text-sm font-medium"
-                >{m.bearer_token()}</label
+          <!-- Authentication Section -->
+          <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
+            <legend
+              class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+            >
+              <svg
+                class="h-3 w-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
               >
-              <input
-                id="mcp-bearer_token"
-                type="password"
-                bind:value={bearer_token}
-                placeholder={authPlaceholder || "Ange din bearer token..."}
-                autocomplete="off"
-                class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-              />
-              <p class="text-muted mt-1.5 text-xs">
-                {#if isEditMode}<span class="text-warning-default"
-                    >{m.leave_empty_keep_existing()}.
-                  </span>{/if}
-                {m.will_be_sent_as_bearer()}
-              </p>
-            </div>
-          {/if}
-        </fieldset>
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+                />
+              </svg>
+              {m.mcp_authentication_legend()}
+            </legend>
+
+            <Select.Simple
+              options={[
+                { value: "none", label: "Publik (ingen autentisering)" },
+                { value: "bearer", label: "Bearer Token" },
+                { value: "api_key_header", label: m.api_key_header_auth() }
+              ]}
+              bind:value={http_auth_type}
+            >
+              {m.authentication_type()}
+            </Select.Simple>
+
+            {#if http_auth_type === "api_key_header"}
+              <div>
+                <label
+                  for="mcp-api_key_header_name"
+                  class="text-default mb-1.5 block text-sm font-medium"
+                  >{m.api_key_header_name()}</label
+                >
+                <input
+                  id="mcp-api_key_header_name"
+                  type="text"
+                  bind:value={api_key_header_name}
+                  placeholder={m.api_key_header_name_placeholder()}
+                  autocomplete="off"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                />
+                {#if isEditMode}
+                  <p class="text-muted mt-1.5 text-xs">{m.api_key_header_name_keep_hint()}</p>
+                {/if}
+              </div>
+              <div>
+                <label for="mcp-api_key_token" class="text-default mb-1.5 block text-sm font-medium"
+                  >{m.api_key()}</label
+                >
+                <input
+                  id="mcp-api_key_token"
+                  type="password"
+                  bind:value={api_key_token}
+                  placeholder={authPlaceholder}
+                  autocomplete="off"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                />
+                <p class="text-muted mt-1.5 text-xs">
+                  {#if isEditMode}<span class="text-warning-default"
+                      >{m.leave_empty_keep_existing()}.
+                    </span>{/if}
+                  {m.api_key_header_sent_as()}
+                </p>
+              </div>
+            {/if}
+
+            {#if http_auth_type === "bearer"}
+              <div>
+                <label for="mcp-bearer_token" class="text-default mb-1.5 block text-sm font-medium"
+                  >{m.bearer_token()}</label
+                >
+                <input
+                  id="mcp-bearer_token"
+                  type="password"
+                  bind:value={bearer_token}
+                  placeholder={authPlaceholder || "Ange din bearer token..."}
+                  autocomplete="off"
+                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                />
+                <p class="text-muted mt-1.5 text-xs">
+                  {#if isEditMode}<span class="text-warning-default"
+                      >{m.leave_empty_keep_existing()}.
+                    </span>{/if}
+                  {m.will_be_sent_as_bearer()}
+                </p>
+              </div>
+            {/if}
+          </fieldset>
+        {/if}
 
         <!-- Optional Section -->
         <fieldset>
@@ -650,21 +878,24 @@
             />
           </div>
 
-          <div class="mt-4">
-            <label for="mcp-forward_identity" class="flex items-start gap-2.5">
-              <input
-                id="mcp-forward_identity"
-                type="checkbox"
-                bind:checked={forward_identity}
-                aria-describedby="forward-identity-hint"
-                class="border-default text-accent-default ring-accent-default focus:ring-accent-default mt-0.5 h-4 w-4 rounded border shadow-sm focus:ring-2"
-              />
-              <span class="text-default text-sm font-medium">{m.mcp_forward_identity()}</span>
-            </label>
-            <p id="forward-identity-hint" class="text-muted mt-1.5 pl-6.5 text-xs">
-              {capability ? capability.forwardIdentityHint() : m.mcp_forward_identity_hint()}
-            </p>
-          </div>
+          <!-- The backend forces identity forwarding off for built-in providers. -->
+          {#if !isBuiltin}
+            <div class="mt-4">
+              <label for="mcp-forward_identity" class="flex items-start gap-2.5">
+                <input
+                  id="mcp-forward_identity"
+                  type="checkbox"
+                  bind:checked={forward_identity}
+                  aria-describedby="forward-identity-hint"
+                  class="border-default text-accent-default ring-accent-default focus:ring-accent-default mt-0.5 h-4 w-4 rounded border shadow-sm focus:ring-2"
+                />
+                <span class="text-default text-sm font-medium">{m.mcp_forward_identity()}</span>
+              </label>
+              <p id="forward-identity-hint" class="text-muted mt-1.5 pl-6.5 text-xs">
+                {capability ? capability.forwardIdentityHint() : m.mcp_forward_identity_hint()}
+              </p>
+            </div>
+          {/if}
 
           <details class="border-dimmer mt-5 border-t pt-4">
             <summary class="text-default cursor-pointer text-sm font-medium">
@@ -787,7 +1018,8 @@
         onclick={handleSubmit}
         disabled={submitting ||
           !name ||
-          !http_url ||
+          (!isBuiltin && !http_url) ||
+          builtinIncomplete ||
           audienceIncomplete ||
           (http_auth_type === "api_key_header" &&
             !isEditMode &&

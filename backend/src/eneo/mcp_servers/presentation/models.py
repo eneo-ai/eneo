@@ -1,7 +1,7 @@
 from typing import Any, Generic, Literal, Optional, TypeVar, Union
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, Field, computed_field
+from pydantic import AnyHttpUrl, BaseModel, Field, computed_field, model_validator
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
@@ -31,7 +31,19 @@ class MCPServerAudienceGroupPublic(BaseModel):
 # "api_key_header" sends the credential in an admin-chosen header
 # (e.g. X-Api-Key). Header name is validated server-side against HTTP token
 # syntax and a deny-list of transport-level headers.
-MCPServerAuthType = Literal["none", "bearer", "api_key_header"]
+# "internal" marks a built-in provider: the endpoint is one of Eneo's own
+# loopback MCP servers, authenticated with a per-request scoped token, and
+# ``provider_config`` names the tenant model provider and model it calls.
+MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal"]
+
+
+class BuiltinProviderConfig(BaseModel):
+    """Model selection for a built-in provider (``http_auth_type = internal``)."""
+
+    model_provider_id: UUID
+    model: str = Field(min_length=1, max_length=200)
+    size: str = "auto"
+    quality: str = "auto"
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -49,8 +61,9 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer", "api_key_header"
+    http_auth_type: str  # "none", "bearer", "api_key_header", "internal"
     purpose: MCPServerPurpose = "general"
+    provider_config: Optional[BuiltinProviderConfig] = None
     is_enabled: bool = True
     # Capability providers: who this provider serves. "everyone" is the
     # tenant default; "groups" serves the listed user groups (lowest
@@ -78,11 +91,14 @@ class MCPServerCreate(BaseModel):
     """DTO for creating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: str
-    http_url: AnyHttpUrl
+    # Required unless http_auth_type is "internal": a built-in provider's URL
+    # is Eneo's own loopback endpoint and is set server-side.
+    http_url: Optional[AnyHttpUrl] = None
     http_auth_type: MCPServerAuthType = "none"
     purpose: MCPServerPurpose = "general"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    provider_config: Optional[BuiltinProviderConfig] = None
     forward_identity: bool = False
     tool_catalog_max_count: int = Field(
         default=MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
@@ -109,6 +125,12 @@ class MCPServerCreate(BaseModel):
     audience_priority: int = Field(default=DEFAULT_AUDIENCE_PRIORITY, ge=0)
     user_group_ids: list[UUID] = []
 
+    @model_validator(mode="after")
+    def require_url_for_external_servers(self) -> "MCPServerCreate":
+        if self.http_auth_type != "internal" and self.http_url is None:
+            raise ValueError("http_url is required")
+        return self
+
 
 class MCPServerUpdate(BaseModel):
     """DTO for updating an MCP server (admin only, uses Streamable HTTP transport)."""
@@ -121,6 +143,7 @@ class MCPServerUpdate(BaseModel):
     purpose: Optional[MCPServerPurpose] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    provider_config: Union[BuiltinProviderConfig, None, NotProvided] = NOT_PROVIDED
     forward_identity: Optional[bool] = None
     tool_catalog_max_count: Optional[int] = Field(
         default=None,

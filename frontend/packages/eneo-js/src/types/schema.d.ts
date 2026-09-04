@@ -10427,6 +10427,29 @@ export interface components {
       file: string;
     };
     /**
+     * BuiltinProviderConfig
+     * @description Model selection for a built-in provider (``http_auth_type = internal``).
+     */
+    BuiltinProviderConfig: {
+      /**
+       * Model Provider Id
+       * Format: uuid
+       */
+      model_provider_id: string;
+      /** Model */
+      model: string;
+      /**
+       * Size
+       * @default auto
+       */
+      size?: string;
+      /**
+       * Quality
+       * @default auto
+       */
+      quality?: string;
+    };
+    /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
      */
@@ -13534,17 +13557,14 @@ export interface components {
     MCPServerCreate: {
       /** Name */
       name: string;
-      /**
-       * Http Url
-       * Format: uri
-       */
-      http_url: string;
+      /** Http Url */
+      http_url?: string | null;
       /**
        * Http Auth Type
        * @default none
        * @enum {string}
        */
-      http_auth_type?: "none" | "bearer" | "api_key_header";
+      http_auth_type?: "none" | "bearer" | "api_key_header" | "internal";
       /**
        * Purpose
        * @default general
@@ -13557,6 +13577,7 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
       /**
        * Forward Identity
        * @default false
@@ -13633,6 +13654,7 @@ export interface components {
        * @enum {string}
        */
       purpose?: "general" | "web_search" | "image_generation";
+      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
       /**
        * Is Enabled
        * @default true
@@ -13747,6 +13769,7 @@ export interface components {
        * @enum {string}
        */
       purpose?: "general" | "web_search" | "image_generation";
+      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
       /**
        * Is Enabled
        * @default true
@@ -13944,7 +13967,7 @@ export interface components {
       /** Http Url */
       http_url?: string | null;
       /** Http Auth Type */
-      http_auth_type?: ("none" | "bearer" | "api_key_header") | null;
+      http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Purpose */
       purpose?: ("general" | "web_search" | "image_generation") | null;
       /** Description */
@@ -13953,6 +13976,8 @@ export interface components {
       http_auth_config_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Provider Config */
+      provider_config?: components["schemas"]["BuiltinProviderConfig"] | null;
       /** Forward Identity */
       forward_identity?: boolean | null;
       /** Tool Catalog Max Count */

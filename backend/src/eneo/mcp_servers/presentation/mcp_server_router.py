@@ -290,7 +290,7 @@ async def create_mcp_server(
 
     result = await service.create_mcp_server(
         name=data.name,
-        http_url=str(data.http_url),
+        http_url=str(data.http_url) if data.http_url else "",
         http_auth_type=data.http_auth_type,
         purpose=data.purpose,
         description=data.description,
@@ -308,6 +308,11 @@ async def create_mcp_server(
         audience=data.audience,
         audience_priority=data.audience_priority,
         user_group_ids=data.user_group_ids,
+        provider_config=(
+            data.provider_config.model_dump(mode="json")
+            if data.provider_config
+            else None
+        ),
     )
 
     # If connection failed, return 400 error with message
@@ -390,6 +395,12 @@ async def update_mcp_server(
         audience=data.audience,
         audience_priority=data.audience_priority,
         user_group_ids=data.user_group_ids,
+        provider_config=(
+            data.provider_config
+            if isinstance(data.provider_config, NotProvided)
+            or data.provider_config is None
+            else data.provider_config.model_dump(mode="json")
+        ),
     )
 
     # If connection validation failed, return 400 error with message

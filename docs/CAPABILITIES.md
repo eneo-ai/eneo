@@ -20,7 +20,7 @@ Only one marker per capability can be attached to a space or assistant.
 
 ## 2. Administering providers
 
-1. Create the server under **Admin → MCP servers** and set **Used for** to the capability. Capability servers are saved inactive.
+1. Create the server under **Admin → MCP servers**: use **Set up …** on the capability's card at the top of the page (it opens the dialog with **Used for** preset, and image generation on the built-in source), or add a server from the header and set **Used for** yourself. Capability servers are saved inactive.
 2. Sync and approve its tools.
 3. Activate it. Activation is atomic: activating a default provider deactivates the previous default for the same capability.
 
@@ -34,6 +34,14 @@ Changing a server's purpose re-homes it. Moving a general server into a capabili
 | **User groups** | Serves members of the selected groups. Any number may be active alongside the default. When a user matches several, the lowest **priority** number wins, then the name. |
 
 An active default cannot be narrowed to user groups in place. Deactivate it first, or activate another default.
+
+### Built-in image provider
+
+Image generation does not need an external MCP server. In the server dialog, set **Used for** to image generation and **Source** to *Built-in, via a model provider*. Pick one of the tenant's active model providers (**Admin → Models**) and enter the image model or deployment name, for example `gpt-image-1` on OpenAI or Azure OpenAI, or `imagen-4.0-generate-001` on Gemini. Default size and quality are optional; the assistant may override them per request.
+
+Under the hood the row is an ordinary provider whose endpoint is Eneo's own loopback MCP server (`/internal-mcp/image_generation`) and whose auth type is `internal`. It carries no credentials: on every request the ask path mints a short-lived token naming the provider row, and the loopback tool calls the model through LiteLLM with the credentials stored on the selected model provider. Activation, audiences, permissions and classification work exactly as for external providers, and its tool is approved automatically on sync because it is Eneo's own code. Switching an existing external server to the built-in source replaces its tool catalog with the loopback's tools in the same save, so no manual sync is needed. Web search has no built-in provider.
+
+The backend must be able to reach its own loopback URL (`INTERNAL_MCP_BASE_URL`, the same requirement as the knowledge and files servers).
 
 ## 3. Ask-time resolution
 
