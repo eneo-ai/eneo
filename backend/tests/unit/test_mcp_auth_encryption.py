@@ -296,6 +296,9 @@ class TestAssemblerHasCredentials:
         server.description = None
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
@@ -319,6 +322,9 @@ class TestAssemblerHasCredentials:
         server.description = None
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
@@ -343,6 +349,9 @@ class TestAssemblerHasCredentials:
         server.description = None
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
@@ -388,6 +397,9 @@ class TestAssemblerHasCredentials:
         server.description = None
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
@@ -422,6 +434,9 @@ class TestAssemblerHasCredentials:
         server.description = None
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": encrypted_token}
@@ -451,6 +466,9 @@ class TestAssemblerHasCredentials:
         server.description = None
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "plaintext-token-5678"}
@@ -485,6 +503,9 @@ class TestProxyFactoryDecryption:
         server.name = "test"
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {
@@ -512,6 +533,9 @@ class TestProxyFactoryDecryption:
         server.name = "test"
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {
@@ -534,6 +558,9 @@ class TestProxyFactoryDecryption:
         server.name = "public-server"
         server.http_url = "http://localhost"
         server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
         server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
