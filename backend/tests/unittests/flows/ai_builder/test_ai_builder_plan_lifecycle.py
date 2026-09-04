@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
+    AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     AIBuilderPlanLifecycle,
@@ -909,7 +910,9 @@ class TestAIBuilderPlanLifecycle:
         authoring_service.prepare.assert_awaited()
 
     @pytest.mark.anyio
-    async def test_apply_plan_without_planning_state_is_corruption(self) -> None:
+    async def test_apply_plan_without_readable_planning_state_asks_for_a_new_proposal(
+        self,
+    ) -> None:
         user = _make_user()
         repo = _make_repo_mock()
         session = _make_session(
@@ -938,9 +941,12 @@ class TestAIBuilderPlanLifecycle:
             authoring_service=authoring_service,
         )
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(AIBuilderBadRequestException) as excinfo:
             await lifecycle.apply_plan(plan_id=plan.id)
 
+        assert (
+            excinfo.value.code is AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+        )
         authoring_service.prepare.assert_not_awaited()
 
     @pytest.mark.anyio
