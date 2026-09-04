@@ -1041,6 +1041,95 @@ async def test_duplicate_worker_exits_when_step_already_claimed(user):
     assert result == {"status": "skipped", "reason": "step_already_claimed"}
 
 
+def _execute_setup_for_security(user, *, space_level: int, model_level: int):
+    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant = _security_assistant(uuid4(), model_level=model_level)
+    space = _security_space(
+        space_id=uuid4(), assistants=[assistant], security_level=space_level
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(return_value=None)
+    flow_run_repo.get_step_result = AsyncMock(
+        return_value=_claimed_step_result(
+            run_id=queued_run.id,
+            flow_id=queued_run.flow_id,
+            tenant_id=user.tenant_id,
+            step_id=step_id,
+            assistant_id=assistant.id,
+        )
+    )
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant.id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._validate_assistant_snapshots = AsyncMock()
+    executor._execute_step = AsyncMock()
+    return executor, flow_run_repo, queued_run
+
+
+@pytest.mark.asyncio
+async def test_execute_records_the_runs_evidence_level_before_the_first_step(user):
+    executor, flow_run_repo, queued_run = _execute_setup_for_security(
+        user, space_level=3, model_level=3
+    )
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+    assert result == {"status": "skipped", "reason": "step_already_claimed"}
+    flow_run_repo.record_evidence_classification_level.assert_awaited_once_with(
+        run_id=queued_run.id, tenant_id=user.tenant_id, level=3
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_fails_a_security_mismatch_before_any_step_runs(user):
+    executor, flow_run_repo, queued_run = _execute_setup_for_security(
+        user, space_level=3, model_level=1
+    )
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+    assert result["status"] == "failed"
+    flow_run_repo.record_evidence_classification_level.assert_not_awaited()
+    flow_run_repo.claim_step_result.assert_not_awaited()
+    executor._execute_step.assert_not_awaited()
+    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_execute_skips_when_run_claim_fails(user):
     executor, _, flow_run_repo, _ = _build_executor(user)

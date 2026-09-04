@@ -6,6 +6,7 @@ import pytest
 
 from eneo.flows.flow_security_classification import (
     evaluate_step_security_classification,
+    evidence_classification_level,
 )
 from eneo.main.exceptions import BadRequestException
 
@@ -117,3 +118,10 @@ def test_all_previous_steps_uses_max_prior_effective_output_level() -> None:
         )
 
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
+
+
+def test_evidence_classification_level_is_the_runs_highest_step_level():
+    assert evidence_classification_level({1: None, 2: 3, 3: 1}) == 3
+    # An unclassified run records 0 so it can be told from a run that predates the rule.
+    assert evidence_classification_level({1: None}) == 0
+    assert evidence_classification_level({}) == 0

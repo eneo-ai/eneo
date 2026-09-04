@@ -706,6 +706,7 @@ class FlowRuns(BasePublic):
         sa.String(32),
         nullable=True,
     )
+    evidence_classification_level: Mapped[Optional[int]] = mapped_column(nullable=True)
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey(Tenants.id, ondelete="CASCADE"),
         nullable=False,

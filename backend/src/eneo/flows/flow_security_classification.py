@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -114,4 +115,22 @@ def evaluate_step_security_classification(
         effective_output_level=_max_level(
             base_output_level, output_classification_override
         ),
+    )
+
+
+def evidence_classification_level(
+    step_output_levels: Mapping[int, int | None],
+) -> int:
+    """The level a reader of this run's evidence must clear.
+
+    The highest effective output level across the run's steps, 0 when nothing
+    in the run is classified. Recorded on the run when it starts, so that a
+    later reader (a person, an export, the AI builder's review) is held to the
+    rule that applied when the evidence was produced rather than to whatever
+    the flow or space says at reading time. A run recorded before this rule
+    carries no level, and readers treat that as unknown, not as 0.
+    """
+    return max(
+        (level for level in step_output_levels.values() if level is not None),
+        default=0,
     )

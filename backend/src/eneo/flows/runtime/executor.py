@@ -88,6 +88,7 @@ from eneo.flows.flow_runtime_policy import (
 )
 from eneo.flows.flow_security_classification import (
     evaluate_step_security_classification,
+    evidence_classification_level,
 )
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.infrastructure.flow_provider_call_recorder import (
@@ -749,15 +750,35 @@ class FlowRunExecutor:
         logger.info(
             "flow_executor.steps_parsed run_id=%s step_count=%d", run_id, len(steps)
         )
-        step_output_levels: dict[int, int | None] = {}
-        for step in sorted(steps, key=lambda item: item.step_order):
-            step_output_levels[
-                step.step_order
-            ] = await self._validate_runtime_step_security(
-                step=step,
-                state=state,
-                prior_output_levels_by_order=step_output_levels,
+        try:
+            step_output_levels = await self._resolve_step_output_levels(
+                steps=steps, state=state
             )
+        except BadRequestException as exc:
+            source = FlowRunLifecycleSource.INVALID_FLOW_DEFINITION
+            run_error = self._run_error_from_bad_request(
+                exc,
+                source=source,
+                default_code=FlowApiErrorCode.DEFINITION_INVALID,
+            )
+            await self._terminalize_run(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                target_status=FlowRunStatus.FAILED,
+                source=source,
+                error=run_error,
+            )
+            await self._commit()
+            return {
+                "status": "failed",
+                "error": run_error.code.value,
+            }
+        await self.flow_run_repo.record_evidence_classification_level(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            level=evidence_classification_level(step_output_levels),
+        )
+        for step in sorted(steps, key=lambda item: item.step_order):
             latest_run = await self.flow_run_repo.get(
                 run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
             )
@@ -2319,6 +2340,23 @@ class FlowRunExecutor:
             raise BadRequestException(
                 f"Step {step.step_order}: assistant configuration changed after publish. Republish the flow before running it."
             )
+
+    async def _resolve_step_output_levels(
+        self, *, steps: list[RuntimeStep], state: RunExecutionState
+    ) -> dict[int, int | None]:
+        """Every step's effective output level, in order, before any step runs.
+
+        A step's floor depends on the steps before it, so a run that would fail
+        this check at step three must not have produced steps one and two.
+        """
+        levels: dict[int, int | None] = {}
+        for step in sorted(steps, key=lambda item: item.step_order):
+            levels[step.step_order] = await self._validate_runtime_step_security(
+                step=step,
+                state=state,
+                prior_output_levels_by_order=levels,
+            )
+        return levels
 
     async def _validate_runtime_step_security(
         self,

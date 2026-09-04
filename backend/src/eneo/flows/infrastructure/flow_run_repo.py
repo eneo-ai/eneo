@@ -369,6 +369,7 @@ _FLOW_RUN_STATUS_COLUMNS = (
     FlowRuns.started_at,
     FlowRuns.finished_at,
     FlowRuns.job_id,
+    FlowRuns.evidence_classification_level,
     FlowRuns.created_at,
     FlowRuns.updated_at,
 )
@@ -998,6 +999,16 @@ class FlowRunRepository:
             )
         )
         return int(getattr(result, "rowcount", 0) or 0)
+
+    async def record_evidence_classification_level(
+        self, *, run_id: UUID, tenant_id: UUID, level: int
+    ) -> None:
+        await self.session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .values(evidence_classification_level=level)
+        )
 
     async def update_input_payload(
         self,

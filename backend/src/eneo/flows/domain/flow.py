@@ -258,6 +258,7 @@ class FlowRunStatusSnapshot(BaseModel):
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     job_id: Optional[UUID] = None
+    evidence_classification_level: int | None = Field(default=None, ge=0)
     created_at: datetime
     updated_at: datetime
 
