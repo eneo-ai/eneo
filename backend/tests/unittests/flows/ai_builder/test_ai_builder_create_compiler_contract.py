@@ -51,6 +51,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalIntentArgumentError,
     parse_create_flow_intent_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
+    build_requirements_disclosure,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
@@ -98,6 +101,10 @@ from eneo.flows.ai_builder.planning_state import (
     RuntimeMetadataFieldPurpose,
     SchemaResolution,
 )
+from eneo.flows.ai_builder.planning_state_builder import (
+    apply_policy_defaults_from_resolved_slots,
+)
+from eneo.flows.ai_builder.question_catalog import render_question
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
@@ -1327,6 +1334,47 @@ def test_compile_context_derives_analysis_fields_from_result_obligations() -> No
         "recommended_action",
     ]
     assert context.source_reader_required_fields == ()
+
+
+def test_an_assumed_layout_is_disclosed_committed_and_compiled_as_one_thing() -> None:
+    state = PlanningState.empty()
+    state.resolved_slots["primary_runtime_input"] = _slot(
+        "primary_runtime_input",
+        "documents",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "pdf_document",
+    )
+    state.resolved_slots["pdf_generation_mode"] = _slot(
+        "pdf_generation_mode",
+        "generated_pdf",
+    )
+    apply_policy_defaults_from_resolved_slots(state, freeform_text="")
+    assert state.resolved_slots["document_material_scope"].source == "policy_default"
+    assert state.resolved_slots["report_disposition"].source == "policy_default"
+    _commit_architecture(state)
+
+    disclosure = build_requirements_disclosure(state, ui_language="sv")
+    option_label = next(
+        option.label
+        for option in render_question("report_disposition", "sv").options
+        if option.value == "synthesized_overview"
+    )
+    assert {
+        (row.question_id, row.value, row.label) for row in disclosure.assumption_rows
+    } >= {("report_disposition", "synthesized_overview", option_label)}
+    processing = next(
+        decision.decision
+        for decision in disclosure.key_decisions
+        if decision.topic == "Planerad bearbetning"
+    )
+    assert processing.endswith("(en samlad sammanställning)")
+    assert state.architecture_commit is not None
+    assert state.architecture_commit.report_disposition == "synthesized_overview"
+    context = create_compile_context_from_planning_state(state)
+    assert context is not None
+    assert context.report_disposition == "synthesized_overview"
 
 
 def test_compile_context_reads_report_disposition_only_from_commit() -> None:
