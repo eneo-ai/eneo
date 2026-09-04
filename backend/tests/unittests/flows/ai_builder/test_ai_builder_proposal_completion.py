@@ -1566,12 +1566,13 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
         model="openai/gpt-5.4",
         target_kind=TargetKind.CREATE,
     )
+    # A classification that parses: the total keyed contract, one resolved slot.
     auxiliary_response = _make_response_with_text(
         json.dumps(
             {
-                "slots": [
-                    {
-                        "slot_name": "terminal_output",
+                "slots": {
+                    "terminal_output": {
+                        "outcome": "resolved",
                         "value": "pdf_document",
                         "confidence": "high",
                         "reason": "The user explicitly requested PDF output.",
@@ -1583,7 +1584,14 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
                         ],
                         "evidence_level": "explicit",
                     }
-                ],
+                },
+                "file_roles": [],
+                "checkpoint_updates": [],
+                "form_intake": None,
+                "named_result_evidence": None,
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
             }
         ),
         prompt_tokens=2,
@@ -1633,7 +1641,7 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
             minimum_conversation_budget_tokens=0,
         ),
     )
-    assert classification is not None
+    assert classification.outcome == "resolved"
     call_budget = ProposalCallBudget(call_limit=2)
     calls: tuple[tuple[ProposalCallKind, bool], ...] = (
         ("proposal_initial", False),

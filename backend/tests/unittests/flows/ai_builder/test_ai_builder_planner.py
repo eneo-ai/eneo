@@ -1542,7 +1542,8 @@ async def test_prepare_planner_request_asks_when_attachment_schema_direction_is_
         "schema_direction"
     )
     assert len(prepared.server_decision.question.question_data.options) == 5
-    provider_callback.assert_awaited_once()
+    # The blank classification is retried once; the budget hook runs per request.
+    assert provider_callback.await_count == 2
 
 
 def test_preprovider_gate_promotes_structural_schema_refusal() -> None:

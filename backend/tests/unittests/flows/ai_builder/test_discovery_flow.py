@@ -3580,7 +3580,8 @@ class TestPlannerDiscoveryQuestionDispatch:
         assert [event["event"] for event in events] == ["text", "question", "done"]
         # The turn's one classifier call; the follow-up question is served
         # from the registry without a second, slot-focused call.
-        assert planner.litellm_client.acompletion.await_count == 1
+        # The unreadable classification is retried once before the backend follow-up.
+        assert planner.litellm_client.acompletion.await_count == 2
         repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio

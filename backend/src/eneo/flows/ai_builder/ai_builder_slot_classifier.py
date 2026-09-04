@@ -199,7 +199,6 @@ async def classify_slots(
             result=replace(cached, cached=True),
         )
 
-    started_at = time.perf_counter()
     completion_kwargs = completion_model_route.prepare_provider_kwargs(
         ModelKwargs(temperature=0.0)
     )
@@ -219,89 +218,112 @@ async def classify_slots(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
     completion_kwargs["max_tokens"] = request_budget.resolved_output_tokens
-    if before_provider_call is not None:
-        await before_provider_call()
-    call = (
-        usage_tracker.begin_call(
-            call_kind="slot_classification",
-            request_budget=request_budget,
-        )
-        if usage_tracker is not None
-        else None
-    )
-    try:
-        response = await litellm_client.acompletion(
-            model=litellm_model,
-            messages=messages,
-            stream=False,
-            drop_params=True,
-            timeout=request_budget.timeout_seconds,
-            **completion_kwargs,
-        )
-    except Exception as error:
-        failure = record_ai_builder_provider_failure(
-            error,
-            stage="slot_classification",
-            tenant_id=tenant_id,
-        )
-        if call is not None and usage_tracker is not None:
-            usage_tracker.fail_call(call=call, failure=failure)
-        raise failure.as_exception() from error
 
-    content = response.choices[0].message.content if response.choices else None
-    if call is not None and usage_tracker is not None:
-        usage_tracker.complete_call(
-            call=call,
-            usage=completion_token_usage_from_response(
-                response,
-                model_name=litellm_model,
-                messages=messages,
-                completion_text=content if isinstance(content, str) else None,
-            ),
+    async def attempt_once() -> SlotClassificationAttempt:
+        started_at = time.perf_counter()
+        if before_provider_call is not None:
+            await before_provider_call()
+        call = (
+            usage_tracker.begin_call(
+                call_kind="slot_classification",
+                request_budget=request_budget,
+            )
+            if usage_tracker is not None
+            else None
         )
-
-    if content is None or (isinstance(content, str) and not content.strip()):
-        return SlotClassificationAttempt(outcome="no_content")
-    if not isinstance(content, str):
-        return SlotClassificationAttempt(outcome="parse_failed")
-
-    _capture_raw_classifier_response(
-        content,
-        slot_names=slot_names,
-        model=litellm_model,
-    )
-    result = slot_classification_contract.parse_slot_classification_response(
-        content,
-        allowed_slot_values=slot_values,
-        classification_input=classification_input,
-        schema_candidate_fingerprints=schema_candidate_fingerprints,
-    )
-    if result is None:
-        return SlotClassificationAttempt(outcome="parse_failed")
-
-    _remember_cache(cache_key, result)
-    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-    logger.info(
-        "AI Builder slot classification completed",
-        extra={
-            **_log_context(
-                tenant_id=tenant_id,
+        try:
+            response = await litellm_client.acompletion(
                 model=litellm_model,
-                slot_names=slot_names,
-                cached=False,
-            ),
-            "accepted_slot_count": sum(
-                isinstance(outcome, ResolvedSlotClassificationOutcome)
-                for outcome in result.slot_outcomes.values()
-            ),
-            "omitted_slot_count": sum(
-                diagnostic.code == "slot_outcome_omitted"
-                for diagnostic in result.diagnostics
-            ),
-            "elapsed_ms": elapsed_ms,
-        },
-    )
-    return SlotClassificationAttempt(outcome="resolved", result=result)
+                messages=messages,
+                stream=False,
+                drop_params=True,
+                timeout=request_budget.timeout_seconds,
+                **completion_kwargs,
+            )
+        except Exception as error:
+            failure = record_ai_builder_provider_failure(
+                error,
+                stage="slot_classification",
+                tenant_id=tenant_id,
+            )
+            if call is not None and usage_tracker is not None:
+                usage_tracker.fail_call(call=call, failure=failure)
+            raise failure.as_exception() from error
+
+        content = response.choices[0].message.content if response.choices else None
+        if call is not None and usage_tracker is not None:
+            usage_tracker.complete_call(
+                call=call,
+                usage=completion_token_usage_from_response(
+                    response,
+                    model_name=litellm_model,
+                    messages=messages,
+                    completion_text=content if isinstance(content, str) else None,
+                ),
+            )
+
+        if content is None or (isinstance(content, str) and not content.strip()):
+            return SlotClassificationAttempt(outcome="no_content")
+        if not isinstance(content, str):
+            return SlotClassificationAttempt(outcome="parse_failed")
+
+        _capture_raw_classifier_response(
+            content,
+            slot_names=slot_names,
+            model=litellm_model,
+        )
+        result = slot_classification_contract.parse_slot_classification_response(
+            content,
+            allowed_slot_values=slot_values,
+            classification_input=classification_input,
+            schema_candidate_fingerprints=schema_candidate_fingerprints,
+        )
+        if result is None:
+            return SlotClassificationAttempt(outcome="parse_failed")
+
+        _remember_cache(cache_key, result)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "AI Builder slot classification completed",
+            extra={
+                **_log_context(
+                    tenant_id=tenant_id,
+                    model=litellm_model,
+                    slot_names=slot_names,
+                    cached=False,
+                ),
+                "accepted_slot_count": sum(
+                    isinstance(outcome, ResolvedSlotClassificationOutcome)
+                    for outcome in result.slot_outcomes.values()
+                ),
+                "omitted_slot_count": sum(
+                    diagnostic.code == "slot_outcome_omitted"
+                    for diagnostic in result.diagnostics
+                ),
+                "elapsed_ms": elapsed_ms,
+            },
+        )
+        return SlotClassificationAttempt(outcome="resolved", result=result)
+
+    attempt = await attempt_once()
+    if attempt.outcome in ("parse_failed", "no_content"):
+        # An unreadable completion is stochastic (a garbled JSON tail after a
+        # long evidence list); left alone it makes every slot absent for the
+        # turn, so one more request is cheaper than the questions it causes.
+        logger.warning(
+            "AI Builder slot classification response unreadable; retrying once",
+            extra={
+                **_log_context(
+                    tenant_id=tenant_id,
+                    model=litellm_model,
+                    slot_names=slot_names,
+                    cached=False,
+                ),
+                "first_outcome": attempt.outcome,
+            },
+        )
+        attempt = await attempt_once()
+    return attempt
 
 
 def slot_classification_request_fits_model(
