@@ -263,7 +263,11 @@ async def test_empty_classifier_response_reopens_heuristic_architecture_slots(
         max_input_tokens=100_000,
         max_output_tokens=2_000,
     )
-    assert "report_disposition" not in context.planning_state.resolved_slots
+    # The classifier read nothing, so the document scope is the policy's
+    # assumption and the layout that rests on it is assumed with it, as a
+    # reopenable row, while the heuristic architecture slots are still asked.
+    layout = context.planning_state.resolved_slots["report_disposition"]
+    assert (layout.source, layout.value) == ("policy_default", "synthesized_overview")
     assert context.planning_state.commit_grade_slot_value("report_disposition") is None
     context.planning_state.resolved_slots["post_processing_goal"] = _slot(
         "post_processing_goal",
@@ -281,7 +285,6 @@ async def test_empty_classifier_response_reopens_heuristic_architecture_slots(
     assert policy.allowed_ask_question_targets == (
         "primary_runtime_input",
         "terminal_output",
-        "report_disposition",
     )
     assert policy.allowed_action_kinds == ("ask_question",)
 

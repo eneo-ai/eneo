@@ -87,6 +87,57 @@ def test_derives_relevant_report_disposition_into_architecture() -> None:
     assert draft.report_disposition == "both"
 
 
+def test_an_assumed_layout_reaches_the_draft_when_the_scope_is_assumed() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="pdf_document",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope", "flexible_document_case", source="policy_default"
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition", "synthesized_overview", source="policy_default"
+    )
+
+    assert "report_disposition" not in architecture_required_slot_names(state)
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    assert draft.report_disposition == "synthesized_overview"
+
+
+def test_a_weak_layout_does_not_reach_the_draft_even_on_an_assumed_scope() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="pdf_document",
+    )
+    state.resolved_slots["document_material_scope"] = _slot(
+        "document_material_scope", "flexible_document_case", source="policy_default"
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition", "per_source_sections", source="model", confidence="medium"
+    )
+
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    assert draft.report_disposition is None
+
+
+def test_a_required_layout_is_built_on_the_user_evidence_only() -> None:
+    state = _state_with_slots(
+        primary_runtime_input="documents",
+        terminal_output="pdf_document",
+        document_material_scope="multiple_documents_case",
+    )
+    state.resolved_slots["report_disposition"] = _slot(
+        "report_disposition", "per_source_sections", source="model", confidence="medium"
+    )
+
+    assert "report_disposition" in architecture_required_slot_names(state)
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    assert draft.report_disposition is None
+
+
 def test_excludes_irrelevant_report_disposition_from_architecture() -> None:
     draft = derive_architecture_commit_draft(
         _state_with_slots(
