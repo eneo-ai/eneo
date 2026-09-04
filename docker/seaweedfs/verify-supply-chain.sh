@@ -7,7 +7,7 @@ readonly SOURCE_TREE="f6590c71c41ec414fc193b89e9d9dd586d39ad17"
 readonly SOURCE_ARCHIVE_SHA256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e"
 readonly SOURCE_LICENSE_SHA256="d789d433cc11da163273d1e39be2e8fa67642f9a58ef220d3f258fa9c14ef613"
 readonly DOWNSTREAM_PATCH_NAME="0001-upgrade-vulnerable-dependencies.patch"
-readonly DOWNSTREAM_PATCH_SHA256="1df1c50cc95f91da78408eda2693f601ceb523964fad085878162e37444e770c"
+readonly DOWNSTREAM_PATCH_SHA256="e3a2962e263e5de759e10080ee7bfaf4fb0554dc746a4a6d8b8613cc8bfa457e"
 readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DOWNSTREAM_PATCH="$SCRIPT_DIRECTORY/patches/$DOWNSTREAM_PATCH_NAME"
 IMAGE_VERSION="$(tr -d '[:space:]' <"$SCRIPT_DIRECTORY/VERSION")"
@@ -125,11 +125,10 @@ audit_source() {
         and any(.[]; .Path == "github.com/kurin/blazer"
             and .Version == "v0.5.3")
         and any(.[]; .Path == "github.com/apache/thrift"
-            and .Version == "v0.23.0"
-            and .Replace.Path == "github.com/apache/thrift"
-            and .Replace.Version == "v0.23.1-0.20260429145742-d2acd3c49e58")
+            and .Version == "v0.24.0"
+            and .Replace == null)
         and any(.[]; .Path == "google.golang.org/grpc"
-            and .Version == "v1.82.1")
+            and .Version == "v1.83.1")
         and any(.[]; .Path == "golang.org/x/image"
             and .Version == "v0.45.0")
         and any(.[]; .Path == "golang.org/x/crypto"
@@ -180,7 +179,7 @@ EOF
         "e2851ee2c9388d5f19a5bed780dfdc16ec860909545b092a399d4ef73a81b7f7" \
         "$work_directory/blazer.LICENSE"
     verify_known_license \
-        "https://raw.githubusercontent.com/apache/thrift/d2acd3c49e58/LICENSE" \
+        "https://raw.githubusercontent.com/apache/thrift/v0.24.0/LICENSE" \
         "89aa7b27868669299bd8a6c53b72ec4beadce42dad6c8336797cc26e1e8df98d" \
         "$work_directory/thrift.LICENSE"
 
