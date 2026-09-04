@@ -759,8 +759,10 @@ def _build_slot_classification_prompt(
         "file_roles "
         "for the listed file_id values. Use runtime_input_sample, template, "
         "reference_material, example_output, or context_only. Decide each role by "
-        "what the flow does with the file at run time, from the conversation and "
-        "file evidence together. runtime_input_sample: the user will upload or "
+        "the file's place in the flow's life, from the conversation and file "
+        "evidence together: a specimen of the material runs will bring, input the "
+        "Builder reads while designing, a structure the flow fills, the desired "
+        "result's form, or background only. runtime_input_sample: the user will upload or "
         "paste new material of this kind at each run and attached this file to "
         'show what it looks like; the flow does not read this file itself ("ett '
         'exempel på det jag laddar upp vid körning"). reference_material: '

@@ -1336,7 +1336,12 @@ def test_compile_context_derives_analysis_fields_from_result_obligations() -> No
     assert context.source_reader_required_fields == ()
 
 
-def test_an_assumed_layout_is_disclosed_committed_and_compiled_as_one_thing() -> None:
+def test_an_assumed_layout_reaches_the_card_the_commit_and_the_compile_context() -> (
+    None
+):
+    # The compiler's own parametrized tests prove the topology built from the
+    # compile context's report_disposition; this test proves the row, the card
+    # line, the commit and that context carry one value.
     state = PlanningState.empty()
     state.resolved_slots["primary_runtime_input"] = _slot(
         "primary_runtime_input",

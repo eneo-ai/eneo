@@ -4614,7 +4614,9 @@ def test_slot_classification_prompt_explains_report_disposition_values() -> None
     assert "each uploaded source" in prompt
 
 
-def test_slot_classification_prompt_defines_every_file_role_by_runtime_use() -> None:
+def test_slot_classification_prompt_defines_every_file_role_by_its_place_in_the_flow() -> (
+    None
+):
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         classification_input=_classification_input(
             "De bifogade handlingarna är underlaget."
@@ -4632,6 +4634,7 @@ def test_slot_classification_prompt_defines_every_file_role_by_runtime_use() -> 
         "context_only",
     ):
         assert f"{role}:" in prompt
+    assert "the file's place in the flow's life" in prompt
     assert "the flow does not read this file itself" in prompt
     assert "material the Builder reads while designing the flow" in prompt
     assert "not carried into runs" in prompt
