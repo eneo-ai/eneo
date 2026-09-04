@@ -398,6 +398,65 @@ async def test_server_question_preserves_prepared_file_roles_on_commit() -> None
 
 
 @pytest.mark.asyncio
+async def test_the_first_question_of_a_create_session_opens_with_what_was_understood() -> (
+    None
+):
+    # The comprehension rides on the first question only: later questions and
+    # edit sessions carry none, so the user reads it once before deciding.
+    repo = AsyncMock()
+    repo.commit_turn.return_value = 5
+    state = PlanningState.empty()
+    state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="pdf_document",
+        source="structured_answer",
+        evidence=["structured_answer:terminal_output"],
+        confidence="high",
+    )
+    decision = AskCanonicalQuestion(slot_name="primary_runtime_input")
+
+    first = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=decision,
+            conversation=[ConversationMessage(role="user", content="Build a flow")],
+            planning_state=state,
+        )
+    )
+    first_question = next(
+        event.data
+        for event in first.events
+        if isinstance(event, AIBuilderQuestionEvent)
+    )
+    assert first_question.question_index == 1
+    assert first_question.understanding is not None
+    assert "PDF" in first_question.understanding.sentences[0]
+
+    later = await dispatch_server_decision(
+        _request(
+            repo=repo,
+            decision=decision,
+            conversation=[
+                ConversationMessage(role="user", content="Build a flow"),
+                ConversationMessage(
+                    role="assistant",
+                    content="Which result?",
+                    metadata={"question_id": "terminal_output", "question_index": 1},
+                ),
+            ],
+            planning_state=state,
+        )
+    )
+    later_question = next(
+        event.data
+        for event in later.events
+        if isinstance(event, AIBuilderQuestionEvent)
+    )
+    assert later_question.question_index == 2
+    assert later_question.understanding is None
+
+
+@pytest.mark.asyncio
 async def test_server_question_uses_canonical_slot_name_question_id() -> None:
     repo = AsyncMock()
     repo.commit_turn.return_value = 5

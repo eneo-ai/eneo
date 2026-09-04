@@ -41,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RunPreviewPayload,
     RunPreviewTemplatePayload,
     RuntimeInputFieldPayload,
+    UnderstandingPayload,
 )
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
     FORM_INTAKE_SIGNAL_ID,
@@ -617,6 +618,101 @@ def _attachment_assumptions(
         )
         for item in ordered
     ]
+
+
+def build_understanding(
+    session_state: PlanningState,
+    *,
+    ui_language: str | None,
+) -> UnderstandingPayload | None:
+    """What was understood before the first question, from commit-grade
+    readings only; weak readings are named as open topics, never as facts."""
+
+    locale = resolve_locale(ui_language)
+    facts: list[str] = []
+    open_topics: list[str] = []
+    for slot_name in (
+        "primary_runtime_input",
+        "terminal_output",
+        "post_processing_goal",
+    ):
+        if session_state.commit_grade_slot_value(slot_name) is not None:
+            facts.append(slot_name)
+        elif slot_name in session_state.resolved_slots:
+            open_topics.append(render_summary_label(slot_name, locale))
+    sentences: list[str] = []
+    if facts:
+        resolved = {name: session_state.resolved_slots[name] for name in facts}
+        sentences.append(_summary_text(resolved, locale))
+    attachment_sentence = _understood_attachments_sentence(session_state, locale)
+    if attachment_sentence:
+        sentences.append(attachment_sentence)
+    if not sentences:
+        return None
+    return UnderstandingPayload(sentences=sentences, open_topics=open_topics)
+
+
+def _understood_attachments_sentence(
+    session_state: PlanningState, locale: Locale
+) -> str | None:
+    """One bounded sentence about the attachments, counting certain roles only."""
+
+    total = len(session_state.file_roles)
+    if total == 0:
+        return None
+    certain: dict[str, int] = {}
+    unsure = 0
+    for item in session_state.file_roles:
+        if item.confidence == "high":
+            certain[item.role] = certain.get(item.role, 0) + 1
+        else:
+            unsure += 1
+    parts = [
+        f"{count} {_attachment_role_count_label(role, count, locale)}"
+        for role, count in sorted(certain.items())
+    ]
+    if unsure:
+        parts.append(
+            f"{unsure} med oklar roll"
+            if locale == "sv"
+            else f"{unsure} with an unclear role"
+        )
+    joined = ", ".join(parts)
+    if locale == "sv":
+        return (
+            f"{total} bifogade filer: {joined}."
+            if total > 1
+            else f"1 bifogad fil: {joined}."
+        )
+    return (
+        f"{total} attached files: {joined}."
+        if total > 1
+        else f"1 attached file: {joined}."
+    )
+
+
+def _attachment_role_count_label(role: str, count: int, locale: Locale) -> str:
+    labels_sv: dict[str, tuple[str, str]] = {
+        "runtime_input_sample": (
+            "exempel på körningsindata",
+            "exempel på körningsindata",
+        ),
+        "template": ("mall", "mallar"),
+        "reference_material": ("underlag", "underlag"),
+        "example_output": ("exempelresultat", "exempelresultat"),
+        "context_only": ("bakgrund", "bakgrund"),
+    }
+    labels_en: dict[str, tuple[str, str]] = {
+        "runtime_input_sample": ("runtime input sample", "runtime input samples"),
+        "template": ("template", "templates"),
+        "reference_material": ("reference document", "reference documents"),
+        "example_output": ("example result", "example results"),
+        "context_only": ("background file", "background files"),
+    }
+    singular, plural = (labels_sv if locale == "sv" else labels_en).get(
+        role, (role, role)
+    )
+    return singular if count == 1 else plural
 
 
 def _attachment_travels(
