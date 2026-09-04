@@ -141,14 +141,18 @@
             <p class="font-semibold">
               {review.error.code === "flow_not_published"
                 ? m.ai_builder_review_unpublished_title()
-                : m.ai_builder_review_load_failed()}
+                : review.error.code === "review_flow_too_large"
+                  ? m.ai_builder_review_flow_too_large_title()
+                  : m.ai_builder_review_load_failed()}
             </p>
             <p class="mt-0.5">
               {review.error.code === "flow_not_published"
                 ? m.ai_builder_review_unpublished_body()
-                : review.error.message}
+                : review.error.code === "review_flow_too_large"
+                  ? m.ai_builder_review_flow_too_large()
+                  : review.error.message}
             </p>
-            {#if review.error.code !== "flow_not_published"}
+            {#if review.error.code !== "flow_not_published" && review.error.code !== "review_flow_too_large"}
               <Button variant="outline" size="sm" class="mt-2.5" onclick={onretry}>
                 {m.ai_builder_review_retry()}
               </Button>

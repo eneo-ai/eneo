@@ -415,6 +415,7 @@ def _make_container(
     service.prepare_message_context.return_value = SimpleNamespace(
         review_context=None,
         review_evidence=None,
+        evidence_floor=0,
         planner_context=SimpleNamespace(
             available_models=[],
             available_kbs=[],
@@ -2310,6 +2311,7 @@ class TestSendMessageEndpoint:
         service.prepare_message_context.return_value = SimpleNamespace(
             review_context=None,
             review_evidence=None,
+            evidence_floor=0,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "openai"}
@@ -2382,6 +2384,7 @@ class TestSendMessageEndpoint:
         service.prepare_message_context.return_value = SimpleNamespace(
             review_context=None,
             review_evidence=None,
+            evidence_floor=0,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "azure"}

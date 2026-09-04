@@ -647,3 +647,14 @@ async def test_the_evidence_floor_persists_with_the_turn_and_never_drops(user):
     )
     # The stale review yields no evidence, yet the floor for this session stays 3.
     assert conversation_evidence_floor(session.conversation) == 3
+    # Every accepted turn re-writes the floor on its own, so a conversation whose
+    # review message was compacted away still carries it on a later turn.
+    later = metadata_for_user_message(evidence_floor=3)
+    assert later == {"evidence_floor": 3}
+    compacted = _edit_session(user, review_metadata=None)
+    compacted.conversation.append(
+        ConversationMessage(role="user", content="Fortsätt", metadata=later)
+    )
+    assert conversation_evidence_floor(compacted.conversation) == 3
+    # No evidence, nothing written: a plain turn carries no floor key.
+    assert metadata_for_user_message(evidence_floor=0) is None

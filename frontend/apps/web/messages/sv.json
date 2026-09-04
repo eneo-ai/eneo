@@ -6716,7 +6716,7 @@
   "ai_builder_review_step": "steg {number}",
   "ai_builder_review_step_labelled": "steg {number} ({label})",
   "ai_builder_review_unknown_step": "ett borttaget steg",
-  "ai_builder_review_unconsumed_title": "Utdata från {step} används inte",
+  "ai_builder_review_unconsumed_title": "Utdata från {step} observerades inte användas",
   "ai_builder_review_unconsumed_evidence": "Inget senare steg läste utdata i {runs} lyckade körningar med spårad indata. Steget kan ändå göra något annat, till exempel ett anrop.",
   "ai_builder_review_repeated_error_title": "{step} misslyckades med samma fel",
   "ai_builder_review_repeated_error_evidence": "Felet {code} återkom i {runs} misslyckade körningar.",
@@ -6724,6 +6724,7 @@
   "ai_builder_review_latency_share_title": "{step} står för {percent} % av tiden",
   "ai_builder_review_share_evidence": "Medel över {runs} lyckade körningar där alla steg mättes.",
   "flow_history_review_with_builder": "Granska med AI-byggaren",
-  "ai_builder_review_flow_too_large": "Flödet har fler steg än granskningen läser. Granska ett mindre flöde eller dela upp det.",
-  "ai_builder_replace_edit_description_review": "Du har en pågående konversation eller ett AI-förslag som inte har godkänts. Om du fortsätter ersätts det med en granskning av körningarna."
+  "ai_builder_review_flow_too_large": "Flödet har fler steg än granskningen läser. Dela upp det eller granska ett mindre flöde.",
+  "ai_builder_replace_edit_description_review": "Du har en pågående konversation eller ett AI-förslag som inte har godkänts. Om du fortsätter ersätts det med en granskning av körningarna.",
+  "ai_builder_review_flow_too_large_title": "Flödet är för stort att granska"
 }

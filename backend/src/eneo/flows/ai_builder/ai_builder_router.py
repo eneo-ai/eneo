@@ -1176,6 +1176,7 @@ async def send_message(
                     edit_context=body.edit_context,
                     review_context=prepared_context.review_context,
                     review_evidence=prepared_context.review_evidence,
+                    evidence_floor=prepared_context.evidence_floor,
                     ui_language=body.ui_language,
                     completion_model_route=prepared_context.completion_model_route,
                     available_models=(

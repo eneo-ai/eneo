@@ -157,6 +157,25 @@ describe("BuilderFindingsScreen", () => {
     expect(screen.getByText(m.ai_builder_review_unpublished_title())).toBeTruthy();
     expect(screen.queryByRole("button", { name: m.ai_builder_review_retry() })).toBeNull();
     unmount();
+    const large = render(BuilderFindingsScreen, {
+      review: {
+        status: "failed",
+        error: {
+          code: "review_flow_too_large",
+          message: "The flow has more steps than a run review reads.",
+          category: "bad_request",
+          phase: "router",
+          transient: false
+        } as never
+      },
+      onprepare: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    expect(screen.getByText(m.ai_builder_review_flow_too_large_title())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_review_flow_too_large())).toBeTruthy();
+    expect(screen.queryByRole("button", { name: m.ai_builder_review_retry() })).toBeNull();
+    large.unmount();
     render(BuilderFindingsScreen, {
       review: {
         status: "ready",

@@ -114,6 +114,7 @@ UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
 REVIEW_CONTEXT_METADATA_KEY = "review_context"
+EVIDENCE_FLOOR_METADATA_KEY = "evidence_floor"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
@@ -2312,6 +2313,11 @@ def conversation_evidence_floor(
     for message in conversation:
         if message.role != "user":
             continue
+        metadata_map = _metadata_mapping(message.metadata)
+        if metadata_map is not None:
+            raw_floor = metadata_map.get(EVIDENCE_FLOOR_METADATA_KEY)
+            if isinstance(raw_floor, int) and not isinstance(raw_floor, bool):
+                floor = max(floor, raw_floor)
         context = review_context_from_metadata(message.metadata)
         if context is not None:
             floor = max(floor, context.evidence_classification_level)
@@ -2326,6 +2332,7 @@ def metadata_for_user_message(
     edit_context: AIBuilderEditContext | ResolvedAIBuilderEditContext | None = None,
     review_context: AIBuilderReviewContext | None = None,
     review_evidence_level: int | None = None,
+    evidence_floor: int | None = None,
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:
@@ -2353,6 +2360,10 @@ def metadata_for_user_message(
             **review_context.model_dump(),
             evidence_classification_level=review_evidence_level or 0,
         ).to_metadata()
+    if evidence_floor:
+        # Written on every accepted turn once evidence entered the
+        # conversation, so the bounded tail compaction keeps still carries it.
+        metadata[EVIDENCE_FLOOR_METADATA_KEY] = evidence_floor
     return metadata or None
 
 

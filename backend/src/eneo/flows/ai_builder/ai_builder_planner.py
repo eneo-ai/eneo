@@ -261,6 +261,7 @@ class AIBuilderPlanner:
         edit_context: AIBuilderEditContext | None = None,
         review_context: AIBuilderReviewContext | None = None,
         review_evidence: FlowReviewEvidence | None = None,
+        evidence_floor: int = 0,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
@@ -339,17 +340,14 @@ class AIBuilderPlanner:
                 **(initial_metadata or {}),
                 **(metadata_for_user_message(edit_context=plan_edit_context) or {}),
             }
-        review_metadata = (
-            metadata_for_user_message(
-                review_context=review_context,
-                review_evidence_level=(
-                    review_evidence.evidence_classification_level
-                    if review_evidence is not None
-                    else None
-                ),
-            )
-            if review_context is not None
-            else None
+        review_metadata = metadata_for_user_message(
+            review_context=review_context,
+            review_evidence_level=(
+                review_evidence.evidence_classification_level
+                if review_evidence is not None
+                else None
+            ),
+            evidence_floor=evidence_floor,
         )
         if review_metadata:
             initial_metadata = {**(initial_metadata or {}), **review_metadata}

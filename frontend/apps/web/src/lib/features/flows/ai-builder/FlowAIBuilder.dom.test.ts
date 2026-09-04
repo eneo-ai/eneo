@@ -29,6 +29,30 @@ import type { StructuredQuestion } from "./structuredQuestionAnswer";
 // ---- Routes and fixtures ----------------------------------------------------
 
 const SESSIONS_ROUTE = "/api/v1/flows/ai-builder/sessions";
+// A published version with one run and nothing to point at: enough for the
+// findings screen to own the phase.
+const REVIEW_PACKET = {
+  flow_id: "flow-1",
+  flow_version: 2,
+  definition_checksum: "sum-2",
+  generated_at: "2026-09-04T12:00:00Z",
+  evidence_classification_level: 0,
+  steps: [{ step_id: "11111111-1111-4111-8111-111111111111", step_order: 1, label: "Steg" }],
+  cohort: {
+    completed_run_ids: ["r1"],
+    failed_run_ids: [],
+    omitted: { other_version: 0, not_viewable: 0, level_unknown: 0, overflow: 0 }
+  },
+  facts: [
+    {
+      kind: "evidence_completeness",
+      finding_id: "cccccccccccccccc",
+      runs_with_all_step_results: 1,
+      runs_missing_step_results: 0,
+      runs_without_lineage: 0
+    }
+  ]
+};
 const SESSION_ROUTE = "/api/v1/flows/ai-builder/sessions/{session_id}";
 const PLAN_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}";
 
@@ -286,6 +310,7 @@ function makeFetch(options: FetchOptions = {}) {
       }
     ) => {
       if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
+      if (path.endsWith("/review-packet")) return REVIEW_PACKET;
       if (path === SESSIONS_ROUTE && init?.method === "get") return { sessions: [] };
       if (path === SESSIONS_ROUTE && init?.method === "post") {
         posts.push(init.requestBody!["application/json"]);
@@ -406,7 +431,11 @@ interface ShellProps {
 function renderShell({ fetch, stream, ...props }: ShellProps) {
   let service: FlowAIBuilderService | undefined;
   let builder:
-    { focusSavedFlowStep: (scope: AIBuilderSavedFlowStepScope) => Promise<void> } | undefined;
+    | {
+        focusSavedFlowStep: (scope: AIBuilderSavedFlowStepScope) => Promise<void>;
+        openReview: () => Promise<void>;
+      }
+    | undefined;
   render(FlowAIBuilderHarness, {
     transport: { fetch, stream } as unknown as AIBuilderClientTransport,
     ...props,
@@ -2365,6 +2394,68 @@ describe("FlowAIBuilder edit host contract", () => {
     await fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.body).toMatchObject({ edit_context: SAVED_STEP_SCOPE.editContext });
+  });
+
+  it("opens the run review from a cold launch once the session exists", async () => {
+    let releaseCreate!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const { fetch } = makeFetch({ created: editSession() });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") await held;
+      return baseFetch(path, init);
+    });
+    const { stream } = makeStream();
+    const { builder } = renderShell({ fetch, stream, targetKind: "edit", flowId: "flow-1" });
+    await waitFor(() => expect(builder()).toBeDefined());
+    const launched = builder().openReview();
+    releaseCreate();
+    await launched;
+    const heading = await screen.findByRole("heading", { name: m.ai_builder_review_title() });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(await screen.findByTestId("findings-none")).toBeTruthy();
+  });
+
+  it("asks before a run review replaces an ongoing edit and clears the saved-step scope", async () => {
+    const ongoing = makeSession({
+      session_id: "e-ongoing",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      conversation: [
+        userMessage("u1", "Byt rubrik på rapporten"),
+        assistantMessage("a1", "Vad ska rubriken vara?")
+      ]
+    });
+    const fresh = editSession();
+    let posts = 0;
+    const { fetch } = makeFetch({ sessions: [ongoing, fresh] });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        return posts === 1 ? ongoing : fresh;
+      }
+      return baseFetch(path, init);
+    });
+    const { stream } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    service().setSavedFlowStepScope(SAVED_STEP_SCOPE);
+    await builder().openReview();
+    expect(await screen.findByText(m.ai_builder_replace_edit_description_review())).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: m.ai_builder_review_title() })).toBeNull();
+    await fireEvent.click(button(m.ai_builder_replace_edit_action()));
+    expect(await screen.findByRole("heading", { name: m.ai_builder_review_title() })).toBeTruthy();
+    expect(service().savedFlowStepScope).toBeNull();
+    expect(posts).toBe(2);
   });
 
   it("waits for edit bootstrap before deciding whether a cold launch replaces an ongoing edit", async () => {

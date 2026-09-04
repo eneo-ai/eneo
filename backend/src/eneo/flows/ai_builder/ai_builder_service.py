@@ -168,6 +168,7 @@ class PreparedMessageContext:
     session_attachment_file_ids: tuple[UUID, ...]
     review_context: AIBuilderReviewContext | None = None
     review_evidence: FlowReviewEvidence | None = None
+    evidence_floor: int = 0
 
 
 @dataclass(frozen=True)
@@ -395,21 +396,24 @@ class AIBuilderService:
         review_evidence = await self._resolve_review_evidence(
             session=session, review_context=review_context
         )
+        # The floor this conversation is held to: whatever evidence this turn
+        # reads, or any turn before it read. It only ever rises, and it is
+        # written back on the accepted turn so a compacted conversation
+        # still carries it.
+        evidence_floor = max(
+            (
+                review_evidence.evidence_classification_level
+                if review_evidence is not None
+                else 0
+            ),
+            conversation_evidence_floor(session.conversation),
+        )
         planner_context = build_planner_context(
             space,
             model_id=model_id,
             active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant_flow_settings,
-            minimum_level=max(
-                (
-                    review_evidence.evidence_classification_level
-                    if review_evidence is not None
-                    else 0
-                ),
-                # Evidence read on an earlier turn may live on in the
-                # conversation; the floor never drops below what it was.
-                conversation_evidence_floor(session.conversation),
-            ),
+            minimum_level=evidence_floor,
         )
         if (
             message is not None
@@ -518,6 +522,7 @@ class AIBuilderService:
             session_attachment_file_ids=tuple(session_file_ids),
             review_context=review_context,
             review_evidence=review_evidence,
+            evidence_floor=evidence_floor,
         )
 
     @staticmethod
@@ -578,6 +583,7 @@ class AIBuilderService:
         edit_context: AIBuilderEditContext | None = None,
         review_context: AIBuilderReviewContext | None = None,
         review_evidence: FlowReviewEvidence | None = None,
+        evidence_floor: int = 0,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
@@ -613,6 +619,7 @@ class AIBuilderService:
             edit_context=edit_context,
             review_context=review_context,
             review_evidence=review_evidence,
+            evidence_floor=evidence_floor,
             ui_language=ui_language,
             completion_model_route=completion_model_route,
             available_models=available_models,
