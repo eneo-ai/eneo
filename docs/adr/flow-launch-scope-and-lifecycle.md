@@ -9,7 +9,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
-- **Last revised:** 2026-08-31
+- **Last revised:** 2026-09-04
 - **Decision owners:** Product, security, and architecture
 - **Scope:** Flow and Flow AI Builder launch behavior, destructive retention
   activation, and the portable-package platform boundary
@@ -413,7 +413,10 @@ WI-MKT-02.
 
 - **Decision:** Require explicit confirmation for choices that change evidence
   omission, source coverage, retrieval, runtime inputs, external delivery,
-  audit/compliance posture, or `report_disposition`. Benign formatting defaults may
+  audit/compliance posture, or `report_disposition` where the multi-document
+  scope is the user's own evidence. Where that scope is itself a disclosed
+  assumption, the layout is a disclosed, vetoable assumption confirmed with
+  the requirements (revised 2026-09-04, A0-Q3). Benign formatting defaults may
   be visible, typed, vetoable assumptions.
 - **Consequences:** Accepted state must preserve provenance and replay these choices
   deterministically. A human review request maps approve/reject to `view`, maps
