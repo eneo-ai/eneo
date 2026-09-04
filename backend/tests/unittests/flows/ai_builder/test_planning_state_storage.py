@@ -17,10 +17,16 @@ out of Pydantic's typed world. These tests pin:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import cast
+from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.flows.ai_builder.ai_builder_repo import _planning_state_for_storage
+from eneo.flows.ai_builder.ai_builder_repo import (
+    AIBuilderRepository,
+    _planning_state_for_storage,
+)
 from eneo.flows.ai_builder.planning_state import (
     ARCHITECTURE_HASH_HEX_LENGTH,
     BUILDER_SCHEMA_VERSION,
@@ -156,3 +162,52 @@ class TestSaveLoadRoundTrip:
         loaded = PlanningState.model_validate(first["planning_state_jsonb"])
         second = _planning_state_for_storage(loaded)
         assert first["planning_state_jsonb"] == second["planning_state_jsonb"]
+
+
+class _StubSession:
+    """The two session calls `load_planning_state` makes, with a canned row."""
+
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def in_transaction(self) -> bool:
+        return True
+
+    async def execute(self, _statement: object) -> "_StubResult":
+        return _StubResult((uuid4(), self._payload))
+
+
+class _StubResult:
+    def __init__(self, row: tuple[object, object]) -> None:
+        self._row = row
+
+    def one_or_none(self) -> tuple[object, object]:
+        return self._row
+
+
+class TestLoadPlanningState:
+    """The repository is the one owner of "this build does not read that state"."""
+
+    @pytest.mark.asyncio
+    async def test_a_payload_stamped_by_another_schema_version_loads_as_none(
+        self,
+    ) -> None:
+        payload = _planning_state_for_storage(_ready_state())["planning_state_jsonb"]
+        assert isinstance(payload, dict)
+        payload["builder_schema_version"] = BUILDER_SCHEMA_VERSION - 1
+        payload["field_this_build_never_had"] = ["x"]
+        repo = AIBuilderRepository(cast(AsyncSession, _StubSession(payload)))
+
+        loaded = await repo.load_planning_state(session_id=uuid4(), tenant_id=uuid4())
+
+        assert loaded is None
+
+    @pytest.mark.asyncio
+    async def test_a_current_payload_is_validated_strictly(self) -> None:
+        state = _ready_state()
+        payload = _planning_state_for_storage(state)["planning_state_jsonb"]
+        repo = AIBuilderRepository(cast(AsyncSession, _StubSession(payload)))
+
+        loaded = await repo.load_planning_state(session_id=uuid4(), tenant_id=uuid4())
+
+        assert loaded == state.validated_snapshot()

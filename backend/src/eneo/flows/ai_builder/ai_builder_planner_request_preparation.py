@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
@@ -126,7 +126,7 @@ from eneo.flows.ai_builder.ai_builder_turn_controller import (
     GenerateProposal,
     resolve_turn_control,
 )
-from eneo.flows.ai_builder.planning_state import BUILDER_SCHEMA_VERSION, PlanningState
+from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.mapped_execution_policy import (
@@ -232,12 +232,6 @@ PreparedTurnOutcome: TypeAlias = ServerOutputPrepared | ProposalPrepared
 async def prepare_planner_request(
     request: PlannerRequestPreparationInput,
 ) -> PreparedTurnOutcome:
-    persisted = request.persisted_planning_state
-    if (
-        persisted is not None
-        and persisted.builder_schema_version != BUILDER_SCHEMA_VERSION
-    ):
-        request = replace(request, persisted_planning_state=None)
     requirements_state = resolve_requirements_state(request.conversation)
     ui_language = _resolve_ui_language(request.conversation)
     reopen = unconsumed_reopen_question(request.conversation)
@@ -374,7 +368,7 @@ async def prepare_planner_request(
         BuilderTurnControl(
             decision=AskCanonicalQuestion(
                 slot_name=reopen.question_id,
-                allow_focused_classification=False,
+                reopen=True,
             )
         )
         if reopen is not None
