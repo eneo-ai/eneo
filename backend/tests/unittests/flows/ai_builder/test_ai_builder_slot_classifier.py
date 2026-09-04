@@ -4700,6 +4700,26 @@ def test_slot_classification_prompt_keeps_the_option_out_of_the_outcome_field() 
     assert "carries its chosen option in value, never in outcome" in prompt
 
 
+def test_slot_classification_prompt_explains_comparison_scope_values() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input(
+            "Flödet ska jämföra utfört arbete mot avtal."
+        ),
+        allowed_slot_values={
+            "comparison_scope": frozenset(
+                {"same_run_compare", "compare_previous_material", "no_direct_compare"}
+            ),
+        },
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "For comparison_scope" in prompt
+    assert "material uploaded in the same run against each other" in prompt
+    assert "jämföra utfört arbete mot avtal" in prompt
+    assert "compare_previous_material when new material is compared" in prompt
+
+
 def test_slot_classification_prompt_defines_every_file_role_by_its_place_in_the_flow() -> (
     None
 ):

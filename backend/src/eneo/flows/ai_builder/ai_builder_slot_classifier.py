@@ -913,6 +913,11 @@ def _build_slot_classification_prompt(
         "classify synthesized_overview when they want the sources combined into "
         "one shared summary or analysis; classify both when they ask for source "
         "sections plus a shared overview, comparison, or conclusion. "
+        "For comparison_scope, classify same_run_compare when the user compares, "
+        "checks, or reconciles material uploaded in the same run against each "
+        'other ("jämföra utfört arbete mot avtal", "stämma av mot checklistan"); '
+        "compare_previous_material when new material is compared with earlier "
+        "stored material; no_direct_compare when nothing is compared. "
         "If the conversation and uploaded-file evidence show that an upload is an "
         "example_output, classify that file_role and use the same exact quoted "
         "evidence for report_disposition and visible output-shape requirements when "
