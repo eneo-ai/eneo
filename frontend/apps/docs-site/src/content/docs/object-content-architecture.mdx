@@ -292,6 +292,14 @@ than republishing an upstream container image. The build uses pinned builder
 and distroless runtime image digests, compiles a static binary, and runs as a
 non-root user.
 
+The image has its own workflow and its own version, `docker/seaweedfs/VERSION`
+(for example `4.40-eneo.3`). Because every input is pinned, the build is
+reproducible and runs only when those inputs change on `develop`. Each version
+tag is published once and never moved; changing the source pin, the downstream
+patch, or the builder or runtime images means bumping the version. Application
+releases record which store version they were verified against instead of
+rebuilding it.
+
 ```mermaid
 flowchart TD
   source[Pinned SeaweedFS source archive] --> sourcePolicy[Source hash, license, and Go vulnerability policy]
@@ -319,6 +327,16 @@ The build workflow performs these checks before publication:
    Actions identity.
 6. It creates the multi-platform manifest, signs its provenance, and verifies
    the registry attestations independently before publishing evidence.
+
+Only `develop` runs the privileged attestation and publication jobs. Pull
+requests and manual runs from other branches run the same source policy, build,
+reproducibility check, smoke test, SBOM generation, and vulnerability gate
+against an ephemeral local registry with read-only permissions, so a broken
+image is caught before merge without anything reaching the public registry. A
+weekly scheduled run repeats the source policy and scans both published
+platform digests with the current vulnerability databases without rebuilding
+or publishing, so new advisories surface as a red scheduled run instead of a
+blocked application deployment.
 
 The release workflow resolves immutable image digests, verifies SeaweedFS
 manifest provenance plus both platform SBOM attestations, and attaches

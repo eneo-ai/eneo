@@ -10,6 +10,8 @@ readonly DOWNSTREAM_PATCH_NAME="0001-upgrade-vulnerable-dependencies.patch"
 readonly DOWNSTREAM_PATCH_SHA256="1df1c50cc95f91da78408eda2693f601ceb523964fad085878162e37444e770c"
 readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DOWNSTREAM_PATCH="$SCRIPT_DIRECTORY/patches/$DOWNSTREAM_PATCH_NAME"
+IMAGE_VERSION="$(tr -d '[:space:]' <"$SCRIPT_DIRECTORY/VERSION")"
+readonly IMAGE_VERSION
 readonly GO_IMAGE="docker.io/library/golang:1.26.8-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81"
 readonly GO_LICENSES_REVISION="3e084b0caf710f7bfead967567539214f598c0a2"
 readonly GOVULNCHECK_VERSION="v1.6.0"
@@ -228,11 +230,13 @@ audit_image() {
         docker pull --platform "$platform" "$image_ref" >/dev/null
     fi
     docker image inspect "$image_ref" | jq -e \
+        --arg version "$IMAGE_VERSION" \
         --arg commit "$SOURCE_COMMIT" \
         --arg tree "$SOURCE_TREE" \
         --arg archive "$SOURCE_ARCHIVE_SHA256" \
         --arg patch "$DOWNSTREAM_PATCH_SHA256" '
         length == 1
+        and .[0].Config.Labels["org.opencontainers.image.version"] == $version
         and .[0].Config.User == "65532:65532"
         and .[0].Config.WorkingDir == "/data"
         and .[0].Config.Entrypoint == ["/usr/local/bin/weed"]
@@ -261,6 +265,7 @@ audit_image() {
 
     cat >"$provenance_file" <<EOF
 image=$image_ref
+image_version=$IMAGE_VERSION
 platform=$platform
 source_commit=$SOURCE_COMMIT
 source_tree=$SOURCE_TREE

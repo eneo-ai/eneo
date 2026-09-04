@@ -42,11 +42,14 @@ RUN mkdir -m 0700 /out/data \
 
 FROM gcr.io/distroless/static-debian13:nonroot@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 
+# The publication workflow passes the contents of docker/seaweedfs/VERSION.
+ARG IMAGE_VERSION
+
 LABEL org.opencontainers.image.title="Eneo SeaweedFS object-content store" \
       org.opencontainers.image.description="Eneo-built reference S3-compatible byte store for object content" \
       org.opencontainers.image.source="https://github.com/eneo-ai/eneo" \
       org.opencontainers.image.vendor="Eneo" \
-      org.opencontainers.image.version="4.40-eneo.3" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0" \
       io.eneo.upstream.name="SeaweedFS" \
       io.eneo.upstream.version="4.40" \
