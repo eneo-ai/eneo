@@ -20,6 +20,7 @@ from eneo.database.tables.questions_table import (
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
 from eneo.files.file_content_loader import FileContentLoader
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import (
     SessionAdd,
@@ -52,6 +53,13 @@ class SessionRepository:
         self,
         sessions: list[SessionInDB],
     ) -> list[SessionInDB]:
+        info_blobs = [
+            info_blob
+            for session in sessions
+            for question in session.questions
+            for info_blob in question.info_blobs
+        ]
+        await InfoBlobRepository(self.session).hydrate_original_availability(info_blobs)
         if self.file_content_loader is None:
             if any(
                 question.questions_files
@@ -147,7 +155,7 @@ class SessionRepository:
         return await self.delegate.add(session)
 
     async def update(self, session: SessionUpdate) -> SessionInDB | None:
-        return await self.delegate.update(session)
+        return await self._hydrate_optional(await self.delegate.update(session))
 
     async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
         stmt = (

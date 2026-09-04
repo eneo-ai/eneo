@@ -10,6 +10,7 @@ class EntityType(str, Enum):
     APP = "app"
     SKILL = "skill"
     FILE = "file"
+    INFO_BLOB = "info_blob"
     WEBSITE = "website"
     TENANT_SETTINGS = "tenant_settings"
     GOVERNANCE_POLICY = "governance_policy"

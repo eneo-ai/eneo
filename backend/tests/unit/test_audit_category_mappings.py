@@ -264,7 +264,7 @@ class TestCategoryDistribution:
             "admin_actions": 49,
             "user_actions": 45,
             "security_events": 9,
-            "file_operations": 4,
+            "file_operations": 5,
             "integration_events": 19,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED

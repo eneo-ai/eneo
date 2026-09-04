@@ -57,6 +57,7 @@ from eneo.object_content.content import (
 from eneo.object_content.content_service import (
     ObjectContentService,
     VerifiedObjectPublication,
+    detach_content_read,
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
@@ -781,43 +782,15 @@ class FileService:
             access_class=reference.access_class,
         )
 
-        read_context = self._object_content.open_content(
-            grant,
-            range_header=range_header,
-        )
-        opened = await read_context.__aenter__()
-        closed = False
-
-        async def exit_read_context(
-            error: BaseException | None = None,
-        ) -> bool | None:
-            nonlocal closed
-            if closed:
-                return None
-            closed = True
-            if error is None:
-                return await read_context.__aexit__(None, None, None)
-            return await read_context.__aexit__(
-                type(error),
-                error,
-                error.__traceback__,
+        opened = await detach_content_read(
+            self._object_content.open_content(
+                grant,
+                range_header=range_header,
             )
-
-        async def stream() -> AsyncGenerator[bytes]:
-            try:
-                async for chunk in opened.chunks:
-                    yield chunk
-            except BaseException as error:
-                if not await exit_read_context(error):
-                    raise
-            else:
-                await exit_read_context()
-
-        async def close() -> None:
-            await exit_read_context()
+        )
 
         return FileDownload(
-            chunks=stream(),
+            chunks=opened.chunks,
             content_length=opened.content_length,
             media_type=opened.media_type,
             filename=(
@@ -828,7 +801,7 @@ class FileService:
             sha256=reference.sha256,
             content_range=opened.content_range,
             range_supported=metadata.file_type is FileType.AUDIO,
-            _close=close,
+            _close=opened.aclose,
         )
 
     def _open_legacy_download(
