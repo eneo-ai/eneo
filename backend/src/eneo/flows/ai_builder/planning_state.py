@@ -924,7 +924,9 @@ def _is_compilable_named_result_segment(value: str) -> bool:
 class PlanningState(_PlanningModel):
     fcm_version: int
     planner_contract_version: int
-    builder_schema_version: int
+    # Strict: a stamp that is not an integer is drift, never a version that
+    # lax coercion happens to spell ("22", True).
+    builder_schema_version: int = Field(strict=True)
     signals: list[PlanningSignal] = Field(default_factory=list[PlanningSignal])
     resolved_slots: dict[str, ResolvedSlot] = Field(
         default_factory=dict[str, ResolvedSlot]

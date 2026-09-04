@@ -612,15 +612,19 @@ class AIBuilderPlanLifecycle:
         spec: FlowDraftSpecCore,
     ) -> None:
         # An approved plan only exists after a proposal turn committed planning
-        # state, so a missing planning state here is corruption, not a legacy
-        # session shape.
+        # state. The repository returns nothing for a state this build does
+        # not read (stamped by another builder schema version), so the plan
+        # approved against it cannot be materialized here: a new proposal
+        # rebuilds the state from the conversation.
         planning_state = await self.repo.load_planning_state(
             session_id=session.id,
             tenant_id=self.user.tenant_id,
         )
         if planning_state is None:
-            raise RuntimeError(
-                "AI Builder session has an approved plan without planning state."
+            raise AIBuilderBadRequestException(
+                "The approved plan was made against a planning state this version "
+                "of the Builder does not read. Ask for a new proposal.",
+                code=AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED,
             )
         mismatches = checkpoint_intent_mismatches(
             spec,

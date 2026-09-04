@@ -1714,7 +1714,9 @@ class AIBuilderRepository:
           so the caller knows to stamp a new `PlanningState`.
         - Row present with a payload stamped by another builder schema
           version: return `None`; the planner rebuilds the state from the
-          conversation, since this build cannot validate that shape.
+          conversation, since this build cannot validate that shape. A
+          missing or malformed stamp is drift, not another version, and
+          fails the strict validation below.
         - Row present with a current payload: return the validated model;
           any drifted JSONB raises Pydantic's `ValidationError` rather than
           silently reverting to a default.
@@ -1736,10 +1738,15 @@ class AIBuilderRepository:
             payload = row[1]
             if payload is None:
                 return None
+            stamp = (
+                cast(Mapping[str, object], payload).get("builder_schema_version")
+                if isinstance(payload, Mapping)
+                else None
+            )
             if (
-                isinstance(payload, Mapping)
-                and cast(Mapping[str, object], payload).get("builder_schema_version")
-                != BUILDER_SCHEMA_VERSION
+                isinstance(stamp, int)
+                and not isinstance(stamp, bool)
+                and stamp != BUILDER_SCHEMA_VERSION
             ):
                 return None
             return PlanningState.model_validate(payload)

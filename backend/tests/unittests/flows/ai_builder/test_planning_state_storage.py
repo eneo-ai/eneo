@@ -21,6 +21,7 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.flows.ai_builder.ai_builder_repo import (
@@ -203,7 +204,36 @@ class TestLoadPlanningState:
         assert loaded is None
 
     @pytest.mark.asyncio
-    async def test_a_current_payload_is_validated_strictly(self) -> None:
+    @pytest.mark.parametrize(
+        "drift",
+        [
+            {"builder_schema_version": None},
+            {"builder_schema_version": "22"},
+            {"builder_schema_version": True},
+            {"field_this_build_never_had": ["x"]},
+        ],
+        ids=["missing_stamp", "malformed_stamp", "boolean_stamp", "extra_field"],
+    )
+    async def test_drift_under_the_current_version_fails_strict_validation(
+        self,
+        drift: dict[str, object],
+    ) -> None:
+        # A missing or malformed stamp is drift, never another version: it
+        # reaches strict validation instead of reading as never saved.
+        payload = _planning_state_for_storage(_ready_state())["planning_state_jsonb"]
+        assert isinstance(payload, dict)
+        for key, value in drift.items():
+            if value is None:
+                payload.pop(key, None)
+            else:
+                payload[key] = value
+        repo = AIBuilderRepository(cast(AsyncSession, _StubSession(payload)))
+
+        with pytest.raises(ValidationError):
+            await repo.load_planning_state(session_id=uuid4(), tenant_id=uuid4())
+
+    @pytest.mark.asyncio
+    async def test_a_current_payload_loads(self) -> None:
         state = _ready_state()
         payload = _planning_state_for_storage(state)["planning_state_jsonb"]
         repo = AIBuilderRepository(cast(AsyncSession, _StubSession(payload)))
