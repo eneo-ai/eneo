@@ -6734,7 +6734,7 @@
           "selected_option_id": "docx_document"
         },
         "docx_output_mode": {
-          "selected_option_id": "template_fill_docx"
+          "selected_option_id": "generated_docx"
         }
       }
     },
