@@ -296,12 +296,18 @@ digest:
 ENEO_SEAWEEDFS_IMAGE=ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest>
 ```
 
-Verify Eneo's build provenance:
+Verify Eneo's build provenance with the same constraints the release workflow
+applies (the signing workflow, the `develop` branch that publishes the image,
+GitHub-hosted runners, and the attestation bundle stored in the registry):
 
 ```bash
 gh attestation verify \
   "oci://ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest>" \
   --repo eneo-ai/eneo \
+  --signer-workflow github.com/eneo-ai/eneo/.github/workflows/seaweedfs_image.yml \
+  --source-ref refs/heads/develop \
+  --deny-self-hosted-runners \
+  --bundle-from-oci \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
