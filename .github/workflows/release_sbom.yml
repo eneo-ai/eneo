@@ -409,7 +409,7 @@ jobs:
             echo "::error::Recorded SeaweedFS manifest does not match the published image." >&2
             exit 1
           fi
-          signer_workflow="${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}/.github/workflows/build_and_push_images.yml"
+          signer_workflow="${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}/.github/workflows/seaweedfs_image.yml"
           common_flags=(
             --repo "$GITHUB_REPOSITORY"
             --signer-workflow "$signer_workflow"
