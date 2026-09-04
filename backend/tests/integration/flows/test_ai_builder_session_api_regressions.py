@@ -128,6 +128,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     ClassifiedEvidence,
     ClassifiedSlot,
+    ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationInput,
     SlotClassificationResult,
@@ -213,6 +214,17 @@ async def bearer_token(db_container, patch_auth_service_jwt, admin_user):
         auth_service = container.auth_service()
         token = auth_service.create_access_token_for_user(user)
     return token
+
+
+def _classified_result(*slots: ClassifiedSlot) -> SlotClassificationResult:
+    """A classifier result keyed the way the total contract expects."""
+
+    return SlotClassificationResult(
+        slot_outcomes={
+            slot.slot_name: ResolvedSlotClassificationOutcome.from_classified_slot(slot)
+            for slot in slots
+        }
+    )
 
 
 def _make_llm_response(
@@ -5562,9 +5574,9 @@ async def test_classified_output_drift_revises_before_persisting_question(
         classification_response = _make_llm_response(
             content=json.dumps(
                 {
-                    "slots": [
-                        {
-                            "slot_name": "terminal_output",
+                    "slots": {
+                        "terminal_output": {
+                            "outcome": "resolved",
                             "value": "pdf_document",
                             "confidence": "high",
                             "reason": "Användaren anger uttryckligen PDF som slutfil.",
@@ -5576,7 +5588,7 @@ async def test_classified_output_drift_revises_before_persisting_question(
                             ],
                             "evidence_level": "explicit",
                         },
-                    ],
+                    },
                     "file_roles": [],
                     "checkpoint_updates": [],
                     "form_intake": None,
@@ -5584,8 +5596,6 @@ async def test_classified_output_drift_revises_before_persisting_question(
                     "example_output_constraints": None,
                     "schema_direction": None,
                     "secondary_obligations": [],
-                    "assumptions": [],
-                    "contradictions": [],
                 }
             )
         )
@@ -7636,8 +7646,8 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
         if classification_call_count == 1:
             return SlotClassificationAttempt(
                 outcome="resolved",
-                result=SlotClassificationResult(
-                    slots=(
+                result=_classified_result(
+                    *(
                         ClassifiedSlot(
                             slot_name="primary_runtime_input",
                             value="documents",
@@ -7664,8 +7674,8 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
             )
         return SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(
-                slots=(
+            result=_classified_result(
+                *(
                     ClassifiedSlot(
                         slot_name="report_disposition",
                         value="synthesized_overview",
@@ -7749,9 +7759,10 @@ async def test_ai_builder_api_does_not_repeat_report_disposition_after_structure
     assert classified_disposition.value == "synthesized_overview"
     assert classified_disposition.source == "model"
     assert classified_disposition.is_commit_grade is False
-    # The third turn carries the user's structured answer while the classifier
-    # keeps replaying its older inference; the answer wins and is not re-asked.
-    assert classification_call_count >= 3
+    # The third turn carries the user's structured answer: an exact option
+    # selection is replayed into the state without a classifier call, so the
+    # older medium inference never gets a chance to re-ask.
+    assert classification_call_count == 2
     assert not any(event["event"] == "error" for event in third_events), third_events
     assert not any(
         event["event"] == "question"
@@ -8111,8 +8122,8 @@ async def test_ai_builder_api_create_mode_can_generate_approve_apply_and_publish
         )
         return SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(
-                slots=tuple(
+            result=_classified_result(
+                *tuple(
                     ClassifiedSlot(
                         slot_name=slot_name,
                         value=value,
@@ -8632,7 +8643,10 @@ async def test_ai_builder_api_edit_mode_transcription_insert_clears_stale_runtim
                     "ljudfil, transkriberar den före det befintliga "
                     "dokumentsteget och behåll resten."
                 ),
+                # One run transcribes a recording or reads uploads, not both:
+                # the hard gate is asked first, and the recording is the input.
                 structured_answers={
+                    "flow_input_architecture": "audio_primary_input",
                     "primary_runtime_input": "audio",
                 },
             )
@@ -9172,8 +9186,8 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
         )
         return SlotClassificationAttempt(
             outcome="resolved",
-            result=SlotClassificationResult(
-                slots=(
+            result=_classified_result(
+                *(
                     ClassifiedSlot(
                         slot_name="primary_runtime_input",
                         value="audio",
@@ -9260,10 +9274,16 @@ async def test_ai_builder_api_audio_report_confirms_core_output_before_runtime_m
         None,
     )
     assert requirements_event is not None, _builder_event_outline(second_events)
-    assumptions = cast(dict[str, object], requirements_event["data"])["assumptions"]
+    # Runtime metadata is settled by a typed, reopenable row, not prose.
+    assumption_rows = cast(
+        list[dict[str, object]],
+        cast(dict[str, object], requirements_event["data"])["assumption_rows"],
+    )
     assert any(
-        "formulärfält" in assumption for assumption in cast(list[str], assumptions)
-    ), assumptions
+        row.get("question_id") == "runtime_metadata_fields"
+        and row.get("value") == "no_extra_metadata"
+        for row in assumption_rows
+    ), assumption_rows
 
 
 @pytest.mark.asyncio
