@@ -655,8 +655,8 @@ def _attachment_run_consequence(travels: bool, locale: Locale) -> str:
     """What the attachment means for runs, read from the committed architecture.
 
     A role label is evidence about the file; whether the file travels with the
-    flow is decided by the commit. Every other attachment was read while
-    designing, and what a run receives is the input contract's business.
+    flow is decided by the commit. What a run receives is the input contract's
+    business.
     """
 
     if travels:
