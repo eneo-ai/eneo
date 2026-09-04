@@ -94,6 +94,51 @@ def test_template_wording_without_an_attachment_asks_the_docx_mode() -> None:
     assert "docx_output_mode" in analysis.selected_question_ids
 
 
+def test_a_result_wanted_in_the_template_never_becomes_a_generated_document() -> None:
+    # "ett utkast i kommunens mall" names the mode without a fill verb or the
+    # word DOCX. With the terminal answered as a document and no template
+    # attached, the generated default may not be taken behind those words: the
+    # reader's template reading stays below commit grade (it is a heuristic),
+    # the policy asks the mode, and answering template fill without an
+    # attachment meets the existing typed refusal.
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=(
+                "Vi tar fram många tjänsteskrivelser från olika underlag och vill "
+                "ha ett flöde som hjälper handläggaren att få fram ett bra utkast "
+                "i kommunens mall."
+            ),
+            metadata={"ui_language": "sv"},
+        ),
+        _answer("primary_runtime_input", "documents", "Dokument"),
+        _answer("terminal_output", "docx_document", "Word"),
+    ]
+    state = build_planning_state_from_conversation(conversation)
+
+    mode = state.resolved_slots.get("docx_output_mode")
+    assert mode is None or (
+        mode.value == "template_fill_docx" and mode.source != "policy_default"
+    )
+    assert (
+        evaluate_slot_interaction(
+            SLOT_INTERACTION_POLICIES["docx_output_mode"],
+            state,
+            freeform_text=conversation[0].content,
+        )
+        == "ask"
+    )
+    analysis = analyze_discovery(conversation, planning_state=state)
+    assert "docx_output_mode" in analysis.selected_question_ids
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=analysis.selected_question_ids,
+    )
+    assert policy.allowed_action_kinds == ("ask_question",)
+    assert "docx_output_mode" in policy.allowed_ask_question_targets
+
+
 def test_validating_several_files_against_a_policy_is_asked_how_to_compare() -> None:
     # No text rule turns "several files" plus "validate" into a same-run
     # comparison: the counterpart is an external policy.

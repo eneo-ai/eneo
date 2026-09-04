@@ -56,6 +56,18 @@ DOCX_TEMPLATE_MODE_MARKERS: tuple[str, ...] = (
     "from the template",
     "fill a template",
     "fill the template",
+    # A result wanted "in the template" names the mode without a fill verb.
+    "i mallen",
+    "i mall",
+    "i kommunens mall",
+    "i vår mall",
+    "i var mall",
+    "enligt mallen",
+    "enligt mall",
+    "in the template",
+    "in our template",
+    "using the template",
+    "using our template",
 )
 
 DOCX_GENERATED_MODE_MARKERS: tuple[str, ...] = (

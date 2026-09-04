@@ -806,15 +806,25 @@ def resolve_docx_output_mode(
 
 
 def has_explicit_docx_mode_text(text: str) -> bool:
-    return _has_explicit_output_mode_text(
-        text,
-        context_markers=DOCX_CONTEXT_MARKERS,
-        generated_markers=DOCX_GENERATED_MODE_MARKERS,
-        template_matcher=lambda output_text: contains_any_phrase(
-            output_text,
-            DOCX_TEMPLATE_MODE_MARKERS,
-        ),
-    )
+    """The user's words speak to the DOCX mode, so no default may be taken.
+
+    Template wording names the mode by itself: "ett utkast i kommunens mall"
+    is a filled template whether or not the word DOCX appears, and the slot is
+    only evaluated once the terminal is a DOCX. Generated-mode wording still
+    needs a DOCX context, since "utan mall" alone says nothing about a result.
+    """
+
+    normalized_text = normalize_signal_text(text)
+    if not normalized_text:
+        return False
+    output_text = build_role_scoped_text(normalized_text).preferred_output_text()
+    if not output_text:
+        return False
+    if contains_any_phrase(output_text, DOCX_TEMPLATE_MODE_MARKERS):
+        return True
+    return contains_any_phrase(
+        output_text, DOCX_CONTEXT_MARKERS
+    ) and contains_any_phrase(output_text, DOCX_GENERATED_MODE_MARKERS)
 
 
 def has_explicit_pdf_mode_text(text: str) -> bool:
