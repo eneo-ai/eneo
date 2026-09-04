@@ -2327,6 +2327,7 @@ async def test_ai_builder_message_and_attachments_are_committed_before_first_pro
                     "file_ids": [file_id],
                     "question_answer": None,
                     "edit_context": None,
+                    "review_context": None,
                     "ui_language": "sv",
                     "acknowledge_duplicate_provider_spend": False,
                 },
