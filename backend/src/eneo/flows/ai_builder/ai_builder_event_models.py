@@ -22,7 +22,14 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
 from eneo.flows.ai_builder.ai_builder_telemetry_models import (
     SessionTelemetrySummary,
 )
-from eneo.flows.ai_builder.planning_state import NamedResultOrigin
+from eneo.flows.ai_builder.planning_state import (
+    AttachmentCoverage,
+    FileRole,
+    NamedResultOrigin,
+)
+from eneo.flows.flow_ai_builder_budget_settings import (
+    AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+)
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 
@@ -219,6 +226,50 @@ class AssumptionRowPayload(BaseModel):
         return self
 
 
+class AttachmentRowPayload(BaseModel):
+    """One attached file as the card shows it: what it is, how sure, and
+    whether it travels with the flow.
+
+    `travels` is the committed architecture's decision (a template under a
+    template-fill commit), never the role label's. How sure the reading is
+    stays outside this row: a new citation or a changed confidence for the
+    same role is not a different plan, so it must not move the version
+    (see `RequirementsSummaryPayload.weak_role_file_ids`). Ids only: the
+    client owns the labels.
+    """
+
+    file_id: UUID
+    filename: str
+    role: FileRole
+    readable: bool
+    coverage: AttachmentCoverage
+    travels: bool
+    placeholders: list[str] | None = None
+
+
+class RunPreviewTemplatePayload(BaseModel):
+    filename: str
+    placeholder_count: int = Field(ge=0)
+
+
+class RunPreviewPayload(BaseModel):
+    """The contract a run will follow, derived from planning state alone.
+
+    A preview of the contract, not of a result: it names what a run receives
+    and what kind of result comes out, never values, prose, layout, step
+    counts or execution. Every field is commit grade or a committed decision,
+    so the card previews only what the user is asked to sign.
+    """
+
+    runtime_input: str | None = None
+    max_files: int | None = Field(default=None, ge=1)
+    result_type: str | None = None
+    report_layout: str | None = None
+    required_sections: list[str] = Field(default_factory=list)
+    obligations: list[str] = Field(default_factory=list)
+    template: RunPreviewTemplatePayload | None = None
+
+
 def _named_content_fields_are_empty(
     value: list["NamedContentFieldPayload"],
 ) -> bool:
@@ -258,6 +309,18 @@ class NamedContentFieldPayload(BaseModel):
         return self
 
 
+def _weak_role_file_ids_are_empty(value: list[UUID]) -> bool:
+    return not value
+
+
+def _attachment_rows_are_empty(value: list["AttachmentRowPayload"]) -> bool:
+    return not value
+
+
+def _run_preview_is_absent(value: "RunPreviewPayload | None") -> bool:
+    return value is None
+
+
 def _resolved_requirements_are_empty(
     value: list[ResolvedRequirementPayload],
 ) -> bool:
@@ -294,6 +357,16 @@ class RequirementsDisclosureContent(BaseModel):
         default_factory=_empty_resolved_requirements,
         max_length=len(KNOWN_REQUIREMENT_SLOT_NAMES),
         exclude_if=_resolved_requirements_are_empty,
+    )
+    # Typed truth for the card: every attachment as a row, and the contract a
+    # run will follow. Both are part of what the user signs.
+    attachment_rows: list[AttachmentRowPayload] = Field(
+        default_factory=list[AttachmentRowPayload],
+        max_length=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
+        exclude_if=_attachment_rows_are_empty,
+    )
+    run_preview: RunPreviewPayload | None = Field(
+        default=None, exclude_if=_run_preview_is_absent
     )
 
     @field_validator("input_description", "output_description", mode="after")
@@ -380,6 +453,12 @@ class RequirementsSummaryPayload(RequirementsDisclosureContent):
     # Required, because a summary the client cannot name is a summary the user
     # cannot confirm: the confirmation request carries this exact version back.
     requirements_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # Attachments whose role is a weak reading the user should check. Display
+    # provenance beside the hashed rows: a changed confidence for the same role
+    # is not a different disclosure.
+    weak_role_file_ids: list[UUID] = Field(
+        default_factory=list[UUID], exclude_if=_weak_role_file_ids_are_empty
+    )
     # The content obligations the user named, as readable items below the lead
     # summary. This is also the edit surface: the user sends
     # the ids they leave standing back as a `named_content_fields_edit`, and

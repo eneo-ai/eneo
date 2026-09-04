@@ -1371,6 +1371,89 @@ def test_server_confirmation_derives_the_attachment_run_consequence_from_the_com
     assert "uploads its own documents" not in english_rows[0]
 
 
+def _attachment(
+    role: FileRole, *, confidence: str = "high", placeholders: list[str] | None = None
+) -> FileRoleEvidence:
+    return FileRoleEvidence(
+        file_id=UUID("00000000-0000-0000-0000-000000000901"),
+        filename="attached.docx",
+        file_type="document",
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        has_readable_text=True,
+        coverage="fully_seen",
+        role=role,
+        source="model",
+        confidence=confidence,  # type: ignore[arg-type]
+        template_placeholders=placeholders,
+    )
+
+
+def test_server_confirmation_carries_typed_attachment_rows_with_the_commits_travel_decision() -> (
+    None
+):
+    # The card gets every attachment as a typed row; whether the file travels
+    # is the commit's decision, and a weak role is flagged beside the rows,
+    # not inside them.
+    state = _state(
+        primary_runtime_input="documents",
+        terminal_output="docx_document",
+        docx_output_mode="template_fill_docx",
+    )
+    state.file_roles = [_attachment("template", placeholders=["diarienummer"])]
+    state.architecture_commit = _finalized_commit_for_state(state)
+    decision = _decision(state=state, ui_language="sv")
+    assert isinstance(decision, ConfirmRequirements)
+    (row,) = decision.payload.attachment_rows
+    assert row.role == "template" and row.travels is True
+    assert row.placeholders == ["diarienummer"]
+    assert decision.payload.weak_role_file_ids == []
+
+    generated = _state(
+        primary_runtime_input="documents",
+        terminal_output="docx_document",
+        docx_output_mode="generated_docx",
+    )
+    generated.file_roles = [
+        _attachment("template", confidence="medium", placeholders=["diarienummer"])
+    ]
+    generated.architecture_commit = _finalized_commit_for_state(generated)
+    generated_decision = _decision(state=generated, ui_language="sv")
+    assert isinstance(generated_decision, ConfirmRequirements)
+    (generated_row,) = generated_decision.payload.attachment_rows
+    assert generated_row.travels is False
+    assert generated_decision.payload.weak_role_file_ids == [generated_row.file_id]
+    # Travel is part of what the user signs; certainty is not.
+    assert (
+        generated_decision.payload.requirements_version
+        != decision.payload.requirements_version
+    )
+
+
+def test_server_confirmation_previews_the_run_contract_not_a_result() -> None:
+    state = _state(
+        primary_runtime_input="documents",
+        terminal_output="pdf_document",
+        post_processing_goal="structure_key_information",
+        document_material_scope="multiple_documents_case",
+        report_disposition="synthesized_overview",
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+    decision = _decision(state=state, ui_language="en")
+    assert isinstance(decision, ConfirmRequirements)
+    preview = decision.payload.run_preview
+    assert preview is not None
+    assert preview.runtime_input == "documents"
+    assert preview.result_type == "pdf_document"
+    assert preview.report_layout == "synthesized_overview"
+    assert preview.template is None
+    assert preview.max_files is None
+
+    empty = _decision(state=PlanningState.empty(), ui_language="en")
+    assert (
+        not isinstance(empty, ConfirmRequirements) or empty.payload.run_preview is None
+    )
+
+
 def test_server_confirmation_discloses_every_attachment_and_versions_coverage() -> None:
     state = _state(primary_runtime_input="text", terminal_output="docx_document")
     long_filename = f"attachment-0-{'x' * 120}.txt"

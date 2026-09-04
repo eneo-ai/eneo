@@ -32,11 +32,14 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AssumptionRowPayload,
+    AttachmentRowPayload,
     KeyDecisionPayload,
     NamedContentFieldPayload,
     RequirementsDisclosureContent,
     RequirementsSummaryPayload,
     ResolvedRequirementPayload,
+    RunPreviewPayload,
+    RunPreviewTemplatePayload,
     RuntimeInputFieldPayload,
 )
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
@@ -55,6 +58,7 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
     RESULT_OBLIGATION_SIGNAL_ID,
     RESULT_OBLIGATION_VALUES,
     ResultObligation,
+    derive_result_contract,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import project_schema_fields
 from eneo.flows.ai_builder.planning_state import (
@@ -140,6 +144,13 @@ def build_requirements_disclosure(
             render_value=render_ai_builder_evidence_value,
         ),
         runtime_input_fields=_runtime_input_fields(session_state, locale),
+        weak_role_file_ids=[
+            item.file_id
+            for item in sorted(
+                session_state.file_roles, key=lambda item: str(item.file_id)
+            )
+            if item.confidence != "high"
+        ],
     )
 
 
@@ -263,6 +274,8 @@ def _disclosure_content(
         input_description=input_description,
         output_description=output_description,
         assumption_rows=_assumption_rows(session_state, locale),
+        attachment_rows=_attachment_rows(session_state),
+        run_preview=_run_preview(session_state),
         resolved_requirements=[
             ResolvedRequirementPayload(
                 requirement_id=slot_name,
@@ -594,25 +607,92 @@ def _attachment_assumptions(
     # selected template — so hiding one lets a plan change inherit a
     # confirmation the user gave for something else.
     ordered = sorted(session_state.file_roles, key=lambda item: str(item.file_id))
-    # Only a template can travel with the flow, and only when the committed
-    # architecture fills a template and exactly one attached template exists;
-    # the plan lifecycle promotes it under the same rule.
+    travels = _attachment_travels(session_state)
+    return [
+        _attachment_assumption(
+            item,
+            locale,
+            render_value=render_value,
+            travels=travels(item),
+        )
+        for item in ordered
+    ]
+
+
+def _attachment_travels(
+    session_state: PlanningState,
+) -> Callable[[FileRoleEvidence], bool]:
+    """Whether an attachment travels with the flow: the commit's decision.
+
+    Only a template can travel, and only when the committed architecture fills
+    a template and exactly one attached template exists; the plan lifecycle
+    promotes it under the same rule. The prose row and the typed row read
+    this one predicate.
+    """
+
     commit = session_state.architecture_commit
     template_fill = (
         commit is not None
         and bool(commit.tuples_chain)
         and commit.tuples_chain[-1].output_mode is FlowAuthoringOutputMode.TEMPLATE_FILL
     )
-    template_count = sum(item.role == "template" for item in ordered)
+    template_count = sum(item.role == "template" for item in session_state.file_roles)
+    return lambda item: (
+        template_fill and item.role == "template" and template_count == 1
+    )
+
+
+def _attachment_rows(session_state: PlanningState) -> list[AttachmentRowPayload]:
+    travels = _attachment_travels(session_state)
     return [
-        _attachment_assumption(
-            item,
-            locale,
-            render_value=render_value,
-            travels=template_fill and item.role == "template" and template_count == 1,
+        AttachmentRowPayload(
+            file_id=item.file_id,
+            filename=item.filename,
+            role=item.role,
+            readable=item.has_readable_text,
+            coverage=item.coverage,
+            travels=travels(item),
+            placeholders=item.template_placeholders,
         )
-        for item in ordered
+        for item in sorted(session_state.file_roles, key=lambda item: str(item.file_id))
     ]
+
+
+def _run_preview(session_state: PlanningState) -> RunPreviewPayload | None:
+    """The contract a run will follow, from commit-grade slots and the commit."""
+
+    contract = derive_result_contract(session_state)
+    runtime_input = session_state.commit_grade_slot_value("primary_runtime_input")
+    result_type = session_state.commit_grade_slot_value("terminal_output")
+    commit = session_state.architecture_commit
+    travels = _attachment_travels(session_state)
+    template = next(
+        (
+            RunPreviewTemplatePayload(
+                filename=item.filename,
+                placeholder_count=len(item.template_placeholders or []),
+            )
+            for item in session_state.file_roles
+            if travels(item)
+        ),
+        None,
+    )
+    if (
+        runtime_input is None
+        and result_type is None
+        and contract is None
+        and template is None
+    ):
+        return None
+    return RunPreviewPayload(
+        runtime_input=runtime_input,
+        max_files=session_state.mapped_file_limit.accepted_value,
+        result_type=result_type,
+        report_layout=commit.report_disposition if commit is not None else None,
+        required_sections=list(contract.required_sections) if contract else [],
+        obligations=list(contract.secondary_obligations) if contract else [],
+        template=template,
+    )
 
 
 def _attachment_assumption(
