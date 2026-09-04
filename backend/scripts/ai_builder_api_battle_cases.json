@@ -2144,6 +2144,9 @@
       "complexity": "hard",
       "domain": "municipal_property_company",
       "prompt": "Jag vill skapa ett flöde för kommunfastigheter. Jag laddar upp serviceavtal, arbetsorder, besiktningsprotokoll och felanmälningar. Flödet ska jämföra utfört arbete mot avtal, hitta återkommande fel, garanti- eller vitesrisker, rekommendera åtgärder och skapa en rapport till fastighetsförvaltaren.",
+      "question_answer_overrides": {
+        "comparison_scope": {"selected_option_id": "same_run_compare"}
+      },
       "expected": {
         "min_steps": 4,
         "max_steps": 9,
@@ -3543,7 +3546,6 @@
           "docx_output_mode",
           "pdf_generation_mode",
           "comparison_scope",
-          "report_disposition",
           "runtime_metadata_fields",
           "mapped_file_limit"
         ],
@@ -3553,7 +3555,8 @@
         "allowed_question_event_ids": [
           "primary_runtime_input",
           "terminal_output",
-          "document_material_scope"
+          "document_material_scope",
+          "report_disposition"
         ],
         "max_question_event_count": 4,
         "max_reopened_question_count": 0,
@@ -3762,7 +3765,6 @@
           "docx_output_mode",
           "pdf_generation_mode",
           "comparison_scope",
-          "report_disposition",
           "runtime_metadata_fields",
           "mapped_file_limit"
         ],
@@ -3772,7 +3774,8 @@
         "allowed_question_event_ids": [
           "primary_runtime_input",
           "terminal_output",
-          "document_material_scope"
+          "document_material_scope",
+          "report_disposition"
         ],
         "max_question_event_count": 4,
         "max_reopened_question_count": 0,
@@ -6692,7 +6695,6 @@
         "forbidden_question_event_ids": [
           "pdf_generation_mode",
           "comparison_scope",
-          "report_disposition",
           "runtime_metadata_fields",
           "mapped_file_limit"
         ],
@@ -6703,7 +6705,8 @@
           "primary_runtime_input",
           "document_material_scope",
           "terminal_output",
-          "docx_output_mode"
+          "docx_output_mode",
+          "report_disposition"
         ],
         "max_question_event_count": 4,
         "max_reopened_question_count": 0,
@@ -6718,6 +6721,9 @@
       ],
       "synthetic_user_profile": "document_source",
       "question_answer_overrides": {
+        "report_disposition": {
+          "selected_option_id": "synthesized_overview"
+        },
         "document_material_scope": {
           "selected_option_id": "multiple_documents_case"
         },
