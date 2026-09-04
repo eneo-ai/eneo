@@ -26,6 +26,7 @@
   let infoBlobs = [...data.infoBlobPage.items];
   let nextInfoBlobCursor = data.infoBlobPage.next_cursor ?? null;
   let totalInfoBlobCount = data.infoBlobPage.total_count;
+  let infoBlobPageGeneration = 0;
   let loadingMoreInfoBlobs = false;
   let pollingCrawlRuns = false;
   let historyRunId = data.crawlRuns.at(-1)?.id;
@@ -94,6 +95,7 @@
 
     return () => {
       mounted = false;
+      infoBlobPageGeneration += 1;
       clearInterval(interval);
     };
   });
@@ -107,6 +109,8 @@
   $: activeRun = latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined;
 
   function replaceInfoBlobPage(page: WebsiteInfoBlobPage) {
+    infoBlobPageGeneration += 1;
+    loadingMoreInfoBlobs = false;
     infoBlobs = [...page.items];
     nextInfoBlobCursor = page.next_cursor ?? null;
     totalInfoBlobCount = page.total_count;
@@ -115,20 +119,31 @@
   async function loadMoreInfoBlobs() {
     if (nextInfoBlobCursor === null || loadingMoreInfoBlobs) return;
 
+    const generation = infoBlobPageGeneration;
+    const cursor = nextInfoBlobCursor;
+    const websiteId = data.website.id;
     loadingMoreInfoBlobs = true;
     try {
       const page = await eneo.websites.indexedBlobs.listPage({
-        id: data.website.id,
+        id: websiteId,
         limit: PAGINATION.PAGE_SIZE,
-        cursor: nextInfoBlobCursor
+        cursor
       });
+      if (
+        generation !== infoBlobPageGeneration ||
+        websiteId !== data.website.id ||
+        cursor !== nextInfoBlobCursor
+      )
+        return;
       infoBlobs = [...infoBlobs, ...page.items];
       nextInfoBlobCursor = page.next_cursor ?? null;
       totalInfoBlobCount = page.total_count;
     } catch (error) {
-      toastError(error, m.website_indexed_content_load_more_failed());
+      if (generation === infoBlobPageGeneration && websiteId === data.website.id) {
+        toastError(error, m.website_indexed_content_load_more_failed());
+      }
     } finally {
-      loadingMoreInfoBlobs = false;
+      if (generation === infoBlobPageGeneration) loadingMoreInfoBlobs = false;
     }
   }
 </script>

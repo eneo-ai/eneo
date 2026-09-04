@@ -190,6 +190,66 @@ test("history failures do not hide the latest status or block content, and histo
   expect(listBlobs).toHaveBeenCalledOnce();
 });
 
+test("a terminal refresh discards an older load-more response even if the cursor is reused", async () => {
+  const oldFirstPage = {
+    ...emptyPage,
+    count: 1,
+    total_count: 2,
+    next_cursor: "page-2",
+    items: [{ id: "old-first", metadata: { title: "Old first page", size: 100 } }]
+  };
+  const oldSecondPage = {
+    ...emptyPage,
+    count: 1,
+    total_count: 2,
+    items: [{ id: "old-second", metadata: { title: "Old second page", size: 100 } }]
+  };
+  let resolveOldPage: (value: typeof oldSecondPage) => void = () => {};
+  listBlobs.mockImplementationOnce(
+    () => new Promise<typeof oldSecondPage>((resolve) => (resolveOldPage = resolve))
+  );
+  render(WebsiteDetailPage, {
+    data: { ...data, crawlRuns: [running], infoBlobPage: oldFirstPage } as never
+  });
+  await page.getByRole("tab", { name: m.indexed_content(), exact: true }).click();
+  await page
+    .getByRole("button", { name: m.website_indexed_content_load_more({ current: 1, total: 2 }) })
+    .click();
+  expect(listBlobs).toHaveBeenCalledWith({ id: "website-1", limit: 100, cursor: "page-2" });
+
+  latestRun.mockResolvedValue(terminal);
+  listBlobs.mockResolvedValue({
+    ...oldFirstPage,
+    items: [{ id: "new-first", metadata: { title: "New first page", size: 100 } }]
+  });
+  await vi.advanceTimersByTimeAsync(10_000);
+  await expect.element(page.getByText("New first page", { exact: true })).toBeVisible();
+
+  await expect
+    .element(
+      page.getByRole("button", {
+        name: m.website_indexed_content_load_more({ current: 1, total: 2 })
+      })
+    )
+    .toBeEnabled();
+  let resolveNewPage: (value: typeof oldSecondPage) => void = () => {};
+  listBlobs.mockImplementationOnce(
+    () => new Promise<typeof oldSecondPage>((resolve) => (resolveNewPage = resolve))
+  );
+  await page
+    .getByRole("button", { name: m.website_indexed_content_load_more({ current: 1, total: 2 }) })
+    .click();
+  resolveOldPage(oldSecondPage);
+  await expect.element(page.getByRole("button", { name: m.loading_more() })).toBeDisabled();
+  await expect.element(page.getByText("Old second page", { exact: true })).not.toBeInTheDocument();
+  resolveNewPage({
+    ...oldSecondPage,
+    items: [{ id: "new-second", metadata: { title: "New second page", size: 100 } }]
+  });
+  await expect.element(page.getByText("New second page", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("New first page", { exact: true })).toBeVisible();
+});
+
 test.each([running, terminal])(
   "crawl controls use the latest run while history is unavailable (phase: $phase)",
   async (latest) => {
