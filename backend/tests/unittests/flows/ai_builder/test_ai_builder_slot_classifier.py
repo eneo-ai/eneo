@@ -4571,6 +4571,30 @@ def test_slot_classification_prompt_explains_report_disposition_values() -> None
     assert "each uploaded source" in prompt
 
 
+def test_slot_classification_prompt_defines_every_file_role_by_runtime_use() -> None:
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input(
+            "De bifogade handlingarna är underlaget."
+        ),
+        allowed_slot_values={"primary_runtime_input": frozenset({"documents"})},
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    for role in (
+        "runtime_input_sample",
+        "template",
+        "reference_material",
+        "example_output",
+        "context_only",
+    ):
+        assert f"{role}:" in prompt
+    assert "the flow does not read this file itself" in prompt
+    assert "material the Builder reads while designing the flow" in prompt
+    assert "not carried into runs" in prompt
+    assert "the flow never reads" in prompt
+
+
 def test_slot_classification_prompt_explains_example_output_evidence() -> None:
     file_id = UUID("00000000-0000-0000-0000-000000000111")
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
@@ -4601,12 +4625,12 @@ def test_slot_classification_prompt_explains_example_output_evidence() -> None:
     )
 
     prompt = "\n".join(message["content"] for message in messages)
-    assert "example_output means the user attached a file as an example" in prompt
+    assert "example_output: the file shows the form of the desired result" in prompt
     assert "Cite exact source quotes for every content claim" in prompt
     assert "attachment-only conclusions as medium confidence" in prompt
     assert "tone, detail_level, organization, formatting, or audience" in prompt
     assert "does not promise exact visual layout" in prompt
-    assert "Use the conversation and file evidence together" in prompt
+    assert "from the conversation and file evidence together" in prompt
     assert "Do not wait for deterministic inferred_role example_output" in prompt
     assert "Never classify terminal_output from uploaded-file evidence alone" in prompt
     assert "filename: bilaga.pdf" in prompt
