@@ -2609,6 +2609,103 @@ async def test_attempt_provenance_writers_preserve_tracked_sections(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_cohort_readers_return_step_metrics_and_current_attempt_lineage(
+    attempt_provenance_context,
+):
+    """The review readers see a step's metadata and its current attempt's edges,
+    and nothing for a run they were not asked about."""
+    context = attempt_provenance_context
+    source_step_id = uuid4()
+    aggregate = FlowResolvedInputEdges.model_validate(
+        {
+            "schema_version": 1,
+            "edges": [
+                {
+                    "binding_ref": "previous",
+                    "source": {
+                        "kind": "step_result",
+                        "source_step_id": str(source_step_id),
+                        "source_attempt_no": 1,
+                        "selector": {"kind": "json_path", "path": []},
+                    },
+                    "selection": {
+                        "encoding": "utf8",
+                        "sha256": "b" * 64,
+                        "byte_size": 7,
+                    },
+                }
+            ],
+        }
+    )
+    async with sessionmanager.session() as session, session.begin():
+        run_repo = FlowRunRepository(session=session)
+        await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=1,
+            dispatch_task_id="cohort-readers",
+        )
+        activated = await _activate_test_attempt(
+            repo=run_repo, context=context, aggregate=aggregate
+        )
+        assert activated is not None
+        now = datetime.now(timezone.utc)
+        await run_repo.save_step_result(
+            flow_run_id=context.run_id,
+            result=FlowStepResult(
+                id=uuid4(),
+                flow_run_id=context.run_id,
+                flow_id=context.flow_id,
+                tenant_id=context.tenant_id,
+                step_id=context.step_id,
+                step_order=1,
+                current_attempt_no=1,
+                num_tokens_input=40,
+                num_tokens_output=2,
+                status=FlowStepResultStatus.COMPLETED,
+                started_at=now - timedelta(seconds=3),
+                finished_at=now,
+                created_at=now,
+                updated_at=now,
+            ),
+            tenant_id=context.tenant_id,
+            attempt_no=1,
+        )
+        metrics = await run_repo.list_step_result_metrics(
+            tenant_id=context.tenant_id, run_ids=[context.run_id]
+        )
+        assert [
+            (m.step_id, m.status, m.num_tokens_input, m.num_tokens_output)
+            for m in metrics
+        ] == [(context.step_id, "completed", 40, 2)]
+        assert metrics[0].finished_at is not None
+        lineage = await run_repo.list_current_attempt_lineage(
+            tenant_id=context.tenant_id, run_ids=[context.run_id]
+        )
+        assert [(item.flow_run_id, item.step_id) for item in lineage] == [
+            (context.run_id, context.step_id)
+        ]
+        assert lineage[0].edges.status == "tracked"
+        assert lineage[0].edges.aggregate == aggregate
+        assert (
+            await run_repo.list_step_result_metrics(
+                tenant_id=context.tenant_id, run_ids=[uuid4()]
+            )
+            == []
+        )
+        assert (
+            await run_repo.list_current_attempt_lineage(
+                tenant_id=context.tenant_id, run_ids=[]
+            )
+            == []
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_resolved_input_edges_are_written_once_with_idempotent_retry(
     attempt_provenance_context,
 ) -> None:

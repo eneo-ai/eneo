@@ -198,6 +198,26 @@ def _attempt_evidence_logical_bytes() -> Any:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowStepResultMetrics:
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    status: str
+    error_code: str | None
+    num_tokens_input: int | None
+    num_tokens_output: int | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepLineage:
+    flow_run_id: UUID
+    step_id: UUID
+    edges: FlowResolvedInputEdgesParseResult
+
+
+@dataclass(frozen=True, slots=True)
 class StepAttemptPage:
     """One snapshot's admitted attempts and the counts that qualify them.
 
@@ -1031,6 +1051,77 @@ class FlowRunRepository:
             .values(input_payload_json=updated_payload)
         )
         return updated_payload
+
+    async def list_step_result_metrics(
+        self, *, tenant_id: UUID, run_ids: Sequence[UUID]
+    ) -> list[FlowStepResultMetrics]:
+        """Status, error code, token and timing columns per step for many runs.
+
+        One statement and no payload columns: a review over a cohort of runs
+        must not pull step inputs and outputs it never reads.
+        """
+        if not run_ids:
+            return []
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.flow_run_id,
+                    FlowStepResults.step_id,
+                    FlowStepResults.step_order,
+                    FlowStepResults.status,
+                    FlowStepResults.error_code,
+                    FlowStepResults.num_tokens_input,
+                    FlowStepResults.num_tokens_output,
+                    FlowStepResults.started_at,
+                    FlowStepResults.finished_at,
+                )
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.flow_run_id.in_(tuple(run_ids)))
+                .order_by(FlowStepResults.flow_run_id, FlowStepResults.step_order)
+            )
+        ).all()
+        return [FlowStepResultMetrics(*row) for row in rows]
+
+    async def list_current_attempt_lineage(
+        self, *, tenant_id: UUID, run_ids: Sequence[UUID]
+    ) -> list[FlowStepLineage]:
+        """Resolved-input edges of every step result's current attempt, for many runs."""
+        if not run_ids:
+            return []
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.flow_run_id,
+                    FlowStepResults.step_id,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .select_from(FlowStepResults)
+                .join(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.attempt_no
+                        == FlowStepResults.current_attempt_no,
+                    ),
+                )
+                .join(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.flow_run_id.in_(tuple(run_ids)))
+            )
+        ).all()
+        return [
+            FlowStepLineage(
+                flow_run_id=run_id,
+                step_id=step_id,
+                edges=parse_resolved_input_edges(raw_edges),
+            )
+            for run_id, step_id, raw_edges in rows
+        ]
 
     async def list_step_results(
         self,

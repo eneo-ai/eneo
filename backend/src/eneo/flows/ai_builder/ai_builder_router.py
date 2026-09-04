@@ -103,6 +103,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_usage_event,
     encode_ai_builder_stream_event,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewPacket
 from eneo.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
@@ -822,6 +823,53 @@ async def report_client_error(
                 )
             ),
         )
+
+
+@router.get(
+    "/flows/{flow_id}/review-packet",
+    response_model=FlowReviewPacket,
+    operation_id="get_ai_builder_flow_review_packet",
+    summary="Get AI Builder Flow Review Packet",
+    description=(
+        "The bounded, deterministic facts the AI builder may read about a "
+        "published flow's recent runs before it proposes an edit: which step "
+        "outputs were observed consumed, repeated error codes, token and "
+        "latency share, and evidence completeness. Runs the caller may not "
+        "view are counted, never named."
+    ),
+    responses={
+        400: _ai_builder_error_response(
+            description="The flow has no published version, or is not in the given space.",
+            message="The flow has no published version to review runs of.",
+            code=AIBuilderErrorCode.FLOW_NOT_PUBLISHED,
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this space.",
+            message="API key space scope does not match requested AI builder resource.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            details={"auth_layer": "api_key_scope"},
+        ),
+    },
+)
+async def get_flow_review_packet(
+    request: Request,
+    flow_id: UUID,
+    space_id: UUID,
+    container: ContainerWithUserExplicitTransactionDep,
+) -> FlowReviewPacket:
+    database_session = cast(AsyncSession, container.session())
+    async with database_session.begin():
+        authorization = await _authorize_ai_builder_request(
+            request,
+            container,
+            action=FlowApiAction.BUILDER_SESSION_CREATE,
+            space_id=space_id,
+        )
+        _authorized_space(authorization)
+        packet = await container.ai_builder_flow_review_service().build_packet(
+            flow_id=flow_id, space_id=space_id
+        )
+    return packet
 
 
 @router.post(
