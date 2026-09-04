@@ -23,7 +23,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     ClassifierRetentionClass,
     NamedContentFieldsEditRequest,
     SlotClassificationNamedResultEvidenceMetadata,
-    focused_slot_classifications_from_metadata,
     named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
     question_answer_question_id,
@@ -330,36 +329,32 @@ def _replay_persisted_turn_evidence(
         # A turn's classification is persisted on the message that prompted it,
         # so an edit sent together with a sentence is applied before that
         # sentence is read — which is the order the user said them in.
-        classifications = (
-            slot_classification_from_metadata(message.metadata),
-            *focused_slot_classifications_from_metadata(message.metadata),
-        )
-        for classification in classifications:
-            if classification is None or classification.outcome != "resolved":
-                continue
-            prompt_hash = classification.prompt_hash
-            assert prompt_hash is not None
-            classification_result = classification.to_result()
-            merge_llm_resolved_slots(
-                state,
+        classification = slot_classification_from_metadata(message.metadata)
+        if classification is None or classification.outcome != "resolved":
+            continue
+        prompt_hash = classification.prompt_hash
+        assert prompt_hash is not None
+        classification_result = classification.to_result()
+        merge_llm_resolved_slots(
+            state,
+            classification_result,
+            prompt_hash=prompt_hash,
+            freeform_text=freeform_text,
+            model_blocked_slots=model_blocked_slots,
+            settled_by_acceptance=attested_slots_without_newer_evidence(
                 classification_result,
-                prompt_hash=prompt_hash,
-                freeform_text=freeform_text,
-                model_blocked_slots=model_blocked_slots,
-                settled_by_acceptance=attested_slots_without_newer_evidence(
-                    classification_result,
-                    conversation=conversation,
-                    cited_message_ids_by_source={
-                        source.source_id: source.message_id
-                        for source in classification.source_inventory
-                    },
-                    classified_at_index=index,
-                ),
-            )
-            _apply_replayed_named_result_evidence(
-                state,
-                snapshot=classification.named_result_evidence,
-            )
+                conversation=conversation,
+                cited_message_ids_by_source={
+                    source.source_id: source.message_id
+                    for source in classification.source_inventory
+                },
+                classified_at_index=index,
+            ),
+        )
+        _apply_replayed_named_result_evidence(
+            state,
+            snapshot=classification.named_result_evidence,
+        )
 
 
 def _reconcile_report_disposition_after_classifier_replay(
@@ -488,14 +483,6 @@ def _carry_forward_planner_state(
     attached_file_ids: Collection[UUID],
     declared_schema_fingerprints: frozenset[str] | None,
 ) -> None:
-    rebuilt.focused_classification_attempted_slots = list(
-        dict.fromkeys(
-            (
-                *rebuilt.focused_classification_attempted_slots,
-                *persisted.focused_classification_attempted_slots,
-            )
-        )
-    )
     if rebuilt.mapped_file_limit.accepted_value is None:
         prior_limit = persisted.mapped_file_limit
         # A missing proposal means the current policy blocks new mapped

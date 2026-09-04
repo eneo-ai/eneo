@@ -22,9 +22,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_with_slot_classification,
     requirements_confirmation_from_question_answer,
 )
-from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
-    FocusedSlotClassificationRuntime,
-)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     SessionStatus,
@@ -543,16 +540,6 @@ class AIBuilderPlanner:
                                 ),
                                 schema_direction_pending=(
                                     planner_turn_request.schema_direction_pending
-                                ),
-                                focused_classification_runtime=(
-                                    FocusedSlotClassificationRuntime(
-                                        litellm_client=self.litellm_client,
-                                        completion_model_route=completion_model_route,
-                                        max_input_tokens=max_input_tokens,
-                                        max_output_tokens=max_output_tokens,
-                                        budget_policy=budget_policy,
-                                        before_provider_call=mark_provider_work_started,
-                                    )
                                 ),
                             )
                         )

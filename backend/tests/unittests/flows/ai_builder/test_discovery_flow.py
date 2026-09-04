@@ -3554,7 +3554,9 @@ class TestPlannerDiscoveryQuestionDispatch:
             events.append(encode_ai_builder_stream_event(event))
 
         assert [event["event"] for event in events] == ["text", "question", "done"]
-        assert planner.litellm_client.acompletion.await_count == 2
+        # The turn's one classifier call; the follow-up question is served
+        # from the registry without a second, slot-focused call.
+        assert planner.litellm_client.acompletion.await_count == 1
         repo.commit_turn.assert_awaited_once()
 
     @pytest.mark.asyncio

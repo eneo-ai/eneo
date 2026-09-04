@@ -52,9 +52,9 @@ _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
 
 class TestModuleConstants:
-    def test_builder_schema_version_is_twenty_two(self) -> None:
-        # v22: focused classifier attempts persist once per catalog slot.
-        assert BUILDER_SCHEMA_VERSION == 22
+    def test_builder_schema_version_is_twenty_three(self) -> None:
+        # v23: the focused classifier's attempt list left the persisted shape.
+        assert BUILDER_SCHEMA_VERSION == 23
 
     def test_payload_cap_is_512_kibibytes(self) -> None:
         assert PLANNING_STATE_PAYLOAD_CAP_BYTES == 512 * 1024
@@ -82,7 +82,6 @@ class TestEmptyConstruction:
         state = PlanningState.empty()
         assert state.signals == []
         assert state.resolved_slots == {}
-        assert state.focused_classification_attempted_slots == []
         assert state.file_roles == []
         assert state.input_schema_evidence is None
         assert state.output_schema_evidence is None

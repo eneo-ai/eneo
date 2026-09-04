@@ -15,8 +15,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationNamedResultEvidenceMetadata,
     SlotClassificationSourceMetadata,
-    focused_slot_classifications_from_metadata,
-    metadata_with_focused_slot_classification,
     metadata_with_slot_classification,
     question_response_from_metadata,
     slot_classification_from_metadata,
@@ -132,56 +130,6 @@ def _classifier_msg(
         slot_classification_result(
             slot_outcomes={slot_name: outcome},
         ),
-    )
-
-
-def _focused_classifier_msg(
-    message_id: str,
-    *,
-    slot_name: str,
-    value: str,
-) -> ConversationMessage:
-    source_id = f"user_message:{message_id}"
-    quote = f"{slot_name} is {value}"
-    classification = slot_classification_metadata_from_attempt(
-        SlotClassificationAttempt(
-            outcome="resolved",
-            result=slot_classification_result(
-                slots=(
-                    ClassifiedSlot(
-                        slot_name=slot_name,
-                        value=value,
-                        confidence="high",
-                        reason="focused test classification",
-                        evidence=(
-                            ClassifiedEvidence(source_id=source_id, quote=quote),
-                        ),
-                    ),
-                )
-            ),
-        ),
-        prompt_hash=hashlib.sha256(message_id.encode()).hexdigest(),
-        classification_input=SlotClassificationInput(
-            sources=(
-                SlotClassificationSource(
-                    source_id=source_id,
-                    kind="user_message",
-                    text=quote,
-                    message_id=message_id,
-                ),
-            ),
-            current_user_message_id=message_id,
-        ),
-        model="openai/gpt-test",
-        provider="openai",
-    )
-    metadata = metadata_with_focused_slot_classification(None, classification)
-    assert metadata is not None
-    return ConversationMessage(
-        message_id=message_id,
-        role="user",
-        content=quote,
-        metadata=metadata,
     )
 
 
@@ -573,48 +521,6 @@ def test_byte_compaction_rebuild_matches_after_later_slot_correction() -> None:
         if (parsed := slot_classification_from_metadata(message.metadata)) is not None
     )
     assert classification.diagnostics == []
-
-
-def test_focused_classification_survives_count_and_byte_compaction() -> None:
-    conversation = [
-        _focused_classifier_msg(
-            "focused-old",
-            slot_name="terminal_output",
-            value="structured_text",
-        ),
-        _focused_classifier_msg(
-            "focused-new",
-            slot_name="terminal_output",
-            value="docx_document",
-        ),
-        *[_msg("assistant", content=f"filler {index}") for index in range(20)],
-        _msg("user", content="continue"),
-    ]
-    expected = build_planning_state_from_conversation(conversation)
-    count_compacted = compact_ai_builder_conversation(
-        conversation,
-        max_messages=6,
-        tail_messages=4,
-    )
-    without_old = conversation_serialized_size_bytes(conversation[1:])
-    byte_compacted = compact_ai_builder_conversation(
-        conversation,
-        max_conversation_bytes=without_old + 100,
-    )
-
-    for compacted in (count_compacted, byte_compacted):
-        assert build_planning_state_from_conversation(compacted) == expected
-        classifications = [
-            classification
-            for message in compacted
-            for classification in focused_slot_classifications_from_metadata(
-                message.metadata
-            )
-        ]
-        assert [slot.value for item in classifications for slot in item.slots] == [
-            "docx_document"
-        ]
-        assert all(not item.diagnostics for item in classifications)
 
 
 def test_compaction_retains_latest_checkpoint_update_for_rebuild() -> None:

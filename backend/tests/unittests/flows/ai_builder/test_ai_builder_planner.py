@@ -1501,7 +1501,7 @@ async def test_prepare_reopen_command_dispatches_canonical_question_without_clas
     assert isinstance(prepared, ServerOutputPrepared)
     assert prepared.server_decision == AskCanonicalQuestion(
         slot_name="document_material_scope",
-        allow_focused_classification=False,
+        reopen=True,
     )
     assert build_runtime.await_args.kwargs["allow_classification"] is False
     planner.litellm_client.acompletion.assert_not_awaited()
@@ -3702,7 +3702,6 @@ async def test_resumed_stale_classification_is_rejected_and_rearms_discovery() -
         quote=legacy_quote,
     )
     legacy_state = PlanningState.empty()
-    legacy_state.builder_schema_version = 20
     legacy_state.resolved_slots = {
         "primary_runtime_input": ResolvedSlot(
             name="primary_runtime_input",
@@ -3736,7 +3735,6 @@ async def test_resumed_stale_classification_is_rejected_and_rearms_discovery() -
             evidence=[legacy_evidence.planning_reference()],
         ),
     ]
-    assert legacy_state.builder_schema_version == 20
     assert legacy_state.named_result_evidence
     draft = derive_architecture_commit_draft(legacy_state)
     assert draft is not None
@@ -3850,7 +3848,7 @@ async def test_resumed_stale_classification_is_rejected_and_rearms_discovery() -
         planner,
         conversation=conversation,
         completion_model_route=_route(),
-        persisted_planning_state=legacy_state,
+        persisted_planning_state=None,
     )
 
     planner.litellm_client.acompletion.assert_awaited_once()
@@ -3871,10 +3869,14 @@ async def test_resumed_stale_classification_is_rejected_and_rearms_discovery() -
 
 
 @pytest.mark.asyncio
-async def test_latest_v20_confirmation_discards_state_and_rearms_confirmation() -> None:
+async def test_confirmation_of_a_state_this_build_no_longer_loads_rearms_confirmation() -> (
+    None
+):
+    # The repository returns no state for a payload stamped by another builder
+    # schema version, so a confirmation recorded against that state arrives
+    # with nothing persisted behind it.
     planner = _make_planner()
     legacy_state = _document_architecture_state()
-    legacy_state.builder_schema_version = 20
     legacy_state.named_result_evidence = [
         NamedResultEvidence(
             name="legacy_field",
@@ -3891,7 +3893,7 @@ async def test_latest_v20_confirmation_discards_state_and_rearms_confirmation() 
         planner,
         conversation=_confirmation_conversation(legacy_disclosure),
         completion_model_route=_route(),
-        persisted_planning_state=legacy_state,
+        persisted_planning_state=None,
     )
 
     assert isinstance(prepared, ServerOutputPrepared)

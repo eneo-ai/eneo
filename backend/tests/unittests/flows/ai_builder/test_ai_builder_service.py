@@ -1861,7 +1861,9 @@ class TestSendMessageToolCall:
                 )
             )
 
-        assert mock_litellm.acompletion.await_count == 2
+        # One understanding call per turn: the purpose question follows it
+        # without a second, slot-focused classifier call.
+        assert mock_litellm.acompletion.await_count == 1
         question_events = [e for e in events if e["event"] == SSE_EVENT_QUESTION]
         assert len(question_events) == 1
         assert json.loads(question_events[0]["data"])["question_id"] == (
