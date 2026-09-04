@@ -81,6 +81,7 @@ from eneo.flows.ai_builder.question_catalog import (
     render_summary_label,
     runtime_metadata_field_purpose_label,
 )
+from eneo.flows.enums import FlowAuthoringOutputMode
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 _ATTACHMENT_ASSUMPTION_PREFIX_EN = "Attachment evidence — "
@@ -593,8 +594,23 @@ def _attachment_assumptions(
     # selected template — so hiding one lets a plan change inherit a
     # confirmation the user gave for something else.
     ordered = sorted(session_state.file_roles, key=lambda item: str(item.file_id))
+    # Only a template can travel with the flow, and only when the committed
+    # architecture fills a template and exactly one attached template exists;
+    # the plan lifecycle promotes it under the same rule.
+    commit = session_state.architecture_commit
+    template_fill = (
+        commit is not None
+        and bool(commit.tuples_chain)
+        and commit.tuples_chain[-1].output_mode is FlowAuthoringOutputMode.TEMPLATE_FILL
+    )
+    template_count = sum(item.role == "template" for item in ordered)
     return [
-        _attachment_assumption(item, locale, render_value=render_value)
+        _attachment_assumption(
+            item,
+            locale,
+            render_value=render_value,
+            travels=template_fill and item.role == "template" and template_count == 1,
+        )
         for item in ordered
     ]
 
@@ -604,6 +620,7 @@ def _attachment_assumption(
     locale: Locale,
     *,
     render_value: RenderEvidenceValue,
+    travels: bool,
 ) -> str:
     role = _attachment_role_label(item.role, locale)
     coverage = _attachment_coverage_description(
@@ -618,7 +635,7 @@ def _attachment_assumption(
     # label, not an identity, so the whole id is disclosed.
     reference = str(item.file_id)
     placeholders = _template_placeholder_text(item, locale, render_value=render_value)
-    consequence = _attachment_role_consequence(item.role, locale)
+    consequence = _attachment_run_consequence(travels, locale)
     if locale == "sv":
         readable = "ja" if item.has_readable_text else "nej"
         return (
@@ -634,44 +651,27 @@ def _attachment_assumption(
     )
 
 
-def _attachment_role_consequence(role: FileRole, locale: Locale) -> str:
-    """What the role means for runs, so the user is not left to infer it.
+def _attachment_run_consequence(travels: bool, locale: Locale) -> str:
+    """What the attachment means for runs, read from the committed architecture.
 
-    Only a template travels with the flow. Every other attachment was read
-    while designing, and each run brings its own material.
+    A role label is evidence about the file; whether the file travels with the
+    flow is decided by the commit. Every other attachment was read while
+    designing, and what a run receives is the input contract's business.
     """
 
-    consequences_sv: dict[FileRole, str] = {
-        "runtime_input_sample": (
-            "Filen visar vad varje körning laddar upp; flödet läser inte just "
-            "den här filen."
-        ),
-        "template": "Mallen följer med flödet och fylls i vid varje körning.",
-        "reference_material": (
-            "Underlaget användes när flödet utformades och följer inte med i "
-            "körningar; varje körning laddar upp sina egna dokument."
-        ),
-        "example_output": (
-            "Filen visar resultatets form och följer inte med i körningar."
-        ),
-        "context_only": "Bakgrund för samtalet; flödet läser den aldrig.",
-    }
-    consequences_en: dict[FileRole, str] = {
-        "runtime_input_sample": (
-            "This file shows what each run uploads; the flow does not read this "
-            "file itself."
-        ),
-        "template": "The template travels with the flow and is filled at every run.",
-        "reference_material": (
-            "This material was read while designing the flow and is not carried "
-            "into runs; each run uploads its own documents."
-        ),
-        "example_output": (
-            "This file shows the result's form and is not carried into runs."
-        ),
-        "context_only": "Background for this conversation; the flow never reads it.",
-    }
-    return (consequences_sv if locale == "sv" else consequences_en)[role]
+    if travels:
+        return (
+            "Mallen följer med flödet och fylls i vid varje körning."
+            if locale == "sv"
+            else "The template travels with the flow and is filled at every run."
+        )
+    return (
+        "Filen följer inte med i körningar; vad varje körning får in styrs av "
+        "indatakontraktet ovan."
+        if locale == "sv"
+        else "This file is not carried into runs; what each run receives follows "
+        "the input contract above."
+    )
 
 
 def _template_placeholder_text(

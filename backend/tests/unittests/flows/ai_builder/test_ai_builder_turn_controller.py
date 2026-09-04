@@ -1285,52 +1285,67 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
 
 
 @pytest.mark.parametrize(
-    ("role", "swedish", "english"),
+    ("role", "slots", "swedish", "english"),
     [
         (
-            "runtime_input_sample",
-            "flödet läser inte just den här filen",
-            "the flow does not read this file itself",
-        ),
-        (
             "template",
+            {
+                "primary_runtime_input": "documents",
+                "terminal_output": "docx_document",
+                "docx_output_mode": "template_fill_docx",
+            },
             "Mallen följer med flödet och fylls i vid varje körning",
             "The template travels with the flow and is filled at every run",
         ),
         (
-            "reference_material",
-            "följer inte med i körningar; varje körning laddar upp sina egna dokument",
-            "is not carried into runs; each run uploads its own documents",
+            "template",
+            {
+                "primary_runtime_input": "documents",
+                "terminal_output": "docx_document",
+                "docx_output_mode": "generated_docx",
+            },
+            "Filen följer inte med i körningar",
+            "This file is not carried into runs",
         ),
         (
-            "example_output",
-            "visar resultatets form och följer inte med i körningar",
-            "shows the result's form and is not carried into runs",
+            "reference_material",
+            {"primary_runtime_input": "text", "terminal_output": "docx_document"},
+            "Filen följer inte med i körningar",
+            "This file is not carried into runs",
         ),
         (
             "context_only",
-            "flödet läser den aldrig",
-            "the flow never reads it",
+            {"primary_runtime_input": "text", "terminal_output": "docx_document"},
+            "Filen följer inte med i körningar",
+            "This file is not carried into runs",
         ),
     ],
+    ids=[
+        "template-fill",
+        "template-role-generated-docx",
+        "reference-text-input",
+        "context-only",
+    ],
 )
-def test_server_confirmation_says_what_each_attachment_role_means_for_runs(
-    role: FileRole, swedish: str, english: str
+def test_server_confirmation_derives_the_attachment_run_consequence_from_the_commit(
+    role: FileRole, slots: dict[str, str], swedish: str, english: str
 ) -> None:
-    # The role label alone leaves the user to guess whether the file travels
-    # with the flow; only a template does, and the row says so per role.
-    state = _state(primary_runtime_input="text", terminal_output="docx_document")
+    # The role label is evidence about the file; whether it travels with the
+    # flow is the commit's decision (template fill with one attached template).
+    # Nothing else is promised about what runs receive.
+    state = _state(**slots)
     state.file_roles = [
         FileRoleEvidence(
             file_id=UUID("00000000-0000-0000-0000-000000000801"),
-            filename="attached.pdf",
+            filename="attached.docx",
             file_type="document",
-            mimetype="application/pdf",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             has_readable_text=True,
             coverage="fully_seen",
             role=role,
             source="model",
             confidence="high",
+            template_placeholders=["diarienummer"] if role == "template" else None,
         ),
     ]
     state.architecture_commit = _finalized_commit_for_state(state)
@@ -1340,14 +1355,20 @@ def test_server_confirmation_says_what_each_attachment_role_means_for_runs(
 
     assert isinstance(swedish_decision, ConfirmRequirements)
     assert isinstance(english_decision, ConfirmRequirements)
-    assert any(
-        'Bilaga "attached.pdf"' in assumption and swedish in assumption
-        for assumption in swedish_decision.payload.assumptions
-    )
-    assert any(
-        'Attachment "attached.pdf"' in assumption and english in assumption
-        for assumption in english_decision.payload.assumptions
-    )
+    swedish_rows = [
+        row
+        for row in swedish_decision.payload.assumptions
+        if 'Bilaga "attached.docx"' in row
+    ]
+    english_rows = [
+        row
+        for row in english_decision.payload.assumptions
+        if 'Attachment "attached.docx"' in row
+    ]
+    assert len(swedish_rows) == 1 and swedish in swedish_rows[0]
+    assert len(english_rows) == 1 and english in english_rows[0]
+    assert "laddar upp sina egna dokument" not in swedish_rows[0]
+    assert "uploads its own documents" not in english_rows[0]
 
 
 def test_server_confirmation_discloses_every_attachment_and_versions_coverage() -> None:
