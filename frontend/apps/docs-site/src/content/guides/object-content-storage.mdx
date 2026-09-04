@@ -821,9 +821,40 @@ Storage**. Changing the target for new writes never starts a fleet migration.
 
 ### Why can I not delete an uploaded File?
 
-The File is still used by a chat, Assistant, App, or App run. Check its deletion
-preview, remove those uses deliberately, and try again. Eneo blocks the delete
-instead of silently breaking those resources.
+`DELETE /api/v1/files/{file_id}/` returns `409` with `code: "file_in_use"`
+while a chat, Assistant, App, or App run still references the File or one of
+its generated files. This is a usage conflict; granting more permissions or
+retrying the same request does not resolve it.
+
+The response's `details.blockers` lists the remaining uses and their counts.
+For example, `{"kind": "chat_attachment", "count": 1}` means one chat-message
+attachment reference remains. The read-only
+`GET /api/v1/files/{file_id}/deletion-preview/` endpoint returns the same usage
+information before deletion. It reports counts, not the conversation IDs.
+
+There is currently no API endpoint to detach an individual file from an
+existing chat message while preserving the conversation. Leaving the file out
+of a later chat request does not remove its earlier reference.
+
+For a disposable automation conversation:
+
+1. Retain the conversation ID and uploaded file IDs when creating them.
+2. Finish processing and save the result the integration needs.
+3. Delete the conversation with `DELETE /api/v1/conversations/{session_id}/`.
+   This removes the whole conversation and its attachment references.
+4. Delete each uploaded file with `DELETE /api/v1/files/{file_id}/`. A successful
+   deletion returns `204`. If another reference remains, it still returns `409`.
+
+Use credentials for the owning user/principal, with the required scope and
+permissions. Conversation deletion checks `assistants` and `conversations`
+admin permission; file deletion requires a user-owned key with `files` admin
+permission. Adapt the `/api/v1` prefix to your gateway's environment and version.
+
+If the conversation must be retained, retain its attached files too. Do not
+delete conversation history merely to make file cleanup succeed. For other
+blocker kinds, remove the reference through the owning resource's supported
+workflow before retrying. The final DELETE always rechecks usage, even if a
+previous preview allowed deletion.
 
 ### What happens when an endpoint is down?
 
