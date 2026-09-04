@@ -4700,6 +4700,23 @@ def test_slot_classification_prompt_keeps_the_option_out_of_the_outcome_field() 
     assert "carries its chosen option in value, never in outcome" in prompt
 
 
+def test_slot_classification_prompt_reads_a_template_result_as_a_document() -> None:
+    # "ett utkast i kommunens mall" is a filled template, not text; without an
+    # attached template the reading must stay weak so the Builder asks.
+    messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
+        classification_input=_classification_input("Ett bra utkast i kommunens mall."),
+        allowed_slot_values={
+            "terminal_output": frozenset({"structured_text", "docx_document"}),
+        },
+        ui_language="sv",
+    )
+
+    prompt = "\n".join(message["content"] for message in messages)
+    assert "A result the user wants in a template" in prompt
+    assert "is a docx_document filled from that template, never text" in prompt
+    assert "emit that terminal_output at medium confidence" in prompt
+
+
 def test_slot_classification_prompt_explains_comparison_scope_values() -> None:
     messages = classifier._build_slot_classification_prompt(  # noqa: SLF001
         classification_input=_classification_input(
@@ -4715,9 +4732,9 @@ def test_slot_classification_prompt_explains_comparison_scope_values() -> None:
 
     prompt = "\n".join(message["content"] for message in messages)
     assert "For comparison_scope" in prompt
-    assert "material uploaded in the same run against each other" in prompt
-    assert "jämföra utfört arbete mot avtal" in prompt
+    assert "against other material of the same run" in prompt
     assert "compare_previous_material when new material is compared" in prompt
+    assert "no_direct_compare when nothing is compared" in prompt
 
 
 def test_slot_classification_prompt_defines_every_file_role_by_its_place_in_the_flow() -> (
