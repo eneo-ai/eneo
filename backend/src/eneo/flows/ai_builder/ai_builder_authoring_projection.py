@@ -45,6 +45,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
     strip_inapplicable_completion_model,
 )
+from eneo.main.exceptions import BadRequestException
 
 
 class MaterializedAddStep(BaseModel):
@@ -238,7 +239,10 @@ def apply_existing_step_patch(
 
     if "name" in fields:
         if patch.name is None or not patch.name.strip():
-            raise ValueError("Step name cannot be cleared.")
+            raise BadRequestException(
+                f"Step {patch.existing_step_ref}: name cannot be cleared; omit "
+                "name to keep the current one."
+            )
         updates["name"] = patch.name.strip()
     for field_name in (
         "input_source",
@@ -248,14 +252,18 @@ def apply_existing_step_patch(
         if field_name in fields:
             updates[field_name] = getattr(patch, field_name)
     if "output_contract" in fields:
-        updates["output_contract"] = _object_schema_from_field_map(
-            patch.output_contract
+        updates["output_contract"] = _validated_output_contract(
+            patch.output_contract,
+            existing_step_ref=patch.existing_step_ref,
         )
     if "review_mode" in fields:
         updates["review_policy"] = compile_review_policy(patch.review_mode)
     if "assistant_spec" in fields:
         if patch.assistant_spec is None:
-            raise ValueError("Assistant spec cannot be cleared.")
+            raise BadRequestException(
+                f"Step {patch.existing_step_ref}: assistant_spec cannot be "
+                "cleared; omit it to keep the current one."
+            )
         updates["assistant_spec"] = merge_assistant_spec_patch(
             existing.assistant_spec,
             patch.assistant_spec,
@@ -264,33 +272,31 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
-def _object_schema_from_field_map(
+def _validated_output_contract(
     contract: FlowPersistedJsonObject | None,
+    *,
+    existing_step_ref: str,
 ) -> FlowPersistedJsonObject | None:
-    """Admit a bare field map as the object schema it unambiguously means.
+    """Accept an object schema; name the envelope for anything else.
 
-    The edit tool asks for a JSON Schema object, but a model that writes
+    The edit tool asks for a JSON Schema object. A model that writes
     ``{"summary": {"type": "string"}}`` has named its fields without the
-    ``type``/``properties`` envelope. That map has exactly one lossless
-    reading; left as-is it compiled to a contract with no properties and the
-    critic then reported the named field as missing (2026-09-05).
+    envelope; compiled as-is that map became a contract with no properties
+    and the critic then reported the named field as missing, which no repair
+    could satisfy (2026-09-05). Rewriting the map here is not safe either,
+    since keyword-only schemas look the same, so the shape is rejected with
+    the envelope spelled out.
     """
 
-    if contract is None or not contract:
+    if contract is None or "properties" in contract or contract.get("type") == "object":
         return contract
-    if any(
-        key in contract
-        for key in ("type", "properties", "$ref", "anyOf", "oneOf", "allOf", "items")
-    ):
-        return contract
-    if not all(isinstance(value, dict) for value in contract.values()):
-        return contract
-    return {
-        "type": "object",
-        "properties": dict(contract),
-        "required": list(contract),
-        "additionalProperties": False,
-    }
+    raise BadRequestException(
+        f"Step {existing_step_ref}: output_contract must be a JSON Schema object "
+        'such as {"type": "object", "properties": {"summary": {"type": "string"}}, '
+        '"required": ["summary"]}; top-level keys received: '
+        + ", ".join(sorted(str(key) for key in contract))
+        + "."
+    )
 
 
 def _compile_existing_step_modification(
@@ -401,7 +407,10 @@ def merge_assistant_spec_patch(
     instructions = existing.instructions
     if "instructions" in patched_fields:
         if patch.instructions is None or not patch.instructions.strip():
-            raise ValueError("Assistant instructions cannot be cleared.")
+            raise BadRequestException(
+                "assistant_spec.instructions cannot be cleared; omit it to keep "
+                "the current instructions."
+            )
         instructions = patch.instructions.strip()
 
     knowledge_refs = existing.knowledge_refs

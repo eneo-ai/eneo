@@ -125,34 +125,32 @@ def test_edit_overlay_null_description_keeps_current_and_blank_clears() -> None:
     assert cleared.flow_description == ""
 
 
-def test_edit_overlay_wraps_bare_output_contract_field_map() -> None:
+def test_edit_overlay_rejects_output_contract_without_schema_envelope() -> None:
     # Live 2026-09-05: the model named the fields without the schema envelope;
     # compiled as-is the contract had no properties and the critic reported
-    # `summary` missing although it was there.
-    result = compile_ordered_edit_proposal(
-        base_spec=_base_spec(),
-        proposal=_edit_proposal(
-            steps=[
-                ModifyExistingStep(
-                    existing_step_ref="existing_step_1",
-                    output_type=OutputType.JSON,
-                    output_contract={
-                        "summary": {"type": "string"},
-                        "key_points": {"type": "array", "items": {"type": "string"}},
-                    },
-                )
-            ],
-        ),
-    )
-    assert result.steps[0].output_contract == {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "key_points": {"type": "array", "items": {"type": "string"}},
-        },
-        "required": ["summary", "key_points"],
-        "additionalProperties": False,
-    }
+    # `summary` missing although it was there. The shape is refused with the
+    # envelope spelled out so the repair call can fix it.
+    with pytest.raises(
+        BadRequestException, match=r"output_contract must be a JSON Schema object"
+    ):
+        compile_ordered_edit_proposal(
+            base_spec=_base_spec(),
+            proposal=_edit_proposal(
+                steps=[
+                    ModifyExistingStep(
+                        existing_step_ref="existing_step_1",
+                        output_type=OutputType.JSON,
+                        output_contract={
+                            "summary": {"type": "string"},
+                            "key_points": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                    )
+                ],
+            ),
+        )
 
     explicit = {"type": "object", "properties": {"summary": {"type": "string"}}}
     kept = compile_ordered_edit_proposal(
@@ -168,6 +166,20 @@ def test_edit_overlay_wraps_bare_output_contract_field_map() -> None:
         ),
     )
     assert kept.steps[0].output_contract == explicit
+
+
+def test_edit_overlay_cleared_step_name_is_a_request_error() -> None:
+    # A cleared name is model-correctable; a ValueError here bypassed the
+    # repair loop and reached the user as a lost connection.
+    with pytest.raises(BadRequestException, match=r"name cannot be cleared"):
+        compile_ordered_edit_proposal(
+            base_spec=_base_spec(),
+            proposal=_edit_proposal(
+                steps=[
+                    ModifyExistingStep(existing_step_ref="existing_step_1", name="  ")
+                ],
+            ),
+        )
 
 
 def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:
