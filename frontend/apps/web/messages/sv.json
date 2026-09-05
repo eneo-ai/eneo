@@ -6751,6 +6751,5 @@
   "ai_builder_reply_reading_sources": "Eneo läser dina källor…",
   "ai_builder_attachment_coverage_full": "läst i sin helhet",
   "ai_builder_attachment_coverage_excerpt": "läst i utdrag",
-  "ai_builder_attachment_coverage_inventory": "bara innehållsförteckningen läst",
-  "ai_builder_attachment_placeholders_more": "{shown} och {count} till"
+  "ai_builder_attachment_coverage_inventory": "läsbar text finns, men inget textutdrag ingick"
 }

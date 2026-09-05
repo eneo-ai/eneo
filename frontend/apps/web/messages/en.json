@@ -6751,6 +6751,5 @@
   "ai_builder_reply_reading_sources": "Eneo is reading your sources…",
   "ai_builder_attachment_coverage_full": "read in full",
   "ai_builder_attachment_coverage_excerpt": "read in excerpts",
-  "ai_builder_attachment_coverage_inventory": "only the inventory read",
-  "ai_builder_attachment_placeholders_more": "{shown} and {count} more"
+  "ai_builder_attachment_coverage_inventory": "readable text exists, but no excerpt was included"
 }

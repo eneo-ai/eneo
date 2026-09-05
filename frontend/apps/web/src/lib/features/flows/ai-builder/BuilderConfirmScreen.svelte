@@ -383,10 +383,14 @@
   const changeDrafts = new SvelteMap<string | null, string>();
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
-  // The attachment sentences are planner context; the rows above are what
-  // the user reads and confirms.
+  const attachmentRows = $derived(summary.attachment_rows ?? []);
+  // The attachment sentences are planner context; when typed rows exist they
+  // are what the user reads instead. A disclosure saved before the rows
+  // existed still shows its sentences, so nothing confirmed goes unseen.
   const assumptions = $derived(
-    (summary.assumptions ?? []).filter((text) => !isAttachmentAssumption(text))
+    attachmentRows.length > 0
+      ? (summary.assumptions ?? []).filter((text) => !isAttachmentAssumption(text))
+      : (summary.assumptions ?? [])
   );
   /** Defaults Eneo chose, each reopenable to its own question. */
   const assumptionRows = $derived(summary.assumption_rows ?? []);
@@ -398,7 +402,6 @@
   );
   const manualNotes = $derived(summary.manual_setup_notes ?? []);
   /** Every attachment as the server typed it; the role label is the client's. */
-  const attachmentRows = $derived(summary.attachment_rows ?? []);
   type AttachmentRow = (typeof attachmentRows)[number];
 
   function attachmentCoverageLabel(coverage: AttachmentRow["coverage"]): string {
@@ -421,13 +424,6 @@
   }
 
   const PLACEHOLDERS_SHOWN = 4;
-  function attachmentPlaceholderText(placeholders: string[]): string {
-    const shown = placeholders.slice(0, PLACEHOLDERS_SHOWN).join(", ");
-    const rest = placeholders.length - PLACEHOLDERS_SHOWN;
-    return rest > 0
-      ? m.ai_builder_attachment_placeholders_more({ shown, count: String(rest) })
-      : shown;
-  }
   const weakRoleIds = $derived(new Set(summary.weak_role_file_ids ?? []));
   const runPreview = $derived(summary.run_preview ?? null);
   const attachmentRoleLabel = (role: string): string => {
@@ -694,14 +690,31 @@
                             >
                           {/if}
                           {#if row.placeholders && row.placeholders.length > 0}
-                            <span class="text-secondary" title={row.placeholders.join(", ")}>
-                              · {m.ai_builder_attachment_placeholders({
-                                count: String(row.placeholders.length)
-                              })}:
-                              <span class="font-mono text-[0.78rem]"
-                                >{attachmentPlaceholderText(row.placeholders)}</span
-                              >
-                            </span>
+                            {#if row.placeholders.length <= PLACEHOLDERS_SHOWN}
+                              <span class="text-secondary">
+                                · {m.ai_builder_attachment_placeholders({
+                                  count: String(row.placeholders.length)
+                                })}:
+                                <span class="font-mono text-[0.78rem]"
+                                  >{row.placeholders.join(", ")}</span
+                                >
+                              </span>
+                            {:else}
+                              <!-- A long list opens with keyboard or touch; a tooltip is not
+                                   a place to read what one confirms. -->
+                              <details class="text-secondary inline-block">
+                                <summary
+                                  class="text-accent-stronger cursor-pointer list-none font-medium underline-offset-2 hover:underline focus-visible:underline"
+                                >
+                                  · {m.ai_builder_attachment_placeholders({
+                                    count: String(row.placeholders.length)
+                                  })}
+                                </summary>
+                                <span class="font-mono text-[0.78rem]"
+                                  >{row.placeholders.join(", ")}</span
+                                >
+                              </details>
+                            {/if}
                           {/if}
                           {#if weakRoleIds.has(row.file_id)}
                             <span class="text-warning-default text-[0.8rem] font-medium">

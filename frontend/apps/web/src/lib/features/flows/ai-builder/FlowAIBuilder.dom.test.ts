@@ -816,7 +816,7 @@ describe("FlowAIBuilder discovery screens", () => {
           readable: true,
           coverage: "fully_seen",
           travels: true,
-          placeholders: ["diarienummer", "datum"]
+          placeholders: ["diarienummer", "datum", "namn", "adress", "beslutsfattare"]
         },
         {
           file_id: "00000000-0000-0000-0000-000000000802",
@@ -866,9 +866,13 @@ describe("FlowAIBuilder discovery screens", () => {
     const rows = await screen.findByTestId("attachment-rows");
     expect(rows.textContent).toContain("mall.docx");
     expect(rows.textContent).toContain(m.ai_builder_attachment_travels());
-    expect(rows.textContent).toContain(m.ai_builder_attachment_placeholders({ count: "2" }));
-    // The exact placeholders and the coverage are facts the user confirms.
-    expect(rows.textContent).toContain("diarienummer, datum");
+    expect(rows.textContent).toContain(m.ai_builder_attachment_placeholders({ count: "5" }));
+    // Every placeholder is inspectable without a pointer: the long list sits in
+    // a native disclosure the keyboard can open.
+    const placeholderToggle = rows.querySelector("details > summary") as HTMLElement;
+    expect(placeholderToggle).toBeTruthy();
+    await fireEvent.click(placeholderToggle);
+    expect(rows.textContent).toContain("diarienummer, datum, namn, adress, beslutsfattare");
     expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_full());
     expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_inventory());
     expect(rows.textContent).toContain("underlag.pdf (1)");
@@ -884,6 +888,32 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(preview.textContent).toContain(m.ai_builder_run_preview_max_files({ count: "5" }));
     expect(preview.textContent).toContain("Word-dokument");
     expect(preview.textContent).toContain("mall.docx");
+  });
+
+  it("keeps the attachment sentences of a disclosure saved before the typed rows existed", async () => {
+    const legacy = {
+      ...SUMMARY,
+      assumptions: [
+        ...(SUMMARY.assumptions ?? []),
+        'Bilageunderlag – Bilaga "mall.docx" (id 00000000-0000-0000-0000-000000000801): vald roll Mall; läsbar text: ja.'
+      ]
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Fyll i kommunens mall"),
+            assistantMessage("a1", "Här är min tolkning.", { requirements_summary: legacy })
+          ]
+        })
+      ]
+    });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+    await screen.findByText(m.ai_builder_requirements_title());
+    expect(screen.queryByTestId("attachment-rows")).toBeNull();
+    await fireEvent.click(screen.getByRole("button", { name: /Antaganden|Assumptions/ }));
+    expect(await screen.findByText(/Bilageunderlag –/)).toBeTruthy();
   });
 
   it("shows an assumption as a row and reopens its question on the server", async () => {
