@@ -160,6 +160,8 @@ def test_edit_overlay_rejects_output_contract_without_schema_envelope() -> None:
         {"additionalProperties": {"type": "string"}},
         {"const": {"summary": "approved"}},
         {"$ref": "#/$defs/summary", "$defs": {"summary": {"type": "string"}}},
+        {"contentSchema": {"type": "object"}},
+        {"prefixItems": [{"type": "string"}]},
     ):
         kept = compile_ordered_edit_proposal(
             base_spec=_base_spec(),

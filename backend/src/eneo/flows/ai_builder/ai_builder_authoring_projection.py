@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from collections.abc import Mapping
+from typing import Annotated, Any, Literal, cast
 
 import jsonschema
+from jsonschema_specifications import (  # pyright: ignore[reportMissingTypeStubs]  # ships without type stubs
+    REGISTRY,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
@@ -273,27 +277,31 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
-# Draft 7 lists its keywords flat; 2020-12 adds a few and every "$" key.
-_JSON_SCHEMA_KEYWORDS: frozenset[str] = frozenset(
-    jsonschema.Draft7Validator.META_SCHEMA["properties"]
-) | frozenset(
-    {
-        "$defs",
-        "$anchor",
-        "$dynamicAnchor",
-        "$dynamicRef",
-        "$vocabulary",
-        "prefixItems",
-        "unevaluatedItems",
-        "unevaluatedProperties",
-        "dependentRequired",
-        "dependentSchemas",
-        "minContains",
-        "maxContains",
-        "deprecated",
-        "writeOnly",
-    }
-)
+def _json_schema_keywords() -> frozenset[str]:
+    """Every keyword the installed metaschemas define, 2020-12 and draft 7.
+
+    The 2020-12 metaschema spreads its keywords over vocabulary schemas, so
+    they are read through the registry rather than listed by hand (a hand
+    list missed ``contentSchema``, 2026-09-05).
+    """
+
+    meta = cast(dict[str, Any], jsonschema.Draft202012Validator.META_SCHEMA)
+    resolver = REGISTRY.resolver(base_uri=str(meta["$id"]))
+    keywords: set[str] = set(meta.get("properties", {}))
+    for entry in cast(list[dict[str, Any]], meta.get("allOf", [])):
+        ref = entry.get("$ref")
+        if not isinstance(ref, str):
+            continue
+        vocabulary = resolver.lookup(ref).contents
+        if isinstance(vocabulary, Mapping):
+            keywords |= set(vocabulary.get("properties", {}))
+    keywords |= set(
+        cast(dict[str, Any], jsonschema.Draft7Validator.META_SCHEMA)["properties"]
+    )
+    return frozenset(keywords)
+
+
+_JSON_SCHEMA_KEYWORDS = _json_schema_keywords()
 
 
 def _validated_output_contract(
