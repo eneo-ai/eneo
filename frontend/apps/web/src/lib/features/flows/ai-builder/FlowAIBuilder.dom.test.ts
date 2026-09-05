@@ -426,6 +426,7 @@ interface ShellProps {
   targetKind?: "create" | "edit";
   flowId?: string | null;
   resumeSessionId?: string | null;
+  canReview?: boolean;
 }
 
 function renderShell({ fetch, stream, ...props }: ShellProps) {
@@ -527,6 +528,37 @@ describe("FlowAIBuilder bootstrap", () => {
     ).toBeTruthy();
     expect(posts).toEqual([expect.objectContaining({ target_kind: "edit", flow_id: "flow-1" })]);
     expect(fetch).toHaveBeenCalledWith(SESSIONS_ROUTE, expect.objectContaining({ method: "get" }));
+  });
+
+  it("shows the review entry only when the page grants the review permission", async () => {
+    const withReview = makeFetch({
+      created: makeSession({ session_id: "e-1", target_kind: "edit", flow_id: "flow-1" })
+    });
+    const granted = renderShell({
+      fetch: withReview.fetch,
+      stream: makeStream().stream,
+      targetKind: "edit",
+      flowId: "flow-1",
+      canReview: true
+    });
+    void granted;
+    expect(await screen.findByTestId("open-review")).toBeTruthy();
+    cleanup();
+
+    const withoutReview = makeFetch({
+      created: makeSession({ session_id: "e-2", target_kind: "edit", flow_id: "flow-1" })
+    });
+    renderShell({
+      fetch: withoutReview.fetch,
+      stream: makeStream().stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    // Ordinary Builder editing stays available without the review feature.
+    expect(
+      await screen.findByRole("heading", { name: m.ai_builder_task_title_edit() })
+    ).toBeTruthy();
+    expect(screen.queryByTestId("open-review")).toBeNull();
   });
 
   it("resumes the chosen draft and lets its transcript pick the screen", async () => {

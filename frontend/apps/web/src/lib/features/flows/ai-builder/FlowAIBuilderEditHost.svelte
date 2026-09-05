@@ -12,9 +12,11 @@
     spaceId: string;
     flowId: string;
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
+    /** Whether the user may review the published version's runs. */
+    canReview?: boolean;
   }
 
-  let { eneo, spaceId, flowId, onapplied }: Props = $props();
+  let { eneo, spaceId, flowId, onapplied, canReview = false }: Props = $props();
 
   const service = untrack(() => initAIBuilderService(eneo, spaceId, flowId));
   let builder = $state<FlowAIBuilder | undefined>();
@@ -42,4 +44,9 @@
   });
 </script>
 
-<FlowAIBuilder bind:this={builder} targetKind="edit" onapplied={(detail) => onapplied?.(detail)} />
+<FlowAIBuilder
+  bind:this={builder}
+  targetKind="edit"
+  {canReview}
+  onapplied={(detail) => onapplied?.(detail)}
+/>

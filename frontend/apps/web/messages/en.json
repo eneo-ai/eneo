@@ -6020,6 +6020,8 @@
   "permission_flows_manage_description": "Create, edit, publish, and manage flows. Includes the ability to view and run flows.",
   "permission_flows_ai_builder": "Flows: AI builder",
   "permission_flows_ai_builder_description": "Use the AI builder to create or revise flow definitions.",
+  "permission_flows_ai_builder_review": "Flows: review runs with the AI builder",
+  "permission_flows_ai_builder_review_description": "Let the AI builder read a published flow's recent runs, point at what can be improved and prepare changes. Requires Flows: manage and Flows: AI builder.",
   "permission_flows_trace": "Flows: trace",
   "permission_flows_trace_description": "Inspect flow run traces and debug exports for operational troubleshooting.",
   "api_keys_scope_resource_access_link_tenant": "Resource access applies across the tenant scope selected above.",

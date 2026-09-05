@@ -98,6 +98,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_flows_ai_builder(),
         description: m.permission_flows_ai_builder_description()
       };
+    case "flows_ai_builder_review":
+      return {
+        label: m.permission_flows_ai_builder_review(),
+        description: m.permission_flows_ai_builder_review_description()
+      };
     case "flows_trace":
       return {
         label: m.permission_flows_trace(),

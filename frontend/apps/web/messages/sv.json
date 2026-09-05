@@ -6021,6 +6021,8 @@
   "permission_flows_manage_description": "Skapa, redigera, publicera och hantera flöden. Inkluderar behörighet att visa och köra flöden.",
   "permission_flows_ai_builder": "Flöden: AI-byggaren",
   "permission_flows_ai_builder_description": "Använd AI-byggaren för att skapa eller ändra flödesdefinitioner.",
+  "permission_flows_ai_builder_review": "Flöden: granska körningar med AI-byggaren",
+  "permission_flows_ai_builder_review_description": "Låt AI-byggaren läsa ett publicerat flödes senaste körningar, peka på det som kan förbättras och förbereda ändringar. Kräver Flöden: hantera och Flöden: AI-byggaren.",
   "permission_flows_trace": "Flöden: spårning",
   "permission_flows_trace_description": "Granska flödeskörningars spårning och felsökningsexporter vid driftfelsökning.",
   "api_keys_scope_resource_access_link_tenant": "Resursåtkomst gäller inom organisationsomfånget du valde ovan.",

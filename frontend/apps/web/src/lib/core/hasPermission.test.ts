@@ -12,6 +12,9 @@ describe("hasPermission", () => {
     expect(can("flows_run")).toBe(true);
     expect(can("flows_manage")).toBe(true);
     expect(can("flows_ai_builder")).toBe(true);
+    // Reviewing runs with the AI builder is a feature an organisation turns
+    // on per role; the legacy grant never implies it.
+    expect(can("flows_ai_builder_review")).toBe(false);
   });
 
   it("treats flows_manage as implying view and run", () => {

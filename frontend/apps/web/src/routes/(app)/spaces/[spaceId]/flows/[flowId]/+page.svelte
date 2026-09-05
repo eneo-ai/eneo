@@ -100,6 +100,11 @@
   const canUseAIBuilder = user.hasPermission({
     allOf: ["flows_manage", "flows_ai_builder"]
   });
+  // Reviewing the published version's runs is its own role permission on
+  // top of the builder; both entry points read this one value.
+  const canReviewWithAIBuilder = user.hasPermission({
+    allOf: ["flows_manage", "flows_ai_builder", "flows_ai_builder_review"]
+  });
 
   const userMode = getFlowUserMode();
 
@@ -1398,6 +1403,7 @@
           eneo={data.eneo}
           spaceId={$currentSpace.id}
           flowId={$resource.id}
+          canReview={canReviewWithAIBuilder}
           onapplied={async (detail) => {
             try {
               const updated = await data.eneo.flows.get({ id: detail.flow_id });
@@ -1443,7 +1449,7 @@
           const confirmedIds = new Set(runIds);
           optimisticHistoryRuns = optimisticHistoryRuns.filter((run) => !confirmedIds.has(run.id));
         }}
-        onreview={canUseAIBuilder && $resource.published_version != null
+        onreview={canReviewWithAIBuilder && $resource.published_version != null
           ? async () => {
               ensureAIBuilder();
               setActiveTab("ai-builder");

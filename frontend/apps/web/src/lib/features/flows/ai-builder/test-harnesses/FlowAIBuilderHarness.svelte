@@ -15,6 +15,7 @@
     targetKind?: TargetKind;
     flowId?: string | null;
     resumeSessionId?: string | null;
+    canReview?: boolean;
     /** Test hook: receive the service instance to drive live session changes. */
     onservice?: (service: FlowAIBuilderService) => void;
     /** Test hook: receive the mounted shell to exercise its public launch actions. */
@@ -26,6 +27,7 @@
     targetKind = "create",
     flowId = null,
     resumeSessionId = null,
+    canReview = false,
     onservice,
     onbuilder
   }: Props = $props();
@@ -67,4 +69,4 @@
   });
 </script>
 
-<FlowAIBuilder bind:this={builder} {targetKind} {resumeSessionId} />
+<FlowAIBuilder bind:this={builder} {targetKind} {resumeSessionId} {canReview} />

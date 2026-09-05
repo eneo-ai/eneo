@@ -41,6 +41,9 @@
     /** The host shows the saved state and Samtal on its own title row. */
     statusInPageHeader?: boolean;
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
+    /** Whether the user may review the published version's runs; the page
+     *  decides from the role permission and both entry points follow it. */
+    canReview?: boolean;
     /** A draft chosen in the Flöden list; the page opens that session instead of a new one. */
     resumeSessionId?: string | null;
   }
@@ -49,6 +52,7 @@
     targetKind = "edit",
     statusInPageHeader = false,
     onapplied,
+    canReview = false,
     resumeSessionId = null
   }: Props = $props();
 
@@ -762,7 +766,7 @@
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}
           oncleareditcontext={() => service.clearActiveStepScope()}
-          onopenreview={() => void launchReview()}
+          onopenreview={canReview ? () => void launchReview() : undefined}
         />
       {:else if screen === "question" && questionMessage}
         <BuilderQuestionScreen
