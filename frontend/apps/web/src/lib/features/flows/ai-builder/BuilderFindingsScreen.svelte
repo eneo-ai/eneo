@@ -299,7 +299,7 @@
               </h3>
               <p class="text-secondary mt-0.5 text-xs text-pretty">
                 {m.ai_builder_review_suggestions_lead({
-                  model: judged.model_id,
+                  model: judged.model_name,
                   runs: String(judged.sample.run_ids.length),
                   included: String(judged.sample.excerpts_included),
                   truncated: String(judged.sample.excerpts_truncated),

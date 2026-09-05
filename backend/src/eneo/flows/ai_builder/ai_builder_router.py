@@ -1190,6 +1190,7 @@ async def send_message(
     body: SendMessageRequest,
     container: ContainerWithUserExplicitTransactionDep,
 ):
+    body = body.canonical()
     service = _get_ai_builder_service(container)
     database_session = cast(AsyncSession, container.session())
     async with database_session.begin():
@@ -1284,11 +1285,7 @@ async def send_message(
                     acknowledge_duplicate_provider_spend=(
                         body.acknowledge_duplicate_provider_spend
                     ),
-                    message=(
-                        prepared_context.message
-                        if prepared_context.message is not None
-                        else body.message
-                    ),
+                    message=body.message,
                     file_ids=body.file_ids,
                     question_answer=body.question_answer,
                     edit_context=body.edit_context,

@@ -18,6 +18,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     ReviewSampleStep,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+    MAX_SUGGESTION_STEPS,
     build_review_suggestions_messages,
     parse_review_suggestions,
     render_review_sample,
@@ -204,6 +205,54 @@ def test_unknown_kind_unverifiable_source_or_foreign_fact_invalidates_the_answer
         # Diagnostics are codes with positions, never the model's own text.
         assert all(":" in problem for problem in parsed.problems), label
         assert "rename_step" not in " ".join(parsed.problems)
+
+
+def test_a_suggestion_names_at_most_the_steps_a_request_can_carry():
+    """Generation and handoff share one step limit: what the parser admits
+    always validates as an investigation request, and one step more is
+    refused whole rather than truncated."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+    )
+
+    base = _sample()
+    wide = base.model_copy(
+        update={
+            "steps": [
+                base.steps[1].model_copy(update={"step_order": order})
+                for order in range(1, MAX_SUGGESTION_STEPS + 2)
+            ]
+        }
+    )
+    suggestion = {
+        "kind": "duplicated_work",
+        "rationale": "x",
+        "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
+    }
+
+    admitted = parse_review_suggestions(
+        _answer(
+            {**suggestion, "step_orders": list(range(1, MAX_SUGGESTION_STEPS + 1))}
+        ),
+        sample=wide,
+    )
+    assert admitted.outcome == "valid"
+    AIBuilderSuggestionContext(
+        flow_version=wide.packet.flow_version,
+        definition_checksum=wide.packet.definition_checksum,
+        sample_run_ids=[run.run_id for run in wide.runs],
+        suggestion_kind=admitted.suggestions[0].kind,
+        step_orders=admitted.suggestions[0].step_orders,
+    )
+
+    refused = parse_review_suggestions(
+        _answer(
+            {**suggestion, "step_orders": list(range(1, MAX_SUGGESTION_STEPS + 2))}
+        ),
+        sample=wide,
+    )
+    assert refused.outcome == "invalid"
+    assert list(refused.problems) == ["suggestion_1:too_many_steps"]
 
 
 def test_absence_claims_need_complete_evidence_for_their_sources_and_steps():

@@ -74,7 +74,6 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderReviewReference,
     AIBuilderSuggestionContext,
     FlowReviewEvidence,
-    investigation_message,
     resolve_review_evidence,
     resolve_suggestion_evidence,
 )
@@ -171,6 +170,7 @@ class PreparedReviewJudgement:
 
     completion_model_route: ResolvedCompletionModelRoute
     model_id: UUID
+    model_name: str
     max_input_tokens: int
     max_output_tokens: int
     budget_policy: AIBuilderBudgetPolicy
@@ -189,9 +189,6 @@ class PreparedMessageContext:
     review_context: AIBuilderReviewReference | None = None
     review_evidence: FlowReviewEvidence | None = None
     evidence_floor: int = 0
-    # The user message as the server will persist it: the client's text, or
-    # the fixed investigation text when the turn acts on a model suggestion.
-    message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -419,10 +416,6 @@ class AIBuilderService:
         review_evidence = await self._resolve_review_evidence(
             session=session, review_context=review_context
         )
-        if isinstance(review_context, AIBuilderSuggestionContext):
-            message = investigation_message(
-                review_context.suggestion_kind, review_context.step_orders
-            )
         # The floor this conversation is held to: whatever evidence this turn
         # reads, or any turn before it read. It only ever rises, and it is
         # written back on the accepted turn so a compacted conversation
@@ -550,7 +543,6 @@ class AIBuilderService:
             review_context=review_context,
             review_evidence=review_evidence,
             evidence_floor=evidence_floor,
-            message=message,
         )
 
     @staticmethod
@@ -779,6 +771,7 @@ class AIBuilderService:
         return PreparedReviewJudgement(
             completion_model_route=route,
             model_id=planner_context.model.id,
+            model_name=planner_context.model.name,
             max_input_tokens=planner_context.max_input_tokens,
             max_output_tokens=planner_context.max_output_tokens,
             budget_policy=planner_context.budget_policy,
@@ -798,6 +791,7 @@ class AIBuilderService:
             litellm_client=litellm,
             completion_model_route=prepared.completion_model_route,
             model_id=prepared.model_id,
+            model_name=prepared.model_name,
             max_input_tokens=prepared.max_input_tokens,
             max_output_tokens=prepared.max_output_tokens,
             budget_policy=prepared.budget_policy,

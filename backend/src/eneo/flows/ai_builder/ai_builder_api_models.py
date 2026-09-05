@@ -43,7 +43,11 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
-from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderReviewReference
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    AIBuilderReviewReference,
+    AIBuilderSuggestionContext,
+    investigation_message,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
 )
@@ -518,6 +522,25 @@ class SendMessageRequest(BaseModel):
             "can repeat provider work and cost."
         ),
     )
+
+    def canonical(self) -> "SendMessageRequest":
+        """The request as the server retains it.
+
+        A turn acting on a model suggestion carries the fixed investigation
+        text whatever the client sent, so the fingerprint, the retry snapshot
+        and the conversation all hold the same message and none of them
+        holds the model's prose.
+        """
+        if isinstance(self.review_context, AIBuilderSuggestionContext):
+            return self.model_copy(
+                update={
+                    "message": investigation_message(
+                        self.review_context.suggestion_kind,
+                        self.review_context.step_orders,
+                    )
+                }
+            )
+        return self
 
     def request_fingerprint(self) -> str:
         """Hash the stable caller-authored logical request, not mutable provider config."""

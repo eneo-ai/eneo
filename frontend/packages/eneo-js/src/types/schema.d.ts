@@ -18017,6 +18017,8 @@ export interface components {
        * Format: uuid
        */
       model_id: string;
+      /** Model Name */
+      model_name: string;
       sample: components["schemas"]["FlowReviewSuggestionSampleSummary"];
       /** Suggestions */
       suggestions: components["schemas"]["FlowReviewSuggestion"][];

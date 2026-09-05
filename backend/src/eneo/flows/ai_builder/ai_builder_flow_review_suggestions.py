@@ -49,6 +49,8 @@ logger = get_logger(__name__)
 REVIEW_SUGGESTIONS_SCHEMA_VERSION = 1
 MAX_SUGGESTIONS = 6
 MAX_SOURCES_PER_SUGGESTION = 3
+# One limit from the model's answer to the investigation request built on it.
+MAX_SUGGESTION_STEPS = 10
 MAX_RATIONALE_CHARS = 400
 MAX_QUOTE_CHARS = 200
 
@@ -81,7 +83,7 @@ class FlowReviewSuggestion(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: FlowReviewSuggestionKind
-    step_orders: list[int] = Field(min_length=1)
+    step_orders: list[int] = Field(min_length=1, max_length=MAX_SUGGESTION_STEPS)
     rationale: str = Field(min_length=1, max_length=MAX_RATIONALE_CHARS)
     sources: list[FlowReviewSuggestionSource] = Field(min_length=1)
     fact_ids: list[str] = Field(default_factory=list)
@@ -105,6 +107,7 @@ class FlowReviewSuggestions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     model_id: UUID
+    model_name: str
     generated_at: datetime
     flow_version: int
     definition_checksum: str
@@ -234,7 +237,7 @@ Regler:
 - Varje förslag ska ha 1–{MAX_SOURCES_PER_SUGGESTION} källor: käll-id exakt som i underlaget och ett ordagrant citat (högst {MAX_QUOTE_CHARS} tecken) ur den källan.
 - Källor som är avklippta, utelämnade eller inte inspelade kan inte styrka att något saknas; missing_check och step_not_useful kräver att alla citerade källor ingår i sin helhet.
 - Använd fact-id i fact_ids bara när faktumet stödjer förslaget.
-- Högst {MAX_SUGGESTIONS} förslag. Inga förslag är ett giltigt svar.
+- Högst {MAX_SUGGESTIONS} förslag, vart och ett om högst {MAX_SUGGESTION_STEPS} steg. Inga förslag är ett giltigt svar.
 - Motivering på svenska, högst {MAX_RATIONALE_CHARS} tecken, inga personuppgifter ur utdragen.
 
 Svarsform (exakt dessa nycklar, JSON utan kommentarer):
@@ -396,6 +399,8 @@ def _parse_suggestion(
         if raw_step not in index.step_orders:
             return "step_not_in_definition"
         steps.append(raw_step)
+    if len(set(steps)) > MAX_SUGGESTION_STEPS:
+        return "too_many_steps"
     rationale = data.get("rationale")
     if not isinstance(rationale, str) or not rationale.strip():
         return "rationale_missing"
@@ -487,6 +492,7 @@ async def generate_review_suggestions(
     litellm_client: Any,
     completion_model_route: ResolvedCompletionModelRoute,
     model_id: UUID,
+    model_name: str,
     max_input_tokens: int,
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy,
@@ -574,6 +580,7 @@ async def generate_review_suggestions(
     )
     return FlowReviewSuggestions(
         model_id=model_id,
+        model_name=model_name,
         generated_at=datetime.now(timezone.utc),
         flow_version=sample.packet.flow_version,
         definition_checksum=sample.packet.definition_checksum,

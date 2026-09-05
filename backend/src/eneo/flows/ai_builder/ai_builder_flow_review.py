@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     structural_steps,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+    MAX_SUGGESTION_STEPS,
     FlowReviewSuggestionKind,
 )
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
@@ -196,7 +197,6 @@ class PersistedReviewContext(AIBuilderReviewContext):
 
 
 MAX_SUGGESTION_SAMPLE_RUNS = 3
-MAX_SUGGESTION_STEPS = 10
 
 
 class AIBuilderSuggestionContext(BaseModel):
@@ -323,6 +323,13 @@ def resolve_suggestion_evidence(
             context={"missing_run_count": len(missing)},
         )
     steps = set(context.step_orders)
+    unknown = sorted(steps - {step.step_order for step in packet.steps})
+    if unknown:
+        raise AIBuilderBadRequestException(
+            "A named step is not part of this flow's review.",
+            code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+            context={"unknown_step_orders": unknown},
+        )
     facts: list[FlowReviewFact] = [
         fact
         for fact in packet.facts

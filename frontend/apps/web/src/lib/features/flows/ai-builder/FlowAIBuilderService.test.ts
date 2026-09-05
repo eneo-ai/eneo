@@ -476,6 +476,92 @@ describe("FlowAIBuilderService", () => {
     expect(service.phase).toBe("reviewing");
   });
 
+  describe("review lifetime", () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      let reject!: (reason: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+    const packet = (version: number) => ({
+      flow_version: version,
+      definition_checksum: `sum-${version}`
+    });
+    const judged = (version: number) => ({
+      flow_version: version,
+      definition_checksum: `sum-${version}`,
+      suggestions: []
+    });
+    function makeReviewService() {
+      const fetch = vi.fn();
+      const service = new FlowAIBuilderService(
+        { client: { fetch, stream: vi.fn() } } as never,
+        "space-1",
+        "flow-1"
+      );
+      return { service, fetch };
+    }
+
+    it("drops a review packet that arrives after the review closed", async () => {
+      const { service, fetch } = makeReviewService();
+      const pending = deferred<object>();
+      fetch.mockReturnValueOnce(pending.promise);
+
+      const opened = service.openReview();
+      expect(service.review.status).toBe("loading");
+      service.closeReview();
+      pending.resolve(packet(1));
+      await opened;
+
+      expect(service.review).toEqual({ status: "closed" });
+    });
+
+    it("drops suggestions that answer a review that was reopened on another version", async () => {
+      const { service, fetch } = makeReviewService();
+      const pendingSuggestions = deferred<object>();
+      fetch
+        .mockResolvedValueOnce(packet(1))
+        .mockReturnValueOnce(pendingSuggestions.promise)
+        .mockResolvedValueOnce(packet(2));
+
+      await service.openReview();
+      const requested = service.requestSuggestions();
+      await service.openReview();
+      pendingSuggestions.resolve(judged(1));
+      await requested;
+
+      expect(service.review).toEqual({ status: "ready", packet: packet(2) });
+      expect(service.suggestions).toEqual({ status: "closed" });
+    });
+
+    it("drops a suggestions failure that arrives after the review closed", async () => {
+      const { service, fetch } = makeReviewService();
+      const pendingSuggestions = deferred<object>();
+      fetch.mockResolvedValueOnce(packet(1)).mockReturnValueOnce(pendingSuggestions.promise);
+
+      await service.openReview();
+      const requested = service.requestSuggestions();
+      service.closeReview();
+      pendingSuggestions.reject(new Error("late"));
+      await requested;
+
+      expect(service.suggestions).toEqual({ status: "closed" });
+    });
+
+    it("keeps suggestions that answer the review still open", async () => {
+      const { service, fetch } = makeReviewService();
+      fetch.mockResolvedValueOnce(packet(1)).mockResolvedValueOnce(judged(1));
+
+      await service.openReview();
+      await service.requestSuggestions();
+
+      expect(service.suggestions).toEqual({ status: "ready", suggestions: judged(1) });
+    });
+  });
+
   it("keeps the plan-seen latch for transient re-plan streams", () => {
     const service = makeService();
 

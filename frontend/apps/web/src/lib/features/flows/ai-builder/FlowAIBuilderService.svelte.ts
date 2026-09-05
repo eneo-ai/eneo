@@ -387,13 +387,21 @@ export class FlowAIBuilderService {
    *  closed, loading, the packet, or the load failure. */
   review: AIBuilderFlowReviewState = $state({ status: "closed" });
 
+  /** Which opened review a pending request belongs to. Opening or closing
+   *  starts a new one, so a response that arrives late finds its review gone
+   *  and is dropped instead of repopulating a closed or different review. */
+  #reviewGeneration = 0;
+
   async openReview(): Promise<void> {
+    const generation = ++this.#reviewGeneration;
     this.review = { status: "loading" };
     this.suggestions = { status: "closed" };
     try {
       const packet = await this.#driver.fetchFlowReviewPacket();
+      if (generation !== this.#reviewGeneration) return;
       this.review = { status: "ready", packet };
     } catch (error) {
+      if (generation !== this.#reviewGeneration) return;
       this.review = {
         status: "failed",
         error: parseAIBuilderError({
@@ -406,6 +414,7 @@ export class FlowAIBuilderService {
   }
 
   closeReview(): void {
+    this.#reviewGeneration += 1;
     this.review = { status: "closed" };
     this.suggestions = { status: "closed" };
   }
@@ -415,11 +424,14 @@ export class FlowAIBuilderService {
   suggestions: AIBuilderFlowReviewSuggestionsState = $state({ status: "closed" });
 
   async requestSuggestions(): Promise<void> {
+    const generation = this.#reviewGeneration;
     this.suggestions = { status: "loading" };
     try {
       const suggestions = await this.#driver.fetchFlowReviewSuggestions();
+      if (generation !== this.#reviewGeneration) return;
       this.suggestions = { status: "ready", suggestions };
     } catch (error) {
+      if (generation !== this.#reviewGeneration) return;
       this.suggestions = {
         status: "failed",
         error: parseAIBuilderError({
@@ -446,7 +458,7 @@ export class FlowAIBuilderService {
       reviewContext
     );
     if (outcome !== "not_started" && reviewContext) {
-      this.review = { status: "closed" };
+      this.closeReview();
     }
     if (this.#state.error?.code === "invalid_existing_step_ref") {
       this.clearSavedFlowStepScope();

@@ -112,6 +112,7 @@ async def _generate(client, *, max_input_tokens: int = 100_000):
         litellm_client=client,
         completion_model_route=_route(),
         model_id=uuid4(),
+        model_name="gpt-test",
         max_input_tokens=max_input_tokens,
         max_output_tokens=4000,
         budget_policy=resolve_ai_builder_budget_policy(None),
@@ -144,6 +145,7 @@ async def test_a_sourced_answer_becomes_suggestions_with_the_sample_floor():
     result = await _generate(client)
     assert result.evidence_classification_level == 1
     assert result.flow_version == 2
+    assert result.model_name == "gpt-test"
     assert [item.kind for item in result.suggestions] == ["instruction_outcome_drift"]
     assert result.sample.excerpts_included == 1
     (call,) = client.calls

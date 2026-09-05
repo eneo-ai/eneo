@@ -416,7 +416,6 @@ def _make_container(
     )
     service.prepare_message_context.return_value = SimpleNamespace(
         review_context=None,
-        message=None,
         review_evidence=None,
         evidence_floor=0,
         planner_context=SimpleNamespace(
@@ -2313,7 +2312,6 @@ class TestSendMessageEndpoint:
         flow.id = session.flow_id
         service.prepare_message_context.return_value = SimpleNamespace(
             review_context=None,
-            message=None,
             review_evidence=None,
             evidence_floor=0,
             planner_context=SimpleNamespace(
@@ -2366,6 +2364,58 @@ class TestSendMessageEndpoint:
         service.prepare_message_context.assert_awaited_once()
 
     @pytest.mark.anyio
+    async def test_a_suggestion_turn_retains_only_the_investigation_text(self):
+        """The client's text never reaches the conversation, the retry snapshot
+        or the fingerprint: the route canonicalises the request first."""
+        from eneo.flows.ai_builder.ai_builder_flow_review import (
+            AIBuilderSuggestionContext,
+            investigation_message,
+        )
+
+        container = _make_container()
+        session = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        async def mock_events(*args, **kwargs):
+            yield build_done_event()
+
+        service.send_message.return_value = mock_events()
+        context = AIBuilderSuggestionContext(
+            flow_version=3,
+            definition_checksum="sum-3",
+            sample_run_ids=[uuid4()],
+            suggestion_kind="duplicated_work",
+            step_orders=[2, 3],
+        )
+        body = SendMessageRequest(
+            client_turn_id=uuid4(),
+            message="Modellens citat: hemlig text ur en körning",
+            review_context=context,
+        )
+        response = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=body,
+            container=container,
+        )
+        await _read_sse_events(response)
+
+        expected = investigation_message("duplicated_work", [2, 3])
+        sent = service.send_message.call_args.kwargs
+        assert sent["message"] == expected
+        assert sent["request_snapshot"]["message"] == expected
+        assert "hemlig" not in json.dumps(sent["request_snapshot"])
+        assert sent["request_fingerprint"] == body.canonical().request_fingerprint()
+        assert (
+            service.preflight_message_turn.call_args.kwargs["request_fingerprint"]
+            == sent["request_fingerprint"]
+        )
+
+    @pytest.mark.anyio
     async def test_forwards_full_provider_kwargs_from_service_context(self):
         from sse_starlette import EventSourceResponse
 
@@ -2387,7 +2437,6 @@ class TestSendMessageEndpoint:
 
         service.prepare_message_context.return_value = SimpleNamespace(
             review_context=None,
-            message=None,
             review_evidence=None,
             evidence_floor=0,
             planner_context=SimpleNamespace(

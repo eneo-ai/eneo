@@ -203,6 +203,7 @@ describe("BuilderFindingsScreen suggestions", () => {
   function makeSuggestions() {
     return {
       model_id: "model-1",
+      model_name: "GPT-test",
       generated_at: "2026-09-05T12:00:00Z",
       flow_version: 4,
       definition_checksum: "sum-4",
@@ -271,7 +272,7 @@ describe("BuilderFindingsScreen suggestions", () => {
     );
     expect(section.textContent).toContain(
       m.ai_builder_review_suggestions_lead({
-        model: "model-1",
+        model: "GPT-test",
         runs: "2",
         included: "5",
         truncated: "1",

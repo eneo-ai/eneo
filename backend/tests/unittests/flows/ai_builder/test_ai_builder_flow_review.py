@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -804,6 +805,49 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
         resolve_suggestion_evidence(packet, context, sample_run_levels={run_a: 1})
     assert gone.value.code == AIBuilderErrorCode.REVIEW_STALE
     assert gone.value.context == {"missing_run_count": 1}
+
+    # Steps outside the reviewed definition are a bad reference, not a
+    # hypothesis: a request may not name what the review never showed.
+    with pytest.raises(AIBuilderBadRequestException) as unknown:
+        resolve_suggestion_evidence(
+            packet,
+            context.model_copy(update={"step_orders": [2, -7, 999]}),
+            sample_run_levels={run_a: 1, run_b: 3},
+        )
+    assert unknown.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
+    assert unknown.value.context == {"unknown_step_orders": [-7, 999]}
+
+
+def test_a_suggestion_turn_is_canonical_before_fingerprint_and_snapshot():
+    """Whatever the client typed, every retained representation of a turn
+    acting on a suggestion carries the fixed investigation text."""
+    from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        investigation_message,
+    )
+
+    context = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="sum",
+        sample_run_ids=[uuid4()],
+        suggestion_kind="instruction_outcome_drift",
+        step_orders=[3, 1],
+    )
+    first = SendMessageRequest(
+        client_turn_id=uuid4(), message="citat ett", review_context=context
+    ).canonical()
+    second = SendMessageRequest(
+        client_turn_id=uuid4(), message="citat två", review_context=context
+    ).canonical()
+    expected = investigation_message("instruction_outcome_drift", [3, 1])
+    assert first.message == second.message == expected
+    assert first.retry_snapshot()["message"] == expected
+    assert "citat" not in json.dumps(first.retry_snapshot())
+    assert first.request_fingerprint() == second.request_fingerprint()
+    # A plain turn is left exactly as the client sent it.
+    plain = SendMessageRequest(client_turn_id=uuid4(), message="ändra steg 2")
+    assert plain.canonical() is plain
 
 
 def test_suggestion_references_persist_with_the_resolved_level_and_parse_back():
