@@ -302,13 +302,29 @@ describe("BuilderFindingsScreen suggestions", () => {
   it("distinguishes an empty judgement from a failed one", () => {
     const { unmount } = render(BuilderFindingsScreen, {
       review: { status: "ready", packet: makePacket() },
-      suggestions: { status: "ready", suggestions: { ...makeSuggestions(), suggestions: [] } },
+      suggestions: {
+        status: "ready",
+        suggestions: {
+          ...makeSuggestions(),
+          sample: { ...makeSuggestions().sample, run_ids: [RUN_1] },
+          suggestions: []
+        }
+      },
       onprepare: vi.fn(),
       onsuggest: vi.fn(),
       onclose: vi.fn(),
       onretry: vi.fn()
     });
     expect(screen.getByTestId("suggestions-none")).toBeTruthy();
+    // One sampled run reads as one run, not "1 runs".
+    expect(screen.getByTestId("review-suggestions").textContent).toContain(
+      m.ai_builder_review_suggestions_lead_one({
+        model: "GPT-test",
+        included: "5",
+        truncated: "1",
+        unread: "3"
+      })
+    );
     unmount();
 
     render(BuilderFindingsScreen, {

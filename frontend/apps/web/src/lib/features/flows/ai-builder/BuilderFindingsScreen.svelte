@@ -297,19 +297,22 @@
               <h3 class="text-primary text-[0.9375rem] font-bold">
                 {m.ai_builder_review_suggestions_title()}
               </h3>
+              {@const sampleCounts = {
+                model: judged.model_name,
+                runs: String(judged.sample.run_ids.length),
+                included: String(judged.sample.excerpts_included),
+                truncated: String(judged.sample.excerpts_truncated),
+                unread: String(
+                  judged.sample.excerpts_omitted_by_budget +
+                    judged.sample.excerpts_omitted_by_reader +
+                    judged.sample.excerpts_not_recorded +
+                    judged.sample.excerpts_unavailable
+                )
+              }}
               <p class="text-secondary mt-0.5 text-xs text-pretty">
-                {m.ai_builder_review_suggestions_lead({
-                  model: judged.model_name,
-                  runs: String(judged.sample.run_ids.length),
-                  included: String(judged.sample.excerpts_included),
-                  truncated: String(judged.sample.excerpts_truncated),
-                  unread: String(
-                    judged.sample.excerpts_omitted_by_budget +
-                      judged.sample.excerpts_omitted_by_reader +
-                      judged.sample.excerpts_not_recorded +
-                      judged.sample.excerpts_unavailable
-                  )
-                })}
+                {judged.sample.run_ids.length === 1
+                  ? m.ai_builder_review_suggestions_lead_one(sampleCounts)
+                  : m.ai_builder_review_suggestions_lead(sampleCounts)}
               </p>
               {#if judged.suggestions.length === 0}
                 <p
@@ -366,10 +369,14 @@
           <footer class="border-default mt-4 border-t pt-3 text-xs">
             <p class="text-secondary text-pretty">
               {#if completeness && completeness.kind === "evidence_completeness"}
-                {m.ai_builder_review_completeness({
-                  complete: String(completeness.runs_with_all_step_results),
-                  incomplete: String(completeness.runs_missing_step_results)
-                })}
+                {completeness.runs_with_all_step_results === 1
+                  ? m.ai_builder_review_completeness_one({
+                      incomplete: String(completeness.runs_missing_step_results)
+                    })
+                  : m.ai_builder_review_completeness({
+                      complete: String(completeness.runs_with_all_step_results),
+                      incomplete: String(completeness.runs_missing_step_results)
+                    })}
               {/if}
               {#if omittedCount > 0}
                 {m.ai_builder_review_omitted({ count: String(omittedCount) })}
