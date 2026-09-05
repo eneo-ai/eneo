@@ -240,6 +240,7 @@ Svara med JSON enligt schemat. Föreslå bara det som utdragen faktiskt visar:
 Regler:
 - Varje förslag ska ha 1–{MAX_SOURCES_PER_SUGGESTION} källor: käll-id exakt som i underlaget och ett ordagrant citat (högst {MAX_QUOTE_CHARS} tecken) ur den källan.
 - Källor som är avklippta, utelämnade eller inte inspelade kan inte styrka att något saknas; missing_check och step_not_useful kräver att alla citerade källor ingår i sin helhet.
+- instruction_outcome_drift kräver minst en citerad utdata som ingår i sin helhet; ett avklippt utdrag säger inget om hur utdata slutade.
 - "Avklippt" betyder att läsaren kortade utdraget, inte att flödet gjorde det: att en text slutar tvärt är aldrig ett bevis, och ett stegs utdata får inte bedömas som ofullständig av det skälet.
 - Citatet ska vara en exakt teckensträng ur utdraget som det visas här: fyll aldrig i ett avklippt ord och skriv inte om något.
 - Använd fact-id i fact_ids bara när faktumet stödjer förslaget.
@@ -454,6 +455,20 @@ def _parse_suggestion(
             for step in steps
         ):
             return "absence_claim_without_complete_step_output"
+    if kind == "instruction_outcome_drift":
+        # Whether an output follows its instruction can only be judged on
+        # the whole output: a cut excerpt shows neither what came after the
+        # cut nor whether the step finished. The claim must cite at least
+        # one output, and every cited output must be complete.
+        cited_outputs = [
+            availability
+            for source, availability in zip(sources, availabilities)
+            if source.field == "output"
+        ]
+        if not cited_outputs:
+            return "drift_claim_without_output_source"
+        if any(availability != "included" for availability in cited_outputs):
+            return "drift_claim_cites_incomplete_output"
     return FlowReviewSuggestion(
         kind=cast(FlowReviewSuggestionKind, kind),
         step_orders=sorted(set(steps)),

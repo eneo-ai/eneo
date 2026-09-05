@@ -244,6 +244,46 @@ def test_a_quote_across_line_breaks_still_resolves_in_the_excerpt():
     ]
 
 
+def test_a_drift_claim_needs_a_complete_cited_output():
+    """Instruction-versus-outcome can only be judged on the whole output: a
+    claim with no cited output, or with a cut one, is refused by code."""
+    base = _sample()
+    drift = {
+        "kind": "instruction_outcome_drift",
+        "step_orders": [1],
+        "rationale": "x",
+    }
+    only_instruction = {
+        **drift,
+        "step_orders": [2],
+        "sources": [{"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"}],
+    }
+    assert list(
+        parse_review_suggestions(_answer(only_instruction), sample=base).problems
+    ) == ["suggestion_1:drift_claim_without_output_source"]
+    with_output = {
+        **drift,
+        "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
+    }
+    assert [
+        item.kind
+        for item in parse_review_suggestions(
+            _answer(with_output), sample=base
+        ).suggestions
+    ] == ["instruction_outcome_drift"]
+    cut = base.model_copy(
+        update={
+            "excerpts": [
+                base.excerpts[0].model_copy(update={"availability": "truncated"}),
+                *base.excerpts[1:],
+            ]
+        }
+    )
+    assert list(
+        parse_review_suggestions(_answer(with_output), sample=cut).problems
+    ) == ["suggestion_1:drift_claim_cites_incomplete_output"]
+
+
 def test_a_verified_suggestion_survives_an_unverifiable_one_beside_it():
     """One absence claim on a truncated excerpt must not discard the
     duplicated-work claim whose quotes resolve; the refused one is counted."""
