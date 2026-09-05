@@ -17,8 +17,10 @@ packet.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Protocol, Sequence
 from uuid import UUID
@@ -29,8 +31,22 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+    PER_EXCERPT_CHARS,
+    READ_DEADLINE_SECONDS,
+    TOTAL_EXCERPT_CHARS,
+    ExcerptBudget,
+    FlowReviewSample,
+    ReviewSampleBudget,
+    ReviewSampleExcerpt,
+    ReviewSampleRun,
+    excerpts_for_run,
+    select_sample_run_ids,
+    structural_steps,
+)
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
-from eneo.flows.domain.flow import Flow, FlowRunStatusSnapshot, FlowVersion
+from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
+from eneo.flows.domain.flow import Flow, FlowRun, FlowRunStatusSnapshot, FlowVersion
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowRunStatus
 from eneo.flows.infrastructure.flow_run_repo import (
@@ -144,6 +160,9 @@ class FlowReviewPacket(BaseModel):
     steps: list[FlowReviewStep]
     cohort: FlowReviewCohort
     facts: list[FlowReviewFact]
+
+
+FlowReviewSample.model_rebuild(_types_namespace={"FlowReviewPacket": FlowReviewPacket})
 
 
 class AIBuilderReviewContext(BaseModel):
@@ -500,6 +519,19 @@ class FlowReviewRunRepository(Protocol):
     ) -> list[FlowStepLineage]: ...
 
 
+class FlowReviewEvidenceReader(Protocol):
+    async def get_run(
+        self, *, run_id: UUID, flow_id: UUID | None, access_kind: FlowRunAccessKind
+    ) -> FlowRun: ...
+
+    async def get_redacted_evidence_bundle(
+        self, *, run_id: UUID, run: FlowRun
+    ) -> RedactedEvidenceBundle: ...
+
+
+ReviewSampleAudit = Callable[[FlowRun], Awaitable[None]]
+
+
 class FlowReviewAccessPolicy(Protocol):
     async def ensure_can_access_run(
         self, run: FlowRunStatusSnapshot, *, access_kind: FlowRunAccessKind
@@ -515,14 +547,95 @@ class AIBuilderFlowReviewService:
         flow_run_repo: FlowReviewRunRepository,
         flow_version_repo: FlowReviewVersionRepository,
         access_policy: FlowReviewAccessPolicy,
+        evidence_service: FlowReviewEvidenceReader,
     ) -> None:
         self.user = user
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
         self.flow_version_repo = flow_version_repo
         self.access_policy = access_policy
+        self.evidence_service = evidence_service
 
-    async def build_packet(self, *, flow_id: UUID, space_id: UUID) -> FlowReviewPacket:
+    async def build_review_sample(
+        self,
+        *,
+        flow_id: UUID,
+        space_id: UUID,
+        audit: ReviewSampleAudit,
+    ) -> FlowReviewSample:
+        """The packet plus bounded run content one model call may read.
+
+        Every sampled run is audited through ``audit`` before its evidence is
+        read; an audit that raises stops the sample before any content is
+        assembled, so a caller that commits the audit first can be sure no
+        unrecorded read reached a provider. The floor is the packet's (every
+        fact-contributing run) raised to the sampled runs' levels.
+        """
+
+        packet = await self.build_packet(flow_id=flow_id, space_id=space_id)
+        _, version = await self._published(flow_id=flow_id, space_id=space_id)
+        steps = parse_published_runtime_steps(
+            version.definition_json, flow_version=packet.flow_version
+        )
+        level = packet.evidence_classification_level
+        runs: list[ReviewSampleRun] = []
+        excerpts: list[ReviewSampleExcerpt] = []
+        budget = ExcerptBudget()
+        try:
+            async with asyncio.timeout(READ_DEADLINE_SECONDS):
+                for run_id in select_sample_run_ids(packet):
+                    run = await self.evidence_service.get_run(
+                        run_id=run_id, flow_id=flow_id, access_kind="evidence_view"
+                    )
+                    if run.evidence_classification_level is None:
+                        raise AIBuilderBadRequestException(
+                            "A sampled run no longer carries an evidence level.",
+                            code=AIBuilderErrorCode.REVIEW_STALE,
+                        )
+                    await audit(run)
+                    bundle = await self.evidence_service.get_redacted_evidence_bundle(
+                        run_id=run_id, run=run
+                    )
+                    level = max(level, run.evidence_classification_level)
+                    runs.append(
+                        ReviewSampleRun(
+                            run_id=run.id,
+                            status=run.status.value,
+                            evidence_classification_level=(
+                                run.evidence_classification_level
+                            ),
+                        )
+                    )
+                    excerpts.extend(
+                        excerpts_for_run(
+                            run_id=run.id,
+                            steps=steps,
+                            step_result_records=bundle.step_results,
+                            budget=budget,
+                        )
+                    )
+        except TimeoutError as exc:
+            raise AIBuilderBadRequestException(
+                "Reading the sampled runs took longer than the review allows.",
+                code=AIBuilderErrorCode.REVIEW_SAMPLE_TIMEOUT,
+            ) from exc
+        return FlowReviewSample(
+            packet=packet,
+            generated_at=datetime.now(timezone.utc),
+            evidence_classification_level=level,
+            steps=structural_steps(steps),
+            runs=runs,
+            excerpts=excerpts,
+            budget=ReviewSampleBudget(
+                per_excerpt_chars=PER_EXCERPT_CHARS,
+                total_excerpt_chars=TOTAL_EXCERPT_CHARS,
+                used_excerpt_chars=budget.used,
+            ),
+        )
+
+    async def _published(
+        self, *, flow_id: UUID, space_id: UUID
+    ) -> tuple[Flow, FlowVersion]:
         tenant_id = self.user.tenant_id
         flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=tenant_id)
         if flow.space_id != space_id:
@@ -539,6 +652,13 @@ class AIBuilderFlowReviewService:
         version = await self.flow_version_repo.get(
             flow_id, published_version, tenant_id
         )
+        return flow, version
+
+    async def build_packet(self, *, flow_id: UUID, space_id: UUID) -> FlowReviewPacket:
+        tenant_id = self.user.tenant_id
+        flow, version = await self._published(flow_id=flow_id, space_id=space_id)
+        published_version = flow.published_version
+        assert published_version is not None
         definition_checksum = version.definition_checksum
         steps = parse_published_runtime_steps(
             version.definition_json, flow_version=published_version

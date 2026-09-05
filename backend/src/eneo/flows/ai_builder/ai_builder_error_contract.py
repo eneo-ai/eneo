@@ -132,6 +132,7 @@ class AIBuilderErrorCode(StrEnum):
     REVIEW_STALE = "review_stale"
     REVIEW_FINDING_UNKNOWN = "review_finding_unknown"
     REVIEW_FLOW_TOO_LARGE = "review_flow_too_large"
+    REVIEW_SAMPLE_TIMEOUT = "review_sample_timeout"
     PLANNER_MODEL_BELOW_EVIDENCE_LEVEL = "planner_model_below_evidence_level"
     FLOW_SPACE_MISMATCH = "flow_space_mismatch"
     INVALID_AI_BUILDER_SETTINGS = "invalid_ai_builder_settings"
@@ -727,6 +728,11 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             eneo_error_code=ErrorCodes.BAD_REQUEST,
         ),
         AIBuilderErrorCode.REVIEW_FLOW_TOO_LARGE: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        AIBuilderErrorCode.REVIEW_SAMPLE_TIMEOUT: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,

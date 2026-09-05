@@ -1598,6 +1598,7 @@ class Container(containers.DeclarativeContainer):
         flow_run_repo=flow_run_repo,
         flow_version_repo=flow_version_repo,
         access_policy=flow_run_access_policy,
+        evidence_service=flow_run_evidence_service,
     )
     ai_builder_service = providers.Factory(
         AIBuilderService,

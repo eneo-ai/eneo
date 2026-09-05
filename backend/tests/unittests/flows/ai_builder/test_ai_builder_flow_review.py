@@ -287,7 +287,7 @@ def _snapshot(
     )
 
 
-def _service(user, *, flow, version, snapshots, denied: set[UUID]):
+def _service(user, *, flow, version, snapshots, denied: set[UUID], evidence=None):
     async def _ensure(run, *, access_kind):
         assert access_kind == "evidence_view"
         if run.id in denied:
@@ -305,6 +305,10 @@ def _service(user, *, flow, version, snapshots, denied: set[UUID]):
             flow_run_repo=flow_run_repo,
             flow_version_repo=SimpleNamespace(get=AsyncMock(return_value=version)),
             access_policy=SimpleNamespace(ensure_can_access_run=_ensure),
+            evidence_service=evidence
+            or SimpleNamespace(
+                get_run=AsyncMock(), get_redacted_evidence_bundle=AsyncMock()
+            ),
         ),
         flow_run_repo,
     )
