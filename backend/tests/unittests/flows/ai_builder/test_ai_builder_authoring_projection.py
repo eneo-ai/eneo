@@ -89,6 +89,42 @@ def test_ordered_edit_proposal_requires_plan_rationale() -> None:
         IntentOrderedEditProposal(plan_rationale=" ", steps=[])
 
 
+def _keep_existing() -> list[ModifyExistingStep]:
+    return [ModifyExistingStep(existing_step_ref="existing_step_1")]
+
+
+def test_edit_overlay_null_or_blank_name_keeps_current_name() -> None:
+    # The edit tool promises "null keeps the current name"; a blank name has
+    # no other honest reading. Raising here turned a finished turn into a
+    # connection error for the user.
+    for flow_name in (None, "", "   "):
+        result = compile_ordered_edit_proposal(
+            base_spec=_base_spec(),
+            proposal=_edit_proposal(flow_name=flow_name, steps=_keep_existing()),
+        )
+        assert result.flow_name == "Existing flow"
+
+    renamed = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=_edit_proposal(flow_name="  Renamed flow ", steps=_keep_existing()),
+    )
+    assert renamed.flow_name == "Renamed flow"
+
+
+def test_edit_overlay_null_description_keeps_current_and_blank_clears() -> None:
+    kept = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=_edit_proposal(flow_description=None, steps=_keep_existing()),
+    )
+    assert kept.flow_description == "Existing description"
+
+    cleared = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=_edit_proposal(flow_description="   ", steps=_keep_existing()),
+    )
+    assert cleared.flow_description == ""
+
+
 def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(),

@@ -412,10 +412,13 @@ def _resolve_flow_name(
     base_spec: FlowDraftSpecCore,
     proposal: MaterializedOrderedEditProposal,
 ) -> str:
+    # The edit tool promises "null to keep current"; a blank name has no other
+    # honest reading either. Raising here after the provider answered turned
+    # a whole turn into "connection lost" for the user.
     if "flow_name" not in proposal.model_fields_set:
         return base_spec.flow_name
     if proposal.flow_name is None or not proposal.flow_name.strip():
-        raise ValueError("Flow name cannot be cleared.")
+        return base_spec.flow_name
     return proposal.flow_name.strip()
 
 
@@ -425,9 +428,11 @@ def _resolve_flow_description(
 ) -> str:
     if "flow_description" not in proposal.model_fields_set:
         return base_spec.flow_description
-    return (
-        "" if proposal.flow_description is None else proposal.flow_description.strip()
-    )
+    # Null keeps the current description, as the tool schema says; an empty
+    # string is an explicit clearing.
+    if proposal.flow_description is None:
+        return base_spec.flow_description
+    return proposal.flow_description.strip()
 
 
 __all__ = [
