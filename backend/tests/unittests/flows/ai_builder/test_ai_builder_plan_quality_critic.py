@@ -1471,6 +1471,60 @@ def test_requested_extra_step_on_one_step_text_flow_passes_final_quality() -> No
     assert feedback is None or "ett enda text-till-text-steg" not in feedback
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Översätt texten utan extra steg.",
+        "Translate this sentence. Do not add another step.",
+    ],
+)
+def test_forbidden_extra_step_on_one_step_text_flow_keeps_restraint(
+    content: str,
+) -> None:
+    # Gate 2026-09-05: mentioning an extra step only to forbid it must not
+    # exempt the two-step proposal.
+    from uuid import uuid4
+
+    from eneo.flows.domain.flow import Flow, FlowStep
+
+    one_step_flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Översätt",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Översätt",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+            )
+        ],
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Översätt",
+        steps=[
+            _step("step_a", "Analysera", "Identifiera språk."),
+            _step(
+                "step_b",
+                "Översätt",
+                "Översätt till engelska.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(
+        [{"role": "user", "content": content}], spec, flow=one_step_flow
+    )
+
+    assert feedback is not None
+    assert "ett enda text-till-text-steg" in feedback
+
+
 def test_direct_text_transform_accepts_single_text_step() -> None:
     conversation = [
         {

@@ -81,9 +81,20 @@ _QUALITY_STEP_MARKERS: tuple[str, ...] = (
 _MULTI_STEP_PREFERENCE_MARKERS: tuple[str, ...] = (
     "flera steg",
     "mellanliggande steg",
-    # An explicitly requested extra step is the exception the restraint's
-    # own wording promises ("om användaren inte uttryckligen ber om fler
-    # steg"); a one-step translation flow may be told to grow (2026-09-05).
+    "inte bara minimal",
+    "inte bara en minimal",
+    "inte bara en kort kedja",
+    "inte bara två steg",
+    "not just a minimal",
+    "not just two steps",
+    "more than two steps",
+)
+
+# An explicitly requested extra step is the exception the restraint's own
+# wording promises ("om användaren inte uttryckligen ber om fler steg"); a
+# one-step translation flow may be told to grow (2026-09-05). A request that
+# mentions an extra step only to forbid it keeps the restraint.
+_STEP_ADDITION_MARKERS: tuple[str, ...] = (
     "fler steg",
     "lägg till ett steg",
     "lägg till ett extra steg",
@@ -100,13 +111,30 @@ _MULTI_STEP_PREFERENCE_MARKERS: tuple[str, ...] = (
     "add another step",
     "additional step",
     "another step",
-    "inte bara minimal",
-    "inte bara en minimal",
-    "inte bara en kort kedja",
-    "inte bara två steg",
-    "not just a minimal",
-    "not just two steps",
-    "more than two steps",
+)
+
+_STEP_ADDITION_NEGATION_MARKERS: tuple[str, ...] = (
+    "utan extra steg",
+    "utan ytterligare steg",
+    "utan fler steg",
+    "utan avslutande steg",
+    "inga extra steg",
+    "inga fler steg",
+    "inga ytterligare steg",
+    "inget extra steg",
+    "inte lägga till",
+    "lägg inte till",
+    "without extra step",
+    "without an extra step",
+    "without additional step",
+    "without another step",
+    "without more steps",
+    "do not add",
+    "don't add",
+    "no extra step",
+    "no additional step",
+    "no other step",
+    "not add another",
 )
 
 _FORM_COMPLEMENT_MARKERS: tuple[str, ...] = (
@@ -184,9 +212,18 @@ def user_requested_simple_text_transform(
         or _contains_any(normalized, _STRUCTURED_INTERMEDIATE_MARKERS)
         or _contains_any(normalized, _QUALITY_STEP_MARKERS)
         or _contains_any(normalized, _MULTI_STEP_PREFERENCE_MARKERS)
+        or _requests_extra_step(normalized)
         or _contains_any(normalized, _FORM_COMPLEMENT_MARKERS)
         or _contains_any(normalized, _FORM_FIELD_GUARD_MARKERS)
     )
+
+
+def _requests_extra_step(text: str) -> bool:
+    """Affirmed step addition only; a forbidden extra step keeps the restraint."""
+
+    if _contains_any(text, _STEP_ADDITION_NEGATION_MARKERS):
+        return False
+    return _contains_any(text, _STEP_ADDITION_MARKERS)
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:

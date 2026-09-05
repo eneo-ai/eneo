@@ -18,6 +18,9 @@ from eneo.flows.ai_builder.ai_builder_simple_text_transform import (
         "Translate this sentence to English: Vi ses imorgon.",
         "Skriv om den här texten så att den blir kortare.",
         "Correct this text and keep the same meaning.",
+        "Översätt texten utan extra steg.",
+        "Translate this sentence. Do not add another step.",
+        "Översätt meningen, lägg inte till ett steg.",
     ],
 )
 def test_flags_direct_text_transform(text: str) -> None:
