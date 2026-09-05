@@ -6730,7 +6730,7 @@
   "ai_builder_review_show_hidden": "Visa {count} dolda",
   "ai_builder_review_hide": "Dölj",
   "ai_builder_review_prepare": "Förbered ändring",
-  "ai_builder_review_prepare_message": "Förbered en ändring utifrån: {finding}",
+  "ai_builder_review_prepare_message": "Förbered en ändring som åtgärdar: {finding}",
   "ai_builder_review_completeness": "{complete} körningar hade resultat för alla steg, {incomplete} saknade något.",
   "ai_builder_review_omitted": "{count} körningar lästes inte (utanför urvalet, äldre än spårningen eller utan behörighet).",
   "ai_builder_review_step": "steg {number}",

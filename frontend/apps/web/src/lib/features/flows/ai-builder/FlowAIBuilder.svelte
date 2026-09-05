@@ -344,7 +344,9 @@
             });
       }
       case "confirm":
-        return m.ai_builder_requirements_title();
+        return targetKind === "edit"
+          ? m.ai_builder_requirements_title_edit()
+          : m.ai_builder_requirements_title();
       case "findings":
         return m.ai_builder_review_title();
       case "build":
@@ -359,6 +361,7 @@
   });
   let screenAnnouncementText = $state("");
   let builderRootEl = $state<HTMLElement | null>(null);
+  let screenScrollEl = $state<HTMLElement | null>(null);
   let announcedScreenKey: string | null = null;
   $effect(() => {
     const key = screenKey;
@@ -395,9 +398,10 @@
       ?.querySelector<HTMLElement>("[data-builder-screen-heading]")
       ?.focus({ preventScroll: true });
     // A new screen starts at its top: the previous screen may have been
-    // scrolled to its foot, and the reader would otherwise land mid-card.
-    // Block-only, so a horizontally scrollable row is never moved.
-    builderRootEl?.scrollIntoView({ block: "start", inline: "nearest" });
+    // scrolled to its foot, and the reader would otherwise land mid-card. The
+    // screen column owns the vertical scroll, so reset it there; a horizontally
+    // scrollable row inside it is never moved.
+    if (screenScrollEl) screenScrollEl.scrollTop = 0;
   }
 
   // ---- Error ownership ------------------------------------------------------
@@ -726,7 +730,7 @@
       </div>
     </div>
 
-    <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div class="flex min-h-0 flex-1 flex-col overflow-y-auto" bind:this={screenScrollEl}>
       <BuilderTurnAlert
         {targetKind}
         suppressStreamError={generationFailedWithoutPlan}

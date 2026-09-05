@@ -513,7 +513,9 @@
 
     <section
       class="border-stronger bg-primary overflow-hidden rounded-xl border shadow-xs"
-      aria-label={m.ai_builder_requirements_title()}
+      aria-label={isEdit
+        ? m.ai_builder_requirements_title_edit()
+        : m.ai_builder_requirements_title()}
     >
       <header class="bg-accent-dimmer border-accent-default/25 border-b px-5 py-3.5">
         <h2

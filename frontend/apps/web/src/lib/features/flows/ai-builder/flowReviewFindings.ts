@@ -6,12 +6,7 @@ export function describeReviewFact(
   fact: AIBuilderFlowReviewFact,
   steps: AIBuilderFlowReviewStep[]
 ): { title: string; evidence: string } {
-  const described = describe(fact, steps);
-  // Step labels read mid-sentence ("steg 2"); a card title starts a sentence.
-  return {
-    ...described,
-    title: described.title.charAt(0).toUpperCase() + described.title.slice(1)
-  };
+  return describe(fact, steps);
 }
 
 function describe(

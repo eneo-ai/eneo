@@ -6730,7 +6730,7 @@
   "ai_builder_review_show_hidden": "Show {count} hidden",
   "ai_builder_review_hide": "Hide",
   "ai_builder_review_prepare": "Prepare change",
-  "ai_builder_review_prepare_message": "Prepare a change based on: {finding}",
+  "ai_builder_review_prepare_message": "Prepare a change that addresses: {finding}",
   "ai_builder_review_completeness": "{complete} runs had results for every step, {incomplete} were missing some.",
   "ai_builder_review_omitted": "{count} runs were not read (outside the selection, older than tracking, or not permitted).",
   "ai_builder_review_step": "step {number}",

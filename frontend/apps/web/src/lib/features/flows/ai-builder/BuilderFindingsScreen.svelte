@@ -184,7 +184,9 @@
                 >
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                      <p class="text-primary text-[0.9rem] font-semibold">{described.title}</p>
+                      <p class="text-primary text-[0.9rem] font-semibold first-letter:uppercase">
+                        {described.title}
+                      </p>
                       <p class="text-secondary mt-0.5 text-[0.8125rem] text-pretty">
                         {described.evidence}
                       </p>
