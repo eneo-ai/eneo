@@ -11,6 +11,7 @@ const meta: MetaRecord = {
   "audit-logging": "Audit Logging",
   "api-key-management": "API Key Management",
   "release-sboms": "Release SBOMs",
+  "token-counting": "Token Counting",
   api: "API Reference",
 };
 

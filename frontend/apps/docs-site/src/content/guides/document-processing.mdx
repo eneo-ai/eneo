@@ -1,13 +1,15 @@
+import { Callout, Steps, Tabs } from "nextra/components";
+
 # Document Processing
 
-Eneo's document processing capabilities allow you to create AI-powered knowledge bases from your documents and websites. This guide covers uploading documents, web crawling, and optimizing retrieval.
+Eneo's document processing capabilities allow you to create AI-powered knowledge bases from your documents and websites. This guide covers uploading documents, web crawling, and how retrieval is configured.
 
 ## Overview
 
 Eneo can process and extract knowledge from:
 
-- **Documents**: PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .csv)
-- **Websites**: Automated crawling and content extraction
+- **Documents**: PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx, .xls), CSV, JSON, XML
+- **Websites**: Automated crawling and content extraction, optionally including linked documents
 - **Text files**: Plain text, Markdown
 
 All content is:
@@ -32,51 +34,57 @@ default; compatible object storage is optional and does not replace pgvector.
 
 ## Uploading Documents
 
-### Step 1: Create a Space
+Documents live in **collections**, and collections belong to a space. Every
+collection is bound to one embedding model, chosen from the models enabled in
+the space when the collection is created.
 
-Documents belong to collaborative spaces in Eneo:
+<Steps>
+
+### Create a Space
 
 1. Log in to your Eneo instance
-2. Click **Spaces** in the sidebar
-3. Click **Create Space**
-4. Fill in:
-   - **Name**: Your space name
-   - **Description**: What the space is for
-   - **Visibility**: Private or Team
-5. Click **Create**
+2. Click **Spaces** in the sidebar and create a space, or open your personal space
+3. Make sure at least one embedding model is enabled for the space; the
+   collection dialog refuses to continue otherwise
 
-### Step 2: Navigate to Knowledge Base
+### Create a Collection
 
-1. Open your space
-2. Click the **Knowledge** tab
-3. Click **Add Documents**
+1. Open the space and click the **Knowledge** tab
+2. Under **Collections**, click **Create collection**
+3. Give it a name and pick the embedding model
 
-### Step 3: Upload Files
+### Upload Files
 
-1. Click **Upload Files** or drag and drop
-2. Select one or multiple files
-3. Click **Upload**
+1. Open the collection
+2. Drag files onto the page or click **Upload files**
 
-The worker service will process files in the background. You'll see:
+</Steps>
 
-- ✓ **Uploaded**: File received
-- ⏳ **Processing**: Content extraction in progress
-- ✓ **Completed**: Ready for queries
+Each file becomes one background job. The job list shows the job as
+**queued**, **in progress**, and finally **complete** or **failed**; the
+frontend polls job status automatically, so there is no need to refresh.
 
 ### Supported Formats
 
-| Format     | Extension       | Notes                                            |
-| ---------- | --------------- | ------------------------------------------------ |
-| PDF        | `.pdf`          | Text-based PDFs work best; OCR not yet supported |
-| Word       | `.docx`         | Modern Word documents                            |
-| PowerPoint | `.pptx`         | Extracts text from slides                        |
-| Excel      | `.xlsx`, `.csv` | Extracts data as text                            |
-| Text       | `.txt`, `.md`   | Plain text and Markdown                          |
+| Format     | Extension          | Notes                                                                     |
+| ---------- | ------------------ | ------------------------------------------------------------------------- |
+| PDF        | `.pdf`             | Text-based PDFs; tables are converted to Markdown. OCR is not supported   |
+| Word       | `.docx`            | Modern Word documents. Legacy `.doc` is rejected with a "save as .docx" error |
+| PowerPoint | `.pptx`            | Extracts text from slides. Legacy `.ppt` is rejected                      |
+| Excel      | `.xlsx`, `.xls`    | Every sheet is serialised row by row; merged cells are forward-filled     |
+| CSV        | `.csv`             | Read as text                                                              |
+| JSON, XML  | `.json`, `.xml`    | Read as text                                                              |
+| Text       | `.txt`, `.md`      | UTF-8 first, then Windows-1252 as a fallback                              |
+
+The file type is detected from the content, not the extension. Encrypted PDFs,
+corrupt archives, and files without any extractable text fail with a specific
+failure code on the job (`encrypted`, `corrupt`, `no_extractable_text`,
+`unsupported_format`).
 
 ### File Size Limits
 
 Administrators with the Storage permission set the knowledge-file limit in
-**Admin > Storage**. Changes apply without restarting backend or worker.
+**Admin > File storage**. Changes apply without restarting backend or worker.
 Operators keep a deployment safety ceiling for PostgreSQL rows or the optional
 object-store transport; Eneo uses the lower effective limit and shows which
 setting constrains it.
@@ -88,73 +96,95 @@ for the exact responsibility split.
 
 ## Web Crawling
 
-Automatically extract content from websites.
+A website source crawls a site and stores each page as a document in the
+space, bound to the embedding model chosen when the website is created (the
+space's default embedding model when none is selected).
 
-### Step 1: Add a Web Source
+### Add a Website
 
-1. In your space, go to **Knowledge** tab
-2. Click **Add Web Source**
-3. Enter the URL to crawl
-4. Configure crawling options:
-   - **Max Depth**: How many levels to crawl (default: 2)
-   - **Max Pages**: Maximum pages to process (default: 50)
-   - **Follow Links**: Crawl linked pages
-5. Click **Start Crawling**
+1. In your space, open the **Knowledge** tab and go to **Websites**
+2. Click **Connect website**
+3. Fill in:
+   - **URL (required)**: where indexing starts, including `https://`, or the
+     full URL of a `sitemap.xml` for sitemap crawls
+   - **Display name**: optional, defaults to the URL
+   - **Crawl type**: **Basic crawl** or **Sitemap based crawl**
+   - **Download and analyse compatible files**: also fetch linked PDFs,
+     Office documents, CSV, JSON, XML, and text files (basic crawls only)
+   - **Automatic updates**: **Never**, **Every day**, **Every other day**, or
+     **Every week**
+   - **HTTP Basic Authentication**: optional username and password for
+     protected sites; credentials are encrypted and used only for this website
+   - **Embedding model**: shown only when creating; defaults to the space's
+     default embedding model
+4. Click **Create website**
 
-### Step 2: Monitor Progress
+The scheduler checks every hour on the hour (UTC): a daily website is queued
+once at least 24 hours have passed since its last crawl, an every-other-day
+website after 48 hours, and a weekly website only on Fridays (UTC) once seven
+days have passed. Use **Start crawl** on the website to run a crawl manually
+at any time.
 
-The crawler will:
+<Tabs items={["Basic crawl", "Sitemap based crawl"]}>
+  <Tabs.Tab>
+    Starts at the URL and follows links within the site until the tenant's
+    page limit or time limit is reached. `robots.txt` is respected by
+    default and request rate is auto-throttled. This is the only mode that can
+    download linked files.
+  </Tabs.Tab>
+  <Tabs.Tab>
+    Reads the sitemap you point it at and fetches exactly the pages it lists.
+    Use this for large sites where you want predictable coverage without
+    link discovery.
+  </Tabs.Tab>
+</Tabs>
 
-1. Fetch the initial page
-2. Extract links (if configured)
-3. Process each page in the background
-4. Update progress in real-time
+### Monitor Progress
 
-### Crawling Configuration
+Each crawl is recorded as a crawl run with its page count and status, visible
+on the website page and over the WebSocket. If a website fails ten crawls in
+a row it is automatically disabled; change its update interval to re-enable
+it.
 
-**Shallow crawl** (single page):
+### Crawler Limits
 
+Crawl limits are not set per website. They are deployment defaults from
+`env_backend.env` that a system administrator can override per tenant.
+
+| Setting                            | Default             | Purpose                                              |
+| ---------------------------------- | ------------------- | ---------------------------------------------------- |
+| `CRAWL_MAX_LENGTH`                 | 36000 s (10 hours)  | Maximum duration of one crawl                        |
+| `CLOSESPIDER_ITEMCOUNT`            | 20000               | Maximum pages per crawl                              |
+| `DOWNLOAD_MAX_SIZE`                | 10485760 (10 MB)    | Maximum size of a downloaded file                    |
+| `OBEY_ROBOTS`                      | `true`              | Respect `robots.txt`                                 |
+| `AUTOTHROTTLE_ENABLED`             | `true`              | Slow down based on the target server's response time |
+| `CRAWL_PAGE_BATCH_SIZE`            | 100                 | Pages committed per database write                   |
+| `CRAWL_EMBEDDING_CONCURRENCY`      | 3                   | Parallel embedding calls per crawl                   |
+| `TENANT_WORKER_CONCURRENCY_LIMIT`  | 4                   | Concurrent crawl jobs per tenant                     |
+| `CRAWL_FEEDER_ENABLED`             | `true`              | Release queued crawls in batches                     |
+| `USING_CRAWL`                      | `true`              | Enable crawling for the deployment                   |
+
+Per-tenant overrides are stored on the tenant and read by the worker at the
+start of every crawl:
+
+```bash
+# Requires the super API key
+curl -X PUT https://your-eneo-instance.com/api/v1/sysadmin/tenants/<tenant-id>/crawler-settings \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"closespider_itemcount": 5000, "crawl_max_length": 7200}'
 ```
-URL: https://example.com/documentation
-Max Depth: 0
-Max Pages: 1
-```
 
-**Deep crawl** (entire section):
-
-```
-URL: https://example.com/docs
-Max Depth: 3
-Max Pages: 100
-Follow Links: Yes
-```
+`GET` on the same path returns the effective settings, and `DELETE` reverts the
+tenant to the deployment defaults. Every setting is range-checked; the
+response lists the valid range when a value is rejected.
 
 ### Web Crawling Best Practices
 
-1. **Start small**: Test with single pages first
-2. **Respect limits**: Don't crawl too many pages at once
-3. **Check robots.txt**: Ensure crawling is allowed
-4. **Use specific URLs**: Target documentation sections, not entire websites
-
-### Handling Authentication
-
-For authenticated websites, use the API:
-
-```python
-import requests
-
-response = requests.post(
-    "https://your-eneo-instance.com/api/spaces/123/knowledge/web",
-    json={
-        "url": "https://example.com/docs",
-        "max_depth": 2,
-        "headers": {
-            "Authorization": "Bearer your-token"
-        }
-    },
-    headers={"Authorization": "Bearer your-eneo-api-key"}
-)
-```
+1. **Start small**: test with a section of the site before crawling all of it
+2. **Prefer sitemaps** for large sites where the sitemap is maintained
+3. **Check robots.txt**: the crawler honours it unless the tenant disables `obey_robots`
+4. **Use specific URLs**: point a basic crawl at a documentation section, not the root domain
 
 ---
 
@@ -164,106 +194,92 @@ response = requests.post(
 
 Content is extracted from source formats:
 
-- **PDF**: Text extraction using pdfplumber
-- **Word**: XML parsing of .docx structure
-- **PowerPoint**: Slide text extraction
-- **Excel**: Cell data extraction
-- **Web**: HTML parsing with Scrapy
+- **PDF**: `pdfplumber`, with tables rendered as Markdown
+- **Word**: `docx2python`
+- **PowerPoint**: `python-pptx`
+- **Excel**: pandas with the `calamine` engine
+- **Web**: Scrapy spiders, HTML parsed with BeautifulSoup and converted with `html2text`
 
 ### 2. Chunking
 
-Text is split into chunks for optimal retrieval:
+Text is split with LangChain's `RecursiveCharacterTextSplitter`. Chunk size is
+measured in **tokens**, not characters:
 
-**Default chunk size**: 1000 characters with 200 character overlap
+- **Chunk size**: 200 tokens
+- **Overlap**: 40 tokens
 
-Overlap ensures context isn't lost at boundaries:
+Tokens are counted with LiteLLM's model-aware tokenizer, falling back to a
+four-characters-per-token estimate if counting fails.
 
-```
-Chunk 1: [..................] (chars 0-1000)
-Chunk 2:           [..................] (chars 800-1800)
-Chunk 3:                      [..................] (chars 1600-2600)
-```
+<Callout type="info">
+  The splitter reads `CHUNK_SIZE` and `CHUNK_OVERLAP` from the worker's
+  environment if they are set, but they are not part of the deployment
+  templates and changing them only affects documents processed afterwards.
+  Existing chunks are not rebuilt.
+</Callout>
 
 ### 3. Embedding
 
-Each chunk is converted to a vector embedding:
+Each chunk is embedded with the embedding model bound to its collection or
+website:
 
-- **Model**: Configurable embedding model (default: OpenAI text-embedding-3-small)
-- **Dimensions**: 1536 dimensions (OpenAI) or model-specific
-- **Storage**: Stored in PostgreSQL with pgvector extension
+- **Models**: embedding models are registered per tenant in **Admin > Models**
+  and enabled per space. There is no global default model in the environment.
+- **Storage**: vectors are stored in `info_blob_chunks.embedding`, a
+  dimensionless pgvector column, so models with different dimensions coexist.
+- **Provider calls**: made through LiteLLM with the tenant's configured
+  provider credentials. See [AI Provider Configuration](/guides/ai-providers).
 
 ### 4. Retrieval
 
-When users query:
+When a user asks a question:
 
-1. Query is converted to an embedding
-2. Vector similarity search finds relevant chunks
-3. Top-k most relevant chunks are retrieved (default: k=5)
-4. Chunks are provided as context to the AI model
+1. The question is embedded with the same model as the assistant's knowledge sources
+2. PostgreSQL orders chunks in scope (the assistant's collections, websites,
+   and integrations) by cosine distance and returns the nearest candidates: 30
+   in the legacy retrieval version, or a count derived from the model's
+   context window in the newer one
+3. Optionally, chunks below `INJECT_KNOWLEDGE_MIN_SCORE` are dropped
+4. In the legacy version an autocut step trims the low-relevance tail where
+   the score curve flattens
+5. The remaining chunks are placed in the prompt as context
+
+The score is `1 - cosine distance`. Its scale depends on the embedding model,
+which is why `INJECT_KNOWLEDGE_MIN_SCORE` is unset by default.
+
+See [Knowledge Retrieval and MCP](/docs/knowledge-retrieval-and-mcp) for the
+retrieval versions, the search-as-a-tool mode, and how the candidate count is
+derived from the model's context window.
 
 ---
 
 ## Optimizing Retrieval
 
-### Chunk Size Configuration
+### Organise by Scope
 
-Adjust chunk size based on your content:
+Retrieval searches every chunk in the assistant's knowledge scope, and there is
+no approximate-nearest-neighbour index on the embedding column. Smaller,
+focused collections are both faster and more precise than one large
+collection.
 
-**Large chunks** (1500-2000 chars):
+### Choose the Embedding Model per Collection
 
-- ✓ Better for long-form content
-- ✓ More context per chunk
-- ✗ Less precise retrieval
+The embedding model is fixed when a collection or website is created. To move
+content to another model, create a new collection with that model and upload
+the documents again; existing chunks are not re-embedded in place.
 
-**Small chunks** (500-800 chars):
+### Relevance Floor
 
-- ✓ More precise retrieval
-- ✓ Better for factual Q&A
-- ✗ May lose context
-
-To configure, add to `env_backend.env`:
-
-```bash
-CHUNK_SIZE=1000
-CHUNK_OVERLAP=200
-```
-
-### Embedding Models
-
-Choose the right embedding model:
-
-**OpenAI text-embedding-3-small** (default):
-
-- Fast and cost-effective
-- 1536 dimensions
-- Good for general purpose
-
-**OpenAI text-embedding-3-large**:
-
-- Higher quality
-- 3072 dimensions
-- Better for complex queries
-
-Configure in `env_backend.env`:
+For inject-mode retrieval, set a deployment-wide floor in `env_backend.env`
+once you know the score distribution of your embedding model:
 
 ```bash
-EMBEDDING_MODEL=text-embedding-3-small
+# Cosine similarity, -1 to 1. Unset by default.
+INJECT_KNOWLEDGE_MIN_SCORE=0.3
 ```
 
-### Retrieval Parameters
-
-Adjust how many chunks are retrieved:
-
-```bash
-# Number of chunks to retrieve
-RETRIEVAL_K=5
-
-# Minimum similarity threshold (0-1)
-RETRIEVAL_THRESHOLD=0.7
-```
-
-Higher `k` = more context but potentially less relevant
-Higher threshold = more precise but may miss relevant content
+There are no other retrieval variables in the environment; the chunk count and
+autocut behaviour are set per retrieval version in code.
 
 ---
 
@@ -272,16 +288,8 @@ Higher threshold = more precise but may miss relevant content
 ### View Documents
 
 1. Go to your space
-2. Click **Knowledge** tab
-3. See all documents and their status
-
-### Search Documents
-
-Use the search bar to find specific documents:
-
-```
-Search: "quarterly report"
-```
+2. Click the **Knowledge** tab
+3. Open a collection or website to see its documents and job status
 
 ### Update Documents
 
@@ -295,61 +303,35 @@ If processing fails, the previous version remains available.
 2. Click **Delete**
 3. Confirm deletion
 
-Deletion removes:
-
-- Original document
-- All chunks
-- All embeddings
+Deleting a document removes its text and all of its chunks and embeddings.
+Deleting a collection or website removes every document in it.
 
 ---
 
-## Performance Optimization
+## Performance
 
-### Processing Speed
+### Worker Capacity
 
-**Worker configuration** in `docker-compose.yml`:
-
-```yaml
-worker:
-  deploy:
-    replicas: 2 # Run 2 worker instances
-    resources:
-      limits:
-        cpus: "2"
-        memory: 2G
-```
-
-### Database Performance
-
-**Create indexes** for faster queries:
-
-```sql
--- Already included in migrations, but if needed:
-CREATE INDEX idx_document_chunks_embedding
-ON document_chunks
-USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
-```
-
-**Optimize PostgreSQL** in `env_db.env`:
+The worker runs the same image as the backend with `RUN_AS_WORKER=true`. Two
+settings in `env_backend.env` control throughput:
 
 ```bash
-# Increase shared buffers
-POSTGRES_SHARED_BUFFERS=256MB
+# Concurrent jobs per worker process (default 15)
+WORKER_MAX_JOBS=15
 
-# Increase work memory
-POSTGRES_WORK_MEM=16MB
+# Concurrent crawl jobs per tenant (default 4, 0 = unlimited)
+TENANT_WORKER_CONCURRENCY_LIMIT=4
 ```
 
-### Caching
+Keep `WORKER_MAX_JOBS` at or below roughly 60 % of `DB_POOL_SIZE +
+DB_POOL_MAX_OVERFLOW` so the API keeps enough database connections. The
+backend template documents the sizing table. To add capacity, run an
+additional worker container with the same environment.
 
-Enable Redis caching for embeddings:
+### Health
 
-```bash
-# In env_backend.env
-CACHE_EMBEDDINGS=true
-CACHE_TTL_SECONDS=3600
-```
+- `GET /api/healthz` reports the worker heartbeat; a stale heartbeat returns `503`
+- `GET /api/healthz/crawler` shows crawl queue lengths and feeder diagnostics
 
 ---
 
@@ -362,14 +344,16 @@ CACHE_TTL_SECONDS=3600
 ```bash
 docker compose ps worker
 docker compose logs worker
+curl -s https://your-eneo-instance.com/api/healthz
 ```
 
 **Common issues:**
 
-- Worker not running
-- Insufficient memory
-- Unsupported file format
-- Corrupted file
+- Worker not running or its heartbeat is stale
+- File type not in the supported list, or a legacy `.doc`/`.ppt` file (`unsupported_format`)
+- Encrypted or corrupt file (the job shows `encrypted` or `corrupt`)
+- Scanned PDF with no text layer (`no_extractable_text`)
+- File larger than the limit in **Admin > File storage**
 
 **Solution:**
 
@@ -382,21 +366,22 @@ docker compose restart worker
 **Check error messages:**
 
 ```bash
-docker compose logs worker | grep crawl
+docker compose logs worker | grep -i crawl
+curl -s https://your-eneo-instance.com/api/healthz/crawler
 ```
 
 **Common issues:**
 
-- Website blocks crawlers (check robots.txt)
-- Authentication required
-- Rate limiting
-- Network issues
+- `robots.txt` disallows the crawler
+- The site requires HTTP Basic Authentication that was not configured
+- The crawl hit `CLOSESPIDER_ITEMCOUNT` or `CRAWL_MAX_LENGTH`
+- The website was auto-disabled after ten consecutive failures
 
 **Solution:**
 
-- Use specific URLs instead of root domains
-- Reduce max_pages and max_depth
-- Add delays between requests
+- Use a sitemap crawl or a more specific start URL
+- Raise the tenant's page or time limit through the sysadmin API
+- Change the website's update interval to re-enable it
 
 ### Poor Retrieval Quality
 
@@ -408,103 +393,71 @@ docker compose logs worker | grep crawl
 
 **Solutions:**
 
-1. **Check chunk size:**
-
-   - Too large = less precise
-   - Too small = loses context
-
-2. **Adjust retrieval parameters:**
-
-   ```bash
-   RETRIEVAL_K=10  # Retrieve more chunks
-   RETRIEVAL_THRESHOLD=0.6  # Lower threshold
-   ```
-
-3. **Use better embeddings:**
-
-   ```bash
-   EMBEDDING_MODEL=text-embedding-3-large
-   ```
-
-4. **Improve document quality:**
-   - Use text-based PDFs (not scanned images)
-   - Remove headers/footers
-   - Clean up formatting
-
-### Out of Memory Errors
-
-**Reduce worker memory usage:**
-
-```yaml
-# docker-compose.yml
-worker:
-  deploy:
-    resources:
-      limits:
-        memory: 1G # Reduce from 2G
-```
-
-**Process fewer documents simultaneously:**
-
-```bash
-# env_backend.env
-MAX_CONCURRENT_TASKS=2  # Reduce from default
-```
+1. **Narrow the scope**: attach only the collections the assistant needs
+2. **Check the embedding model**: all sources of one assistant must use a model
+   that fits the content and language
+3. **Set a relevance floor** with `INJECT_KNOWLEDGE_MIN_SCORE` once you know
+   your model's score distribution
+4. **Improve document quality**: use text-based PDFs, remove boilerplate
+   headers and footers, and keep one topic per document
 
 ---
 
-## Advanced Use Cases
+## Using the API
 
-### Batch Upload via API
+Every operation in this guide is available under `/api/v1` and documented in
+the Swagger UI at `/docs` on your instance. Authenticate with an API key in the
+`X-API-Key` header.
 
-Upload multiple files programmatically:
+**Upload one file to a collection** (one file per request; the response is a
+job you can poll):
 
 ```python
 import requests
 
-files = [
-    ('files', open('doc1.pdf', 'rb')),
-    ('files', open('doc2.pdf', 'rb')),
-    ('files', open('doc3.pdf', 'rb')),
-]
+BASE = "https://your-eneo-instance.com/api/v1"
+HEADERS = {"X-API-Key": "your-api-key"}
 
-response = requests.post(
-    'https://your-eneo-instance.com/api/spaces/123/knowledge/upload',
-    files=files,
-    headers={'Authorization': 'Bearer your-api-key'}
-)
+with open("doc1.pdf", "rb") as f:
+    job = requests.post(
+        f"{BASE}/groups/{collection_id}/info-blobs/upload/",
+        files={"file": f},
+        headers=HEADERS,
+    ).json()
+
+status = requests.get(f"{BASE}/jobs/{job['id']}/", headers=HEADERS).json()
 ```
 
-### Custom Chunking Strategies
+**Add text directly** without a file: `POST /api/v1/groups/{id}/info-blobs/`
+accepts up to 128 text info-blobs per request and embeds them with the
+collection's model.
 
-For specialized content, implement custom chunking:
+**Create and run a website crawler:**
 
 ```python
-# In your fork of Eneo backend
-from app.services.chunking import ChunkingStrategy
+website = requests.post(
+    f"{BASE}/spaces/{space_id}/knowledge/websites/",
+    json={
+        "url": "https://example.com/docs",
+        "crawl_type": "crawl",          # or "sitemap"
+        "download_files": True,
+        "update_interval": "weekly",    # never | daily | every_other_day | weekly
+    },
+    headers=HEADERS,
+).json()
 
-class CustomChunker(ChunkingStrategy):
-    def chunk(self, text: str) -> list[str]:
-        # Your custom logic
-        return chunks
+run = requests.post(f"{BASE}/websites/{website['id']}/run/", headers=HEADERS).json()
 ```
 
-### Multi-language Support
-
-Process documents in multiple languages:
-
-```bash
-# env_backend.env
-EMBEDDING_MODEL=multilingual-e5-large  # Multi-language model
-```
+See the [API Reference](/docs/api) for authentication details.
 
 ---
 
 ## Best Practices
 
-1. **Organize by topic**: Create separate spaces for different topics
-2. **Use descriptive names**: Name documents clearly
-3. **Keep documents updated**: Regularly refresh content
+1. **Organize by topic**: Create separate collections for different topics
+2. **Use descriptive names**: Name documents clearly; the title is what a re-upload matches on
+3. **Keep documents updated**: Re-upload changed files; the old version stays searchable until the new one is complete
 4. **Monitor storage**: Check disk usage periodically
 5. **Test retrieval**: Verify documents are being used in responses
 6. **Start small**: Test with a few documents before bulk upload
@@ -515,6 +468,6 @@ EMBEDDING_MODEL=multilingual-e5-large  # Multi-language model
 ## Need Help?
 
 - **Processing issues**: Check [troubleshooting docs](https://github.com/eneo-ai/eneo/blob/develop/docs/TROUBLESHOOTING.md)
-- **API reference**: [API documentation](https://your-eneo-instance.com/api/docs)
+- **API reference**: Swagger UI at `/docs` on your instance, or the [API Reference](/docs/api)
 - **GitHub issues**: [Report bugs](https://github.com/eneo-ai/eneo/issues)
 - **Email support**: digitalisering@sundsvall.se (public sector organizations)

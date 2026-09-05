@@ -98,11 +98,11 @@ import { Callout, Tabs, Steps } from 'nextra/components'
         Try Locally
       </h3>
       <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-        {"Run Eneo on your machine in minutes with Docker. Perfect for evaluation and testing."}
+        {"Run Eneo on your machine with the VS Code DevContainer, or bring up the Docker Compose reference stack for evaluation."}
       </div>
 
       <div className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-teal-600 dark:text-teal-400">
-        5 minute setup
+        Quick start
         <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
         </svg>
@@ -174,12 +174,12 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 
 ## Quick Start
 
-Get Eneo running locally in under 5 minutes.
+Two ways to get a running instance: the Docker Compose reference stack (served by Traefik with Let's Encrypt, so it needs a public domain) or the VS Code DevContainer for local development.
 
 <Tabs items={['Docker Compose', 'DevContainer']}>
   <Tabs.Tab>
     ```bash
-    # Clone the repository
+    # Clone the repository and enter the deployment folder
     git clone https://github.com/eneo-ai/eneo.git
     cd eneo/docs/deployment/
 
@@ -188,17 +188,27 @@ Get Eneo running locally in under 5 minutes.
     cp env_frontend.template env_frontend.env
     cp env_db.template env_db.env
 
-    # Add your AI provider key (e.g., OpenAI)
-    echo "OPENAI_API_KEY=sk-..." >> env_backend.env
-
-    # Create network and start
+    # Create the external network Traefik uses
     docker network create proxy_tier
+
+    # Generate the secrets the templates ship empty
+    echo "JWT_SECRET=$(openssl rand -hex 32)"          # env_backend.env
+    echo "URL_SIGNING_KEY=$(openssl rand -hex 32)"     # env_backend.env
+    echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)" # env_backend.env AND env_db.env
+    docker compose run --rm --no-deps backend python -m eneo.cli.generate_encryption_key  # ENCRYPTION_KEY in env_backend.env
+
+    # Paste the values into the env files, set PUBLIC_ORIGIN and the domain URLs,
+    # and replace your-domain.com / your-email@domain.com in docker-compose.yml
+
+    # Start all services
     docker compose up -d
     ```
 
-    **Access:** https://localhost (or your configured domain)
+    **Access:** `https://your-domain.com` (Traefik only routes the host name you set in `docker-compose.yml`; there is no localhost route)
 
     **Default login:** `user@example.com` / `Password1!`
+
+    The [deployment guide](/guides/deployment) walks through every value.
   </Tabs.Tab>
   <Tabs.Tab>
     ```bash
@@ -209,19 +219,26 @@ Get Eneo running locally in under 5 minutes.
     # Open in VS Code
     code .
     # Click "Reopen in Container" when prompted
+
+    # Inside the container (nothing starts automatically)
+    cd backend && uv run python init_db.py   # first run: migrations + default user
+    cd backend && uv run start               # terminal 1: API on :8123
+    cd frontend && bun run dev               # terminal 2: web app on :3000
+    cd backend && uv run worker              # terminal 3: uploads and crawls
     ```
 
-    The DevContainer includes all dependencies pre-configured for development.
+    The DevContainer ships Python 3.11 with uv, Bun, PostgreSQL with pgvector and Redis, creates `backend/.env` and `frontend/apps/web/.env` from their templates, and generates a development `ENCRYPTION_KEY`.
 
     **Access:**
     - Platform: http://localhost:3000
-    - API Docs: http://localhost:8000/docs
+    - API docs: http://localhost:8123/docs
+    - Default login: `user@example.com` / `Password1!`
   </Tabs.Tab>
 </Tabs>
 
 <Callout type="info">
   **Next steps after install:**
-  Configure your AI provider in Admin → Models, then create your first Space and Assistant.
+  Add an AI provider in Admin → Models (saving credentials requires `ENCRYPTION_KEY`), then create your first Space and Assistant.
   [Full deployment guide →](/guides/deployment)
 </Callout>
 
@@ -372,7 +389,7 @@ Get Eneo running locally in under 5 minutes.
           {"Model Agnostic"}
         </h3>
         <div className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
-          {"Use OpenAI, Anthropic, Azure, Google, Mistral, or local models. Switch providers without re-architecting."}
+          {"Route requests through LiteLLM to OpenAI, Anthropic, Azure OpenAI, Google Gemini, Mistral and other providers, or to self-hosted models behind an OpenAI-compatible endpoint. Providers are configured per tenant in the admin UI."}
         </div>
 
         <div className="mt-4 flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400">
@@ -495,14 +512,14 @@ Get Eneo running locally in under 5 minutes.
       </a>
 
       {/* Enterprise SSO */}
-      <a href="/guides/oidc-federation/multi-tenant" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700">
+      <a href="/guides/oidc-federation" className="group rounded-xl border border-slate-200 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700">
         <div className="mb-3 inline-flex rounded-lg bg-gradient-to-br from-blue-100 to-indigo-100 p-2.5 dark:from-blue-900/30 dark:to-indigo-900/30">
           <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
           </svg>
         </div>
         <h4 className="font-semibold text-slate-900 dark:text-white">{"Enterprise SSO (OIDC)"}</h4>
-        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Integrate with Entra ID, MobilityGuard, or other IdPs"}</div>
+        <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Integrate with Entra ID, Keycloak, Auth0 or any other OIDC provider; per-tenant IdPs via federation"}</div>
         <div className="mt-3 flex items-center gap-1 text-sm font-medium text-blue-600 dark:text-blue-400">
           Set up SSO
           <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -521,7 +538,7 @@ Get Eneo running locally in under 5 minutes.
           </div>
           <div className="flex-1">
             <h4 className="font-semibold text-slate-900 dark:text-white">{"SharePoint Integration"}</h4>
-            <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Import documents from SharePoint and OneDrive with automatic sync and permissions handling"}</div>
+            <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{"Import documents from SharePoint and OneDrive with webhook-based sync, using a service account or tenant app"}</div>
             <div className="mt-3 flex items-center gap-1 text-sm font-medium text-violet-600 dark:text-violet-400">
               Connect SharePoint
               <svg className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">

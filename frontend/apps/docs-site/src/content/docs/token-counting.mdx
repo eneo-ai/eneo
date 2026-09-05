@@ -23,15 +23,20 @@ This works for both streaming and non-streaming requests, and token usage is cor
 
 ## Estimation for Self-Hosted Models
 
-Self-hosted models (such as those running on vLLM or Ollama) do not always return token usage data. When accurate counts are unavailable, Eneo falls back to a local estimation using the `cl100k_base` tokenizer.
+Self-hosted models (such as those running on vLLM or Ollama) do not always return token usage data. When a response carries no usage block, Eneo measures the request it actually sent with LiteLLM's model-aware token counter (`litellm.token_counter`), passing the exact message list and tool definitions for that provider call. LiteLLM picks the tokenizer for the model route; when it does not recognise the model it uses its default `cl100k_base` encoding. If counting fails altogether, Eneo uses a last-resort length estimate (roughly one token per four characters plus a fixed per-message overhead).
+
+The estimate includes:
+
+- Message scaffolding (role framing and per-message overhead) as LiteLLM models it
+- Tool and function definitions sent with the request
+- Images, priced from their pixel dimensions
 
 This estimation has some known limitations:
 
 - It may over- or undercount tokens since different models use different tokenizers
-- Formatting overhead and tool definitions added by the provider are not included in the estimate
 - Reasoning tokens that do not appear in the response text are not captured
 
-As a result, token counts for self-hosted models should be treated as approximations rather than exact values.
+As a result, token counts for self-hosted models should be treated as approximations rather than exact values. When a provider does report a prompt token count, Eneo compares it with its own estimate for the same request and logs a warning if the two drift by more than 20 %, so tokenizer or pricing changes surface in the backend logs instead of silently skewing dashboards.
 
 ## Data Flow
 

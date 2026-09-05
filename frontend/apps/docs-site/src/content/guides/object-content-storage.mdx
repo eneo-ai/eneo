@@ -8,14 +8,14 @@ import { Callout, Steps, Tabs } from "nextra/components";
   storage is optional.
 - Operators configure storage infrastructure and safety bounds. Administrators connect a destination and choose one
   deployment-wide target for eligible new File, Icon, and knowledge original
-  writes in **Admin > Storage** without restarting backend or worker.
+  writes in **Admin > File storage** without restarting backend or worker.
 - A policy change affects new writes only. Existing content never moves
   implicitly.
 - The one-time [File and Icon storage
   upgrade](/guides/file-icon-storage-upgrade) runs online after schema expansion
   and is required for PostgreSQL-only installations too.
 - You can change to another S3-compatible service later: copy the bucket with
-  your own tooling, then switch destination in **Admin > Storage**. The previous
+  your own tooling, then switch destination in **Admin > File storage**. The previous
   destination stays available so you can switch back.
 - Each payload has one byte authority. Eneo does not fall back, dual-write, or
   maintain vendor-specific product modes.
@@ -66,7 +66,7 @@ Object storage and RAG solve different problems:
 
 | Product content                        | Current behavior                                                                                |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Eligible new File and Icon bytes       | Use the deployment-wide target selected in **Admin > Storage**                                  |
+| Eligible new File and Icon bytes       | Use the deployment-wide target selected in **Admin > File storage**                                  |
 | Existing File and Icon bytes           | Stay readable from frozen legacy columns while a bounded worker adopts and verifies them online |
 | New knowledge file and audio originals | Keep the exact upload in the selected target after successful processing                        |
 | Existing knowledge versions            | Stay usable, but have no recoverable original because earlier releases did not retain it        |
@@ -200,12 +200,12 @@ mean “more services.”
 
 | Owner         | Responsibility                                                                                                                                        |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Administrator | Connect a destination, change or roll back it, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Administrator | Connect a destination, change or roll back it, rotate its access keys, and set the new-write target and business upload limits in **Admin > File storage** |
 | Operator      | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning        |
 
 Administrators with the Storage permission can review policy, effective
 limits, and capability status. Deployment-wide content inventory spans tenants
-and is part of that same administrative view. **Admin > Storage** shows the
+and is part of that same administrative view. **Admin > File storage** shows the
 current target, connection health, file-content distribution, and migration
 state first. Target changes, upload limits, and existing-content moves remain
 separate actions, while detailed limits and PostgreSQL allocation are available
@@ -214,7 +214,7 @@ under technical details.
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
 safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
 upload limit. For PostgreSQL-inline session uploads and knowledge originals,
-Eneo uses the smaller of the admin policy and this ceiling. **Admin > Storage**
+Eneo uses the smaller of the admin policy and this ceiling. **Admin > File storage**
 shows the configured limit, effective limit, and constraining source for
 knowledge files and transcription audio as well as File and Icon. Object-store
 uploads use the same rule with the portable multipart envelope derived from
@@ -273,7 +273,7 @@ deployment ceiling. Admin policy may exceed this value, but inline session
 writes use the lower effective limit and report the ceiling as the constraining
 source.
 
-In **Admin > Storage**, keep the new-write target set to **PostgreSQL inline**
+In **Admin > File storage**, keep the new-write target set to **PostgreSQL inline**
 and set the four business limits. The update applies to backend and worker
 operations without restarting either process. It also controls the original
 bytes of newly accepted knowledge file and audio jobs; searchable text and
@@ -341,7 +341,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
 ```
 
 After readiness reports `ready`, an administrator can select **Object store**
-in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
+in **Admin > File storage**. Selection fails clearly if the endpoint is unavailable
 or incompatible. No backend or worker restart is required for the policy
 change.
 
@@ -380,7 +380,7 @@ credentials encrypted:
 ENCRYPTION_KEY=<44-character Fernet key>
 ```
 
-Then open **Admin > Storage**, add the endpoint, signing region, bucket, and
+Then open **Admin > File storage**, add the endpoint, signing region, bucket, and
 application access keys, and let Eneo test and save the encrypted connection.
 Adding the connection does not select it for new writes or move existing
 content. Keep path-based bucket addressing unless the endpoint has wildcard DNS
@@ -402,7 +402,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
 ```
 
 After the connection reports **Ready**, an administrator can select **Object
-storage** in **Admin > Storage**. Connection tests and policy changes fail
+storage** in **Admin > File storage**. Connection tests and policy changes fail
 clearly if the endpoint is unavailable or incompatible. Neither action needs a
 backend or worker restart.
 
@@ -438,7 +438,7 @@ physical cleanup. The detailed engineering contract remains in the
 
 PostgreSQL inline remains the complete default; compatible object storage is
 optional. When the endpoint reports **Ready**, an administrator can
-open **Admin > Storage** and move existing content in either direction:
+open **Admin > File storage** and move existing content in either direction:
 
 1. Choose the destination and a page of 1–100 items.
 2. Select **Queue moves**. Run another command when you want to queue the next
@@ -498,7 +498,7 @@ for a first connection, and back up the current bucket.
 
 ### Stop new writes to object storage
 
-In **Admin > Storage**, select PostgreSQL as the target for new writes, wait
+In **Admin > File storage**, select PostgreSQL as the target for new writes, wait
 until no moves are queued, then select **Pause moves**. Nothing can then appear
 on the old destination while you copy — the switch requires both and is refused
 otherwise.
@@ -516,7 +516,7 @@ The single filename it prints, for example
 `94e1a7e321a740b8959bd0ecdc8827e2`, is your prefix. (On a deployment
 configured through environment variables, this equals
 `OBJECT_CONTENT_DEPLOYMENT_ID` without its dashes; a connection created in
-**Admin > Storage** generates the id internally, so the bucket listing is the
+**Admin > File storage** generates the id internally, so the bucket listing is the
 authoritative source.)
 
 Confirm that prefix lists your objects, then copy and compare both sides:
@@ -544,7 +544,7 @@ Copy only that prefix and preserve object metadata — Eneo verifies the media
 type of every object it reads. Never copy `v1/.eneo-bindings/`: it pairs a
 bucket with one database, and Eneo manages it per destination.
 
-Compare the object count with what **Admin > Storage** reports for object
+Compare the object count with what **Admin > File storage** reports for object
 storage. A clean difference count is not proof on its own: two empty prefixes
 also report no differences.
 
@@ -580,7 +580,7 @@ The comparison contacts the new destination once per stored file, sixteen at
 a time, so on a large deployment the switch request runs for a while — plan
 for it inside the maintenance window, and raise any reverse-proxy request
 timeout in front of the backend if your file count is large. If your browser
-or proxy gives up before the switch answers, refresh **Admin > Storage**
+or proxy gives up before the switch answers, refresh **Admin > File storage**
 first: the switch may still have completed, and you retry only if the old
 destination is still active.
 
@@ -740,7 +740,7 @@ runs Alembic `upgrade head`. The runtime does not create or repair the missing
 policy table.
 
 Policy rollback does not move bytes. To stop placing new content remotely,
-select **PostgreSQL inline** in **Admin > Storage**. The change affects eligible
+select **PostgreSQL inline** in **Admin > File storage**. The change affects eligible
 new writes only. Existing remote content still needs the configured endpoint,
 credentials, certificates, and paired backup. Eneo does not migrate it back
 implicitly.
@@ -879,7 +879,7 @@ text and vectors. Both remain necessary for RAG.
 
 ### What do the storage-usage figures mean?
 
-**Admin > Storage** shows related measurements that must not be added together:
+**Admin > File storage** shows related measurements that must not be added together:
 
 - **File content total** is the combined content size recorded by Eneo, excluding
   content whose deletion has completed (`tombstoned`). The PostgreSQL and
@@ -899,7 +899,7 @@ or billing size. Monitor those values through the host and storage provider.
 
 Yes. Select PostgreSQL for new writes, move every remote item back, and keep the
 endpoint available until orphan and multipart cleanup has finished. Eneo does
-not currently delete the active saved connection from **Admin > Storage**;
+not currently delete the active saved connection from **Admin > File storage**;
 stopping the endpoint afterwards degrades only the optional object-store
 capability while inline content remains available.
 
@@ -934,7 +934,7 @@ bucket back first and use **Change destination**.
 
 ### Can we move between PostgreSQL and object storage instead?
 
-Yes, in both directions, from **Admin > Storage** — see [Move existing
+Yes, in both directions, from **Admin > File storage** — see [Move existing
 content](#move-existing-content). This is a per-file verified move, not a
 destination change. Note that moving a file into PostgreSQL is refused when it
 is larger than the operator's inline ceiling, so a deployment with large files

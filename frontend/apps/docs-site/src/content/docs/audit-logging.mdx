@@ -16,7 +16,7 @@ Audit events are created through the `AuditService` application layer:
 
 Audit logging is gated by:
 
-- A global feature toggle (`audit_logging_enabled`).
+- The `audit_logging_enabled` feature flag (a kill switch, evaluated per tenant).
 - Per-tenant audit configuration (category-level and action-level overrides).
 
 ## Storage model
@@ -45,13 +45,15 @@ Changes apply immediately for new audit events; historical logs are not modified
 
 ## Access model and justification
 
-Viewing audit logs requires an access justification session. The access event itself is logged, including:
+Viewing audit logs requires an access justification session, created with `POST /api/v1/audit/access-session`. The access event itself is logged, including:
 
 - reason category
 - justification text
 - access time and actor
 
 This provides traceability for who accessed audit logs and why.
+
+The justification is stored server-side (Redis) and referenced by an HTTP-only cookie; it is never carried in URLs. A session lasts one hour, and each user can create at most five sessions per hour (`429` when exceeded).
 
 ## Query and search behavior
 
@@ -63,11 +65,15 @@ Audit queries support filters for:
 
 Free-text search matches the log `description` field. If you want reliable search for a name or identifier, include it in `description` or metadata.
 
+For data subject access requests, `GET /api/v1/audit/logs/user/{user_id}` returns every log where the user is the actor or the target (GDPR Article 15). The same `user_id` filter is accepted by the synchronous export.
+
 ## Retention
 
 ### Audit log retention
 
 Audit log retention is tenant-specific. A daily purge job hard-deletes logs older than the configured retention period. This is independent from conversation retention.
+
+The policy is read and updated with `GET`/`PUT /api/v1/audit/retention-policy`. Retention is expressed in days: minimum 1, maximum 2555 (about seven years), default 365.
 
 ### Conversation retention hierarchy
 
@@ -75,8 +81,9 @@ Conversation data (questions and app runs) follows a hierarchical retention poli
 
 1. Assistant or App `data_retention_days` (if set)
 2. Space `data_retention_days`
-3. Tenant-level conversation retention (if enabled internally)
-4. `null` means keep forever
+3. `null` means keep forever
+
+There is no tenant-level conversation retention setting: it was removed from the retention-policy API (`PUT /api/v1/audit/retention-policy` accepts only `retention_days`) to prevent accidental data loss. The purge job still honours the legacy `conversation_retention_enabled`/`conversation_retention_days` columns on the tenant's audit retention policy row if they were set directly in the database, but no API or UI writes them.
 
 Use assistant/app-level overrides when you need shorter retention than the space default.
 
@@ -89,17 +96,18 @@ Endpoint: `GET /api/v1/audit/logs/export`
 - `format=csv` (default)
 - `format=json` (JSON Lines/NDJSON)
 
-Synchronous exports are best for small to medium exports.
+Synchronous exports are best for small to medium exports. They are capped at 50,000 records by default; `max_records` raises the cap to at most 100,000. When the cap is hit, the response carries the header `X-Records-Truncated: true`.
 
 ### Asynchronous export
 
-Endpoint: `POST /api/v1/audit/logs/export`
+Endpoint: `POST /api/v1/audit/logs/export/async`
 
 - `format=csv` or `jsonl`
 - status: `GET /api/v1/audit/logs/export/{job_id}/status`
 - download: `GET /api/v1/audit/logs/export/{job_id}/download`
+- cancel: `POST /api/v1/audit/logs/export/{job_id}/cancel`
 
-Async exports are streamed and resilient for large datasets. Export files are retained for 24 hours before cleanup.
+Async exports are streamed and resilient for large datasets. Each tenant can have at most two async exports running at once. Export files are retained for 24 hours before cleanup.
 
 ## UI behavior notes
 

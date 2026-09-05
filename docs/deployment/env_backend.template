@@ -66,7 +66,7 @@ URL_SIGNING_KEY=
 
 # PUBLIC_ORIGIN (REQUIRED for OIDC authentication)
 # The externally-reachable URL where users access Eneo
-# Used to construct OIDC redirect_uri (e.g., {PUBLIC_ORIGIN}/auth/callback)
+# Used to construct OIDC redirect_uri (e.g., {PUBLIC_ORIGIN}/login/callback)
 # Must match:
 #   1. What users see in their browser address bar
 #   2. What's registered in your OIDC provider (Auth0, Azure AD, etc.)
@@ -109,15 +109,20 @@ OIDC_TENANT_ID=
 #     a) Multi-tenant: Each tenant has their own IdP (Entra ID, Okta, Auth0, etc.)
 #     b) Single-tenant with API management: One tenant, but manage OIDC via API
 #        instead of environment variables (useful for dynamic configuration)
+#
+# FEDERATION_PER_TENANT_ENABLED is a deprecated alias of FEDERATION_ENABLED and
+# logs a warning at startup; if both are set, FEDERATION_ENABLED wins.
 # ----------------------------------------------------------------------------
-FEDERATION_PER_TENANT_ENABLED=false
+FEDERATION_ENABLED=false
 
 # OIDC Safety Controls
 # ----------------------------------------------------------------------------
 # [OPTIONAL] OIDC state JWT lifetime (default: 600 = 10 minutes)
 OIDC_STATE_TTL_SECONDS=600
 
-# [OPTIONAL] Grace period for redirect URI changes (default: 600 = 10 minutes)
+# [OPTIONAL] Grace period for redirect URI changes (code default: 900 = 15 minutes)
+# A value above OIDC_STATE_TTL_SECONDS is capped to the TTL with a startup warning,
+# so this template keeps it at 600 to match the state TTL above.
 OIDC_REDIRECT_GRACE_PERIOD_SECONDS=600
 
 # [OPTIONAL] Strict redirect URI validation (default: true)
@@ -132,7 +137,7 @@ OIDC_CLOCK_LEEWAY_SECONDS=120
 # ----------------------------------------------------------------------------
 # ENCRYPTION_KEY is REQUIRED when enabling:
 #   - TENANT_CREDENTIALS_ENABLED=true (tenant-specific LLM API keys)
-#   - FEDERATION_PER_TENANT_ENABLED=true (tenant-specific IdPs)
+#   - FEDERATION_ENABLED=true (tenant-specific IdPs)
 #   - Model provider management in Admin > Models
 #
 # Generate key:
@@ -210,12 +215,12 @@ ENEO_SUPER_API_KEY=
 # ----------------------------------------------------------------------------
 # Upload Limits (startup requirement on released images, migration seed later)
 # ----------------------------------------------------------------------------
-# Backend images built before the Admin > Storage upload policy existed
+# Backend images built before the Admin > File storage upload policy existed
 # require all four variables at startup; without them the db-init/migration
 # step exits with a Settings validation error and the stack never comes up.
 # Images that include migration 202607251700 read them exactly once, to seed
 # the initial upload policy, and ignore them afterwards; administrators then
-# manage the limits in Admin > Storage. Values below match the seed defaults.
+# manage the limits in Admin > File storage. Values below match the seed defaults.
 UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
 UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
 UPLOAD_MAX_FILE_SIZE=10485760
@@ -252,7 +257,7 @@ OBJECT_CONTENT_PENDING_STALE_SECONDS=300
 # Use virtual only when the endpoint and DNS/TLS support bucket hosts.
 # OBJECT_CONTENT_ADDRESSING_STYLE=path
 
-# Administrators choose destinations in Admin > Storage; restrict reachable
+# Administrators choose destinations in Admin > File storage; restrict reachable
 # hosts with your normal network egress controls if your deployment requires
 # that boundary. See docs/deployment/OBJECT_CONTENT.md.
 
@@ -353,6 +358,7 @@ CRAWL_MAX_LENGTH=36000
 CLOSESPIDER_ITEMCOUNT=20000
 
 # Maximum file size the crawler will download (bytes). Default: 10MB
+# This controls crawler downloads, not the upload policy in Admin > File storage.
 DOWNLOAD_MAX_SIZE=10485760
 
 # Follow robots.txt rules (recommended)
@@ -398,21 +404,6 @@ CRAWL_FEEDER_INTERVAL_SECONDS=10
 CRAWL_FEEDER_BATCH_SIZE=10
 
 # ----------------------------------------------------------------------------
-# Web Crawling Configuration
-# ----------------------------------------------------------------------------
-# [OPTIONAL] Max crawl duration (default: 14400 = 4 hours)
-CRAWL_MAX_LENGTH=14400
-# [OPTIONAL] Max items before stopping (default: 20000)
-CLOSESPIDER_ITEMCOUNT=20000
-# [OPTIONAL] Max file download size in bytes (default: 10485760 = 10MB)
-# This controls crawler downloads, not the upload policy in Admin > Storage.
-DOWNLOAD_MAX_SIZE=10485760
-# [OPTIONAL] Respect robots.txt (default: True)
-OBEY_ROBOTS=True
-# [OPTIONAL] Auto-throttle requests (default: True)
-AUTOTHROTTLE_ENABLED=True
-
-# ----------------------------------------------------------------------------
 # Audit Log Export Configuration
 # ----------------------------------------------------------------------------
 # [OPTIONAL] Directory for storing audit log export files
@@ -456,9 +447,9 @@ DEV=false
 # OBJECT CONTENT SAFETY AND UPLOAD BEHAVIOR
 # ============================================================================
 # Administrators with the Storage permission set upload limits and new-write
-# placement in Admin > Storage.
+# placement in Admin > File storage.
 # Updates take effect without restarting backend or worker processes.
-MAX_IN_QUESTION=1                           # Max file attachments per chat message
+MAX_IN_QUESTION=1                           # Legacy value; not read by the current backend
 
 # ----------------------------------------------------------------------------
 # Integration OAuth Callbacks
@@ -468,6 +459,16 @@ CONFLUENCE_CLIENT_ID=
 CONFLUENCE_CLIENT_SECRET=
 SHAREPOINT_CLIENT_ID=
 SHAREPOINT_CLIENT_SECRET=
+
+# Secret that Microsoft Graph echoes back as clientState in every SharePoint
+# webhook notification. It is the only authentication on that endpoint:
+# subscriptions cannot be created until it is set, and notifications whose
+# clientState does not match are rejected. Generate: openssl rand -hex 32
+SHAREPOINT_WEBHOOK_CLIENT_STATE=
+
+# [OPTIONAL] Explicit webhook callback URL. Defaults to
+# {PUBLIC_ORIGIN}/api/v1/integrations/sharepoint/webhook/
+# SHAREPOINT_WEBHOOK_NOTIFICATION_URL=
 
 # ----------------------------------------------------------------------------
 # Default Tenant & User (First-time Bootstrap)

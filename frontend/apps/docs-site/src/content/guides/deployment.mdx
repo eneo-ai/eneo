@@ -15,14 +15,15 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## Start here
 
-| Your task                           | Go to                                                    |
-| ----------------------------------- | -------------------------------------------------------- |
-| Install a new production instance   | [Quick start](#quick-start)                              |
-| Upgrade an existing instance        | [Updating Eneo](#updating-eneo)                          |
-| Choose PostgreSQL or object storage | [Choose Content Storage](/guides/object-content-storage) |
-| Configure OIDC or SSO               | [Authentication & OIDC](/guides/authentication)          |
-| Configure model providers           | [AI Provider Configuration](/guides/ai-providers)        |
-| Diagnose a failed deployment        | [Troubleshooting](#troubleshooting)                      |
+| Your task                           | Go to                                                                                                                                    |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Install a new production instance   | [Quick start](#quick-start)                                                                                                              |
+| Upgrade an existing instance        | [Updating Eneo](#updating-eneo)                                                                                                          |
+| Choose PostgreSQL or object storage | [Choose Content Storage](/guides/object-content-storage)                                                                                 |
+| Configure OIDC or SSO               | [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) or [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant)     |
+| Configure model providers           | [AI Provider Configuration](/guides/ai-providers)                                                                                        |
+| Add an optional module              | [Optional modules](#optional-modules)                                                                                                    |
+| Diagnose a failed deployment        | [Troubleshooting](#troubleshooting)                                                                                                      |
 
 <Callout type="info">
   You do not need S3-compatible storage to start Eneo. The default deployment
@@ -43,15 +44,16 @@ enabled when needed.
 
 </div>
 
-| Service            | Technology               | Port         | Role                                     |
-| ------------------ | ------------------------ | ------------ | ---------------------------------------- |
-| **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                       |
-| **Backend**        | FastAPI (Python)         | 8000         | API server, authentication               |
-| **Worker**         | ARQ                      | -            | Background processing, document indexing |
-| **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search              |
-| **Redis**          | Redis 7                  | 6379         | Cache, task queue                        |
-| **Object content** | S3-compatible endpoint   | 8333 private | Durable original and derived bytes       |
-| **db-init**        | Python                   | -            | One-time database initialization         |
+| Service            | Technology               | Port         | Role                                                    |
+| ------------------ | ------------------------ | ------------ | ------------------------------------------------------- |
+| **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                                      |
+| **Backend**        | FastAPI (Python)         | 8000         | API server, authentication                              |
+| **Worker**         | ARQ                      | -            | Background processing, document indexing                |
+| **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                             |
+| **Redis**          | Redis 7                  | 6379         | Cache, task queue                                       |
+| **Object content** | S3-compatible endpoint   | 8333 private | Durable original and derived bytes (optional)           |
+| **db-init**        | Python                   | -            | One-time database initialization                        |
+| **Modules**        | Separate containers      | per module   | Optional module apps on `module_net` (Compose overlay)  |
 
 <Callout type="info">
   **Traefik is provided as an example reverse proxy**, not a requirement. You
@@ -68,7 +70,9 @@ Before deploying, ensure you have:
 - **Docker** and **Docker Compose v2+** installed
 - **Domain name** with DNS pointing to your server
 - **SSL certificate** (Let's Encrypt via Traefik, or your own PKI/CA)
-- **At least one AI provider API key** ([see AI Provider Configuration](/guides/ai-providers))
+- **An API key for at least one AI provider.** Providers are added after the
+  first login in **Admin → Models** ([see AI Provider
+  Configuration](/guides/ai-providers))
 
 ### System Requirements
 
@@ -88,7 +92,7 @@ Before running `docker compose up`:
 - replace every `your-domain.com`, `changeme`, and `CHANGEME`;
 - generate the database password, `JWT_SECRET`, and `URL_SIGNING_KEY`;
 - set `PUBLIC_ORIGIN` in the backend and frontend files;
-- configure at least one AI provider;
+- have at least one AI provider API key ready for **Admin → Models**;
 - create the `proxy_tier` network;
 - pin released Eneo images instead of mutable `latest` tags;
 - leave the optional object-store block commented unless you have chosen and
@@ -104,13 +108,24 @@ cd eneo/docs/deployment/
 
 # Option B: Download files directly
 mkdir eneo-deployment && cd eneo-deployment
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/docker-compose.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/docker-compose.object-content.yml
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_backend.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_frontend.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/env_db.template
-curl -O https://raw.githubusercontent.com/eneo-ai/eneo/main/docs/deployment/.env.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.yml
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.object-content.yml
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_backend.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_frontend.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_db.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/.env.template
+
+# Only if you plan to run optional modules (see "Optional modules" below)
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/docker-compose.modules.yml
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_modules.template
+curl -O https://raw.githubusercontent.com/eneo-ai/eneo/develop/docs/deployment/env_module_ttt.template
 ```
+
+<Callout type="info">
+  The `develop` branch carries the deployment files for the next release. If
+  you run a released version, take the files from that release's tag or branch
+  instead so the templates match the images you deploy.
+</Callout>
 
 ### Create environment files
 
@@ -127,31 +142,43 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 Generate secrets and update environment files:
 
 ```bash
-# Generate JWT_SECRET (MUST match in backend AND frontend)
+# Generate JWT_SECRET (backend token signing key)
 JWT_SECRET=$(openssl rand -hex 32)
 echo "JWT_SECRET=$JWT_SECRET"
 
 # Generate URL_SIGNING_KEY
 echo "URL_SIGNING_KEY=$(openssl rand -hex 32)"
 
-# Generate database password
+# Generate database password (MUST match in env_backend.env AND env_db.env)
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
 ```
 
-Edit `env_backend.env` with your values:
+Edit `env_db.env`:
 
+- `POSTGRES_PASSWORD` - paste the generated value (the template ships
+  `POSTGRES_USER=postgres` and `POSTGRES_DB=eneo`; keep them unless you know
+  why you are changing them)
+
+Edit `env_backend.env`:
+
+- `POSTGRES_PASSWORD` - the same value as in `env_db.env`
 - `JWT_SECRET` - paste the generated value
 - `URL_SIGNING_KEY` - paste the generated value
 - `PUBLIC_ORIGIN` - your external URL (e.g., `https://eneo.example.com`)
-- At least one AI provider key (e.g., `OPENAI_API_KEY`)
 
 Edit `env_frontend.env`:
 
-- `JWT_SECRET` - **MUST match backend value**
-- `ENEO_BACKEND_URL` - backend URL for SSR (e.g., `http://backend:8000`)
-- `PUBLIC_ENEO_BACKEND_URL` - external API URL (e.g., `https://eneo.example.com/api`)
+- `JWT_SECRET` - listed for parity with the backend; the SvelteKit app does
+  not read it
+- `ENEO_BACKEND_URL` - the external backend URL used by server-side rendering
+  (e.g., `https://eneo.example.com`)
+- `ENEO_BACKEND_SERVER_URL` - the internal Docker URL that SSR requests are
+  rewritten to, skipping the reverse proxy (`http://backend:8000`)
+- `PUBLIC_ENEO_BACKEND_URL` - the backend origin used by the browser
+  (e.g., `https://eneo.example.com`). **Do not append `/api`**: the client
+  adds `/api/v1/...` itself.
 - `PUBLIC_ORIGIN` - your external URL (e.g., `https://eneo.example.com`)
-- `ORIGIN` - same as PUBLIC_ORIGIN
+- `ORIGIN` - same as `PUBLIC_ORIGIN`
 
 Edit `docker-compose.yml`:
 
@@ -190,6 +217,9 @@ Change this password immediately after first login.
 
 </Callout>
 
+Then add your first model provider in **Admin → Models** (see
+[AI Provider Configuration](/guides/ai-providers)).
+
 </Steps>
 
 ---
@@ -198,14 +228,14 @@ Change this password immediately after first login.
 
 The Docker Compose stack uses four networks:
 
-| Network                                 | Services                                 | Purpose                                                                |
-| --------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| `proxy_tier` (external)                 | Traefik, frontend, backend, worker       | Ingress and outbound access for APIs, OIDC, and crawls                 |
-| `data_net` (`internal: true`)           | db, redis, backend, worker, db-init      | Data layer without internet egress, isolated from Traefik and frontend |
-| `module_net`                            | Traefik, backend                         | Reserved for optional module containers                                |
-| `object_content_net` (`internal: true`) | optional object-content, backend, worker | Private S3-compatible byte plane when enabled; never routed publicly   |
+| Network                                 | Services                                        | Purpose                                                                |
+| --------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
+| `proxy_tier` (external)                 | Traefik, frontend, backend, worker              | Ingress and outbound access for APIs, OIDC, and crawls                 |
+| `data_net` (`internal: true`)           | db, redis, backend, worker, db-init             | Data layer without internet egress, isolated from Traefik and frontend |
+| `module_net` (`internal: true`)         | Traefik, backend, optional module containers    | Modules reach only `backend:8000`; no internet egress                  |
+| `object_content_net` (`internal: true`) | optional object-content, backend, worker        | Private S3-compatible byte plane when enabled; never routed publicly   |
 
-PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend or Traefik containers, and they have no outbound internet access.
+PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend, Traefik, or module containers, and they have no outbound internet access.
 
 <Callout type="warning">
   **Existing installations:** Older deployment files put every service on
@@ -231,28 +261,54 @@ curl -fsS https://your-domain.com/version
 
 ## Environment Configuration
 
+The tables below cover the values you must set or are most likely to change.
+The templates in
+[`docs/deployment/`](https://github.com/eneo-ai/eneo/tree/develop/docs/deployment)
+are the complete reference: every variable is listed there with its shipped
+value and a comment.
+
 <Tabs items={['Backend', 'Frontend', 'Database']}>
   <Tabs.Tab>
     ### Backend Environment Variables
 
-    **Required:**
+    **Infrastructure (required):**
 
-    | Variable | Description | Example |
-    |----------|-------------|---------|
-    | `JWT_SECRET` | Token signing key (32+ chars). Generate: `openssl rand -hex 32` | `a1b2c3d4...` |
-    | `URL_SIGNING_KEY` | URL signing key. Generate: `openssl rand -hex 32` | `e5f6g7h8...` |
-    | `PUBLIC_ORIGIN` | External URL for callbacks | `https://eneo.example.com` |
-    | `DATABASE_URL` | PostgreSQL connection string | `postgresql://eneo:password@db:5432/eneo` |
-    | `REDIS_URL` | Redis connection string | `redis://redis:6379/0` |
+    The backend builds its PostgreSQL and Redis connection URLs from these
+    variables. There is no `DATABASE_URL` or `REDIS_URL`.
+
+    | Variable | Template value | Description |
+    |----------|----------------|-------------|
+    | `POSTGRES_USER` | `postgres` | Database user; must match `env_db.env` |
+    | `POSTGRES_PASSWORD` | `changeme` | **Change this**; must match `env_db.env` |
+    | `POSTGRES_HOST` | `db` | Compose service name |
+    | `POSTGRES_PORT` | `5432` | |
+    | `POSTGRES_DB` | `eneo` | Database name; must match `env_db.env` |
+    | `REDIS_HOST` | `redis` | Compose service name |
+    | `REDIS_PORT` | `6379` | |
+
+    **Security (required):**
+
+    | Variable | Template value | Description |
+    |----------|----------------|-------------|
+    | `JWT_SECRET` | empty | Token signing key (32+ chars). Generate: `openssl rand -hex 32` |
+    | `URL_SIGNING_KEY` | empty | URL signing key. Generate: `openssl rand -hex 32` |
+    | `PUBLIC_ORIGIN` | empty | External URL, e.g. `https://eneo.example.com`. Used to build the OIDC redirect URI `{PUBLIC_ORIGIN}/login/callback` |
+    | `API_PREFIX` | `/api/v1` | Prefix for all API routes |
+    | `API_KEY_HEADER_NAME` | `X-API-Key` | Header that carries API keys (including `ENEO_SUPER_API_KEY`) |
 
     **Default User Setup:**
 
-    | Variable | Default | Description |
-    |----------|---------|-------------|
-    | `DEFAULT_TENANT_NAME` | - | Name for initial tenant |
-    | `DEFAULT_USER_EMAIL` | - | Email for initial admin user |
-    | `DEFAULT_USER_PASSWORD` | - | Password for initial admin user |
-    | `USING_ACCESS_MANAGEMENT` | `false` | Enable Users page in Admin panel |
+    These values are pre-filled in the template and read by `db-init` on the
+    first run. If the tenant or user already exists, `db-init` skips creation.
+
+    | Variable | Template value | Description |
+    |----------|----------------|-------------|
+    | `DEFAULT_TENANT_NAME` | `ExampleTenant` | Name for the initial tenant |
+    | `DEFAULT_TENANT_QUOTA_LIMIT` | `10737418240` | Storage quota for the initial tenant (bytes) |
+    | `DEFAULT_USER_NAME` | `ExampleUser` | Name for the initial admin user |
+    | `DEFAULT_USER_EMAIL` | `user@example.com` | Email for the initial admin user |
+    | `DEFAULT_USER_PASSWORD` | `Password1!` | Password for the initial admin user (change after first login) |
+    | `USING_ACCESS_MANAGEMENT` | `true` | Mounts the roles API used by **Admin → Users** |
 
     **OIDC Authentication (Enterprise SSO):**
 
@@ -260,21 +316,30 @@ curl -fsS https://your-domain.com/version
       **Glossary:** IdP = Identity Provider (Entra ID, MobilityGuard, Auth0). OIDC = OpenID Connect protocol.
 
       **Choose one mode:**
-      - **Single-Tenant via env vars** (`FEDERATION_PER_TENANT_ENABLED=false`): Configure OIDC in frontend env. Requires restart to change settings. Simplest for single-organization deployments.
-      - **Federation via API** (`FEDERATION_PER_TENANT_ENABLED=true`): Configure IdP via sysadmin API. Changes take effect immediately (no restart). Use for multi-tenant deployments OR single-tenant with dynamic configuration.
+      - **Single-Tenant via env vars** (`FEDERATION_ENABLED=false`): Configure `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` in `env_backend.env`. Requires a restart to change settings. Simplest for single-organization deployments.
+      - **Federation via API** (`FEDERATION_ENABLED=true`): Configure IdP via sysadmin API. Changes take effect immediately (no restart). Use for multi-tenant deployments OR single-tenant with dynamic configuration.
+
+      `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias of `FEDERATION_ENABLED`; the backend logs a warning when it is used.
     </Callout>
 
-    **Multi-Tenant Federation (API-managed OIDC):**
+    | Variable | Template value | Description |
+    |----------|----------------|-------------|
+    | `OIDC_DISCOVERY_ENDPOINT` | empty | IdP discovery URL (`.../.well-known/openid-configuration`) for single-tenant mode |
+    | `OIDC_CLIENT_ID` | empty | OIDC client ID |
+    | `OIDC_CLIENT_SECRET` | empty | OIDC client secret |
+    | `FEDERATION_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
+    | `ENCRYPTION_KEY` | empty | 44-char base64 Fernet key (required for credentials & federation) |
+    | `ENEO_SUPER_API_KEY` | empty | Super admin API access (sent as `X-API-Key`) |
 
-    | Variable | Default | Description |
-    |----------|---------|-------------|
-    | `FEDERATION_PER_TENANT_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
-    | `ENCRYPTION_KEY` | - | 44-char base64 Fernet key (required for credentials & federation) |
-    | `ENEO_SUPER_API_KEY` | - | Super admin API access |
+    Register `https://your-domain.com/login/callback` as the redirect URI at
+    your IdP. OIDC state and redirect safety controls
+    (`OIDC_STATE_TTL_SECONDS`, `OIDC_REDIRECT_GRACE_PERIOD_SECONDS`,
+    `STRICT_OIDC_REDIRECT_VALIDATION`, `OIDC_CLOCK_LEEWAY_SECONDS`) are
+    documented in the template.
 
     **Generating ENCRYPTION_KEY:**
 
-    `ENCRYPTION_KEY` is **required** when enabling `TENANT_CREDENTIALS_ENABLED=true` or `FEDERATION_PER_TENANT_ENABLED=true`.
+    `ENCRYPTION_KEY` is **required** when enabling `TENANT_CREDENTIALS_ENABLED=true` or `FEDERATION_ENABLED=true`. The backend refuses to start without it.
 
     ```bash
     # Development (with uv)
@@ -293,34 +358,38 @@ curl -fsS https://your-domain.com/version
 
     **Upload policy:**
 
-    | Variable | Default | Description |
-    |----------|---------|-------------|
-    | `MAX_IN_QUESTION` | `1` | Max files per chat message |
+    Upload limits are not environment variables anymore. Administrators with
+    the Storage permission set byte limits and new-write placement in
+    **Admin → File storage**; those changes take effect without restarting backend
+    or worker. The four `UPLOAD_*`/`TRANSCRIPTION_MAX_FILE_SIZE` lines in the
+    template seed that policy once and are otherwise ignored.
 
     <Callout type="info">
-      Administrators with the Storage permission set byte limits and new-write
-      placement in **Admin > Storage**. Those changes take effect without
-      restarting backend or worker.
-      Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL,
-      backup, and process safety ceiling. For an inline session upload, the
-      effective limit is the smaller value; the admin page shows the configured
-      value, effective value, and constraining source.
+      Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` (template:
+      `10485760`) as a PostgreSQL, WAL, backup, and process safety ceiling. For
+      an inline session upload, the effective limit is the smaller value; the
+      admin page shows the configured value, effective value, and constraining
+      source.
     </Callout>
 
     **Crawler Settings:**
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `CRAWL_FEEDER_ENABLED` | `true` | Enable optimized crawling (keep `true`) |
-    | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (~10 hours) |
+    | `CRAWL_FEEDER_ENABLED` | `true` | Meters the crawl enqueue rate (keep `true`) |
+    | `CRAWL_MAX_LENGTH` | `36000` | Max crawl duration in seconds (10 hours) |
     | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages per crawl |
+    | `DOWNLOAD_MAX_SIZE` | `10485760` | Max file the crawler downloads (bytes) |
+    | `OBEY_ROBOTS` | `true` | Respect `robots.txt` |
+    | `AUTOTHROTTLE_ENABLED` | `true` | Slow down automatically on busy sites |
 
     **Background Worker:**
 
     | Variable | Default | Description |
     |----------|---------|-------------|
     | `WORKER_MAX_JOBS` | `15` | Max concurrent background jobs (should be ≤60% of DB pool size) |
-    | `TENANT_WORKER_CONCURRENCY_LIMIT` | `4` | Max concurrent jobs per tenant (prevents one tenant monopolizing workers) |
+    | `TENANT_WORKER_CONCURRENCY_LIMIT` | `4` | Max concurrent crawl jobs per tenant (prevents one tenant monopolizing workers) |
+    | `TENANT_WORKER_SEMAPHORE_TTL_SECONDS` | `39600` | Slot TTL for crashed workers; must exceed `CRAWL_MAX_LENGTH` |
 
     <Callout type="info">
       **High CPU usage on worker?** Reduce `WORKER_MAX_JOBS` to limit concurrent document processing.
@@ -330,16 +399,16 @@ curl -fsS https://your-domain.com/version
 
     | Variable | Default | Description |
     |----------|---------|-------------|
-    | `TENANT_CREDENTIALS_ENABLED` | `false` | Enable API-based credential management (Fernet encrypted) |
+    | `TENANT_CREDENTIALS_ENABLED` | `false` | Enable the sysadmin credentials API (Fernet encrypted) |
 
     <Callout type="info">
-      **Recommended even for single-tenant deployments.** When `TENANT_CREDENTIALS_ENABLED=true`, you can add, update, or rotate AI provider API keys via the [Credentials API](#credentials-api) without restarting the backend. Credentials are encrypted with Fernet (AES-128-CBC + HMAC). Requires `ENCRYPTION_KEY` to be set.
+      When `TENANT_CREDENTIALS_ENABLED=true`, you can add, update, or rotate AI provider API keys per tenant via the [Credentials API](#credentials-api) without restarting the backend. Credentials are encrypted with Fernet (AES-128-CBC + HMAC). Requires `ENCRYPTION_KEY` to be set; the endpoints answer 404 while the flag is `false`.
     </Callout>
 
     **Integrations:**
 
     <Callout type="info">
-      **Setting up SharePoint?** SharePoint integration requires `SHAREPOINT_WEBHOOK_CLIENT_STATE` for webhook validation. See the [SharePoint Integration Guide](/guides/sharepoint-integration) for complete setup instructions including Azure AD app registration.
+      **Setting up SharePoint?** Webhook subscriptions cannot be created until `SHAREPOINT_WEBHOOK_CLIENT_STATE` is set; Microsoft echoes it back as `clientState` and Eneo rejects notifications that do not match. See the [SharePoint Integration Guide](/guides/sharepoint-integration) for complete setup instructions including Azure AD app registration.
     </Callout>
 
   </Tabs.Tab>
@@ -352,28 +421,25 @@ curl -fsS https://your-domain.com/version
 
     **Required:**
 
-    | Variable | Description | Example |
-    |----------|-------------|---------|
-    | `ENEO_BACKEND_URL` | Backend URL for server-side rendering | `http://backend:8000` |
-    | `PUBLIC_ENEO_BACKEND_URL` | Backend URL for client-side (browser) | `https://eneo.example.com/api` |
-    | `PUBLIC_ORIGIN` | External URL | `https://eneo.example.com` |
-    | `ORIGIN` | Cookie/CORS origin (same as PUBLIC_ORIGIN) | `https://eneo.example.com` |
-    | `JWT_SECRET` | **MUST match backend JWT_SECRET** | `a1b2c3d4...` |
+    | Variable | Template value | Description |
+    |----------|----------------|-------------|
+    | `ENEO_BACKEND_URL` | `https://your-domain.com` | Backend URL for server-side rendering: the **external** https URL |
+    | `ENEO_BACKEND_SERVER_URL` | `http://backend:8000` | Internal server-to-server URL. SSR requests to `ENEO_BACKEND_URL` are rewritten to this address, skipping the reverse proxy |
+    | `PUBLIC_ENEO_BACKEND_URL` | `https://your-domain.com` | Backend origin used by the browser. **Bare origin, no `/api`** - the client appends `/api/v1/...` |
+    | `ORIGIN` | `https://your-domain.com` | Cookie/CORS origin (same as `PUBLIC_ORIGIN`) |
+    | `PUBLIC_ORIGIN` | `https://your-domain.com` | External URL; required for OIDC login and logout |
+    | `JWT_SECRET` | empty | Listed for parity with the backend; the web app does not read it |
 
-    **Optional:**
+    OIDC and federation settings are read by the backend, so set them in
+    `env_backend.env`. The frontend template lists the same
+    `OIDC_*`/federation keys so the two files can be kept in sync; the web app
+    itself needs only `PUBLIC_ORIGIN` for the login flow.
 
-    | Variable | Default | Description |
-    |----------|---------|-------------|
-    | `ENEO_BACKEND_SERVER_URL` | - | Docker internal URL override (e.g., `http://backend:8000`) |
-    | `FEDERATION_PER_TENANT_ENABLED` | `false` | Enable multi-tenant IdP |
-
-    **Single-Tenant OIDC (if not using federation):**
-
-    | Variable | Description |
-    |----------|-------------|
-    | `OIDC_DISCOVERY_ENDPOINT` | OIDC provider discovery URL |
-    | `OIDC_CLIENT_ID` | OIDC client ID |
-    | `OIDC_CLIENT_SECRET` | OIDC client secret |
+    **Optional:** the web app reads the UI flags `SHOW_WEB_SEARCH` and
+    `SHOW_HELP_CENTER`, plus `HELP_CENTER_URL` and
+    `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
+    `env_frontend.template` (`FEEDBACK_FORM_URL`, `SUPPORT_EMAIL`,
+    `SALES_EMAIL`) and `LOGLEVEL` are not read by the current web app.
 
     <Callout type="info">
       **Docker networking tip:** In Docker, `localhost` means "this container" - not your host machine. Use the Docker service name `backend` for container-to-container communication:
@@ -385,11 +451,15 @@ curl -fsS https://your-domain.com/version
   <Tabs.Tab>
     ### Database Environment Variables
 
-    | Variable | Description | Example |
-    |----------|-------------|---------|
-    | `POSTGRES_USER` | Database user | `eneo` |
-    | `POSTGRES_PASSWORD` | Database password (**change from default**) | Generated value |
-    | `POSTGRES_DB` | Database name | `eneo` |
+    `env_db.env` initializes the PostgreSQL container. The same three values
+    must appear in `env_backend.env`, and the Compose healthcheck runs
+    `pg_isready -U postgres`.
+
+    | Variable | Template value | Description |
+    |----------|----------------|-------------|
+    | `POSTGRES_USER` | `postgres` | Database user |
+    | `POSTGRES_PASSWORD` | `changeme` | Database password (**change from default**) |
+    | `POSTGRES_DB` | `eneo` | Database name |
 
     <Callout type="warning">
       **Never use the default password in production.** Generate a secure password:
@@ -419,13 +489,13 @@ not match.
 
 | Owner                                 | Responsibility                                                                                                                                     |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > Storage** |
+| Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > File storage** |
 | Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`            |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
 an explicit verified migration moves it. The product has one provider-neutral
-object-store path, not vendor-specific storage modes. **Admin > Storage** also
+object-store path, not vendor-specific storage modes. **Admin > File storage** also
 compares Eneo's recorded file-content size with the entire PostgreSQL database
 on disk. These figures overlap: inline file content is part of both totals, and
 the PostgreSQL figure also includes searchable text, pgvector embeddings,
@@ -454,19 +524,57 @@ the control-plane boundary, lifecycle, reconciliation, and image supply chain.
 
 ---
 
+## Optional modules
+
+Modules are optional web applications (for example speech-to-text) that run
+next to Eneo on their own domain. A module container joins only `module_net`,
+calls the backend at `http://backend:8000` with a scoped `sk_` service key, and
+can never reach PostgreSQL or Redis. Users log in through their Eneo session;
+modules have no IdP configuration of their own.
+
+Modules ship as a Compose overlay that is inert until you enable a profile:
+
+```bash
+cp env_modules.template env_modules.env
+cp env_module_ttt.template env_module_ttt.env
+# In .env, uncomment and set ENEO_DOMAIN, MODULE_TTT_DOMAIN and MODULE_STT_VERSION
+
+docker compose -f docker-compose.yml -f docker-compose.modules.yml \
+  --profile speech-to-text up -d
+```
+
+| File                                                                                                                           | Purpose                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docker-compose.modules.yml`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/docker-compose.modules.yml)       | The overlay. Every module sits behind a profile (`speech-to-text`, or `all-modules`) and waits for the backend `/api/healthz` check  |
+| [`env_modules.template`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/env_modules.template)                   | Defaults shared by all module containers (`LOG_LEVEL`, `NODE_ENV`, `ENEO_API_KEY_HEADER_NAME`)                                        |
+| [`env_module_ttt.template`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/env_module_ttt.template)             | Per-module secrets for the speech-to-text module (`TAL_TILL_TEXT_FLOW_ID`, `ENEO_API_KEY`, `SESSION_SECRET`)                          |
+| [`MODULES.md`](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MODULES.md)                                       | Operator guide: install the module in **Admin → Modules**, mint the service key, smoke test, rotate keys, uninstall                    |
+
+The module domain must point at the same Traefik ingress; the overlay routes
+it over `eneo_module_net`. See [Module
+Authentication](/docs/module-authentication) for the login handoff, ticket
+exchange, and session refresh contract, and
+[Module administration](#module-administration) below for the admin-side
+prerequisites.
+
+---
+
 ## Reverse Proxy Requirements
 
 Any reverse proxy (Traefik, nginx, HAProxy, Caddy) must meet these requirements:
 
 **Routing:**
 
-| Path            | Target               | Description             |
-| --------------- | -------------------- | ----------------------- |
-| `/*`            | Frontend (port 3000) | All requests except API |
-| `/api/*`        | Backend (port 8000)  | API endpoints           |
-| `/docs`         | Backend (port 8000)  | OpenAPI documentation   |
-| `/openapi.json` | Backend (port 8000)  | OpenAPI spec            |
-| `/version`      | Backend (port 8000)  | Version endpoint        |
+| Path            | Target               | Description                                                              |
+| --------------- | -------------------- | ------------------------------------------------------------------------ |
+| `/*`            | Frontend (port 3000) | All requests except the backend paths below                              |
+| `/api/*`        | Backend (port 8000)  | API endpoints (`/api/v1/...`) and health probes                          |
+| `/scim/*`       | Backend (port 8000)  | SCIM 2.0 provisioning (mounted at `/scim/v2`; see [SCIM](/guides/scim-provisioning)) |
+| `/docs`         | Backend (port 8000)  | OpenAPI documentation                                                    |
+| `/openapi.json` | Backend (port 8000)  | OpenAPI spec                                                             |
+| `/version`      | Backend (port 8000)  | Version endpoint                                                         |
+
+These are the exact prefixes the shipped Traefik labels route to the backend.
 
 **Headers:**
 
@@ -511,6 +619,15 @@ server {
         proxy_set_header Connection "upgrade";
     }
 
+    # SCIM provisioning (identity provider calls /scim/v2/...)
+    location /scim/ {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location /docs {
         proxy_pass http://backend;
         proxy_set_header Host $host;
@@ -546,6 +663,9 @@ Eneo uses environment and user/service credentials for separate tasks.
 | **Super API Key** | `ENEO_SUPER_API_KEY` | Sysadmin operations: tenants, users, credentials, crawler settings |
 | **User/API key**  | Generated in Eneo    | Organization operations allowed by the user's role and key scope   |
 
+Both are sent in the `X-API-Key` header (configurable with
+`API_KEY_HEADER_NAME`).
+
 <Callout type="info">
   **Service Account Pattern:** We recommend creating a dedicated admin account
   (service account) for automated user provisioning via the admin API endpoints,
@@ -558,8 +678,9 @@ Manage AI provider credentials per tenant using the sysadmin API.
 
 <Callout type="warning">
   **Prerequisite:** Set `TENANT_CREDENTIALS_ENABLED=true` and `ENCRYPTION_KEY`
-  in backend env before using these endpoints. See [Per-Tenant
-  Credentials](#environment-configuration) in the Backend configuration.
+  in backend env before using these endpoints; they return 404 otherwise. See
+  [Dynamic Credential Management](#environment-configuration) in the Backend
+  configuration.
 </Callout>
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
@@ -591,7 +712,7 @@ Manage AI provider credentials per tenant using the sysadmin API.
   </Tabs.Tab>
 </Tabs>
 
-**Supported providers:** `openai`, `anthropic`, `azure`, `google`, `mistral`, `vllm`
+**Supported `{provider}` values:** `openai`, `anthropic`, `azure`, `mistral`, `ovhcloud`, `gemini`, `cohere`
 
 <Callout type="warning">
   Credentials are encrypted with Fernet (AES-128-CBC + HMAC). **Backup your
@@ -636,14 +757,14 @@ After deployment, some features require additional configuration in the Admin pa
 <Callout type="info">
   To use the web crawler or upload documents for processing, the **worker
   service must be running** and at least one **embedding model must be enabled**
-  in Admin → Models → Embeddings.
+  in Admin → Models → Embedding models.
 </Callout>
 
 ### Apps (Voice/Audio Features)
 
 <Callout type="info">
   **Can't create Apps?** This feature requires a transcription model. Go to
-  Admin → Models → Transcription tab and enable a model like Whisper.
+  Admin → Models → Transcription models tab and enable a model like Whisper.
 </Callout>
 
 ### Sysadmin API Access
@@ -656,10 +777,11 @@ ENEO_SUPER_API_KEY=your-secure-api-key
 
 ### Module administration
 
-Configure modules in **Administration → Modules** with an ordinary signed-in
+Configure modules in **Admin → Modules** with an ordinary signed-in
 administrator holding the `modules` permission. The organization is derived
 from the session; module administration does not require a separate environment
-key or a tenant ID.
+key or a tenant ID. The container side is covered in
+[Optional modules](#optional-modules).
 
 ---
 
@@ -670,21 +792,22 @@ key or a tenant ID.
 | Symptom                              | Likely Cause                                         | Fix                                                                                 |
 | ------------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run     | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                 |
-| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false`                      | Set to `true`, restart backend                                                      |
-| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                  | Set to external URL (not localhost in prod)                                         |
-| Can't upload multiple files          | `MAX_IN_QUESTION=1`                                  | Increase value in backend env                                                       |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > Storage                  |
+| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false` (default is `true`)  | Set to `true`, restart backend                                                      |
+| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                  | Set to the external origin (not localhost in prod)                                  |
+| Browser requests hit `/api/api/v1/…` | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`           | Use the bare origin, e.g. `https://eneo.example.com`                                |
+| Large file uploads fail              | Admin policy or applicable operator ceiling is lower | Review configured, effective, and source values in Admin > File storage             |
 | "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                  | Set correct key or re-enter credentials                                             |
-| Credentials API returns 404/error    | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
-| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND IdP config                                     |
-| Crawls not processing                | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
+| Credentials API returns 404          | `TENANT_CREDENTIALS_ENABLED=false`                   | Set to `true`, requires `ENCRYPTION_KEY`                                            |
+| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                             | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`) |
+| Scheduled crawls never start         | `CRAWL_FEEDER_ENABLED=false`                         | Set to `true`                                                                       |
 | Crawls/uploads not working           | Worker not running or no embedding model             | Check worker is running, enable embedding model in Admin → Models                   |
-| Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription tab, enable Whisper                                  |
-| JWT token invalid                    | `JWT_SECRET` mismatch                                | Must be identical in backend AND frontend                                           |
+| Can't create Apps                    | No transcription model enabled                       | Admin → Models → Transcription models tab, enable Whisper                           |
+| JWT token invalid                    | Backend `JWT_SECRET` changed since the token was issued | Tokens signed with the old key are rejected; sign in again                       |
 | Worker jobs stuck or slow            | Worker overloaded                                    | Reduce `WORKER_MAX_JOBS` or increase resources                                      |
 | `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service   | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost) |
 | HTTP to HTTPS redirect broken        | Missing Traefik label                                | Ensure `traefik.enable=true` label on traefik service                               |
 | 502 Bad Gateway                      | Domain not replaced in docker-compose.yml            | Replace `your-domain.com` in all 4 locations                                        |
+| SCIM provisioning returns 404        | Reverse proxy does not forward `/scim`               | Route `/scim/*` to the backend (see [Reverse Proxy Requirements](#reverse-proxy-requirements)) |
 
 ### Debug Mode
 
@@ -704,15 +827,30 @@ docker compose logs -f backend
 
 ### Service Health Checks
 
+The backend is not published on a host port in the reference stack, so run
+these through your public domain (or from inside a container).
+
 ```bash
 # Check all services are running
 docker compose ps
 
-# Test backend API
-curl https://your-domain.com/api/health
+# Liveness: the API process answers
+curl -fsS https://your-domain.com/api/livez
+
+# Health: backend, worker heartbeat, and object-content readiness (503 if the worker is unhealthy)
+curl -fsS https://your-domain.com/api/healthz
+
+# Readiness alias of /api/healthz on current images (older released images only have /api/healthz)
+curl -fsS https://your-domain.com/api/readyz
+
+# Crawler queue and worker diagnostics
+curl -fsS https://your-domain.com/api/healthz/crawler
+
+# Running backend version
+curl -fsS https://your-domain.com/version
 
 # Check database
-docker compose exec db psql -U eneo -c "SELECT version()"
+docker compose exec db psql -U postgres -d eneo -c "SELECT version()"
 
 # Check Redis
 docker compose exec redis redis-cli ping
@@ -760,6 +898,8 @@ backend:
   image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
 worker:
   image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
+db-init:
+  image: ghcr.io/eneo-ai/eneo-backend:v1.2.3
 ```
 
 **Find available versions:**
@@ -783,10 +923,10 @@ worker:
 
 ```bash
 # Create timestamped database backup
-docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
+docker compose exec -T db pg_dump -U postgres eneo | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
 
 # Restore from backup (if needed)
-gunzip -c backup_20250108.sql.gz | docker compose exec -T db psql -U eneo eneo
+gunzip -c backup_20250108.sql.gz | docker compose exec -T db psql -U postgres eneo
 ```
 
 **Volume backup (for complete recovery):**
@@ -850,7 +990,7 @@ After the drain is verified and every old writer is stopped, create the database
 backup:
 
 ```bash
-docker compose exec -T db pg_dump -U eneo eneo | gzip > backup_$(date +%Y%m%d).sql.gz
+docker compose exec -T db pg_dump -U postgres eneo | gzip > backup_$(date +%Y%m%d).sql.gz
 ```
 
 If object-store rows exist, take the matching endpoint snapshot while writers
@@ -988,10 +1128,12 @@ skew recovery.
 
 ### Scaling
 
-```bash
-# Scale backend instances (with load balancer)
-docker compose up -d --scale backend=3 --scale worker=2
-```
+The reference `docker-compose.yml` sets a fixed `container_name` on every
+service, so `docker compose up --scale ...` is refused. To run more than one
+backend or worker replica, define additional services without `container_name`
+(or run the images under an orchestrator) and place the backend replicas behind
+your load balancer. Additional workers are safe: only one crawl feeder runs
+across all workers through leader election.
 
 ---
 
@@ -1000,7 +1142,9 @@ docker compose up -d --scale backend=3 --scale worker=2
 - [AI Provider Configuration](/guides/ai-providers) - Configure AI models and providers
 - [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) - Enterprise SSO setup
 - [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) - Simple SSO setup
+- [SCIM Provisioning](/guides/scim-provisioning) - Automated user and group provisioning
 - [SharePoint Integration](/guides/sharepoint-integration) - Connect SharePoint and OneDrive
+- [Module Authentication](/docs/module-authentication) - Login handoff contract for optional modules
 - [Authentication Architecture](/docs/authentication-architecture) - Technical authentication details
 - [System Architecture](/docs/architecture) - Complete architecture overview
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness

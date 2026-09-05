@@ -1,0 +1,398 @@
+# Single-Tenant OIDC Setup
+
+Set up OIDC authentication when all your users authenticate against a single identity provider.
+
+import { Callout, Steps, Tabs, Cards } from 'nextra/components'
+
+---
+
+## Choose Your Configuration Method
+
+<Cards>
+  <Cards.Card title="Environment Variables" href="#environment-variable-configuration">
+    Configure via `OIDC_*` variables in the backend `.env`. Simple setup, but requires a backend restart to change settings.
+  </Cards.Card>
+  <Cards.Card title="Sysadmin API" href="#api-configuration">
+    Configure via the federation API with `FEDERATION_ENABLED=true`. Update OIDC settings at runtime and restrict logins to specific email domains.
+  </Cards.Card>
+</Cards>
+
+<Callout type="info">
+  Not sure which to choose? Start with **Environment Variables** - it's simpler. Switch to the API later if you need runtime updates or `allowed_domains`.
+</Callout>
+
+Both methods use the same login flow: the login page redirects straight to your IdP, and the IdP sends the user back to `{PUBLIC_ORIGIN}/login/callback`.
+
+---
+
+## Environment Variable Configuration
+
+Use environment variables to configure OIDC. This is the default mode (`FEDERATION_ENABLED=false`) and there is no separate enable flag: OIDC is active as soon as `OIDC_DISCOVERY_ENDPOINT` and `OIDC_CLIENT_SECRET` are set.
+
+### Prerequisites
+
+- Admin access to your Identity Provider
+- Access to your Eneo backend `.env` file
+- HTTPS enabled on your Eneo domain (`PUBLIC_ORIGIN` must be `https://`, except `http://localhost` for development)
+
+<Steps>
+### Register your application in the IdP
+
+Register Eneo as a confidential web application and set the redirect URI to your Eneo origin plus `/login/callback`:
+
+```
+https://your-domain.com/login/callback
+```
+
+<Tabs items={['Azure Entra ID', 'Keycloak', 'Auth0', 'Generic OIDC']}>
+  <Tabs.Tab>
+    1. Go to [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations**
+    2. Click **New registration**
+    3. Configure your application:
+       - **Name**: Eneo
+       - **Supported account types**: Accounts in this organizational directory only
+       - **Redirect URI**: Web → `https://your-domain.com/login/callback`
+    4. Click **Register** and note the **Application (client) ID** and **Directory (tenant) ID**
+    5. Go to **Certificates & secrets** → **New client secret** and copy the value immediately (you won't see it again)
+    6. Go to **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions** and add `openid`, `profile`, `email`, `User.Read`
+    7. Click **Grant admin consent**
+
+    **Discovery URL:**
+    ```
+    https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration
+    ```
+    Replace `{tenant-id}` with your Directory (tenant) ID.
+  </Tabs.Tab>
+  <Tabs.Tab>
+    1. Log in to your Keycloak admin console and select your realm
+    2. Go to **Clients** → **Create client**
+       - **Client type**: OpenID Connect
+       - **Client ID**: `eneo`
+    3. Configure the client:
+       - **Client authentication**: ON (confidential)
+       - **Standard flow**: Enabled (Authorization Code Flow)
+       - **Direct access grants**: Disabled
+       - **Valid redirect URIs**: `https://your-domain.com/login/callback`
+       - **Web origins**: `https://your-domain.com`
+    4. Save, then copy the **Client secret** from the **Credentials** tab
+
+    **Discovery URL:**
+    ```
+    https://your-keycloak.com/realms/{realm-name}/.well-known/openid-configuration
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    1. Go to [Auth0 Dashboard](https://manage.auth0.com) → **Applications** → **Applications**
+    2. Click **Create Application**
+       - **Name**: Eneo
+       - **Application Type**: Regular Web Applications
+    3. In the application settings:
+       - **Allowed Callback URLs**: `https://your-domain.com/login/callback`
+       - **Allowed Logout URLs**: `https://your-domain.com`
+       - **Allowed Web Origins**: `https://your-domain.com`
+    4. Save and note the **Domain**, **Client ID** and **Client Secret**
+
+    **Discovery URL:**
+    ```
+    https://your-tenant.auth0.com/.well-known/openid-configuration
+    ```
+  </Tabs.Tab>
+  <Tabs.Tab>
+    Your provider must support OpenID Connect Discovery (`/.well-known/openid-configuration`), the Authorization Code Flow and the `openid`, `profile`, `email` scopes.
+
+    1. Register Eneo as a confidential web application
+    2. Set the redirect URI to `https://your-domain.com/login/callback`
+    3. Note the **Client ID**, **Client Secret** and the discovery URL (usually ends with `/.well-known/openid-configuration`)
+
+    Verify the discovery URL before continuing:
+    ```bash
+    curl https://your-oidc-provider/.well-known/openid-configuration
+    ```
+    This should return a JSON document containing `issuer`, `authorization_endpoint`, `token_endpoint` and `jwks_uri`.
+  </Tabs.Tab>
+</Tabs>
+
+### Configure backend environment variables
+
+Add to your backend `.env` file:
+
+```bash
+# Your Eneo origin - used to compute the redirect URI as {PUBLIC_ORIGIN}/login/callback
+# https:// only (http://localhost allowed for development), no path, no trailing slash
+PUBLIC_ORIGIN=https://your-domain.com
+
+# Identity provider (OIDC discovery auto-configures the authorization/token/JWKS endpoints)
+OIDC_DISCOVERY_ENDPOINT=https://login.microsoftonline.com/{tenant-id}/v2.0/.well-known/openid-configuration
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
+
+# Keep the default
+FEDERATION_ENABLED=false
+```
+
+The frontend environment template (`env_frontend.template`) carries `PUBLIC_ORIGIN` as well - set it to the same value.
+
+<Callout type="warning">
+  `PUBLIC_ORIGIN` must match what you registered in your IdP exactly (including `https://`). The backend rejects a `PUBLIC_ORIGIN` that is not `https://` (or `http://localhost`) or that contains a path, query or fragment.
+</Callout>
+
+### Restart and test
+
+```bash
+docker compose restart backend
+```
+
+Visit your Eneo instance. The login page detects the OIDC configuration and redirects you to your IdP automatically; after signing in you land back in Eneo. To reach the username/password form instead, open `/login?showUsernameAndPassword=true`.
+
+</Steps>
+
+### Changing environment-variable configuration
+
+To update your OIDC settings:
+
+1. Edit the `OIDC_*` variables in your `.env` file
+2. Restart the backend: `docker compose restart backend`
+
+If you need to change settings without restarting, use the [API configuration](#api-configuration) instead.
+
+<Callout type="info">
+  Environment-variable configuration has no email domain restriction: anyone who signs in through the IdP is accepted as long as their Eneo user exists (or JIT provisioning is enabled). Use the API configuration if you need `allowed_domains`.
+</Callout>
+
+---
+
+## API Configuration
+
+Configure OIDC via the sysadmin API for runtime updates without restarting the backend. This is the same mechanism as [multi-tenant federation](/guides/oidc-federation/multi-tenant), used with a single tenant.
+
+### When to use the API
+
+- You want to update OIDC settings or rotate client secrets without a restart
+- You manage configuration through automation
+- You want to restrict logins to specific email domains (`allowed_domains`)
+
+### Prerequisites
+
+- All prerequisites from the environment-variable method
+- Super Admin API key (`ENEO_SUPER_API_KEY` set in the backend `.env`)
+- Your tenant ID (`GET /api/v1/sysadmin/tenants/` with the super admin key)
+
+<Steps>
+### Enable federation mode
+
+Add to your backend `.env` file:
+
+```bash
+# Enable API-based federation config
+FEDERATION_ENABLED=true
+
+# Required for encrypting client secrets in the database (backend refuses to start without it)
+ENCRYPTION_KEY=your-fernet-encryption-key
+
+# Super admin API key for management endpoints
+ENEO_SUPER_API_KEY=your-super-admin-api-key
+
+# Still used as the redirect origin unless the tenant sets canonical_public_origin
+PUBLIC_ORIGIN=https://your-domain.com
+```
+
+Generate an encryption key:
+
+```bash
+uv run python -m eneo.cli.generate_encryption_key
+```
+
+Restart the backend after setting these variables. With `FEDERATION_ENABLED=true` the `OIDC_*` variables are ignored.
+
+### Register your application in the IdP
+
+Follow the same steps as in [Register your application in the IdP](#register-your-application-in-the-idp).
+
+### Configure via API
+
+Use the federation API endpoint to set your OIDC configuration. The backend fetches the discovery document immediately and rejects the request with `400` if it is unreachable or incomplete:
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "entra_id",
+    "canonical_public_origin": "https://your-domain.com",
+    "discovery_endpoint": "https://login.microsoftonline.com/{azure-tenant-id}/v2.0/.well-known/openid-configuration",
+    "client_id": "your-application-client-id",
+    "client_secret": "your-client-secret",
+    "allowed_domains": ["your-company.com"]
+  }'
+```
+
+### Test the configuration
+
+Verify your setup works before users try to log in:
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation/test" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+This fetches the discovery document and checks that `issuer`, `authorization_endpoint`, `token_endpoint` and `jwks_uri` are present. It does not fetch the JWKS or validate the client credentials.
+
+### Test login
+
+Visit your Eneo instance. With exactly one active tenant the login page redirects to your IdP automatically, exactly as in the environment-variable setup. If you later add a second active tenant, Eneo switches to the [multi-tenant login flow](/guides/oidc-federation/multi-tenant#tenant-resolution) (tenant selector or `?tenant={slug}`).
+
+</Steps>
+
+### Updating the API configuration
+
+Use `PATCH` to change individual fields; omitted fields stay unchanged and changes take effect immediately - no restart needed.
+
+```bash
+# Example: Update allowed domains
+curl -X PATCH "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "allowed_domains": ["company.com", "subsidiary.com"]
+  }'
+```
+
+`PUT` replaces the whole configuration and requires all mandatory fields again.
+
+### View current configuration
+
+```bash
+curl "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key"
+```
+
+<Callout type="info">
+  Client secrets are never returned in GET responses - they're masked for security.
+</Callout>
+
+---
+
+## User Provisioning
+
+Eneo matches the signing-in user to an existing Eneo user by the `email` claim of the ID token. By default a user who does not exist is rejected with `403 User not found. Contact your administrator for access.`
+
+To create users automatically on first sign-in (JIT provisioning), enable `provisioning` on the tenant and set a default role:
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"provisioning": true, "default_role_id": "{role-uuid}"}'
+```
+
+<Callout type="warning">
+  Without a `default_role_id`, auto-provisioned users are created with no roles and cannot use assistants, spaces or any other permission-gated feature until an admin assigns one.
+</Callout>
+
+For push-based provisioning from your directory (deactivation, groups), see [SCIM Provisioning](/guides/scim-provisioning).
+
+---
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PUBLIC_ORIGIN` | Yes | Your Eneo origin; the redirect URI is `{PUBLIC_ORIGIN}/login/callback` |
+| `OIDC_DISCOVERY_ENDPOINT` | Yes (env method) | IdP's OIDC discovery URL |
+| `OIDC_CLIENT_ID` | Yes (env method) | OAuth client ID |
+| `OIDC_CLIENT_SECRET` | Yes (env method) | OAuth client secret |
+| `FEDERATION_ENABLED` | - | `false` (default) uses the `OIDC_*` variables; `true` uses the API configuration. `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias |
+| `ENCRYPTION_KEY` | Yes (API method) | Fernet key for encrypting secrets |
+| `ENEO_SUPER_API_KEY` | Yes (API method) | API key for the sysadmin endpoints, sent as `X-API-Key` |
+
+### API Configuration Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `provider` | Yes | Label for the IdP (e.g., `entra_id`, `mobilityguard`, `okta`, `auth0`) |
+| `discovery_endpoint` | Yes | IdP's OIDC discovery URL |
+| `client_id` | Yes | OAuth client ID |
+| `client_secret` | Yes | OAuth client secret (at least 8 characters) |
+| `allowed_domains` | No | Email domains allowed to authenticate |
+| `canonical_public_origin` | No | Origin used for the redirect URI; falls back to `PUBLIC_ORIGIN` |
+| `redirect_path` | No | Callback path (default: `/login/callback`) |
+| `additional_redirect_uris` | No | Extra fully-qualified callback URLs, each also registered in the IdP |
+
+Scopes are fixed to `openid email profile`.
+
+---
+
+## Troubleshooting
+
+### Redirect URI mismatch
+
+The IdP reports that the redirect URI is not registered, or Eneo rejects the callback with `400 Redirect URI mismatch - authentication flow invalid`.
+
+**Fix:** Ensure both match exactly:
+- **In IdP:** `https://your-domain.com/login/callback`
+- **In Eneo:** `PUBLIC_ORIGIN=https://your-domain.com` (or the tenant's `canonical_public_origin`) - no trailing slash, same scheme, host and port
+
+### "Email domain … is not allowed for this organization"
+
+The user's email domain isn't in `allowed_domains` (API method only, `403`).
+
+**Fix:** Add the domain:
+```bash
+curl -X PATCH "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"allowed_domains": ["domain1.com", "domain2.com"]}'
+```
+
+### "User not found. Contact your administrator for access."
+
+The user authenticated successfully but doesn't exist in Eneo (`403`).
+
+**Fix:** Create or invite the user first, or enable [JIT provisioning](#user-provisioning).
+
+### "Email claim not found in ID token"
+
+The ID token has no `email` claim (`401`). On Azure Entra ID this happens when the user has no `mail` attribute or the app registration does not emit the optional `email` claim - see the checklist in [SCIM Provisioning](/guides/scim-provisioning#sign-in-prerequisites-when-paired-with-oidc).
+
+### Invalid client
+
+Token exchange fails with `401 Failed to exchange authorization code for tokens`.
+
+**Fix:** Verify that the client ID and secret match the IdP registration and that the secret has not expired. The IdP's own error response is written to the backend log.
+
+### Debug mode
+
+For complex issues, enable OIDC debug logging:
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/sysadmin/observability/oidc-debug/" \
+  -H "X-API-Key: your-super-admin-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true, "duration_minutes": 10, "reason": "Debugging login issue"}'
+```
+
+Then check the backend logs for entries with `[OIDC DEBUG]` and the correlation ID shown on the error screen:
+
+```bash
+docker compose logs backend | grep "correlation_id.*a1b2c3d4e5f67890"
+```
+
+---
+
+## Security Best Practices
+
+1. **Use HTTPS**: `PUBLIC_ORIGIN` and the registered redirect URI must be `https://` in production
+2. **Rotate secrets**: Regularly rotate client secrets (with the API method this needs no restart)
+3. **Restrict domains**: Configure `allowed_domains` when using the API method
+4. **Monitor access**: Review authentication logs and the [audit log](/guides/audit-logging) regularly
+5. **Back up `ENCRYPTION_KEY`**: Losing it means re-entering every client secret
+
+---
+
+## Next Steps
+
+- [Multi-Tenant Federation](/guides/oidc-federation/multi-tenant) - If you need each tenant to use their own IdP
+- [Authentication Architecture](/docs/authentication-architecture) - Technical details on the OIDC implementation
+- [SCIM Provisioning](/guides/scim-provisioning) - Push users and groups from your IdP
