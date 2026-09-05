@@ -244,13 +244,13 @@ def test_a_quote_across_line_breaks_still_resolves_in_the_excerpt():
     ]
 
 
-def test_a_drift_claim_needs_the_instruction_and_the_complete_output_of_each_named_step():
-    """Instruction-versus-outcome is judged per step and run: the claim must
-    cite the named step's instruction and its complete output from the same
-    run. An output of another step, an instruction alone, an output alone,
-    or a cut output is refused by code."""
+def test_a_drift_claim_is_one_step_in_one_run_with_its_instruction_and_complete_output():
+    """Instruction-versus-outcome is judged for one step in one run, which the
+    source limit can always hold: the claim must cite that step's instruction
+    and its complete output. Several steps or runs, an instruction alone, an
+    output alone, another step's output, or a cut output is refused by code."""
     base = _sample()
-    # Give step 2 a complete output and step 1 a prompt so a well-formed claim exists.
+    # Give step 2 a complete output so a well-formed claim exists.
     sample = base.model_copy(
         update={
             "excerpts": [
@@ -263,9 +263,6 @@ def test_a_drift_claim_needs_the_instruction_and_the_complete_output_of_each_nam
                     }
                 ),
                 base.excerpts[3],
-                base.excerpts[1].model_copy(
-                    update={"step_order": 1, "text": "Skriv en sammanfattning."}
-                ),
             ]
         }
     )
@@ -289,6 +286,11 @@ def test_a_drift_claim_needs_the_instruction_and_the_complete_output_of_each_nam
         ).suggestions
     ] == ["instruction_outcome_drift"]
 
+    # Every allowed drift shape fits the source limit: one step, one run,
+    # two sources. Two steps are two suggestions, refused by rule, never by
+    # the source cap.
+    two_steps = {**well_formed, "step_orders": [1, 2]}
+    assert problems(two_steps) == ["suggestion_1:drift_claim_names_several_steps"]
     instruction_only = {**well_formed, "sources": well_formed["sources"][:1]}
     assert problems(instruction_only) == [
         "suggestion_1:drift_claim_without_output_source"
@@ -306,11 +308,6 @@ def test_a_drift_claim_needs_the_instruction_and_the_complete_output_of_each_nam
     }
     assert problems(other_steps_output) == [
         "suggestion_1:drift_claim_without_output_source"
-    ]
-    # Two named steps, evidence for one: refused for the step left uncovered.
-    partly_covered = {**well_formed, "step_orders": [1, 2]}
-    assert problems(partly_covered) == [
-        "suggestion_1:drift_claim_without_instruction_source"
     ]
     cut = sample.model_copy(
         update={

@@ -241,7 +241,7 @@ Svara med JSON enligt schemat. Föreslå bara det som utdragen faktiskt visar:
 Regler:
 - Varje förslag ska ha 1–{MAX_SOURCES_PER_SUGGESTION} källor: käll-id exakt som i underlaget och ett ordagrant citat (högst {MAX_QUOTE_CHARS} tecken) ur den källan.
 - Källor som är avklippta, utelämnade eller inte inspelade kan inte styrka att något saknas; missing_check och step_not_useful kräver att alla citerade källor ingår i sin helhet.
-- instruction_outcome_drift kräver, för varje angivet steg, ett citat ur stegets instruktion och ett ur stegets utdata från samma körning, och utdatan måste ingå i sin helhet; ett avklippt utdrag säger inget om hur utdata slutade.
+- instruction_outcome_drift gäller ett steg i en körning: ange exakt ett steg och citera stegets instruktion och stegets utdata ur samma körning; utdatan måste ingå i sin helhet (ett avklippt utdrag säger inget om hur utdata slutade). Flera steg eller körningar är flera förslag.
 - "Avklippt" betyder att läsaren kortade utdraget, inte att flödet gjorde det: att en text slutar tvärt är aldrig ett bevis, och ett stegs utdata får inte bedömas som ofullständig av det skälet.
 - Citatet ska vara en exakt teckensträng ur utdraget som det visas här: fyll aldrig i ett avklippt ord och skriv inte om något.
 - Använd fact-id i fact_ids bara när faktumet stödjer förslaget.
@@ -457,25 +457,28 @@ def _parse_suggestion(
         ):
             return "absence_claim_without_complete_step_output"
     if kind == "instruction_outcome_drift":
-        # Instruction versus outcome is judged per step and per run: for every
-        # named step the claim must cite that step's instruction and that
-        # step's complete output from the same run. A cut excerpt shows
-        # neither what came after the cut nor whether the step finished, and
-        # another step's output says nothing about this one.
+        # Instruction versus outcome is one step in one run: the claim must
+        # cite that step's instruction and that step's complete output from
+        # the same run, which the source limit can always hold. A cut excerpt
+        # shows neither what came after the cut nor whether the step
+        # finished, and another step's output says nothing about this one.
+        # Several steps or runs are several suggestions.
+        if len(set(steps)) != 1:
+            return "drift_claim_names_several_steps"
+        if len({source.run_id for source in sources}) != 1:
+            return "drift_claim_cites_several_runs"
+        (step,) = set(steps)
         cited = {
-            (source.run_id, source.step_order, source.field): availability
+            (source.step_order, source.field): availability
             for source, availability in zip(sources, availabilities)
         }
-        cited_runs = {source.run_id for source in sources}
-        for step in steps:
-            for run_id in cited_runs:
-                if (run_id, step, "prompt") not in cited:
-                    return "drift_claim_without_instruction_source"
-                output = cited.get((run_id, step, "output"))
-                if output is None:
-                    return "drift_claim_without_output_source"
-                if output != "included":
-                    return "drift_claim_cites_incomplete_output"
+        if (step, "prompt") not in cited:
+            return "drift_claim_without_instruction_source"
+        output = cited.get((step, "output"))
+        if output is None:
+            return "drift_claim_without_output_source"
+        if output != "included":
+            return "drift_claim_cites_incomplete_output"
     return FlowReviewSuggestion(
         kind=cast(FlowReviewSuggestionKind, kind),
         step_orders=sorted(set(steps)),

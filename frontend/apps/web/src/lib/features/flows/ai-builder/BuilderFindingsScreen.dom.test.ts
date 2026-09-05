@@ -243,7 +243,12 @@ describe("BuilderFindingsScreen suggestions", () => {
       onclose: vi.fn(),
       onretry: vi.fn()
     });
-    expect(screen.getByText(m.ai_builder_review_suggestions_hint())).toBeTruthy();
+    // What crosses to the model is named before the call: the recorded
+    // fields and the recipient, in either locale.
+    const hint = screen.getByText(m.ai_builder_review_suggestions_hint()).textContent ?? "";
+    expect(hint).toMatch(/instruktioner|instructions/i);
+    expect(hint).toMatch(/utdata|outputs/i);
+    expect(hint).toMatch(/planeringsmodell|planning model/i);
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_review_suggest() }));
     expect(onsuggest).toHaveBeenCalledTimes(1);
   });
@@ -296,6 +301,11 @@ describe("BuilderFindingsScreen suggestions", () => {
       .find((label) => label.includes(coverage));
     expect(readingNote).toContain("GPT-test");
 
+    // The action boundary is stated next to the action: what travels, and
+    // that the reasoning and quotes do not.
+    const note =
+      screen.getByText(m.ai_builder_review_suggestion_investigate_hint()).textContent ?? "";
+    expect(note).toMatch(/citaten|quotes/i);
     await fireEvent.click(
       screen.getByRole("button", { name: m.ai_builder_review_suggestion_investigate() })
     );
