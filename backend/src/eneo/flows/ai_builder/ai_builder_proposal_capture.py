@@ -92,6 +92,28 @@ def capture_malformed_proposal_arguments(
         logger.warning("Malformed proposal capture failed", exc_info=True)
 
 
+def capture_refused_review_suggestions(
+    content: str,
+    *,
+    flow_id: str,
+    problem_codes: list[str],
+    messages: list[dict[str, Any]],
+) -> None:
+    """Capture a review judgement the parser refused in part or whole, with
+    the exact prompt it answered, so a refused quote can be compared offline
+    against the excerpt it claims to come from. The log carries codes only."""
+
+    _write_capture(
+        prefix="refused-review-suggestions",
+        payload={
+            "flow_id": flow_id,
+            "problem_codes": problem_codes,
+            "messages": messages,
+            "content": content,
+        },
+    )
+
+
 def _write_capture(*, prefix: str, payload: dict[str, Any]) -> None:
     capture_dir = os.environ.get(REJECTED_PROPOSAL_CAPTURE_DIR_ENV)
     if not capture_dir:

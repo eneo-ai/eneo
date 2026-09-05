@@ -41,6 +41,9 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     FlowReviewSample,
     ReviewSampleExcerpt,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_capture import (
+    capture_refused_review_suggestions,
+)
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.main.logging import get_logger
 from eneo.tokens.token_utils import count_tokens, measure_provider_input_reserve
@@ -240,6 +243,8 @@ Svara med JSON enligt schemat. Föreslå bara det som utdragen faktiskt visar:
 Regler:
 - Varje förslag ska ha 1–{MAX_SOURCES_PER_SUGGESTION} källor: käll-id exakt som i underlaget och ett ordagrant citat (högst {MAX_QUOTE_CHARS} tecken) ur den källan.
 - Källor som är avklippta, utelämnade eller inte inspelade kan inte styrka att något saknas; missing_check och step_not_useful kräver att alla citerade källor ingår i sin helhet.
+- "Avklippt" betyder att läsaren kortade utdraget, inte att flödet gjorde det: att en text slutar tvärt är aldrig ett bevis, och ett stegs utdata får inte bedömas som ofullständig av det skälet.
+- Citatet ska vara en exakt teckensträng ur utdraget som det visas här: fyll aldrig i ett avklippt ord och skriv inte om något.
 - Använd fact-id i fact_ids bara när faktumet stödjer förslaget.
 - Högst {MAX_SUGGESTIONS} förslag, vart och ett om högst {MAX_SUGGESTION_STEPS} steg. Inga förslag är ett giltigt svar.
 - Motivering på svenska, högst {MAX_RATIONALE_CHARS} tecken, inga personuppgifter ur utdragen.
@@ -577,6 +582,13 @@ async def generate_review_suggestions(
             context={"problems": ["no_content"]},
         )
     parsed = parse_review_suggestions(content, sample=sample)
+    if parsed.problems:
+        capture_refused_review_suggestions(
+            content,
+            flow_id=str(sample.packet.flow_id),
+            problem_codes=list(parsed.problems),
+            messages=messages,
+        )
     if parsed.outcome == "invalid":
         logger.info(
             "AI Builder review suggestions rejected",
