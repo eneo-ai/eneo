@@ -357,33 +357,6 @@ def render_confirmed_requirements_proposal_prompt_block(
     if relevant_assumptions:
         lines.append("- assumptions:")
         lines.extend(f"  - {assumption}" for assumption in relevant_assumptions)
-    # The typed rows and preview replaced the attachment prose; the planner
-    # still needs the same facts, so they are rendered here from the types.
-    if summary.attachment_rows:
-        lines.append("- attachments:")
-        for row in summary.attachment_rows:
-            facts = [
-                f"role={row.role}",
-                f"coverage={row.coverage}",
-                "travels_with_run" if row.travels else "planning_only",
-            ]
-            if not row.readable:
-                facts.append("unreadable")
-            if row.placeholders:
-                facts.append("placeholders=" + ", ".join(row.placeholders))
-            lines.append(f"  - {row.filename}: " + "; ".join(facts))
-    preview = summary.run_preview
-    if preview is not None:
-        lines.append("- run_contract:")
-        for key, value in (
-            ("runtime_input", preview.runtime_input),
-            ("max_files", preview.max_files),
-            ("result_type", preview.result_type),
-            ("report_layout", preview.report_layout),
-            ("template", preview.template.filename if preview.template else None),
-        ):
-            if value is not None:
-                lines.append(f"  - {key}: {value}")
 
     return "\n".join(lines) if lines else "- none"
 

@@ -895,3 +895,10 @@ function parseTelemetryEventData(data: string): AIBuilderUsageEventData {
 export function isDiscoveryStatus(status: AIBuilderStatus): boolean {
   return status === "understanding_request" || status === "reading_sources";
 }
+
+/** The server marks the attachment sentences it keeps for the planner with
+ *  one of these prefixes; the card shows the typed rows instead of them. */
+const ATTACHMENT_ASSUMPTION_PREFIXES = ["Bilageunderlag – ", "Attachment evidence — "] as const;
+export function isAttachmentAssumption(text: string): boolean {
+  return ATTACHMENT_ASSUMPTION_PREFIXES.some((prefix) => text.startsWith(prefix));
+}

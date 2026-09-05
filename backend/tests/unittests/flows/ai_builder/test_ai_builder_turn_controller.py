@@ -1278,7 +1278,11 @@ def test_server_confirmation_discloses_attachment_roles_and_honest_coverage() ->
         rows["not-excerpted.pdf"].file_id,
         rows["unreadable.bin"].file_id,
     }
-    assert not any("Bilageunderlag" in item for item in swedish.payload.assumptions)
+    # The planner keeps the attachment facts as prefixed sentences; the card
+    # renders the typed rows and hides those sentences.
+    assert sum(
+        "Bilageunderlag – " in item for item in swedish.payload.assumptions
+    ) == len(rows)
 
 
 @pytest.mark.parametrize(
@@ -1349,10 +1353,15 @@ def test_server_confirmation_derives_the_attachment_travel_decision_from_the_com
         (row,) = decision.payload.attachment_rows
         assert row.role == role
         assert row.travels is travels
-        assert not any(
-            "Bilaga" in item or "Attachment" in item
+        sentence = next(
+            item
             for item in decision.payload.assumptions
+            if item.startswith(("Bilageunderlag – ", "Attachment evidence — "))
         )
+        # The sentence says the same as the row about travelling with the flow.
+        assert (
+            "följer med flödet" in sentence or "travels with the flow" in sentence
+        ) is travels
 
 
 def _attachment(

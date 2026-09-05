@@ -804,6 +804,10 @@ describe("FlowAIBuilder discovery screens", () => {
   it("shows every attachment as a typed row and previews the run contract", async () => {
     const typed = {
       ...SUMMARY,
+      assumptions: [
+        ...(SUMMARY.assumptions ?? []),
+        'Bilageunderlag – Bilaga "mall.docx" (id 00000000-0000-0000-0000-000000000801): vald roll Mall; läsbar text: ja.'
+      ],
       attachment_rows: [
         {
           file_id: "00000000-0000-0000-0000-000000000801",
@@ -869,6 +873,8 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_inventory());
     expect(rows.textContent).toContain("underlag.pdf (1)");
     expect(rows.textContent).toContain("underlag.pdf (2)");
+    // The planner's attachment sentence is not shown beside the rows it duplicates.
+    expect(screen.queryByText(/Bilageunderlag –/)).toBeNull();
     expect(rows.textContent).toContain(m.ai_builder_attachment_not_carried());
     expect(rows.textContent).toContain(m.ai_builder_attachment_role_unsure());
 

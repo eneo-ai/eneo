@@ -63,11 +63,13 @@ from eneo.flows.ai_builder.ai_builder_result_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import project_schema_fields
 from eneo.flows.ai_builder.planning_state import (
+    AttachmentCoverage,
     CheckpointIntent,
     CheckpointProducerKind,
     ConfirmedRuntimeMetadataField,
     ExactNamedResultPlacement,
     ExampleOutputSchemaInferenceReason,
+    FileRole,
     FileRoleEvidence,
     NamedResultEvidence,
     PlanningState,
@@ -296,6 +298,7 @@ def _disclosure_content(
             *_secondary_obligation_assumptions(
                 session_state, locale, render_value=render_value
             ),
+            *_attachment_assumptions(session_state, locale, render_value=render_value),
             *_example_output_assumptions(
                 session_state, locale, render_value=render_value
             ),
@@ -660,6 +663,169 @@ def _understood_attachments_sentence(
         if total > 1
         else f"1 attached file: {joined}."
     )
+
+
+# The planner keeps reading the attachment facts as sentences; the card shows
+# the typed rows instead and hides sentences carrying these prefixes.
+_ATTACHMENT_ASSUMPTION_PREFIX_EN = "Attachment evidence — "
+_ATTACHMENT_ASSUMPTION_PREFIX_SV = "Bilageunderlag – "
+
+
+def _attachment_assumptions(
+    session_state: PlanningState,
+    locale: Locale,
+    *,
+    render_value: RenderEvidenceValue,
+) -> list[str]:
+    # Every attachment, never a truncated head plus a count: an undisclosed
+    # role is still plan-driving — the architecture refusal inspects every
+    # selected template — so hiding one lets a plan change inherit a
+    # confirmation the user gave for something else.
+    ordered = sorted(session_state.file_roles, key=lambda item: str(item.file_id))
+    travels = _attachment_travels(session_state)
+    return [
+        _attachment_assumption(
+            item, locale, render_value=render_value, travels=travels(item)
+        )
+        for item in ordered
+    ]
+
+
+def _attachment_assumption(
+    item: FileRoleEvidence,
+    locale: Locale,
+    *,
+    render_value: RenderEvidenceValue,
+    travels: bool,
+) -> str:
+    role = _attachment_role_label(item.role, locale)
+    coverage = _attachment_coverage_description(
+        item.coverage,
+        has_readable_text=item.has_readable_text,
+        locale=locale,
+    )
+    filename = render_value(item.filename)
+    # Two uploads can share a filename — or a clipped filename — while
+    # carrying different roles and different template placeholders, so the
+    # file's own identity is part of what the user attests to. A prefix is a
+    # label, not an identity, so the whole id is disclosed.
+    reference = str(item.file_id)
+    placeholders = _template_placeholder_text(item, locale, render_value=render_value)
+    consequence = _attachment_run_consequence(travels, locale)
+    if locale == "sv":
+        readable = "ja" if item.has_readable_text else "nej"
+        return (
+            f'{_ATTACHMENT_ASSUMPTION_PREFIX_SV}Bilaga "{filename}" (#{reference}): '
+            f"vald roll {role}; läsbar text: {readable}; "
+            f"täckning: {coverage}. {consequence}{placeholders}"
+        )
+    readable = "yes" if item.has_readable_text else "no"
+    return (
+        f'{_ATTACHMENT_ASSUMPTION_PREFIX_EN}Attachment "{filename}" (#{reference}): '
+        f"selected role {role}; "
+        f"readable text: {readable}; coverage: {coverage}. {consequence}{placeholders}"
+    )
+
+
+def _attachment_run_consequence(travels: bool, locale: Locale) -> str:
+    """What the attachment means for runs, read from the committed architecture.
+
+    A role label is evidence about the file; whether the file travels with the
+    flow is decided by the commit. What a run receives is the input contract's
+    business.
+    """
+
+    if travels:
+        return (
+            "Mallen följer med flödet och fylls i vid varje körning."
+            if locale == "sv"
+            else "The template travels with the flow and is filled at every run."
+        )
+    return (
+        "Filen följer inte med i körningar; vad varje körning får in styrs av "
+        "indatakontraktet ovan."
+        if locale == "sv"
+        else "This file is not carried into runs; what each run receives follows "
+        "the input contract above."
+    )
+
+
+def _template_placeholder_text(
+    item: FileRoleEvidence,
+    locale: Locale,
+    *,
+    render_value: RenderEvidenceValue,
+) -> str:
+    """Template placeholders compile into runtime fields, so they are disclosed."""
+
+    if item.template_placeholders is None:
+        return ""
+    if not item.template_placeholders:
+        return (
+            " Inga platshållare hittades."
+            if locale == "sv"
+            else " No placeholders were found."
+        )
+    rendered = ", ".join(
+        render_value(placeholder) for placeholder in item.template_placeholders
+    )
+    return (
+        f" Platshållare: {rendered}."
+        if locale == "sv"
+        else f" Placeholders: {rendered}."
+    )
+
+
+def _attachment_role_label(role: FileRole, locale: Locale) -> str:
+    labels_sv: dict[FileRole, str] = {
+        "runtime_input_sample": "Exempel på körningsindata",
+        "template": "Mall",
+        "reference_material": "Referensmaterial",
+        "example_output": "Exempelresultat",
+        "context_only": "Endast kontext",
+    }
+    labels_en: dict[FileRole, str] = {
+        "runtime_input_sample": "Runtime input sample",
+        "template": "Template",
+        "reference_material": "Reference material",
+        "example_output": "Example output",
+        "context_only": "Context only",
+    }
+    return (labels_sv if locale == "sv" else labels_en)[role]
+
+
+def _attachment_coverage_description(
+    coverage: AttachmentCoverage,
+    *,
+    has_readable_text: bool,
+    locale: Locale,
+) -> str:
+    match coverage:
+        case "fully_seen":
+            return (
+                "hela den läsbara texten ingår"
+                if locale == "sv"
+                else "all readable text is included"
+            )
+        case "excerpt_truncated":
+            return (
+                "ett förkortat utdrag av den läsbara texten ingår"
+                if locale == "sv"
+                else "a truncated excerpt of the readable text is included"
+            )
+        case "inventory_only":
+            if has_readable_text:
+                return (
+                    "läsbar text finns men inget utdrag ingår"
+                    if locale == "sv"
+                    else "readable text exists but no excerpt is included"
+                )
+            return (
+                "ingen läsbar text är tillgänglig"
+                if locale == "sv"
+                else "no readable text is available"
+            )
+    return assert_never(coverage)
 
 
 def _attachment_role_count_label(role: str, count: int, locale: Locale) -> str:

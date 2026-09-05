@@ -20,6 +20,7 @@
     StructuredQuestionAnswerPayload
   } from "./structuredQuestionAnswer";
   import type { ChatMessage } from "./protocol";
+  import { isAttachmentAssumption } from "./protocol";
   import type {
     AIBuilderAttachmentFile,
     AIBuilderStepScopePresentation,
@@ -382,7 +383,11 @@
   const changeDrafts = new SvelteMap<string | null, string>();
   let changeRequestRef = $state<BuilderChangeRequest | undefined>();
   let assumptionsOpen = $state(false);
-  const assumptions = $derived(summary.assumptions ?? []);
+  // The attachment sentences are planner context; the rows above are what
+  // the user reads and confirms.
+  const assumptions = $derived(
+    (summary.assumptions ?? []).filter((text) => !isAttachmentAssumption(text))
+  );
   /** Defaults Eneo chose, each reopenable to its own question. */
   const assumptionRows = $derived(summary.assumption_rows ?? []);
   const assumptionCount = $derived(assumptionRows.length + assumptions.length);
