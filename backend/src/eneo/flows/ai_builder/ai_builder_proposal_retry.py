@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     capture_malformed_proposal_arguments,
+    capture_rejected_proposal_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     PROPOSAL_PARSE_JSON_FAILURE_CODE,
@@ -646,6 +647,11 @@ async def _process_tool_call(
         )
     )
     if isinstance(outcome, CorrectableFailure):
+        capture_rejected_proposal_arguments(
+            arguments,
+            session_id=str(ctx.session_id),
+            issues=[f"{outcome.kind}: {outcome.feedback}"],
+        )
         _record_attempt_failure(
             ctx, failure_kind=outcome.kind, failure_codes=outcome.codes
         )

@@ -798,6 +798,11 @@ class ProposalSubmissionOwner:
                 metadata_tool_call=tool_call,
             )
             if isinstance(result, CorrectableFailure):
+                capture_rejected_proposal_arguments(
+                    arguments,
+                    session_id=str(ctx.session_id),
+                    issues=[f"{result.kind}: {result.feedback}"],
+                )
                 async for event in self._run_proposal_self_correction(
                     ctx=ctx,
                     failure=result,
