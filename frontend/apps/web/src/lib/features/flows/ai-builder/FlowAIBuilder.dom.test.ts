@@ -822,6 +822,16 @@ describe("FlowAIBuilder discovery screens", () => {
           coverage: "fully_seen",
           travels: false,
           placeholders: null
+        },
+        // Same filename, only the inventory read: the card must keep the two apart.
+        {
+          file_id: "00000000-0000-0000-0000-000000000803",
+          filename: "underlag.pdf",
+          role: "reference_material",
+          readable: true,
+          coverage: "inventory_only",
+          travels: false,
+          placeholders: null
         }
       ],
       weak_role_file_ids: ["00000000-0000-0000-0000-000000000802"],
@@ -833,8 +843,6 @@ describe("FlowAIBuilder discovery screens", () => {
         result_type_label: "Word-dokument",
         report_layout: null,
         report_layout_label: null,
-        required_sections: [],
-        obligations: [],
         template: { filename: "mall.docx", placeholder_count: 2 }
       }
     };
@@ -855,7 +863,12 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(rows.textContent).toContain("mall.docx");
     expect(rows.textContent).toContain(m.ai_builder_attachment_travels());
     expect(rows.textContent).toContain(m.ai_builder_attachment_placeholders({ count: "2" }));
-    expect(rows.textContent).toContain("underlag.pdf");
+    // The exact placeholders and the coverage are facts the user confirms.
+    expect(rows.textContent).toContain("diarienummer, datum");
+    expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_full());
+    expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_inventory());
+    expect(rows.textContent).toContain("underlag.pdf (1)");
+    expect(rows.textContent).toContain("underlag.pdf (2)");
     expect(rows.textContent).toContain(m.ai_builder_attachment_not_carried());
     expect(rows.textContent).toContain(m.ai_builder_attachment_role_unsure());
 

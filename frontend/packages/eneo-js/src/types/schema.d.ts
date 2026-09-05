@@ -28403,14 +28403,10 @@ export interface components {
     RunPreviewPayload: {
       /** Max Files */
       max_files?: number | null;
-      /** Obligations */
-      obligations?: string[];
       /** Report Layout */
       report_layout?: string | null;
       /** Report Layout Label */
       report_layout_label?: string | null;
-      /** Required Sections */
-      required_sections?: string[];
       /** Result Type */
       result_type?: string | null;
       /** Result Type Label */

@@ -574,8 +574,6 @@ const requirementsSummaryEventDataSchema = z.object({
       result_type_label: z.string().nullable().optional(),
       report_layout: z.string().nullable().optional(),
       report_layout_label: z.string().nullable().optional(),
-      required_sections: stringArraySchema.optional(),
-      obligations: stringArraySchema.optional(),
       template: z
         .object({ filename: z.string(), placeholder_count: z.int().nonnegative() })
         .nullable()

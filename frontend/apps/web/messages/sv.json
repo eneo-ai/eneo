@@ -4537,7 +4537,6 @@
   "ai_builder_run_preview_max_files": "högst {count} filer per körning",
   "ai_builder_run_preview_result": "Ger",
   "ai_builder_run_preview_layout": "Upplägg",
-  "ai_builder_run_preview_sections": "Innehåller alltid",
   "ai_builder_run_preview_template": "Mall",
   "ai_builder_confirm_done": "Bekräftad",
   "ai_builder_confirm_note": "Inget skapas när du bekräftar.",
@@ -6749,5 +6748,9 @@
   "ai_builder_replace_edit_description_review": "Du har en pågående konversation eller ett AI-förslag som inte har godkänts. Om du fortsätter ersätts det med en granskning av körningarna.",
   "ai_builder_review_flow_too_large_title": "Flödet är för stort att granska",
   "ai_builder_reply_understanding": "Eneo förstår din beskrivning…",
-  "ai_builder_reply_reading_sources": "Eneo läser dina källor…"
+  "ai_builder_reply_reading_sources": "Eneo läser dina källor…",
+  "ai_builder_attachment_coverage_full": "läst i sin helhet",
+  "ai_builder_attachment_coverage_excerpt": "läst i utdrag",
+  "ai_builder_attachment_coverage_inventory": "bara innehållsförteckningen läst",
+  "ai_builder_attachment_placeholders_more": "{shown} och {count} till"
 }

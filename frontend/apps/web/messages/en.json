@@ -4537,7 +4537,6 @@
   "ai_builder_run_preview_max_files": "at most {count} files per run",
   "ai_builder_run_preview_result": "Produces",
   "ai_builder_run_preview_layout": "Layout",
-  "ai_builder_run_preview_sections": "Always includes",
   "ai_builder_run_preview_template": "Template",
   "ai_builder_confirm_done": "Confirmed",
   "ai_builder_confirm_note": "Nothing is created when you confirm.",
@@ -6749,5 +6748,9 @@
   "ai_builder_replace_edit_description_review": "You have a conversation or AI proposal in progress that has not been approved. Continuing will replace it with a review of the runs.",
   "ai_builder_review_flow_too_large_title": "The flow is too large to review",
   "ai_builder_reply_understanding": "Eneo is understanding your description…",
-  "ai_builder_reply_reading_sources": "Eneo is reading your sources…"
+  "ai_builder_reply_reading_sources": "Eneo is reading your sources…",
+  "ai_builder_attachment_coverage_full": "read in full",
+  "ai_builder_attachment_coverage_excerpt": "read in excerpts",
+  "ai_builder_attachment_coverage_inventory": "only the inventory read",
+  "ai_builder_attachment_placeholders_more": "{shown} and {count} more"
 }

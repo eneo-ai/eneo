@@ -772,8 +772,6 @@ def _run_preview(
         report_layout_label=(
             _report_layout_summary(report_layout, locale) if report_layout else None
         ),
-        required_sections=list(contract.required_sections) if contract else [],
-        obligations=list(contract.secondary_obligations) if contract else [],
         template=template,
     )
 

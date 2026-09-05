@@ -394,6 +394,35 @@
   const manualNotes = $derived(summary.manual_setup_notes ?? []);
   /** Every attachment as the server typed it; the role label is the client's. */
   const attachmentRows = $derived(summary.attachment_rows ?? []);
+  type AttachmentRow = (typeof attachmentRows)[number];
+
+  function attachmentCoverageLabel(coverage: AttachmentRow["coverage"]): string {
+    switch (coverage) {
+      case "fully_seen":
+        return m.ai_builder_attachment_coverage_full();
+      case "excerpt_truncated":
+        return m.ai_builder_attachment_coverage_excerpt();
+      default:
+        return m.ai_builder_attachment_coverage_inventory();
+    }
+  }
+
+  // Two attachments can share a filename; the ordinal keeps each row's facts
+  // attributable to one file.
+  function attachmentDisplayName(row: AttachmentRow): string {
+    const twins = attachmentRows.filter((candidate) => candidate.filename === row.filename);
+    if (twins.length < 2) return row.filename;
+    return `${row.filename} (${twins.indexOf(row) + 1})`;
+  }
+
+  const PLACEHOLDERS_SHOWN = 4;
+  function attachmentPlaceholderText(placeholders: string[]): string {
+    const shown = placeholders.slice(0, PLACEHOLDERS_SHOWN).join(", ");
+    const rest = placeholders.length - PLACEHOLDERS_SHOWN;
+    return rest > 0
+      ? m.ai_builder_attachment_placeholders_more({ shown, count: String(rest) })
+      : shown;
+  }
   const weakRoleIds = $derived(new Set(summary.weak_role_file_ids ?? []));
   const runPreview = $derived(summary.run_preview ?? null);
   const attachmentRoleLabel = (role: string): string => {
@@ -637,25 +666,37 @@
                   <dd class="text-primary text-[0.85rem]">
                     <ul class="flex flex-col gap-1.5" data-testid="attachment-rows">
                       {#each attachmentRows as row (row.file_id)}
-                        <li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                          <span class="font-medium" title={row.filename}>{row.filename}</span>
+                        <li
+                          class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5"
+                          data-file-id={row.file_id}
+                        >
+                          <span class="font-medium" title={row.filename}>
+                            {attachmentDisplayName(row)}
+                          </span>
                           <span class="text-secondary">{attachmentRoleLabel(row.role)}</span>
                           <span class="text-secondary">
                             · {row.travels
                               ? m.ai_builder_attachment_travels()
                               : m.ai_builder_attachment_not_carried()}
                           </span>
-                          {#if row.placeholders && row.placeholders.length > 0}
-                            <span class="text-secondary">
-                              · {m.ai_builder_attachment_placeholders({
-                                count: String(row.placeholders.length)
-                              })}
-                            </span>
-                          {/if}
-                          {#if !row.readable}
+                          {#if row.readable}
+                            <span class="text-secondary"
+                              >· {attachmentCoverageLabel(row.coverage)}</span
+                            >
+                          {:else}
                             <span class="text-secondary"
                               >· {m.ai_builder_attachment_unreadable()}</span
                             >
+                          {/if}
+                          {#if row.placeholders && row.placeholders.length > 0}
+                            <span class="text-secondary" title={row.placeholders.join(", ")}>
+                              · {m.ai_builder_attachment_placeholders({
+                                count: String(row.placeholders.length)
+                              })}:
+                              <span class="font-mono text-[0.78rem]"
+                                >{attachmentPlaceholderText(row.placeholders)}</span
+                              >
+                            </span>
                           {/if}
                           {#if weakRoleIds.has(row.file_id)}
                             <span class="text-warning-default text-[0.8rem] font-medium">
@@ -716,16 +757,6 @@
                   </dt>
                   <dd class="text-primary text-[0.85rem] font-medium">
                     {runPreview.result_type_label}{#if runPreview.report_layout_label}, {runPreview.report_layout_label}{/if}
-                  </dd>
-                </div>
-              {/if}
-              {#if (runPreview.required_sections ?? []).length > 0}
-                <div class="grid gap-x-4 gap-y-0.5 py-1.5 sm:grid-cols-[12.5rem_1fr]">
-                  <dt class="text-secondary text-[0.8125rem]">
-                    {m.ai_builder_run_preview_sections()}
-                  </dt>
-                  <dd class="text-primary text-[0.85rem]">
-                    {(runPreview.required_sections ?? []).join(", ")}
                   </dd>
                 </div>
               {/if}

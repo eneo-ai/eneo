@@ -292,8 +292,6 @@ class RunPreviewPayload(BaseModel):
     result_type_label: str | None = None
     report_layout: str | None = None
     report_layout_label: str | None = None
-    required_sections: list[str] = Field(default_factory=list)
-    obligations: list[str] = Field(default_factory=list)
     template: RunPreviewTemplatePayload | None = None
 
 
