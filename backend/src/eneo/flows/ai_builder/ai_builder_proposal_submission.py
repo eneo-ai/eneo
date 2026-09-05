@@ -828,6 +828,14 @@ class ProposalSubmissionOwner:
                 exc_info=error,
                 extra={"request_id": str(ctx.request_id)},
             )
+            # The architecture boundary rejects after compilation, so the
+            # capture tap must see the accepted arguments here or the shape
+            # that tripped an invariant is unrecoverable (2026-09-05).
+            capture_rejected_proposal_arguments(
+                arguments,
+                session_id=str(ctx.session_id),
+                issues=[f"{type(error).__name__}: {error}"],
+            )
             raise AIBuilderProviderOutcomeUnknownException() from error
 
     def _record_terminal_first_attempt(

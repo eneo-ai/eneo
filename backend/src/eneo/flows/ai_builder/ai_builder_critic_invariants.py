@@ -57,7 +57,6 @@ from eneo.flows.ai_builder.ai_builder_input_architecture_policy import (
     uses_pseudo_transcription_without_audio_step,
 )
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
-    schema_leaf_property_names,
     schema_property_names_at_any_depth,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import (
@@ -692,7 +691,10 @@ def _missing_source_reader_required_field_names(
 
     captured_names: set[str] = set()
     for contract in source_reader_contracts:
-        captured_names.update(schema_leaf_property_names(contract))
+        # Containers count: completion accepted a reader whose "sammanfattning"
+        # is an object with sub-fields, so a leaf-only walk here rejected after
+        # the provider had answered (2026-09-05).
+        captured_names.update(schema_property_names_at_any_depth(contract))
     # Satisfaction is the shared symmetric canonical match, not exact
     # equality: the reader keeps the model's verbatim wording, so
     # "sammanfattning" must satisfy the canonical "summary" requirement.

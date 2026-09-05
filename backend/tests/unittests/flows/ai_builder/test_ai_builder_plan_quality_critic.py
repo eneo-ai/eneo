@@ -4900,6 +4900,49 @@ class TestSourceReaderRequiredFieldsCaptured:
             for issue in issues
         )
 
+    def test_container_field_satisfies_requirement_like_completion_does(self) -> None:
+        # Live 2026-09-05: the reader declared "sammanfattning" as an object
+        # with sub-fields. Completion matched the container name and accepted
+        # the plan; a leaf-only walk here then rejected it after the provider
+        # had answered, which the user saw as a lost connection.
+        spec = FlowDraftSpecCore(
+            flow_name="Källäsare",
+            steps=[
+                _step(
+                    "step_a",
+                    "Läs källor",
+                    "Läs och strukturera källorna.",
+                    input_type=InputType.DOCUMENT,
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "type": "object",
+                        "properties": {
+                            "titel": {"type": "string"},
+                            "sammanfattning": {
+                                "type": "object",
+                                "properties": {
+                                    "punkter": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    }
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                )
+            ],
+        )
+        issues = evaluate_critic_invariants(
+            self._context(spec, required=frozenset({"summary"}))
+        )
+
+        assert not any(
+            issue.id == "source_reader_required_fields_must_be_captured"
+            for issue in issues
+        )
+
     def test_truly_missing_required_field_still_fires(self) -> None:
         issues = evaluate_critic_invariants(
             self._context(
