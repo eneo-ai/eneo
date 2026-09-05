@@ -889,7 +889,8 @@ describe("FlowAIBuilder discovery screens", () => {
     const preview = screen.getByTestId("run-preview");
     expect(preview.textContent).toContain(m.ai_builder_run_preview_title());
     expect(preview.textContent).toContain("Dokument");
-    expect(preview.textContent).toContain(m.ai_builder_run_preview_max_files({ count: "5" }));
+    // The per-run file limit is an assumption row, not repeated in the preview.
+    expect(preview.textContent).not.toContain(m.ai_builder_run_preview_max_files({ count: "5" }));
     expect(preview.textContent).toContain("Word-dokument");
     expect(preview.textContent).toContain("mall.docx");
   });
@@ -2244,7 +2245,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
       flowId: "flow-1"
     });
 
-    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title_edit() });
     await fireEvent.click(
       screen.getByRole("button", {
         name: m.ai_builder_confirm_change_row_aria({ topic: "Slutresultat" })

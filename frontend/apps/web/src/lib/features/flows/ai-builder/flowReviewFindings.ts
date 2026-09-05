@@ -6,6 +6,18 @@ export function describeReviewFact(
   fact: AIBuilderFlowReviewFact,
   steps: AIBuilderFlowReviewStep[]
 ): { title: string; evidence: string } {
+  const described = describe(fact, steps);
+  // Step labels read mid-sentence ("steg 2"); a card title starts a sentence.
+  return {
+    ...described,
+    title: described.title.charAt(0).toUpperCase() + described.title.slice(1)
+  };
+}
+
+function describe(
+  fact: AIBuilderFlowReviewFact,
+  steps: AIBuilderFlowReviewStep[]
+): { title: string; evidence: string } {
   const stepLabel = (stepId: string): string => {
     const step = steps.find((candidate) => candidate.step_id === stepId);
     if (!step) return m.ai_builder_review_unknown_step();

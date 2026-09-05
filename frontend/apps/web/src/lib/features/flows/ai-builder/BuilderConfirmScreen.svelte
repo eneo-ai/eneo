@@ -523,10 +523,16 @@
         >
           {savedFlowStepScope
             ? m.ai_builder_saved_step_review_heading({ step: savedFlowStepScope.stepNumber })
-            : m.ai_builder_requirements_title()}
+            : isEdit
+              ? m.ai_builder_requirements_title_edit()
+              : m.ai_builder_requirements_title()}
         </h2>
         <p class="text-accent-stronger mt-1 text-[0.8125rem] text-pretty">
-          {confirmed ? m.ai_builder_confirm_lead_confirmed() : m.ai_builder_confirm_lead()}
+          {confirmed
+            ? m.ai_builder_confirm_lead_confirmed()
+            : isEdit
+              ? m.ai_builder_confirm_lead_edit()
+              : m.ai_builder_confirm_lead()}
         </p>
       </header>
 
@@ -762,9 +768,7 @@
                     {m.ai_builder_run_preview_input()}
                   </dt>
                   <dd class="text-primary text-[0.85rem] font-medium">
-                    {runPreview.runtime_input_label}{#if runPreview.max_files}, {m.ai_builder_run_preview_max_files(
-                        { count: String(runPreview.max_files) }
-                      )}{/if}
+                    {runPreview.runtime_input_label}
                   </dd>
                 </div>
               {/if}
@@ -1194,7 +1198,7 @@
                  different actions. -->
             <div class="ml-auto flex flex-wrap gap-2">
               <Button variant="default" onclick={onconfirm} {disabled}>
-                {m.ai_builder_confirm_action()}
+                {isEdit ? m.ai_builder_confirm_action_edit() : m.ai_builder_confirm_action()}
               </Button>
             </div>
           {/if}

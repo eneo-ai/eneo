@@ -394,6 +394,10 @@
     builderRootEl
       ?.querySelector<HTMLElement>("[data-builder-screen-heading]")
       ?.focus({ preventScroll: true });
+    // A new screen starts at its top: the previous screen may have been
+    // scrolled to its foot, and the reader would otherwise land mid-card.
+    // Block-only, so a horizontally scrollable row is never moved.
+    builderRootEl?.scrollIntoView({ block: "start", inline: "nearest" });
   }
 
   // ---- Error ownership ------------------------------------------------------

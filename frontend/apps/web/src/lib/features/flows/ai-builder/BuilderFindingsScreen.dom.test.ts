@@ -59,6 +59,8 @@ afterEach(() => {
   cleanup();
 });
 
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 describe("BuilderFindingsScreen", () => {
   it("shows each finding as a card and sends the named finding when a change is prepared", async () => {
     const onprepare = vi.fn();
@@ -73,19 +75,24 @@ describe("BuilderFindingsScreen", () => {
     ).toBeTruthy();
     const cards = screen.getAllByRole("listitem");
     expect(cards).toHaveLength(2);
+    // Titles start with the step phrase, so the card capitalises the first letter.
     expect(
       screen.getByText(
-        m.ai_builder_review_unconsumed_title({
-          step: m.ai_builder_review_step_labelled({ number: "1", label: "Transkribera" })
-        })
+        capitalized(
+          m.ai_builder_review_unconsumed_title({
+            step: m.ai_builder_review_step_labelled({ number: "1", label: "Transkribera" })
+          })
+        )
       )
     ).toBeTruthy();
     expect(
       screen.getByText(
-        m.ai_builder_review_token_share_title({
-          step: m.ai_builder_review_step_labelled({ number: "2", label: "Sammanfatta" }),
-          percent: "82"
-        })
+        capitalized(
+          m.ai_builder_review_token_share_title({
+            step: m.ai_builder_review_step_labelled({ number: "2", label: "Sammanfatta" }),
+            percent: "82"
+          })
+        )
       )
     ).toBeTruthy();
     // The completeness fact is a footnote, never a card, and omitted runs are counted.

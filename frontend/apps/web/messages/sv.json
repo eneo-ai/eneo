@@ -6730,7 +6730,7 @@
   "ai_builder_review_show_hidden": "Visa {count} dolda",
   "ai_builder_review_hide": "Dölj",
   "ai_builder_review_prepare": "Förbered ändring",
-  "ai_builder_review_prepare_message": "Förbered en ändring som åtgärdar: {finding}",
+  "ai_builder_review_prepare_message": "Förbered en ändring utifrån: {finding}",
   "ai_builder_review_completeness": "{complete} körningar hade resultat för alla steg, {incomplete} saknade något.",
   "ai_builder_review_omitted": "{count} körningar lästes inte (utanför urvalet, äldre än spårningen eller utan behörighet).",
   "ai_builder_review_step": "steg {number}",
@@ -6751,5 +6751,8 @@
   "ai_builder_reply_reading_sources": "Eneo läser dina källor…",
   "ai_builder_attachment_coverage_full": "läst i sin helhet",
   "ai_builder_attachment_coverage_excerpt": "läst i utdrag",
-  "ai_builder_attachment_coverage_inventory": "läsbar text finns, men inget textutdrag ingick"
+  "ai_builder_attachment_coverage_inventory": "läsbar text finns, men inget textutdrag ingick",
+  "ai_builder_requirements_title_edit": "Så här har Eneo förstått ändringen",
+  "ai_builder_confirm_lead_edit": "Det här är vad som ändras. Använd Ändra på raden, eller beskriv ändringen nedan.",
+  "ai_builder_confirm_action_edit": "Bekräfta och utforma ändringen"
 }
