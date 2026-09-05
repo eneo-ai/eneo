@@ -154,7 +154,10 @@ async def test_a_sourced_answer_becomes_suggestions_with_the_sample_floor():
 
 
 @pytest.mark.asyncio
-async def test_an_answer_that_does_not_resolve_in_the_sample_is_refused_not_emptied():
+async def test_a_suggestion_that_does_not_resolve_in_the_sample_is_left_out_and_counted():
+    """The screen must tell "the model found nothing" from "the model claimed
+    things that could not be tied to the runs": the latter is a valid answer
+    with nothing admitted and an unverified count."""
     client = _Client(
         content=json.dumps(
             {
@@ -171,18 +174,24 @@ async def test_an_answer_that_does_not_resolve_in_the_sample_is_refused_not_empt
             }
         )
     )
+    result = await _generate(client)
+    assert result.suggestions == []
+    assert result.unverified_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_envelope_is_refused_whole():
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
-        await _generate(client)
+        await _generate(_Client(content=json.dumps({"suggestions": "none"})))
     assert excinfo.value.code == AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT
-    assert excinfo.value.context["problems"] == [
-        "suggestion_1:source_1:quote_not_in_excerpt"
-    ]
+    assert excinfo.value.context["problems"] == ["suggestions_not_list"]
 
 
 @pytest.mark.asyncio
 async def test_an_empty_answer_is_valid():
     result = await _generate(_Client(content=json.dumps({"suggestions": []})))
     assert result.suggestions == []
+    assert result.unverified_count == 0
 
 
 @pytest.mark.asyncio
@@ -228,9 +237,8 @@ async def test_rejected_model_text_never_reaches_the_error_or_the_log(caplog):
         )
     )
     with caplog.at_level("INFO"):
-        with pytest.raises(AIBuilderBadRequestException) as excinfo:
-            await _generate(client)
-    assert excinfo.value.context["problems"] == ["suggestion_1:unknown_kind"]
-    assert sentinel not in str(excinfo.value)
-    assert sentinel not in json.dumps(excinfo.value.context, default=str)
+        result = await _generate(client)
+    assert result.suggestions == []
+    assert result.unverified_count == 1
+    assert sentinel not in result.model_dump_json()
     assert sentinel not in caplog.text

@@ -314,7 +314,29 @@
                   ? m.ai_builder_review_suggestions_lead_one(sampleCounts)
                   : m.ai_builder_review_suggestions_lead(sampleCounts)}
               </p>
-              {#if judged.suggestions.length === 0}
+              {#if judged.suggestions.length === 0 && judged.unverified_count > 0}
+                <div
+                  class="text-secondary mt-3 text-[0.875rem] text-pretty"
+                  data-testid="suggestions-unverified"
+                >
+                  <p>
+                    {judged.unverified_count === 1
+                      ? m.ai_builder_review_suggestions_all_unverified_one()
+                      : m.ai_builder_review_suggestions_all_unverified({
+                          count: String(judged.unverified_count)
+                        })}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="mt-2.5"
+                    {disabled}
+                    onclick={() => onsuggest?.()}
+                  >
+                    {m.ai_builder_review_retry()}
+                  </Button>
+                </div>
+              {:else if judged.suggestions.length === 0}
                 <p
                   class="text-secondary mt-3 text-[0.875rem] text-pretty"
                   data-testid="suggestions-none"
@@ -359,6 +381,18 @@
                     </li>
                   {/each}
                 </ul>
+                {#if judged.unverified_count > 0}
+                  <p
+                    class="text-secondary mt-2 text-xs text-pretty"
+                    data-testid="suggestions-some-unverified"
+                  >
+                    {judged.unverified_count === 1
+                      ? m.ai_builder_review_suggestions_some_unverified_one()
+                      : m.ai_builder_review_suggestions_some_unverified({
+                          count: String(judged.unverified_count)
+                        })}
+                  </p>
+                {/if}
               {/if}
               <p class="text-secondary mt-3 text-xs text-pretty">
                 {m.ai_builder_review_suggestion_disclaimer()}

@@ -13,6 +13,7 @@ invalid rather than being dropped in silence.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal, cast
@@ -114,6 +115,9 @@ class FlowReviewSuggestions(BaseModel):
     evidence_classification_level: int = Field(ge=0)
     sample: FlowReviewSuggestionSampleSummary
     suggestions: list[FlowReviewSuggestion]
+    # Suggestions the model made that could not be tied to the sample and
+    # were left out, so an empty list can be told from a refused answer.
+    unverified_count: int = Field(ge=0)
 
 
 def sample_summary(sample: FlowReviewSample) -> FlowReviewSuggestionSampleSummary:
@@ -306,11 +310,15 @@ def review_suggestions_response_format(mode: StructuredOutputMode) -> dict[str, 
 
 @dataclass(frozen=True)
 class ParsedReviewSuggestions:
-    """Diagnostics are reason codes with positions, never the model's text:
-    a rejected value may carry copied evidence and this outcome is logged."""
+    """The envelope is admitted or refused whole; each suggestion inside it
+    stands or falls on its own evidence, so one unverifiable claim does not
+    discard the verified ones beside it. Diagnostics are reason codes with
+    positions, never the model's text: a rejected value may carry copied
+    evidence and this outcome is logged."""
 
     outcome: Literal["valid", "invalid"]
     suggestions: tuple[FlowReviewSuggestion, ...] = ()
+    # One code per refused suggestion (valid envelope) or one envelope code.
     problems: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -320,7 +328,8 @@ ABSENCE_KINDS: frozenset[str] = frozenset({"missing_check", "step_not_useful"})
 def parse_review_suggestions(
     content: str, *, sample: FlowReviewSample
 ) -> ParsedReviewSuggestions:
-    """Admit the model's answer only when every claim resolves in the sample."""
+    """Admit every suggestion whose claims resolve in the sample; refuse the
+    rest by code. Only a malformed envelope refuses the whole answer."""
 
     try:
         raw: object = json.loads(content)
@@ -344,9 +353,9 @@ def parse_review_suggestions(
             problems.append(f"suggestion_{position + 1}:{parsed}")
             continue
         suggestions.append(parsed)
-    if problems:
-        return ParsedReviewSuggestions("invalid", problems=tuple(problems))
-    return ParsedReviewSuggestions("valid", suggestions=tuple(suggestions))
+    return ParsedReviewSuggestions(
+        "valid", suggestions=tuple(suggestions), problems=tuple(problems)
+    )
 
 
 @dataclass(frozen=True)
@@ -452,6 +461,13 @@ def _parse_suggestion(
     )
 
 
+_WHITESPACE = re.compile(r"\s+")
+
+
+def _collapse_whitespace(text: str) -> str:
+    return _WHITESPACE.sub(" ", text).strip()
+
+
 def _parse_source(
     raw_source: object, *, index: _SampleIndex
 ) -> tuple[FlowReviewSuggestionSource, str] | str:
@@ -467,10 +483,12 @@ def _parse_source(
         return "unknown_source"
     if excerpt.availability not in ("included", "truncated") or not excerpt.text:
         return "source_not_readable"
-    quote = quote.strip()
+    quote = _collapse_whitespace(quote)
     if not quote or len(quote) > MAX_QUOTE_CHARS:
         return "quote_length"
-    if quote not in excerpt.text:
+    # Verbatim in substance: line breaks and indentation in a markdown output
+    # are not evidence, and a model quoting across them still quotes the run.
+    if quote not in _collapse_whitespace(excerpt.text):
         return "quote_not_in_excerpt"
     return (
         FlowReviewSuggestionSource(
@@ -575,6 +593,8 @@ async def generate_review_suggestions(
             "model": litellm_model,
             "run_count": len(sample.runs),
             "suggestion_count": len(parsed.suggestions),
+            "unverified_count": len(parsed.problems),
+            "problem_codes": list(parsed.problems),
             "kinds": sorted({item.kind for item in parsed.suggestions}),
         },
     )
@@ -587,4 +607,5 @@ async def generate_review_suggestions(
         evidence_classification_level=sample.evidence_classification_level,
         sample=sample_summary(sample),
         suggestions=list(parsed.suggestions),
+        unverified_count=len(parsed.problems),
     )

@@ -200,11 +200,74 @@ def test_unknown_kind_unverifiable_source_or_foreign_fact_invalidates_the_answer
     }
     for label, suggestion in cases.items():
         parsed = parse_review_suggestions(_answer(suggestion), sample=sample)
-        assert parsed.outcome == "invalid", label
-        assert parsed.problems, label
+        # The envelope is fine; the one suggestion in it is refused by code.
+        assert parsed.outcome == "valid", label
+        assert parsed.suggestions == (), label
+        assert len(parsed.problems) == 1, label
         # Diagnostics are codes with positions, never the model's own text.
         assert all(":" in problem for problem in parsed.problems), label
         assert "rename_step" not in " ".join(parsed.problems)
+
+
+def test_a_quote_across_line_breaks_still_resolves_in_the_excerpt():
+    """Markdown outputs wrap; a quote with the same words in one line is the
+    same evidence. Different words are not."""
+    base = _sample()
+    wrapped = base.model_copy(
+        update={
+            "excerpts": [
+                base.excerpts[0].model_copy(
+                    update={"text": "Sammanfattning av ärendet:\n\n- tre  punkter.\n"}
+                ),
+                *base.excerpts[1:],
+            ]
+        }
+    )
+    suggestion = {
+        "kind": "duplicated_work",
+        "step_orders": [1],
+        "rationale": "x",
+        "sources": [
+            {"source_id": "run1.step1.output", "quote": "ärendet: - tre punkter"}
+        ],
+    }
+    parsed = parse_review_suggestions(_answer(suggestion), sample=wrapped)
+    assert [item.sources[0].quote for item in parsed.suggestions] == [
+        "ärendet: - tre punkter"
+    ]
+    other = {
+        **suggestion,
+        "sources": [{"source_id": "run1.step1.output", "quote": "fyra punkter"}],
+    }
+    assert list(parse_review_suggestions(_answer(other), sample=wrapped).problems) == [
+        "suggestion_1:source_1:quote_not_in_excerpt"
+    ]
+
+
+def test_a_verified_suggestion_survives_an_unverifiable_one_beside_it():
+    """One absence claim on a truncated excerpt must not discard the
+    duplicated-work claim whose quotes resolve; the refused one is counted."""
+    sample = _sample()
+    parsed = parse_review_suggestions(
+        _answer(
+            {
+                "kind": "duplicated_work",
+                "step_orders": [1, 2],
+                "rationale": "x",
+                "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
+            },
+            {
+                "kind": "missing_check",
+                "step_orders": [2],
+                "rationale": "y",
+                "sources": [{"source_id": "run1.step2.output", "quote": "x"}],
+            },
+        ),
+        sample=sample,
+    )
+    assert parsed.outcome == "valid"
+    assert [item.kind for item in parsed.suggestions] == ["duplicated_work"]
+    assert list(parsed.problems) == ["suggestion_2:source_1:source_not_readable"]
 
 
 def test_a_suggestion_names_at_most_the_steps_a_request_can_carry():
@@ -251,7 +314,7 @@ def test_a_suggestion_names_at_most_the_steps_a_request_can_carry():
         ),
         sample=wide,
     )
-    assert refused.outcome == "invalid"
+    assert refused.suggestions == ()
     assert list(refused.problems) == ["suggestion_1:too_many_steps"]
 
 
@@ -268,7 +331,7 @@ def test_absence_claims_need_complete_evidence_for_their_sources_and_steps():
     parsed = parse_review_suggestions(
         _answer(absence_on_incomplete_step), sample=sample
     )
-    assert parsed.outcome == "invalid"
+    assert parsed.suggestions == ()
     assert parsed.problems == (
         "suggestion_1:absence_claim_without_complete_step_output",
     )
@@ -301,7 +364,7 @@ def test_absence_claims_need_complete_evidence_for_their_sources_and_steps():
     parsed = parse_review_suggestions(
         _answer(absence_on_complete_step), sample=truncated_sample
     )
-    assert parsed.outcome == "invalid"
+    assert parsed.suggestions == ()
     assert parsed.problems[0].endswith("absence_claim_cites_incomplete_source")
     # A drift claim on the same truncated excerpt is still admissible.
     drift = {**absence_on_complete_step, "kind": "instruction_outcome_drift"}
@@ -354,7 +417,7 @@ def test_a_complete_output_in_another_run_does_not_rescue_an_absence_claim():
         "sources": [{"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"}],
     }
     parsed = parse_review_suggestions(_answer(claim), sample=rescued)
-    assert parsed.outcome == "invalid"
+    assert parsed.suggestions == ()
     assert parsed.problems == (
         "suggestion_1:absence_claim_without_complete_step_output",
     )

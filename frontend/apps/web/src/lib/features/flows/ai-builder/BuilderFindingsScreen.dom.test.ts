@@ -204,6 +204,7 @@ describe("BuilderFindingsScreen suggestions", () => {
     return {
       model_id: "model-1",
       model_name: "GPT-test",
+      unverified_count: 0,
       generated_at: "2026-09-05T12:00:00Z",
       flow_version: 4,
       definition_checksum: "sum-4",
@@ -299,7 +300,7 @@ describe("BuilderFindingsScreen suggestions", () => {
     expect(detail.message).toContain("1 och 2");
   });
 
-  it("distinguishes an empty judgement from a failed one", () => {
+  it("distinguishes an empty judgement from a failed one", async () => {
     const { unmount } = render(BuilderFindingsScreen, {
       review: { status: "ready", packet: makePacket() },
       suggestions: {
@@ -326,6 +327,45 @@ describe("BuilderFindingsScreen suggestions", () => {
       })
     );
     unmount();
+
+    // Suggestions the model made but could not tie to the runs are a third
+    // state: not "nothing found", not a failure, and they invite a retry.
+    const onsuggest = vi.fn();
+    const unverifiedOnly = render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: {
+        status: "ready",
+        suggestions: { ...makeSuggestions(), suggestions: [], unverified_count: 3 }
+      },
+      onprepare: vi.fn(),
+      onsuggest,
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    expect(screen.queryByTestId("suggestions-none")).toBeNull();
+    expect(screen.getByTestId("suggestions-unverified").textContent).toContain(
+      m.ai_builder_review_suggestions_all_unverified({ count: "3" })
+    );
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_review_retry() }));
+    expect(onsuggest).toHaveBeenCalledTimes(1);
+    unverifiedOnly.unmount();
+
+    const partly = render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: {
+        status: "ready",
+        suggestions: { ...makeSuggestions(), unverified_count: 1 }
+      },
+      onprepare: vi.fn(),
+      onsuggest: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    expect(screen.getByTestId("suggestions-list")).toBeTruthy();
+    expect(screen.getByTestId("suggestions-some-unverified").textContent).toContain(
+      m.ai_builder_review_suggestions_some_unverified_one()
+    );
+    partly.unmount();
 
     render(BuilderFindingsScreen, {
       review: { status: "ready", packet: makePacket() },

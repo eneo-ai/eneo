@@ -18022,6 +18022,8 @@ export interface components {
       sample: components["schemas"]["FlowReviewSuggestionSampleSummary"];
       /** Suggestions */
       suggestions: components["schemas"]["FlowReviewSuggestion"][];
+      /** Unverified Count */
+      unverified_count: number;
     };
     /** FlowRunArtifactResultPublic */
     FlowRunArtifactResultPublic: {
