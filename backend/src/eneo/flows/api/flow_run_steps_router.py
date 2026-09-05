@@ -15,7 +15,6 @@ from eneo.files.signed_urls import build_signed_download_response
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     error_response,
-    flow_run_evidence_snapshot_transaction,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_definition_access import require_flow_published_runtime_access
@@ -30,7 +29,10 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
     FLOW_RUN_STEPS_PATH,
 )
-from eneo.flows.api.flow_trace_audit import (
+from eneo.flows.application.flow_run_evidence_snapshot import (
+    flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_trace_audit import (
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
 )

@@ -17,7 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import eneo.flows.api.flow_trace_audit as flow_trace_audit_module
+import eneo.flows.application.flow_trace_audit as flow_trace_audit_module
 from eneo.actors.actors.space_actor import SpaceRole
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_dependencies import ScopeFilter
