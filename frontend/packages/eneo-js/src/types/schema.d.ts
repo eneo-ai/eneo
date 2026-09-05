@@ -4027,6 +4027,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/ai-builder/flows/{flow_id}/review-suggestions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Let the planner model judge a published flow's recent runs
+     * @description Reads a bounded sample of recorded prompts, inputs and outputs from a few admitted runs of the published version, together with the review packet, and asks the space's planner model for suggestions it can source in that sample. Every sampled run is audited as an evidence view before it is read; the model must clear the sample's evidence classification level. Nothing is stored.
+     */
+    post: operations["post_ai_builder_flow_review_suggestions"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/ai-builder/plans/{plan_id}": {
     parameters: {
       query?: never;
@@ -10187,6 +10207,7 @@ export interface components {
       | "review_finding_unknown"
       | "review_flow_too_large"
       | "review_sample_timeout"
+      | "review_suggestions_invalid_output"
       | "planner_model_below_evidence_level"
       | "flow_space_mismatch"
       | "invalid_ai_builder_settings"
@@ -17894,6 +17915,82 @@ export interface components {
       step_id: string;
       /** Step Order */
       step_order: number;
+    };
+    /** FlowReviewSuggestion */
+    FlowReviewSuggestion: {
+      /** Fact Ids */
+      fact_ids?: string[];
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "duplicated_work" | "instruction_outcome_drift" | "step_not_useful" | "missing_check";
+      /** Rationale */
+      rationale: string;
+      /** Sources */
+      sources: components["schemas"]["FlowReviewSuggestionSource"][];
+      /** Step Orders */
+      step_orders: number[];
+    };
+    /** FlowReviewSuggestionSampleSummary */
+    FlowReviewSuggestionSampleSummary: {
+      /** Excerpts Included */
+      excerpts_included: number;
+      /** Excerpts Not Recorded */
+      excerpts_not_recorded: number;
+      /** Excerpts Omitted By Budget */
+      excerpts_omitted_by_budget: number;
+      /** Excerpts Truncated */
+      excerpts_truncated: number;
+      /** Excerpts Unavailable */
+      excerpts_unavailable: number;
+      /** Run Ids */
+      run_ids: string[];
+    };
+    /**
+     * FlowReviewSuggestionSource
+     * @description One quoted place in the sample a suggestion rests on.
+     */
+    FlowReviewSuggestionSource: {
+      /**
+       * Field
+       * @enum {string}
+       */
+      field: "prompt" | "input" | "output";
+      /** Quote */
+      quote: string;
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Step Order */
+      step_order: number;
+    };
+    /**
+     * FlowReviewSuggestions
+     * @description The model's judgement over one sample; held by the screen, never stored.
+     */
+    FlowReviewSuggestions: {
+      /** Definition Checksum */
+      definition_checksum: string;
+      /** Evidence Classification Level */
+      evidence_classification_level: number;
+      /** Flow Version */
+      flow_version: number;
+      /**
+       * Generated At
+       * Format: date-time
+       */
+      generated_at: string;
+      /**
+       * Model Id
+       * Format: uuid
+       */
+      model_id: string;
+      sample: components["schemas"]["FlowReviewSuggestionSampleSummary"];
+      /** Suggestions */
+      suggestions: components["schemas"]["FlowReviewSuggestion"][];
     };
     /** FlowRunArtifactResultPublic */
     FlowRunArtifactResultPublic: {
@@ -48559,6 +48656,95 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9007,
            *       "message": "The flow has no published version to review runs of.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Caller lacks space permission or API key scope for this space. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "unauthorized",
+           *       "code": "insufficient_scope",
+           *       "details": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "diagnostic_context": {
+           *         "error_category": "unauthorized",
+           *         "error_code": "insufficient_scope",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  post_ai_builder_flow_review_suggestions: {
+    parameters: {
+      query: {
+        space_id: string;
+        ui_language?: string | null;
+      };
+      header?: never;
+      path: {
+        flow_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowReviewSuggestions"];
+        };
+      };
+      /** @description The flow has no published version, the sample timed out, the planner model is below the evidence level, or the model's answer did not resolve in the sample. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "bad_request",
+           *       "code": "review_suggestions_invalid_output",
+           *       "diagnostic_context": {
+           *         "error_category": "bad_request",
+           *         "error_code": "review_suggestions_invalid_output",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "The review model's answer did not resolve in the sampled evidence.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2

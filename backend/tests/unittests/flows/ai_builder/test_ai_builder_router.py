@@ -87,6 +87,7 @@ from eneo.flows.ai_builder.ai_builder_router import (
     get_session_proposal_telemetry_diagnostics,
     list_session_plans,
     list_sessions,
+    post_flow_review_suggestions,
     revise_plan,
     send_message,
 )
@@ -108,6 +109,7 @@ from eneo.flows.ai_builder.planning_state import (
 )
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
     BadRequestException,
     ErrorCodes,
     UnauthorizedException,
@@ -3031,3 +3033,107 @@ class TestCreatePlanEndpoint:
 
         assert response.flow_id == result.flow_id
         container.audit_service.return_value.log.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Review suggestions endpoint
+# ---------------------------------------------------------------------------
+
+
+class _SnapshotSession:
+    """The evidence snapshot transaction: begin() is an async context, and the
+    isolation level is set through an awaited connection() call."""
+
+    def __init__(self) -> None:
+        self.connection = AsyncMock()
+
+    def begin(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class TestReviewSuggestionsEndpoint:
+    @pytest.mark.anyio
+    async def test_a_failed_audit_stops_the_sample_and_makes_no_provider_call(self):
+        container = _make_container()
+        container.session.return_value = _SnapshotSession()
+        container.tenant_repo.return_value.get = AsyncMock(
+            return_value=SimpleNamespace(flow_settings=None)
+        )
+        container.model_provider_repository.return_value.all = AsyncMock(
+            return_value=[]
+        )
+        # The audit write fails on commit; the tap must refuse before any read.
+        container.audit_service.return_value.log = AsyncMock(
+            side_effect=RuntimeError("audit unavailable")
+        )
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+        bundle_reads: list[object] = []
+
+        async def _build_review_sample(*, flow_id, space_id, audit):
+            await audit(run)
+            bundle_reads.append(run.id)
+            raise AssertionError("evidence must not be read after a failed audit")
+
+        review_service = container.ai_builder_flow_review_service.return_value
+        review_service.build_review_sample = _build_review_sample
+        judge = container.ai_builder_service.return_value.judge_review_sample
+
+        with pytest.raises(AuditLoggingUnavailableException):
+            await post_flow_review_suggestions(
+                request=_make_request(),
+                flow_id=run.flow_id,
+                space_id=uuid4(),
+                container=container,
+            )
+
+        assert bundle_reads == []
+        judge.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_the_provider_is_judged_after_the_snapshot_with_the_audited_sample(
+        self,
+    ):
+        container = _make_container()
+        container.session.return_value = _SnapshotSession()
+        container.tenant_repo.return_value.get = AsyncMock(
+            return_value=SimpleNamespace(flow_settings={"x": 1})
+        )
+        provider_id = uuid4()
+        container.model_provider_repository.return_value.all = AsyncMock(
+            return_value=[SimpleNamespace(id=provider_id)]
+        )
+        container.audit_service.return_value.log = AsyncMock()
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+        sample = object()
+
+        async def _build_review_sample(*, flow_id, space_id, audit):
+            await audit(run)
+            return sample
+
+        review_service = container.ai_builder_flow_review_service.return_value
+        review_service.build_review_sample = _build_review_sample
+        judge = container.ai_builder_service.return_value.judge_review_sample
+        judge.return_value = "judged"
+
+        result = await post_flow_review_suggestions(
+            request=_make_request(),
+            flow_id=run.flow_id,
+            space_id=uuid4(),
+            container=container,
+            ui_language="sv",
+        )
+
+        assert result == "judged"
+        container.audit_service.return_value.log.assert_awaited_once()
+        judge.assert_awaited_once()
+        kwargs = judge.await_args.kwargs
+        assert kwargs["sample"] is sample
+        assert kwargs["active_provider_ids"] == {provider_id}
+        assert kwargs["tenant_flow_settings"] == {"x": 1}
+        assert kwargs["ui_language"] == "sv"

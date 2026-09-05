@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    FlowReviewCohort,
+    FlowReviewOmittedRuns,
+    FlowReviewPacket,
+    StepShareFact,
+)
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+    FlowReviewSample,
+    ReviewSampleBudget,
+    ReviewSampleExcerpt,
+    ReviewSampleRun,
+    ReviewSampleStep,
+)
+from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+    build_review_suggestions_messages,
+    parse_review_suggestions,
+    render_review_sample,
+    sample_summary,
+)
+
+
+def _sample() -> FlowReviewSample:
+    run_a, run_b = uuid4(), uuid4()
+    step_id = uuid4()
+    packet = FlowReviewPacket(
+        flow_id=uuid4(),
+        flow_version=4,
+        definition_checksum="sum-4",
+        generated_at=datetime.now(timezone.utc),
+        evidence_classification_level=2,
+        steps=[],
+        cohort=FlowReviewCohort(
+            completed_run_ids=[run_a],
+            failed_run_ids=[run_b],
+            omitted=FlowReviewOmittedRuns(),
+        ),
+        facts=[
+            StepShareFact(
+                finding_id="f1f1f1f1f1f1f1f1",
+                kind="token_share",
+                step_id=step_id,
+                step_order=2,
+                share=0.8,
+                run_count=3,
+            )
+        ],
+    )
+    steps = [
+        ReviewSampleStep(
+            step_order=order,
+            label=f"Steg {order}",
+            input_source="flow_input" if order == 1 else "previous_step",
+            input_type="document" if order == 1 else "text",
+            output_type="text",
+            output_mode="pass_through",
+            binding_summary=None,
+            output_contract_fields=[],
+            review_mode=None,
+        )
+        for order in (1, 2)
+    ]
+    excerpts = [
+        ReviewSampleExcerpt(
+            run_id=run_a,
+            step_order=1,
+            field="output",
+            availability="included",
+            text="Sammanfattning av ärendet: tre punkter.",
+            recorded_chars=39,
+        ),
+        ReviewSampleExcerpt(
+            run_id=run_a,
+            step_order=2,
+            field="prompt",
+            availability="included",
+            text="Sammanfatta ärendet i tre punkter.",
+            recorded_chars=34,
+        ),
+        ReviewSampleExcerpt(
+            run_id=run_a,
+            step_order=2,
+            field="output",
+            availability="omitted_by_budget",
+            recorded_chars=5000,
+        ),
+        ReviewSampleExcerpt(
+            run_id=run_b, step_order=1, field="output", availability="not_recorded"
+        ),
+    ]
+    return FlowReviewSample(
+        packet=packet,
+        generated_at=datetime.now(timezone.utc),
+        evidence_classification_level=2,
+        steps=steps,
+        runs=[
+            ReviewSampleRun(
+                run_id=run_a, status="completed", evidence_classification_level=2
+            ),
+            ReviewSampleRun(
+                run_id=run_b, status="failed", evidence_classification_level=1
+            ),
+        ],
+        excerpts=excerpts,
+        budget=ReviewSampleBudget(
+            per_excerpt_chars=1500, total_excerpt_chars=30000, used_excerpt_chars=73
+        ),
+    )
+
+
+def _answer(*suggestions: dict) -> str:
+    return json.dumps({"suggestions": list(suggestions)}, ensure_ascii=False)
+
+
+def test_prompt_names_every_excerpt_by_source_id_and_marks_what_cannot_be_read():
+    sample = _sample()
+    rendered = render_review_sample(sample)
+    assert "[run1.step1.output]" in rendered
+    assert "Sammanfattning av ärendet: tre punkter." in rendered
+    assert "[run1.step2.output] (utelämnad av budgetskäl" in rendered
+    assert "[run2.step1.output] (inte inspelad" in rendered
+    assert "[f1f1f1f1f1f1f1f1]" in rendered
+    messages = build_review_suggestions_messages(sample, ui_language="sv")
+    assert (
+        messages[0]["role"] == "system" and "duplicated_work" in messages[0]["content"]
+    )
+
+
+def test_summary_counts_excerpts_by_availability():
+    summary = sample_summary(_sample())
+    assert (summary.excerpts_included, summary.excerpts_omitted_by_budget) == (2, 1)
+    assert summary.excerpts_not_recorded == 1
+
+
+def test_valid_answer_is_admitted_with_resolved_sources_and_facts():
+    sample = _sample()
+    parsed = parse_review_suggestions(
+        _answer(
+            {
+                "kind": "duplicated_work",
+                "step_orders": [2, 1],
+                "rationale": "Steg 2 sammanfattar det steg 1 redan sammanfattade.",
+                "sources": [
+                    {"source_id": "run1.step1.output", "quote": "tre punkter"},
+                    {"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"},
+                ],
+                "fact_ids": ["f1f1f1f1f1f1f1f1"],
+            }
+        ),
+        sample=sample,
+    )
+    assert parsed.outcome == "valid"
+    (suggestion,) = parsed.suggestions
+    assert suggestion.step_orders == [1, 2]
+    assert suggestion.sources[0].run_id == sample.runs[0].run_id
+    assert suggestion.sources[0].field == "output"
+    assert suggestion.fact_ids == ["f1f1f1f1f1f1f1f1"]
+
+
+def test_empty_answer_is_valid_and_distinct_from_invalid_output():
+    sample = _sample()
+    assert parse_review_suggestions(_answer(), sample=sample).outcome == "valid"
+    assert parse_review_suggestions("not json", sample=sample).outcome == "invalid"
+    assert parse_review_suggestions("[]", sample=sample).outcome == "invalid"
+
+
+def test_unknown_kind_unverifiable_source_or_foreign_fact_invalidates_the_answer():
+    sample = _sample()
+    base = {
+        "step_orders": [1],
+        "rationale": "x",
+        "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
+    }
+    cases = {
+        "unknown kind": {**base, "kind": "rename_step"},
+        "step not in definition": {**base, "kind": "missing_check", "step_orders": [9]},
+        "quote not in excerpt": {
+            **base,
+            "kind": "missing_check",
+            "sources": [{"source_id": "run1.step1.output", "quote": "fyra punkter"}],
+        },
+        "source without readable text": {
+            **base,
+            "kind": "missing_check",
+            "sources": [{"source_id": "run1.step2.output", "quote": "x"}],
+        },
+        "unknown source": {
+            **base,
+            "kind": "missing_check",
+            "sources": [{"source_id": "run3.step1.output", "quote": "x"}],
+        },
+        "foreign fact": {**base, "kind": "missing_check", "fact_ids": ["nope"]},
+        "no sources": {**base, "kind": "missing_check", "sources": []},
+    }
+    for label, suggestion in cases.items():
+        parsed = parse_review_suggestions(_answer(suggestion), sample=sample)
+        assert parsed.outcome == "invalid", label
+        assert parsed.problems, label

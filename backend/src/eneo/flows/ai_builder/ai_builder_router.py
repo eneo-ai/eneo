@@ -104,6 +104,10 @@ from eneo.flows.ai_builder.ai_builder_events import (
     encode_ai_builder_stream_event,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewPacket
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import FlowReviewSample
+from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+    FlowReviewSuggestions,
+)
 from eneo.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
@@ -120,6 +124,14 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     AdmissionNormalizerFamily,
 )
 from eneo.flows.ai_builder.planning_state import PlanningState
+from eneo.flows.application.flow_run_evidence_snapshot import (
+    flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_trace_audit import (
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
+)
+from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import (
     FlowAccessFilterMode,
     FlowApiAction,
@@ -128,6 +140,7 @@ from eneo.flows.flow_access_policy import (
 )
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
     BadRequestException,
     NotFoundException,
     UnauthorizedException,
@@ -870,6 +883,97 @@ async def get_flow_review_packet(
             flow_id=flow_id, space_id=space_id
         )
     return packet
+
+
+@router.post(
+    "/flows/{flow_id}/review-suggestions",
+    response_model=FlowReviewSuggestions,
+    operation_id="post_ai_builder_flow_review_suggestions",
+    summary="Let the planner model judge a published flow's recent runs",
+    description=(
+        "Reads a bounded sample of recorded prompts, inputs and outputs from a "
+        "few admitted runs of the published version, together with the review "
+        "packet, and asks the space's planner model for suggestions it can "
+        "source in that sample. Every sampled run is audited as an evidence "
+        "view before it is read; the model must clear the sample's evidence "
+        "classification level. Nothing is stored."
+    ),
+    responses={
+        400: _ai_builder_error_response(
+            description=(
+                "The flow has no published version, the sample timed out, the "
+                "planner model is below the evidence level, or the model's "
+                "answer did not resolve in the sample."
+            ),
+            message="The review model's answer did not resolve in the sampled evidence.",
+            code=AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT,
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks space permission or API key scope for this space.",
+            message="API key space scope does not match requested AI builder resource.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+            details={"auth_layer": "api_key_scope"},
+        ),
+    },
+)
+async def post_flow_review_suggestions(
+    request: Request,
+    flow_id: UUID,
+    space_id: UUID,
+    container: ContainerWithUserExplicitTransactionDep,
+    ui_language: str | None = None,
+) -> FlowReviewSuggestions:
+    """Audit and read inside one evidence snapshot; call the provider after it."""
+
+    user = container.user()
+    audited_runs: list[FlowRun] = []
+
+    async def _audit(run: FlowRun) -> None:
+        await log_flow_trace_audit_or_raise(
+            container=container,
+            user=user,
+            run=run,
+            action=ActionType.FLOW_EVIDENCE_VIEWED,
+            description=f"AI builder review sample read flow run {run.id}",
+            extra={"evidence_detail": "ai_builder_review_sample"},
+        )
+        audited_runs.append(run)
+
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            authorization = await _authorize_ai_builder_request(
+                request,
+                container,
+                action=FlowApiAction.BUILDER_SESSION_CREATE,
+                space_id=space_id,
+            )
+            space = _authorized_space(authorization)
+            tenant = await _get_tenant_repo(container).get(user.tenant_id)
+            active_provider_ids = await _active_provider_ids(container)
+            sample: FlowReviewSample = (
+                await container.ai_builder_flow_review_service().build_review_sample(
+                    flow_id=flow_id, space_id=space_id, audit=_audit
+                )
+            )
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if audited_runs:
+            raise_flow_trace_audit_unavailable(
+                user=user,
+                run=audited_runs[-1],
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+
+    return await container.ai_builder_service().judge_review_sample(
+        sample=sample,
+        space=space,
+        active_provider_ids=active_provider_ids,
+        tenant_flow_settings=tenant.flow_settings if tenant else None,
+        ui_language=ui_language,
+    )
 
 
 @router.post(

@@ -75,6 +75,11 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewEvidence,
     resolve_review_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import FlowReviewSample
+from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+    FlowReviewSuggestions,
+    generate_review_suggestions,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
 )
@@ -709,6 +714,46 @@ class AIBuilderService:
         return await self._build_plan_lifecycle().revise_plan(
             plan_id=plan_id,
             revision_type=revision_type,
+        )
+
+    async def judge_review_sample(
+        self,
+        *,
+        sample: FlowReviewSample,
+        space: "Space",
+        active_provider_ids: AbstractSet[UUID],
+        tenant_flow_settings: dict[str, Any] | None,
+        ui_language: str | None,
+    ) -> FlowReviewSuggestions:
+        """Let the space's planner model judge an already audited sample.
+
+        The model must clear the sample's evidence floor, the same rule a turn
+        that reads run evidence is held to; the provider call happens outside
+        any database transaction, after the caller committed the audits.
+        """
+
+        planner_context = build_planner_context(
+            space,
+            model_id=None,
+            active_provider_ids=active_provider_ids,
+            tenant_flow_settings=tenant_flow_settings,
+            minimum_level=sample.evidence_classification_level,
+        )
+        route = await self.completion_service.resolve_model_route(planner_context.model)
+        route = replace(
+            route,
+            litellm_kwargs=_sanitize_ai_builder_litellm_kwargs(route.litellm_kwargs),
+        )
+        return await generate_review_suggestions(
+            sample=sample,
+            litellm_client=litellm,
+            completion_model_route=route,
+            model_id=planner_context.model.id,
+            max_input_tokens=planner_context.max_input_tokens,
+            max_output_tokens=planner_context.max_output_tokens,
+            budget_policy=planner_context.budget_policy,
+            tenant_id=self.user.tenant_id,
+            ui_language=ui_language,
         )
 
     def _build_planner(self) -> AIBuilderPlanner:
