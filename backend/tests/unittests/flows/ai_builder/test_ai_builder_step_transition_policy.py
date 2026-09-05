@@ -332,6 +332,81 @@ def test_normalize_ai_builder_spec_clears_explicit_question_input_contract() -> 
     )
 
 
+def test_normalize_ai_builder_spec_keeps_structured_projection_input_contract() -> None:
+    # Live 2026-09-05: editing a builder-built flow cleared the untouched
+    # JSON step's contract because its source_refs lowered to a question,
+    # and validation then rejected every edit of that flow.
+    contract = {"type": "object", "properties": {"documents": {"type": "array"}}}
+    spec = FlowDraftSpecCore(
+        flow_name="Structured projection",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Read",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Summarize",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                input_bindings={
+                    "source_refs": [
+                        {
+                            "label": "documents",
+                            "output": "structured",
+                            "step_ref": "step_a",
+                            "field_path": "documents",
+                        }
+                    ]
+                },
+                input_contract=contract,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[1].input_contract == contract
+    assert not any(
+        change.code == "explicit_question_input_contract_cleared"
+        for _step_spec, change in changes
+    )
+
+
+def test_normalize_ai_builder_spec_clears_text_source_refs_input_contract() -> None:
+    spec = FlowDraftSpecCore(
+        flow_name="Text refs",
+        steps=[
+            _step(ref="step_a", name="Read", input_source=InputSource.FLOW_INPUT),
+            _step(
+                ref="step_b",
+                name="Write",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                input_bindings={
+                    "source_refs": [
+                        {"label": "text", "output": "text", "step_ref": "step_a"}
+                    ]
+                },
+                input_contract={
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                },
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[1].input_contract is None
+    assert any(
+        change.code == "explicit_question_input_contract_cleared"
+        for _step_spec, change in changes
+    )
+
+
 def test_normalize_ai_builder_spec_clears_invalid_citation_sidecar_config() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Template report",

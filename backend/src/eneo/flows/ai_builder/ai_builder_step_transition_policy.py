@@ -22,6 +22,7 @@ from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
     dedupe_source_refs,
     effective_question_binding,
+    input_contract_binding_conflict,
     source_ref_bindings,
 )
 from eneo.flows.template_reference_analyzer import (
@@ -485,10 +486,16 @@ def normalize_ai_builder_step(
             )
         )
 
-    if (
-        effective_question_binding(step.input_bindings) is not None
-        and step.input_contract is not None
-    ):
+    # The canonical conflict rule decides: a structured JSON projection
+    # (source_refs with field paths on a json step) keeps its contract, which
+    # the runtime requires. Lowering every source_refs binding to a question
+    # here cleared the contract of untouched steps on edit (2026-09-05).
+    contract_conflict = input_contract_binding_conflict(
+        input_bindings=step.input_bindings,
+        input_contract=step.input_contract,
+        input_type=step.input_type.value,
+    )
+    if contract_conflict is not None:
         updates["input_contract"] = None
         changes.append(
             StepNormalizationChange(
@@ -497,6 +504,9 @@ def normalize_ai_builder_step(
                 message=(
                     "Removed input_contract because the explicit question binding "
                     "supplies rendered text, not the inherited structured object."
+                    if contract_conflict == "question"
+                    else "Removed input_contract because text source_refs supply "
+                    "rendered text, not one contract-shaped input object."
                 ),
             )
         )
