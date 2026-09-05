@@ -48768,7 +48768,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowReviewSuggestions"];
         };
       };
-      /** @description The flow has no published version, the sample timed out, the planner model is below the evidence level, or the model's answer did not resolve in the sample. */
+      /** @description The flow has no published version, the sample timed out, the planner model is below the evidence level, or the model answered in a format that could not be read. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -48785,7 +48785,7 @@ export interface operations {
            *         "request_id": "req_01HZYXEXAMPLE"
            *       },
            *       "eneo_error_code": 9007,
-           *       "message": "The review model's answer did not resolve in the sampled evidence.",
+           *       "message": "The review model answered in a format that could not be read.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2

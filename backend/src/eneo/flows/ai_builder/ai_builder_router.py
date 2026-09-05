@@ -902,10 +902,10 @@ async def get_flow_review_packet(
         400: _ai_builder_error_response(
             description=(
                 "The flow has no published version, the sample timed out, the "
-                "planner model is below the evidence level, or the model's "
-                "answer did not resolve in the sample."
+                "planner model is below the evidence level, or the model "
+                "answered in a format that could not be read."
             ),
-            message="The review model's answer did not resolve in the sampled evidence.",
+            message="The review model answered in a format that could not be read.",
             code=AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT,
         ),
         403: _ai_builder_error_response(

@@ -180,31 +180,6 @@ async def test_a_suggestion_that_does_not_resolve_in_the_sample_is_left_out_and_
 
 
 @pytest.mark.asyncio
-async def test_a_refused_suggestion_is_captured_with_its_prompt_when_the_tap_is_on(
-    tmp_path, monkeypatch
-):
-    """The log carries codes only; the env-gated tap keeps the raw answer and
-    the exact prompt so a refused quote can be compared offline."""
-    monkeypatch.setenv("ENEO_AI_BUILDER_REJECTED_PROPOSAL_CAPTURE_DIR", str(tmp_path))
-    answer = {
-        "suggestions": [
-            {
-                "kind": "missing_check",
-                "step_orders": [1],
-                "rationale": "x",
-                "sources": [{"source_id": "run1.step1.output", "quote": "aldrig sagt"}],
-            }
-        ]
-    }
-    await _generate(_Client(content=json.dumps(answer)))
-    (capture,) = tmp_path.glob("refused-review-suggestions-*.json")
-    payload = json.loads(capture.read_text())
-    assert payload["problem_codes"] == ["suggestion_1:source_1:quote_not_in_excerpt"]
-    assert json.loads(payload["content"]) == answer
-    assert "run1.step1.output" in json.dumps(payload["messages"], ensure_ascii=False)
-
-
-@pytest.mark.asyncio
 async def test_a_malformed_envelope_is_refused_whole():
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
         await _generate(_Client(content=json.dumps({"suggestions": "none"})))

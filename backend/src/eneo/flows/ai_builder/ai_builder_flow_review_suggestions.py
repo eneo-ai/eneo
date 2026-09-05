@@ -41,9 +41,6 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     FlowReviewSample,
     ReviewSampleExcerpt,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_capture import (
-    capture_refused_review_suggestions,
-)
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.main.logging import get_logger
 from eneo.tokens.token_utils import count_tokens, measure_provider_input_reserve
@@ -582,13 +579,6 @@ async def generate_review_suggestions(
             context={"problems": ["no_content"]},
         )
     parsed = parse_review_suggestions(content, sample=sample)
-    if parsed.problems:
-        capture_refused_review_suggestions(
-            content,
-            flow_id=str(sample.packet.flow_id),
-            problem_codes=list(parsed.problems),
-            messages=messages,
-        )
     if parsed.outcome == "invalid":
         logger.info(
             "AI Builder review suggestions rejected",
