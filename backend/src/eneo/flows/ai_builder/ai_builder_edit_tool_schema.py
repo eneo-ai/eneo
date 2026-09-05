@@ -177,6 +177,11 @@ def _build_modify_step_schema(
             "output_contract": {
                 "type": ["object", "null"],
                 "additionalProperties": True,
+                "description": (
+                    "JSON Schema for a JSON output step: an object with "
+                    '"type": "object", "properties": {field: schema}, and '
+                    '"required". Omit to keep the current contract.'
+                ),
             },
             "review_mode": build_review_mode_schema(),
         },

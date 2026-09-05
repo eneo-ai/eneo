@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -243,10 +244,13 @@ def apply_existing_step_patch(
         "input_source",
         "input_type",
         "output_type",
-        "output_contract",
     ):
         if field_name in fields:
             updates[field_name] = getattr(patch, field_name)
+    if "output_contract" in fields:
+        updates["output_contract"] = _object_schema_from_field_map(
+            patch.output_contract
+        )
     if "review_mode" in fields:
         updates["review_policy"] = compile_review_policy(patch.review_mode)
     if "assistant_spec" in fields:
@@ -258,6 +262,35 @@ def apply_existing_step_patch(
         )
 
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
+
+
+def _object_schema_from_field_map(
+    contract: FlowPersistedJsonObject | None,
+) -> FlowPersistedJsonObject | None:
+    """Admit a bare field map as the object schema it unambiguously means.
+
+    The edit tool asks for a JSON Schema object, but a model that writes
+    ``{"summary": {"type": "string"}}`` has named its fields without the
+    ``type``/``properties`` envelope. That map has exactly one lossless
+    reading; left as-is it compiled to a contract with no properties and the
+    critic then reported the named field as missing (2026-09-05).
+    """
+
+    if contract is None or not contract:
+        return contract
+    if any(
+        key in contract
+        for key in ("type", "properties", "$ref", "anyOf", "oneOf", "allOf", "items")
+    ):
+        return contract
+    if not all(isinstance(value, dict) for value in contract.values()):
+        return contract
+    return {
+        "type": "object",
+        "properties": dict(contract),
+        "required": list(contract),
+        "additionalProperties": False,
+    }
 
 
 def _compile_existing_step_modification(

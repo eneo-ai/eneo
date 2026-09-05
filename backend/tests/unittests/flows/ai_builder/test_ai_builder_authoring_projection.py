@@ -125,6 +125,51 @@ def test_edit_overlay_null_description_keeps_current_and_blank_clears() -> None:
     assert cleared.flow_description == ""
 
 
+def test_edit_overlay_wraps_bare_output_contract_field_map() -> None:
+    # Live 2026-09-05: the model named the fields without the schema envelope;
+    # compiled as-is the contract had no properties and the critic reported
+    # `summary` missing although it was there.
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep(
+                    existing_step_ref="existing_step_1",
+                    output_type=OutputType.JSON,
+                    output_contract={
+                        "summary": {"type": "string"},
+                        "key_points": {"type": "array", "items": {"type": "string"}},
+                    },
+                )
+            ],
+        ),
+    )
+    assert result.steps[0].output_contract == {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "key_points": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["summary", "key_points"],
+        "additionalProperties": False,
+    }
+
+    explicit = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    kept = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep(
+                    existing_step_ref="existing_step_1",
+                    output_type=OutputType.JSON,
+                    output_contract=explicit,
+                )
+            ],
+        ),
+    )
+    assert kept.steps[0].output_contract == explicit
+
+
 def test_edit_overlay_omitted_assistant_fields_preserve_snapshot() -> None:
     result = compile_ordered_edit_proposal(
         base_spec=_base_spec(),
