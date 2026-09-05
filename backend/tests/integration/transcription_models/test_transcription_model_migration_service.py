@@ -27,7 +27,7 @@ from eneo.main.exceptions import ValidationException
 class TestTranscriptionModelMigration:
     """End-to-end tests for transcription model migration."""
 
-    async def test_migrate_apps_successfully(
+    async def test_migrate_apps_from_inactive_source_model(
         self,
         db_container,
         transcription_model_factory,
@@ -37,7 +37,9 @@ class TestTranscriptionModelMigration:
         async with db_container() as container:
             session = container.session()
 
-            old_model = await transcription_model_factory(session, "whisper-old")
+            old_model = await transcription_model_factory(
+                session, "whisper-old", is_enabled=False
+            )
             new_model = await transcription_model_factory(session, "whisper-new")
 
             # App referencing the source transcription model (completion model

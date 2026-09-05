@@ -73,23 +73,43 @@ The repository uses GitHub security features and CI to prevent regressions:
   exact image digests scanned by platform and records the bundled store's
   multi-platform manifest reference for deployment.
 - The bundled object store is an Eneo-built artifact, not an upstream-signed
-  SeaweedFS image. The trusted publication job is restricted to protected
-  push/manual runs and uses the GitHub OIDC workflow identity—no PAT, registry
-  password, or signing key. It pins the SeaweedFS 4.40 source commit/archive,
-  Dockerfile frontend, compiler image, runtime image, tools, and every Action by
-  immutable digest or full commit SHA. A hashed downstream patch upgrades gRPC
-  to 1.82.1 until upstream includes that security fix. It publishes only after
-  both Linux platform candidates pass source/license policy, the exact reference
-  Compose bootstrap and persistence smoke, a reachable Go vulnerability scan,
-  and a Grype gate that includes unfixed HIGH/CRITICAL findings.
+  SeaweedFS image. `.github/workflows/seaweedfs_image.yml` owns it and runs
+  only when its pinned inputs change, so application image publishing is never
+  blocked by object-store policy drift. Privileged build, attestation, and
+  publication jobs run only for `develop` and use the GitHub OIDC workflow
+  identity—no PAT, registry password, or signing key. Pull requests and manual
+  runs from other branches run the same source policy, build, smoke test, SBOM,
+  and vulnerability gate against an ephemeral local registry with read-only
+  permissions; nothing reaches GHCR and nothing is attested. The workflow pins the SeaweedFS 4.40 source commit/archive, Dockerfile
+  frontend, compiler image, runtime image, tools, and every Action by immutable
+  digest or full commit SHA. A hashed downstream patch upgrades dependencies
+  with known advisories until upstream includes those fixes. It publishes only
+  after both Linux platform candidates pass source/license policy, a
+  reproducibility rebuild, the exact reference Compose bootstrap and
+  persistence smoke, a reachable Go vulnerability scan, and a Grype gate that
+  includes unfixed HIGH/CRITICAL findings.
+- The published tag is `ghcr.io/eneo-ai/eneo-seaweedfs:<docker/seaweedfs/VERSION>`
+  and is immutable by policy: the serialized publish job refuses to move a
+  version tag to different content and fails closed when it cannot read the
+  registry. An identical rebuild leaves the tag untouched and emits fresh
+  attestations bound to its own source commit. Every change to the image
+  inputs bumps `VERSION`.
+  A weekly scheduled run re-audits the pinned source and both published
+  platform digests against current Go and Grype vulnerability databases
+  without rebuilding or publishing; a red scheduled run is the signal to bump
+  the downstream patch (see `docker/seaweedfs/README.md`).
 - SeaweedFS source-license classifier gaps are resolved only by exact
   module/version/license-file hashes in `docker/seaweedfs/verify-supply-chain.sh`.
   Any dependency, version, license content, or unknown-package drift fails the
   job for review. This is not a general allowlist or vulnerability waiver.
 - Configure the `object-content-supply-chain` GitHub Environment as a protected
-  trusted-publication boundary. Do not grant package write, OIDC, or attestation
-  permissions to pull-request workflows. The canonical image/SBOM owners remain
-  `.github/workflows/build_and_push_images.yml` and
+  trusted-publication boundary with a deployment branch policy that allows
+  only `develop`; the workflow enforces the same rule in code, and the
+  environment policy is the backstop. Do not grant package write, OIDC, or
+  attestation permissions to pull-request workflows, and do not make the
+  path-filtered SeaweedFS workflow a required status check. The canonical
+  image/SBOM owners remain `.github/workflows/build_and_push_images.yml`,
+  `.github/workflows/seaweedfs_image.yml`, and
   `.github/workflows/release_sbom.yml`; do not create a parallel signing system.
 - Secret scanning and push protection should remain enabled for provider keys,
   tokens, credentials, and other repository secrets.
