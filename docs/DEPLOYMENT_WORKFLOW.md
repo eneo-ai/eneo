@@ -1,6 +1,6 @@
-# Contributing to This Project
+# Deployment Workflow
 
-Welcome! This document describes our Git workflow and deployment process. Please read it carefully before contributing.
+This document describes our Git workflow and deployment process. Please read it carefully before contributing.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -15,6 +15,7 @@ Welcome! This document describes our Git workflow and deployment process. Please
 - [Backflow: Release to Develop](#backflow-release-to-develop)
 - [Support / Maintenance Policy](#support--maintenance-policy)
 - [Docker Images](#docker-images)
+- [Documentation Versions](#documentation-versions)
 - [FAQ](#faq)
 
 ## Overview
@@ -387,6 +388,22 @@ ghcr.io/eneo-ai/eneo-frontend:v1.8.0-rc.1  # RC for testing
 ghcr.io/eneo-ai/eneo-frontend:v1.8.0       # Specific release
 ghcr.io/eneo-ai/eneo-frontend:latest       # Highest stable release
 ```
+
+## Documentation Versions
+
+[docs.eneo.ai](https://docs.eneo.ai) is built from `frontend/apps/docs-site` by `.github/workflows/deploy_docs.yml` and follows the release flow above automatically:
+
+| URL | Version | Built from |
+|-----|---------|------------|
+| `https://docs.eneo.ai/` | stable | `release/vX.Y` branch tip of the highest final `vX.Y.Z` tag |
+| `https://docs.eneo.ai/vX.Y/` | archive | the previous release lines |
+| `https://docs.eneo.ai/dev/` | dev | `develop` |
+
+- **Nothing to do at release time.** Publishing the final `v2.2.0` tag makes `release/v2.2` the stable docs on the next run; the previous stable line becomes an archive. RC tags never move stable.
+- **Docs fixes for a released version** are hotfixes: PR to the release branch touching `frontend/apps/docs-site/**`, merge, then cherry-pick to `develop` like any other fix. The merge republishes stable.
+- **Unreleased features** are documented on `develop` and appear under `/dev/` with a banner until they ship.
+
+Because the `github-pages` environment only accepts deployments from `develop`, pushes to release branches and tags re-dispatch the workflow on `develop`, which rebuilds every version from its own ref. See `frontend/apps/docs-site/README.md` for the mechanics and local preview.
 
 ## FAQ
 
