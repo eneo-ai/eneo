@@ -143,6 +143,7 @@ from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
     NotFoundException,
+    ResourceGoneException,
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
@@ -885,6 +886,14 @@ async def get_flow_review_packet(
     return packet
 
 
+_REVIEW_DOMAIN_FAILURES = (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+    ResourceGoneException,
+)
+
+
 @router.post(
     "/flows/{flow_id}/review-suggestions",
     response_model=FlowReviewSuggestions,
@@ -923,7 +932,7 @@ async def post_flow_review_suggestions(
     container: ContainerWithUserExplicitTransactionDep,
     ui_language: str | None = None,
 ) -> FlowReviewSuggestions:
-    """Audit and read inside one evidence snapshot; call the provider after it."""
+    """Audit, read and prepare inside one evidence snapshot; call the provider after it."""
 
     user = container.user()
     audited_runs: list[FlowRun] = []
@@ -939,6 +948,7 @@ async def post_flow_review_suggestions(
         )
         audited_runs.append(run)
 
+    service = container.ai_builder_service()
     try:
         async with flow_run_evidence_snapshot_transaction(container):
             authorization = await _authorize_ai_builder_request(
@@ -955,7 +965,19 @@ async def post_flow_review_suggestions(
                     flow_id=flow_id, space_id=space_id, audit=_audit
                 )
             )
+            # Route resolution reads provider credentials: inside the snapshot.
+            prepared = await service.prepare_review_judgement(
+                sample=sample,
+                space=space,
+                active_provider_ids=active_provider_ids,
+                tenant_flow_settings=tenant.flow_settings if tenant else None,
+            )
     except AuditLoggingUnavailableException:
+        raise
+    except _REVIEW_DOMAIN_FAILURES:
+        # A refusal the sample or the model policy declared keeps its own
+        # code; only an audit write or the commit that carries it is an audit
+        # failure.
         raise
     except Exception as exc:
         if audited_runs:
@@ -967,12 +989,8 @@ async def post_flow_review_suggestions(
             )
         raise
 
-    return await container.ai_builder_service().judge_review_sample(
-        sample=sample,
-        space=space,
-        active_provider_ids=active_provider_ids,
-        tenant_flow_settings=tenant.flow_settings if tenant else None,
-        ui_language=ui_language,
+    return await service.judge_review_sample(
+        prepared=prepared, sample=sample, ui_language=ui_language
     )
 
 

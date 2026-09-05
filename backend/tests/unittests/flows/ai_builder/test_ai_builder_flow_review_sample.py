@@ -264,7 +264,8 @@ def _service_with_runs(user, *, levels: list[int], bundle_delay: float = 0.0):
                     "effective_prompt": "P",
                     "output_payload_json": {"text": "Ut"},
                 },
-            )
+            ),
+            debug_export={"run": {"summary": {"omissions": []}}},
         )
 
     async def _ensure(run, *, access_kind):
@@ -372,3 +373,36 @@ async def test_sample_reads_are_bounded_by_a_deadline(user, monkeypatch):
             flow_id=flow_id, space_id=space_id, audit=_audit
         )
     assert excinfo.value.code == AIBuilderErrorCode.REVIEW_SAMPLE_TIMEOUT
+
+
+def test_a_result_the_reader_left_unread_is_not_called_unrecorded() -> None:
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+        reader_omitted_step_results,
+    )
+
+    run_id = uuid4()
+    steps = [_step(1), _step(2)]
+    records = (_record(1, output_payload_json={"text": "Ut"}),)
+    omitted = reader_omitted_step_results(
+        {
+            "run": {
+                "summary": {
+                    "omissions": [{"section": "step_results", "rows_omitted": 1}]
+                }
+            }
+        }
+    )
+    assert omitted is True
+    assert reader_omitted_step_results({"run": {"summary": {"omissions": []}}}) is False
+    by_key = {
+        (excerpt.step_order, excerpt.field): excerpt
+        for excerpt in excerpts_for_run(
+            run_id=run_id,
+            steps=steps,
+            step_result_records=records,
+            budget=ExcerptBudget(),
+            reader_omitted_records=omitted,
+        )
+    }
+    assert by_key[(1, "output")].availability == "included"
+    assert by_key[(2, "output")].availability == "omitted_by_reader"

@@ -17940,6 +17940,8 @@ export interface components {
       excerpts_not_recorded: number;
       /** Excerpts Omitted By Budget */
       excerpts_omitted_by_budget: number;
+      /** Excerpts Omitted By Reader */
+      excerpts_omitted_by_reader: number;
       /** Excerpts Truncated */
       excerpts_truncated: number;
       /** Excerpts Unavailable */

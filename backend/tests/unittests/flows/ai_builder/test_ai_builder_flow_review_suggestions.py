@@ -201,3 +201,79 @@ def test_unknown_kind_unverifiable_source_or_foreign_fact_invalidates_the_answer
         parsed = parse_review_suggestions(_answer(suggestion), sample=sample)
         assert parsed.outcome == "invalid", label
         assert parsed.problems, label
+        # Diagnostics are codes with positions, never the model's own text.
+        assert all(":" in problem for problem in parsed.problems), label
+        assert "rename_step" not in " ".join(parsed.problems)
+
+
+def test_absence_claims_need_complete_evidence_for_their_sources_and_steps():
+    sample = _sample()
+    # run1.step2.output is omitted by budget: step 2 has no complete output, and
+    # the only readable source for it is the prompt.
+    absence_on_incomplete_step = {
+        "kind": "missing_check",
+        "step_orders": [2],
+        "rationale": "Ingen kontroll av datum sker i steg 2.",
+        "sources": [{"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"}],
+    }
+    parsed = parse_review_suggestions(
+        _answer(absence_on_incomplete_step), sample=sample
+    )
+    assert parsed.outcome == "invalid"
+    assert parsed.problems == (
+        "suggestion_1:absence_claim_without_complete_step_output",
+    )
+
+    # Step 1 has a complete output in run 1: a missing_check on step 1 may cite it.
+    absence_on_complete_step = {
+        "kind": "missing_check",
+        "step_orders": [1],
+        "rationale": "Ingen kontroll av datum sker i steg 1.",
+        "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
+    }
+    assert (
+        parse_review_suggestions(
+            _answer(absence_on_complete_step), sample=sample
+        ).outcome
+        == "valid"
+    )
+
+    # The same claim resting on a truncated excerpt is refused.
+    truncated_sample = sample.model_copy(
+        update={
+            "excerpts": [
+                excerpt.model_copy(update={"availability": "truncated"})
+                if excerpt.step_order == 1 and excerpt.field == "output"
+                else excerpt
+                for excerpt in sample.excerpts
+            ]
+        }
+    )
+    parsed = parse_review_suggestions(
+        _answer(absence_on_complete_step), sample=truncated_sample
+    )
+    assert parsed.outcome == "invalid"
+    assert parsed.problems[0].endswith("absence_claim_cites_incomplete_source")
+    # A drift claim on the same truncated excerpt is still admissible.
+    drift = {**absence_on_complete_step, "kind": "instruction_outcome_drift"}
+    assert (
+        parse_review_suggestions(_answer(drift), sample=truncated_sample).outcome
+        == "valid"
+    )
+
+
+def test_prompt_states_the_wire_shape_in_every_mode():
+    messages = build_review_suggestions_messages(_sample(), ui_language="sv")
+    system = messages[0]["content"]
+    for key in (
+        '"suggestions"',
+        '"kind"',
+        '"step_orders"',
+        '"rationale"',
+        '"sources"',
+        '"source_id"',
+        '"quote"',
+        '"fact_ids"',
+    ):
+        assert key in system
+    assert '{"suggestions": []}' in system

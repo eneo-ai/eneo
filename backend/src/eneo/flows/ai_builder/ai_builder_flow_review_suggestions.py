@@ -94,6 +94,7 @@ class FlowReviewSuggestionSampleSummary(BaseModel):
     excerpts_included: int
     excerpts_truncated: int
     excerpts_omitted_by_budget: int
+    excerpts_omitted_by_reader: int
     excerpts_not_recorded: int
     excerpts_unavailable: int
 
@@ -117,6 +118,7 @@ def sample_summary(sample: FlowReviewSample) -> FlowReviewSuggestionSampleSummar
         "included": 0,
         "truncated": 0,
         "omitted_by_budget": 0,
+        "omitted_by_reader": 0,
         "not_recorded": 0,
         "unavailable": 0,
     }
@@ -128,6 +130,7 @@ def sample_summary(sample: FlowReviewSample) -> FlowReviewSuggestionSampleSummar
         excerpts_included=counts["included"],
         excerpts_truncated=counts["truncated"],
         excerpts_omitted_by_budget=counts["omitted_by_budget"],
+        excerpts_omitted_by_reader=counts["omitted_by_reader"],
         excerpts_not_recorded=counts["not_recorded"],
         excerpts_unavailable=counts["unavailable"],
     )
@@ -212,6 +215,7 @@ _AVAILABILITY_SV = {
     "included": "ingår",
     "truncated": "avklippt",
     "omitted_by_budget": "utelämnad av budgetskäl – inte läst",
+    "omitted_by_reader": "inte läst av bevisläsaren – inte bevis",
     "not_recorded": "inte inspelad i körningen",
     "unavailable_mapped_prompt": "stegets prompt gäller bara första posten – inte bevis",
     "unavailable_template_fill": "mallfyllning spelar inte in någon prompt",
@@ -228,10 +232,14 @@ Svara med JSON enligt schemat. Föreslå bara det som utdragen faktiskt visar:
 
 Regler:
 - Varje förslag ska ha 1–{MAX_SOURCES_PER_SUGGESTION} källor: käll-id exakt som i underlaget och ett ordagrant citat (högst {MAX_QUOTE_CHARS} tecken) ur den källan.
-- Källor som är avklippta, utelämnade eller inte inspelade kan inte styrka att något saknas.
+- Källor som är avklippta, utelämnade eller inte inspelade kan inte styrka att något saknas; missing_check och step_not_useful kräver att alla citerade källor ingår i sin helhet.
 - Använd fact-id i fact_ids bara när faktumet stödjer förslaget.
-- Högst {MAX_SUGGESTIONS} förslag. Inga förslag är ett giltigt svar: returnera en tom lista.
-- Motivering på svenska, högst {MAX_RATIONALE_CHARS} tecken, inga personuppgifter ur utdragen."""
+- Högst {MAX_SUGGESTIONS} förslag. Inga förslag är ett giltigt svar.
+- Motivering på svenska, högst {MAX_RATIONALE_CHARS} tecken, inga personuppgifter ur utdragen.
+
+Svarsform (exakt dessa nycklar, JSON utan kommentarer):
+{{"suggestions": [{{"kind": "duplicated_work", "step_orders": [2, 3], "rationale": "…", "sources": [{{"source_id": "run1.step2.output", "quote": "…"}}], "fact_ids": []}}]}}
+Utan förslag: {{"suggestions": []}}"""
 
 _SYSTEM_EN = _SYSTEM_SV  # The judgement language follows the workspace; Swedish today.
 
@@ -295,9 +303,15 @@ def review_suggestions_response_format(mode: StructuredOutputMode) -> dict[str, 
 
 @dataclass(frozen=True)
 class ParsedReviewSuggestions:
+    """Diagnostics are reason codes with positions, never the model's text:
+    a rejected value may carry copied evidence and this outcome is logged."""
+
     outcome: Literal["valid", "invalid"]
     suggestions: tuple[FlowReviewSuggestion, ...] = ()
     problems: tuple[str, ...] = field(default_factory=tuple)
+
+
+ABSENCE_KINDS: frozenset[str] = frozenset({"missing_check", "step_not_useful"})
 
 
 def parse_review_suggestions(
@@ -307,44 +321,24 @@ def parse_review_suggestions(
 
     try:
         raw: object = json.loads(content)
-    except json.JSONDecodeError as exc:
-        return ParsedReviewSuggestions("invalid", problems=(f"not JSON: {exc.msg}",))
+    except json.JSONDecodeError:
+        return ParsedReviewSuggestions("invalid", problems=("not_json",))
     if not isinstance(raw, dict):
-        return ParsedReviewSuggestions(
-            "invalid", problems=("top level is not an object",)
-        )
+        return ParsedReviewSuggestions("invalid", problems=("top_level_not_object",))
     raw_suggestions = cast(dict[str, object], raw).get("suggestions")
     if not isinstance(raw_suggestions, list):
-        return ParsedReviewSuggestions(
-            "invalid", problems=("`suggestions` is not a list",)
-        )
+        return ParsedReviewSuggestions("invalid", problems=("suggestions_not_list",))
     items = cast(list[object], raw_suggestions)
     if len(items) > MAX_SUGGESTIONS:
-        return ParsedReviewSuggestions(
-            "invalid", problems=(f"more than {MAX_SUGGESTIONS} suggestions",)
-        )
+        return ParsedReviewSuggestions("invalid", problems=("too_many_suggestions",))
 
-    step_orders = {step.step_order for step in sample.steps}
-    fact_ids = {fact.finding_id for fact in sample.packet.facts}
-    run_index_by_id = {run.run_id: index + 1 for index, run in enumerate(sample.runs)}
-    excerpts_by_source_id = {
-        excerpt_source_id(excerpt, run_index=run_index_by_id[excerpt.run_id]): excerpt
-        for excerpt in sample.excerpts
-        if excerpt.run_id in run_index_by_id
-    }
-
+    context = _SampleIndex.build(sample)
     suggestions: list[FlowReviewSuggestion] = []
     problems: list[str] = []
     for position, item in enumerate(items):
-        parsed = _parse_suggestion(
-            item,
-            position=position,
-            step_orders=step_orders,
-            fact_ids=fact_ids,
-            excerpts_by_source_id=excerpts_by_source_id,
-        )
+        parsed = _parse_suggestion(item, index=context)
         if isinstance(parsed, str):
-            problems.append(parsed)
+            problems.append(f"suggestion_{position + 1}:{parsed}")
             continue
         suggestions.append(parsed)
     if problems:
@@ -352,56 +346,92 @@ def parse_review_suggestions(
     return ParsedReviewSuggestions("valid", suggestions=tuple(suggestions))
 
 
+@dataclass(frozen=True)
+class _SampleIndex:
+    step_orders: frozenset[int]
+    fact_ids: frozenset[str]
+    excerpts_by_source_id: dict[str, ReviewSampleExcerpt]
+    complete_output_steps: frozenset[int]
+
+    @classmethod
+    def build(cls, sample: FlowReviewSample) -> "_SampleIndex":
+        run_index_by_id = {
+            run.run_id: index + 1 for index, run in enumerate(sample.runs)
+        }
+        excerpts = {
+            excerpt_source_id(
+                excerpt, run_index=run_index_by_id[excerpt.run_id]
+            ): excerpt
+            for excerpt in sample.excerpts
+            if excerpt.run_id in run_index_by_id
+        }
+        return cls(
+            step_orders=frozenset(step.step_order for step in sample.steps),
+            fact_ids=frozenset(fact.finding_id for fact in sample.packet.facts),
+            excerpts_by_source_id=excerpts,
+            complete_output_steps=frozenset(
+                excerpt.step_order
+                for excerpt in sample.excerpts
+                if excerpt.field == "output" and excerpt.availability == "included"
+            ),
+        )
+
+
 def _parse_suggestion(
-    item: object,
-    *,
-    position: int,
-    step_orders: set[int],
-    fact_ids: set[str],
-    excerpts_by_source_id: dict[str, ReviewSampleExcerpt],
+    item: object, *, index: _SampleIndex
 ) -> FlowReviewSuggestion | str:
-    where = f"suggestion {position + 1}"
     if not isinstance(item, dict):
-        return f"{where}: not an object"
+        return "not_object"
     data = cast(dict[str, object], item)
     kind = data.get("kind")
     if kind not in SUGGESTION_KINDS:
-        return f"{where}: unknown kind {kind!r}"
+        return "unknown_kind"
     raw_steps = data.get("step_orders")
     if not isinstance(raw_steps, list) or not raw_steps:
-        return f"{where}: step_orders missing"
+        return "step_orders_missing"
     steps: list[int] = []
     for raw_step in cast(list[object], raw_steps):
         if isinstance(raw_step, bool) or not isinstance(raw_step, int):
-            return f"{where}: step_orders must be integers"
-        if raw_step not in step_orders:
-            return f"{where}: step {raw_step} is not in the reviewed definition"
+            return "step_orders_not_integers"
+        if raw_step not in index.step_orders:
+            return "step_not_in_definition"
         steps.append(raw_step)
     rationale = data.get("rationale")
     if not isinstance(rationale, str) or not rationale.strip():
-        return f"{where}: rationale missing"
+        return "rationale_missing"
     if len(rationale) > MAX_RATIONALE_CHARS:
-        return f"{where}: rationale longer than {MAX_RATIONALE_CHARS} characters"
+        return "rationale_too_long"
     raw_sources = data.get("sources")
     if not isinstance(raw_sources, list) or not raw_sources:
-        return f"{where}: sources missing"
+        return "sources_missing"
     source_items = cast(list[object], raw_sources)
     if len(source_items) > MAX_SOURCES_PER_SUGGESTION:
-        return f"{where}: more than {MAX_SOURCES_PER_SUGGESTION} sources"
+        return "too_many_sources"
     sources: list[FlowReviewSuggestionSource] = []
-    for raw_source in source_items:
-        source = _parse_source(raw_source, excerpts_by_source_id=excerpts_by_source_id)
-        if isinstance(source, str):
-            return f"{where}: {source}"
+    availabilities: list[str] = []
+    for position, raw_source in enumerate(source_items):
+        parsed = _parse_source(raw_source, index=index)
+        if isinstance(parsed, str):
+            return f"source_{position + 1}:{parsed}"
+        source, availability = parsed
         sources.append(source)
+        availabilities.append(availability)
     raw_fact_ids = data.get("fact_ids", [])
     if not isinstance(raw_fact_ids, list):
-        return f"{where}: fact_ids is not a list"
+        return "fact_ids_not_list"
     cited_facts: list[str] = []
     for raw_fact in cast(list[object], raw_fact_ids):
-        if not isinstance(raw_fact, str) or raw_fact not in fact_ids:
-            return f"{where}: fact id {raw_fact!r} is not in the packet"
+        if not isinstance(raw_fact, str) or raw_fact not in index.fact_ids:
+            return "fact_not_in_packet"
         cited_facts.append(raw_fact)
+    if kind in ABSENCE_KINDS:
+        # A claim that something is absent is only as good as what was read:
+        # every cited source must be complete, and every named step must
+        # have at least one complete output in the sample.
+        if any(availability != "included" for availability in availabilities):
+            return "absence_claim_cites_incomplete_source"
+        if any(step not in index.complete_output_steps for step in steps):
+            return "absence_claim_without_complete_step_output"
     return FlowReviewSuggestion(
         kind=cast(FlowReviewSuggestionKind, kind),
         step_orders=sorted(set(steps)),
@@ -412,30 +442,33 @@ def _parse_suggestion(
 
 
 def _parse_source(
-    raw_source: object, *, excerpts_by_source_id: dict[str, ReviewSampleExcerpt]
-) -> FlowReviewSuggestionSource | str:
+    raw_source: object, *, index: _SampleIndex
+) -> tuple[FlowReviewSuggestionSource, str] | str:
     if not isinstance(raw_source, dict):
-        return "source is not an object"
+        return "not_object"
     data = cast(dict[str, object], raw_source)
     source_id = data.get("source_id")
     quote = data.get("quote")
     if not isinstance(source_id, str) or not isinstance(quote, str):
-        return "source needs source_id and quote"
-    excerpt = excerpts_by_source_id.get(source_id.strip())
+        return "shape"
+    excerpt = index.excerpts_by_source_id.get(source_id.strip())
     if excerpt is None:
-        return f"source {source_id!r} is not in the sample"
+        return "unknown_source"
     if excerpt.availability not in ("included", "truncated") or not excerpt.text:
-        return f"source {source_id!r} has no readable text"
+        return "source_not_readable"
     quote = quote.strip()
     if not quote or len(quote) > MAX_QUOTE_CHARS:
-        return f"quote for {source_id!r} is empty or too long"
+        return "quote_length"
     if quote not in excerpt.text:
-        return f"quote for {source_id!r} is not in the excerpt"
-    return FlowReviewSuggestionSource(
-        run_id=excerpt.run_id,
-        step_order=excerpt.step_order,
-        field=excerpt.field,
-        quote=quote,
+        return "quote_not_in_excerpt"
+    return (
+        FlowReviewSuggestionSource(
+            run_id=excerpt.run_id,
+            step_order=excerpt.step_order,
+            field=excerpt.field,
+            quote=quote,
+        ),
+        excerpt.availability,
     )
 
 
@@ -511,13 +544,13 @@ async def generate_review_suggestions(
         raise AIBuilderBadRequestException(
             "The review model returned no content.",
             code=AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT,
-            context={"problems": ["no content"]},
+            context={"problems": ["no_content"]},
         )
     parsed = parse_review_suggestions(content, sample=sample)
     if parsed.outcome == "invalid":
         logger.info(
             "AI Builder review suggestions rejected",
-            extra={"model": litellm_model, "problems": list(parsed.problems)},
+            extra={"model": litellm_model, "problem_codes": list(parsed.problems)},
         )
         raise AIBuilderBadRequestException(
             "The review model's answer did not resolve in the sampled evidence.",

@@ -43,6 +43,7 @@ ExcerptAvailability = Literal[
     "included",
     "truncated",
     "omitted_by_budget",
+    "omitted_by_reader",
     "not_recorded",
     "unavailable_mapped_prompt",
     "unavailable_template_fill",
@@ -181,18 +182,43 @@ class ExcerptBudget:
         return text[:allowed], "truncated"
 
 
+def reader_omitted_step_results(debug_export: dict[str, Any]) -> bool:
+    """Whether the evidence reader left step results unread under its own limits.
+
+    The reader records row and byte omissions per section; a step result it
+    did not return is unread, not unrecorded, and the sample must say so.
+    """
+
+    run_export = debug_export.get("run")
+    if not isinstance(run_export, dict):
+        return False
+    summary = cast(dict[str, Any], run_export).get("summary")
+    if not isinstance(summary, dict):
+        return False
+    omissions = cast(dict[str, Any], summary).get("omissions")
+    if not isinstance(omissions, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and cast(dict[str, Any], item).get("section") == "step_results"
+        for item in cast(list[object], omissions)
+    )
+
+
 def excerpts_for_run(
     *,
     run_id: UUID,
     steps: list[RuntimeStep],
     step_result_records: tuple[dict[str, Any], ...],
     budget: ExcerptBudget,
+    reader_omitted_records: bool = False,
 ) -> list[ReviewSampleExcerpt]:
     """Prompt, input and output excerpts per step, in step order.
 
     Availability is decided before budget: a mapped step records only its
-    first item's prompt and a template fill records none, and a field a run
-    never recorded is "not_recorded", never "omitted".
+    first item's prompt and a template fill records none; a field a run
+    never recorded is "not_recorded"; a result the reader left unread under
+    its own limits is "omitted_by_reader". Neither is "omitted_by_budget".
     """
 
     records_by_order = {
@@ -215,6 +241,11 @@ def excerpts_for_run(
                     record=record,
                     mapped=mapped,
                     budget=budget,
+                    missing_record_availability=(
+                        "omitted_by_reader"
+                        if reader_omitted_records
+                        else "not_recorded"
+                    ),
                 )
             )
     return excerpts
@@ -228,6 +259,7 @@ def _excerpt(
     record: dict[str, Any] | None,
     mapped: bool,
     budget: ExcerptBudget,
+    missing_record_availability: ExcerptAvailability,
 ) -> ReviewSampleExcerpt:
     def unavailable(availability: ExcerptAvailability) -> ReviewSampleExcerpt:
         return ReviewSampleExcerpt(
@@ -243,7 +275,7 @@ def _excerpt(
         if mapped:
             return unavailable("unavailable_mapped_prompt")
     if record is None:
-        return unavailable("not_recorded")
+        return unavailable(missing_record_availability)
     text = _recorded_text(record, field)
     if text is None:
         return unavailable("not_recorded")

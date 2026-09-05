@@ -41,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     ReviewSampleExcerpt,
     ReviewSampleRun,
     excerpts_for_run,
+    reader_omitted_step_results,
     select_sample_run_ids,
     structural_steps,
 )
@@ -612,6 +613,9 @@ class AIBuilderFlowReviewService:
                             steps=steps,
                             step_result_records=bundle.step_results,
                             budget=budget,
+                            reader_omitted_records=reader_omitted_step_results(
+                                bundle.debug_export
+                            ),
                         )
                     )
         except TimeoutError as exc:

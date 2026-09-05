@@ -3042,33 +3042,46 @@ class TestCreatePlanEndpoint:
 
 class _SnapshotSession:
     """The evidence snapshot transaction: begin() is an async context, and the
-    isolation level is set through an awaited connection() call."""
+    isolation level is set through an awaited connection() call. `fail_commit`
+    makes the transaction fail on exit, the way a failed audit commit would."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, fail_commit: bool = False) -> None:
         self.connection = AsyncMock()
+        self.fail_commit = fail_commit
+        self.open = False
 
     def begin(self):
         return self
 
     async def __aenter__(self):
+        self.open = True
         return self
 
-    async def __aexit__(self, *exc):
+    async def __aexit__(self, exc_type, exc, tb):
+        self.open = False
+        if exc_type is None and self.fail_commit:
+            raise RuntimeError("commit failed")
         return False
+
+
+def _review_container(*, session: _SnapshotSession, flow_settings=None, providers=()):
+    container = _make_container()
+    container.session.return_value = session
+    container.tenant_repo.return_value.get = AsyncMock(
+        return_value=SimpleNamespace(flow_settings=flow_settings)
+    )
+    container.model_provider_repository.return_value.all = AsyncMock(
+        return_value=[SimpleNamespace(id=provider_id) for provider_id in providers]
+    )
+    container.audit_service.return_value.log = AsyncMock()
+    return container
 
 
 class TestReviewSuggestionsEndpoint:
     @pytest.mark.anyio
     async def test_a_failed_audit_stops_the_sample_and_makes_no_provider_call(self):
-        container = _make_container()
-        container.session.return_value = _SnapshotSession()
-        container.tenant_repo.return_value.get = AsyncMock(
-            return_value=SimpleNamespace(flow_settings=None)
-        )
-        container.model_provider_repository.return_value.all = AsyncMock(
-            return_value=[]
-        )
-        # The audit write fails on commit; the tap must refuse before any read.
+        container = _review_container(session=_SnapshotSession())
+        # The audit write fails; the tap must refuse before any read.
         container.audit_service.return_value.log = AsyncMock(
             side_effect=RuntimeError("audit unavailable")
         )
@@ -3082,7 +3095,7 @@ class TestReviewSuggestionsEndpoint:
 
         review_service = container.ai_builder_flow_review_service.return_value
         review_service.build_review_sample = _build_review_sample
-        judge = container.ai_builder_service.return_value.judge_review_sample
+        service = container.ai_builder_service.return_value
 
         with pytest.raises(AuditLoggingUnavailableException):
             await post_flow_review_suggestions(
@@ -3093,33 +3106,90 @@ class TestReviewSuggestionsEndpoint:
             )
 
         assert bundle_reads == []
-        judge.assert_not_called()
+        service.prepare_review_judgement.assert_not_called()
+        service.judge_review_sample.assert_not_called()
 
     @pytest.mark.anyio
-    async def test_the_provider_is_judged_after_the_snapshot_with_the_audited_sample(
+    async def test_a_failed_commit_after_the_audits_is_an_audit_failure_with_no_call(
         self,
     ):
-        container = _make_container()
-        container.session.return_value = _SnapshotSession()
-        container.tenant_repo.return_value.get = AsyncMock(
-            return_value=SimpleNamespace(flow_settings={"x": 1})
+        container = _review_container(session=_SnapshotSession(fail_commit=True))
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+
+        async def _build_review_sample(*, flow_id, space_id, audit):
+            await audit(run)
+            return object()
+
+        container.ai_builder_flow_review_service.return_value.build_review_sample = (
+            _build_review_sample
         )
+        service = container.ai_builder_service.return_value
+
+        with pytest.raises(AuditLoggingUnavailableException):
+            await post_flow_review_suggestions(
+                request=_make_request(),
+                flow_id=run.flow_id,
+                space_id=uuid4(),
+                container=container,
+            )
+
+        service.judge_review_sample.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_a_sample_refusal_after_an_audit_keeps_its_own_code(self):
+        container = _review_container(session=_SnapshotSession())
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+
+        async def _build_review_sample(*, flow_id, space_id, audit):
+            await audit(run)
+            raise AIBuilderBadRequestException(
+                "too slow", code=AIBuilderErrorCode.REVIEW_SAMPLE_TIMEOUT
+            )
+
+        container.ai_builder_flow_review_service.return_value.build_review_sample = (
+            _build_review_sample
+        )
+
+        with pytest.raises(AIBuilderBadRequestException) as excinfo:
+            await post_flow_review_suggestions(
+                request=_make_request(),
+                flow_id=run.flow_id,
+                space_id=uuid4(),
+                container=container,
+            )
+        assert excinfo.value.code == AIBuilderErrorCode.REVIEW_SAMPLE_TIMEOUT
+        container.ai_builder_service.return_value.judge_review_sample.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_the_route_is_prepared_inside_the_snapshot_and_judged_after_it(self):
+        session = _SnapshotSession()
         provider_id = uuid4()
-        container.model_provider_repository.return_value.all = AsyncMock(
-            return_value=[SimpleNamespace(id=provider_id)]
+        container = _review_container(
+            session=session, flow_settings={"x": 1}, providers=(provider_id,)
         )
-        container.audit_service.return_value.log = AsyncMock()
         run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
         sample = object()
+        prepared = object()
+        seen: dict[str, bool] = {}
 
         async def _build_review_sample(*, flow_id, space_id, audit):
             await audit(run)
             return sample
 
-        review_service = container.ai_builder_flow_review_service.return_value
-        review_service.build_review_sample = _build_review_sample
-        judge = container.ai_builder_service.return_value.judge_review_sample
-        judge.return_value = "judged"
+        async def _prepare(**kwargs):
+            seen["prepare_in_transaction"] = session.open
+            return prepared
+
+        async def _judge(**kwargs):
+            seen["judge_in_transaction"] = session.open
+            return "judged"
+
+        container.ai_builder_flow_review_service.return_value.build_review_sample = (
+            _build_review_sample
+        )
+        service = container.ai_builder_service.return_value
+        service.prepare_review_judgement = AsyncMock(side_effect=_prepare)
+        service.judge_review_sample = AsyncMock(side_effect=_judge)
 
         result = await post_flow_review_suggestions(
             request=_make_request(),
@@ -3130,10 +3200,13 @@ class TestReviewSuggestionsEndpoint:
         )
 
         assert result == "judged"
+        assert seen == {"prepare_in_transaction": True, "judge_in_transaction": False}
         container.audit_service.return_value.log.assert_awaited_once()
-        judge.assert_awaited_once()
-        kwargs = judge.await_args.kwargs
-        assert kwargs["sample"] is sample
-        assert kwargs["active_provider_ids"] == {provider_id}
-        assert kwargs["tenant_flow_settings"] == {"x": 1}
-        assert kwargs["ui_language"] == "sv"
+        prepare_kwargs = service.prepare_review_judgement.await_args.kwargs
+        assert prepare_kwargs["sample"] is sample
+        assert prepare_kwargs["active_provider_ids"] == {provider_id}
+        assert prepare_kwargs["tenant_flow_settings"] == {"x": 1}
+        judge_kwargs = service.judge_review_sample.await_args.kwargs
+        assert judge_kwargs["prepared"] is prepared
+        assert judge_kwargs["sample"] is sample
+        assert judge_kwargs["ui_language"] == "sv"

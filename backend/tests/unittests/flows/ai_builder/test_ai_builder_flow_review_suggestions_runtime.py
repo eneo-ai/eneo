@@ -172,7 +172,9 @@ async def test_an_answer_that_does_not_resolve_in_the_sample_is_refused_not_empt
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
         await _generate(client)
     assert excinfo.value.code == AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT
-    assert "not in the excerpt" in " ".join(excinfo.value.context["problems"])
+    assert excinfo.value.context["problems"] == [
+        "suggestion_1:source_1:quote_not_in_excerpt"
+    ]
 
 
 @pytest.mark.asyncio
@@ -202,3 +204,31 @@ async def test_a_provider_error_is_recorded_as_a_provider_failure():
     with pytest.raises(Exception) as excinfo:
         await _generate(client)
     assert not isinstance(excinfo.value, RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_rejected_model_text_never_reaches_the_error_or_the_log(caplog):
+    # A malformed field may carry copied evidence; only reason codes may leave.
+    sentinel = "PERSONNUMMER-19900101-1234"
+    client = _Client(
+        content=json.dumps(
+            {
+                "suggestions": [
+                    {
+                        "kind": sentinel,
+                        "step_orders": [1],
+                        "rationale": sentinel,
+                        "sources": [{"source_id": sentinel, "quote": sentinel}],
+                        "fact_ids": [sentinel],
+                    }
+                ]
+            }
+        )
+    )
+    with caplog.at_level("INFO"):
+        with pytest.raises(AIBuilderBadRequestException) as excinfo:
+            await _generate(client)
+    assert excinfo.value.context["problems"] == ["suggestion_1:unknown_kind"]
+    assert sentinel not in str(excinfo.value)
+    assert sentinel not in json.dumps(excinfo.value.context, default=str)
+    assert sentinel not in caplog.text

@@ -162,6 +162,18 @@ def _sanitize_ai_builder_litellm_kwargs(
 
 
 @dataclass(frozen=True)
+class PreparedReviewJudgement:
+    """What a review judgement resolved inside a transaction: the route with
+    its credentials, the model identity and the budgets it is admitted under."""
+
+    completion_model_route: ResolvedCompletionModelRoute
+    model_id: UUID
+    max_input_tokens: int
+    max_output_tokens: int
+    budget_policy: AIBuilderBudgetPolicy
+
+
+@dataclass(frozen=True)
 class PreparedMessageContext:
     """Pre-fetched planner and flow context for AI Builder message handling."""
 
@@ -716,20 +728,20 @@ class AIBuilderService:
             revision_type=revision_type,
         )
 
-    async def judge_review_sample(
+    async def prepare_review_judgement(
         self,
         *,
         sample: FlowReviewSample,
         space: "Space",
         active_provider_ids: AbstractSet[UUID],
         tenant_flow_settings: dict[str, Any] | None,
-        ui_language: str | None,
-    ) -> FlowReviewSuggestions:
-        """Let the space's planner model judge an already audited sample.
+    ) -> PreparedReviewJudgement:
+        """Everything the judgement needs from the database, before any call.
 
-        The model must clear the sample's evidence floor, the same rule a turn
-        that reads run evidence is held to; the provider call happens outside
-        any database transaction, after the caller committed the audits.
+        The planner model must clear the sample's evidence floor, the same
+        rule a turn that reads run evidence is held to. Route resolution reads
+        provider credentials, so it belongs inside the caller's transaction;
+        the provider call itself must not.
         """
 
         planner_context = build_planner_context(
@@ -744,14 +756,31 @@ class AIBuilderService:
             route,
             litellm_kwargs=_sanitize_ai_builder_litellm_kwargs(route.litellm_kwargs),
         )
-        return await generate_review_suggestions(
-            sample=sample,
-            litellm_client=litellm,
+        return PreparedReviewJudgement(
             completion_model_route=route,
             model_id=planner_context.model.id,
             max_input_tokens=planner_context.max_input_tokens,
             max_output_tokens=planner_context.max_output_tokens,
             budget_policy=planner_context.budget_policy,
+        )
+
+    async def judge_review_sample(
+        self,
+        *,
+        prepared: PreparedReviewJudgement,
+        sample: FlowReviewSample,
+        ui_language: str | None,
+    ) -> FlowReviewSuggestions:
+        """The provider call, outside any database transaction."""
+
+        return await generate_review_suggestions(
+            sample=sample,
+            litellm_client=litellm,
+            completion_model_route=prepared.completion_model_route,
+            model_id=prepared.model_id,
+            max_input_tokens=prepared.max_input_tokens,
+            max_output_tokens=prepared.max_output_tokens,
+            budget_policy=prepared.budget_policy,
             tenant_id=self.user.tenant_id,
             ui_language=ui_language,
         )
