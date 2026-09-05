@@ -351,7 +351,7 @@ class _SampleIndex:
     step_orders: frozenset[int]
     fact_ids: frozenset[str]
     excerpts_by_source_id: dict[str, ReviewSampleExcerpt]
-    complete_output_steps: frozenset[int]
+    complete_outputs: frozenset[tuple[UUID, int]]
 
     @classmethod
     def build(cls, sample: FlowReviewSample) -> "_SampleIndex":
@@ -369,8 +369,8 @@ class _SampleIndex:
             step_orders=frozenset(step.step_order for step in sample.steps),
             fact_ids=frozenset(fact.finding_id for fact in sample.packet.facts),
             excerpts_by_source_id=excerpts,
-            complete_output_steps=frozenset(
-                excerpt.step_order
+            complete_outputs=frozenset(
+                (excerpt.run_id, excerpt.step_order)
                 for excerpt in sample.excerpts
                 if excerpt.field == "output" and excerpt.availability == "included"
             ),
@@ -427,10 +427,16 @@ def _parse_suggestion(
     if kind in ABSENCE_KINDS:
         # A claim that something is absent is only as good as what was read:
         # every cited source must be complete, and every named step must
-        # have at least one complete output in the sample.
+        # have a complete output in every run the claim cites. Another run's
+        # complete output says nothing about the run the citation comes from.
         if any(availability != "included" for availability in availabilities):
             return "absence_claim_cites_incomplete_source"
-        if any(step not in index.complete_output_steps for step in steps):
+        cited_runs = {source.run_id for source in sources}
+        if any(
+            (run_id, step) not in index.complete_outputs
+            for run_id in cited_runs
+            for step in steps
+        ):
             return "absence_claim_without_complete_step_output"
     return FlowReviewSuggestion(
         kind=cast(FlowReviewSuggestionKind, kind),

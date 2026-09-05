@@ -277,3 +277,45 @@ def test_prompt_states_the_wire_shape_in_every_mode():
     ):
         assert key in system
     assert '{"suggestions": []}' in system
+
+
+def test_a_complete_output_in_another_run_does_not_rescue_an_absence_claim():
+    sample = _sample()
+    run_b = sample.runs[1].run_id
+    # run2 gets a complete output for step 2; run1's step 2 output stays omitted.
+    rescued = sample.model_copy(
+        update={
+            "excerpts": [
+                *sample.excerpts,
+                ReviewSampleExcerpt(
+                    run_id=run_b,
+                    step_order=2,
+                    field="output",
+                    availability="included",
+                    text="Tre punkter utan datum.",
+                    recorded_chars=23,
+                ),
+            ]
+        }
+    )
+    claim = {
+        "kind": "missing_check",
+        "step_orders": [2],
+        "rationale": "Ingen kontroll av datum sker i steg 2.",
+        "sources": [{"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"}],
+    }
+    parsed = parse_review_suggestions(_answer(claim), sample=rescued)
+    assert parsed.outcome == "invalid"
+    assert parsed.problems == (
+        "suggestion_1:absence_claim_without_complete_step_output",
+    )
+
+    # Citing run2's own complete output makes the same claim admissible.
+    claim_on_run2 = {
+        **claim,
+        "sources": [{"source_id": "run2.step2.output", "quote": "utan datum"}],
+    }
+    assert (
+        parse_review_suggestions(_answer(claim_on_run2), sample=rescued).outcome
+        == "valid"
+    )

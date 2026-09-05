@@ -143,7 +143,6 @@ from eneo.main.exceptions import (
     AuditLoggingUnavailableException,
     BadRequestException,
     NotFoundException,
-    ResourceGoneException,
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
@@ -886,14 +885,6 @@ async def get_flow_review_packet(
     return packet
 
 
-_REVIEW_DOMAIN_FAILURES = (
-    BadRequestException,
-    NotFoundException,
-    UnauthorizedException,
-    ResourceGoneException,
-)
-
-
 @router.post(
     "/flows/{flow_id}/review-suggestions",
     response_model=FlowReviewSuggestions,
@@ -949,45 +940,46 @@ async def post_flow_review_suggestions(
         audited_runs.append(run)
 
     service = container.ai_builder_service()
+    # A failure raised by the reads or the preparation keeps its own type; the
+    # audit write already reports itself. Only the commit that carries the
+    # audits, failing after the body succeeded, is an audit failure.
+    body_failure: BaseException | None = None
     try:
         async with flow_run_evidence_snapshot_transaction(container):
-            authorization = await _authorize_ai_builder_request(
-                request,
-                container,
-                action=FlowApiAction.BUILDER_SESSION_CREATE,
-                space_id=space_id,
-            )
-            space = _authorized_space(authorization)
-            tenant = await _get_tenant_repo(container).get(user.tenant_id)
-            active_provider_ids = await _active_provider_ids(container)
-            sample: FlowReviewSample = (
-                await container.ai_builder_flow_review_service().build_review_sample(
+            try:
+                authorization = await _authorize_ai_builder_request(
+                    request,
+                    container,
+                    action=FlowApiAction.BUILDER_SESSION_CREATE,
+                    space_id=space_id,
+                )
+                space = _authorized_space(authorization)
+                tenant = await _get_tenant_repo(container).get(user.tenant_id)
+                active_provider_ids = await _active_provider_ids(container)
+                sample: FlowReviewSample = await container.ai_builder_flow_review_service().build_review_sample(
                     flow_id=flow_id, space_id=space_id, audit=_audit
                 )
-            )
-            # Route resolution reads provider credentials: inside the snapshot.
-            prepared = await service.prepare_review_judgement(
-                sample=sample,
-                space=space,
-                active_provider_ids=active_provider_ids,
-                tenant_flow_settings=tenant.flow_settings if tenant else None,
-            )
+                # Route resolution reads provider credentials: inside the snapshot.
+                prepared = await service.prepare_review_judgement(
+                    sample=sample,
+                    space=space,
+                    active_provider_ids=active_provider_ids,
+                    tenant_flow_settings=tenant.flow_settings if tenant else None,
+                )
+            except BaseException as exc:
+                body_failure = exc
+                raise
     except AuditLoggingUnavailableException:
         raise
-    except _REVIEW_DOMAIN_FAILURES:
-        # A refusal the sample or the model policy declared keeps its own
-        # code; only an audit write or the commit that carries it is an audit
-        # failure.
-        raise
     except Exception as exc:
-        if audited_runs:
-            raise_flow_trace_audit_unavailable(
-                user=user,
-                run=audited_runs[-1],
-                action=ActionType.FLOW_EVIDENCE_VIEWED,
-                cause=exc,
-            )
-        raise
+        if exc is body_failure or not audited_runs:
+            raise
+        raise_flow_trace_audit_unavailable(
+            user=user,
+            run=audited_runs[-1],
+            action=ActionType.FLOW_EVIDENCE_VIEWED,
+            cause=exc,
+        )
 
     return await service.judge_review_sample(
         prepared=prepared, sample=sample, ui_language=ui_language

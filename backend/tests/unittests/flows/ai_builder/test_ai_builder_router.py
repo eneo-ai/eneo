@@ -3161,6 +3161,39 @@ class TestReviewSuggestionsEndpoint:
         container.ai_builder_service.return_value.judge_review_sample.assert_not_called()
 
     @pytest.mark.anyio
+    async def test_a_preparation_failure_after_an_audit_keeps_its_own_type(self):
+        # Credential resolution can fail with its own configuration error;
+        # it is a body failure, not an audit failure.
+        container = _review_container(session=_SnapshotSession())
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+
+        async def _build_review_sample(*, flow_id, space_id, audit):
+            await audit(run)
+            return object()
+
+        container.ai_builder_flow_review_service.return_value.build_review_sample = (
+            _build_review_sample
+        )
+        service = container.ai_builder_service.return_value
+
+        class ProviderKeyMissing(RuntimeError):
+            pass
+
+        service.prepare_review_judgement = AsyncMock(
+            side_effect=ProviderKeyMissing("no api key configured")
+        )
+
+        with pytest.raises(ProviderKeyMissing):
+            await post_flow_review_suggestions(
+                request=_make_request(),
+                flow_id=run.flow_id,
+                space_id=uuid4(),
+                container=container,
+            )
+        container.audit_service.return_value.log.assert_awaited_once()
+        service.judge_review_sample.assert_not_called()
+
+    @pytest.mark.anyio
     async def test_the_route_is_prepared_inside_the_snapshot_and_judged_after_it(self):
         session = _SnapshotSession()
         provider_id = uuid4()
