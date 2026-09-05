@@ -52,10 +52,12 @@ function describe(
       };
     case "evidence_completeness":
       return {
-        title: m.ai_builder_review_completeness({
-          complete: String(fact.runs_with_all_step_results),
-          incomplete: String(fact.runs_missing_step_results)
-        }),
+        title:
+          fact.runs_missing_step_results === 1
+            ? m.ai_builder_review_completeness_one()
+            : m.ai_builder_review_completeness({
+                incomplete: String(fact.runs_missing_step_results)
+              }),
         evidence: ""
       };
   }

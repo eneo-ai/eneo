@@ -5,6 +5,10 @@
   import IconX from "@lucide/svelte/icons/x";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
+  import IconCheck from "@lucide/svelte/icons/check";
+  import IconInfo from "@lucide/svelte/icons/info";
+  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import type {
     AIBuilderFlowReviewFact,
     AIBuilderFlowReviewState,
@@ -46,6 +50,9 @@
   }: Props = $props();
 
   let dismissed = $state<Set<string>>(new Set());
+  /** Which suggestion cards show their quotes; folded by default so the
+   *  finding, not its evidence, is what the reviewer reads first. */
+  let openSources = $state<Record<number, boolean>>({});
   $effect(() => {
     if (review.status === "ready") {
       dismissed = dismissedFindingIds(review.packet.flow_id);
@@ -141,18 +148,17 @@
           </h2>
           {#if packet || review.status === "loading"}
             <p class="text-accent-stronger mt-1 text-[0.8125rem] text-pretty">
-              {#if packet && runCount === 1}
-                {packet.cohort.failed_run_ids.length === 1
-                  ? m.ai_builder_review_lead_one_failed({ version: String(packet.flow_version) })
-                  : m.ai_builder_review_lead_one_completed({
-                      version: String(packet.flow_version)
-                    })}
-              {:else if packet}
-                {m.ai_builder_review_lead({
-                  version: String(packet.flow_version),
-                  total: String(runCount),
-                  failed: String(packet.cohort.failed_run_ids.length)
-                })}
+              {#if packet}
+                {runCount === 1
+                  ? m.ai_builder_review_lead_one({ version: String(packet.flow_version) })
+                  : m.ai_builder_review_lead({
+                      version: String(packet.flow_version),
+                      total: String(runCount)
+                    })}{packet.cohort.failed_run_ids.length > 0
+                  ? m.ai_builder_review_lead_failed({
+                      failed: String(packet.cohort.failed_run_ids.length)
+                    })
+                  : ""}
               {:else}
                 {m.ai_builder_review_lead_loading()}
               {/if}
@@ -211,14 +217,17 @@
             </p>
           {/if}
         {:else if packet}
-          <h3 class="text-primary text-[0.9375rem] font-bold">
+          <h3 class="text-primary mb-2.5 text-[0.9375rem] font-bold">
             {m.ai_builder_review_facts_title()}
           </h3>
-          <p class="text-secondary mt-0.5 mb-3 text-xs text-pretty">
-            {m.ai_builder_review_facts_hint()}
-          </p>
           {#if findings.length === 0}
-            <p class="text-secondary text-[0.875rem] text-pretty" data-testid="findings-none">
+            <p
+              class="text-secondary flex items-center gap-1.5 text-[0.875rem] text-pretty"
+              data-testid="findings-none"
+            >
+              {#if hiddenCount === 0}
+                <IconCheck class="text-success-default size-4 shrink-0" aria-hidden="true" />
+              {/if}
               {hiddenCount > 0
                 ? m.ai_builder_review_all_hidden()
                 : m.ai_builder_review_nothing_found()}
@@ -282,9 +291,6 @@
                   <IconSparkles class="size-3.5" aria-hidden="true" />
                   {m.ai_builder_review_suggest()}
                 </Button>
-                <p class="text-secondary text-xs text-pretty">
-                  {m.ai_builder_review_suggest_hint()}
-                </p>
               </div>
             {:else if suggestions.status === "loading"}
               <p class="text-secondary text-[0.8125rem]" aria-busy="true" role="status">
@@ -324,20 +330,43 @@
                 truncated: String(judged.sample.excerpts_truncated),
                 unread: String(unread)
               }}
-              <p class="text-secondary mt-0.5 text-xs text-pretty" data-testid="suggestions-lead">
-                {judged.sample.run_ids.length === 1
-                  ? m.ai_builder_review_suggestions_lead_one({ model: judged.model_name })
-                  : m.ai_builder_review_suggestions_lead({
-                      model: judged.model_name,
-                      runs: String(judged.sample.run_ids.length)
-                    })}
-                {#if judged.sample.excerpts_truncated > 0 && unread > 0}
-                  {m.ai_builder_review_suggestions_coverage_truncated_unread(coverage)}
-                {:else if judged.sample.excerpts_truncated > 0}
-                  {m.ai_builder_review_suggestions_coverage_truncated(coverage)}
-                {:else if unread > 0}
-                  {m.ai_builder_review_suggestions_coverage_unread(coverage)}
-                {/if}
+              {@const coverageText =
+                judged.sample.excerpts_truncated > 0 && unread > 0
+                  ? m.ai_builder_review_suggestions_coverage_truncated_unread(coverage)
+                  : judged.sample.excerpts_truncated > 0
+                    ? m.ai_builder_review_suggestions_coverage_truncated(coverage)
+                    : unread > 0
+                      ? m.ai_builder_review_suggestions_coverage_unread(coverage)
+                      : null}
+              {@const readingNote = [
+                m.ai_builder_review_suggestions_coverage_model({ model: judged.model_name }),
+                coverageText
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              <p
+                class="text-secondary mt-0.5 flex items-center gap-1 text-xs"
+                data-testid="suggestions-lead"
+              >
+                <span>
+                  {judged.sample.run_ids.length === 1
+                    ? m.ai_builder_review_suggestions_lead_one()
+                    : m.ai_builder_review_suggestions_lead({
+                        runs: String(judged.sample.run_ids.length)
+                      })}{coverageText ? ` · ${m.ai_builder_review_suggestions_partly_read()}` : ""}
+                </span>
+                <Tooltip.Provider delayDuration={150}>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      class="text-secondary hover:text-primary focus-visible:ring-accent-default/40 inline-flex size-5 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
+                      aria-label={readingNote}
+                    >
+                      <IconInfo class="size-3.5" aria-hidden="true" />
+                    </Tooltip.Trigger>
+                    <Tooltip.Content class="max-w-[36ch] text-pretty">{readingNote}</Tooltip.Content
+                    >
+                  </Tooltip.Root>
+                </Tooltip.Provider>
               </p>
               {#if judged.suggestions.length === 0 && judged.unverified_count > 0}
                 <div
@@ -383,17 +412,35 @@
                       <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
                         {suggestion.rationale}
                       </p>
-                      <ul class="mt-2 flex flex-col gap-1.5">
-                        {#each suggestion.sources as source, sourceIndex (sourceIndex)}
-                          <li class="text-xs">
-                            <span class="text-secondary">
-                              {suggestionSourceLabel(source, judged.sample.run_ids)}:
-                            </span>
-                            <q class="text-primary">{source.quote}</q>
-                          </li>
-                        {/each}
-                      </ul>
-                      <div class="mt-2.5">
+                      <Collapsible.Root
+                        open={openSources[index] ?? false}
+                        onOpenChange={(open) => (openSources[index] = open)}
+                      >
+                        <Collapsible.Trigger
+                          class="text-secondary hover:text-primary mt-1.5 text-xs font-semibold underline-offset-2 hover:underline"
+                        >
+                          {openSources[index]
+                            ? m.ai_builder_review_suggestion_sources_hide()
+                            : suggestion.sources.length === 1
+                              ? m.ai_builder_review_suggestion_sources_show_one()
+                              : m.ai_builder_review_suggestion_sources_show({
+                                  count: String(suggestion.sources.length)
+                                })}
+                        </Collapsible.Trigger>
+                        <Collapsible.Content>
+                          <ul class="mt-2 flex flex-col gap-1.5">
+                            {#each suggestion.sources as source, sourceIndex (sourceIndex)}
+                              <li class="text-xs">
+                                <span class="text-secondary">
+                                  {suggestionSourceLabel(source, judged.sample.run_ids)}:
+                                </span>
+                                <q class="text-primary">{source.quote}</q>
+                              </li>
+                            {/each}
+                          </ul>
+                        </Collapsible.Content>
+                      </Collapsible.Root>
+                      <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                         <Button
                           size="sm"
                           class="h-8"
@@ -402,6 +449,9 @@
                         >
                           {m.ai_builder_review_suggestion_investigate()}
                         </Button>
+                        <span class="text-secondary text-xs">
+                          {m.ai_builder_review_suggestion_investigate_hint()}
+                        </span>
                       </div>
                     </li>
                   {/each}
@@ -419,38 +469,36 @@
                   </p>
                 {/if}
               {/if}
-              <p class="text-secondary mt-3 text-xs text-pretty">
-                {m.ai_builder_review_suggestion_disclaimer()}
-              </p>
             {/if}
           </section>
 
-          <footer class="border-default mt-4 border-t pt-3 text-xs">
-            <p class="text-secondary text-pretty">
-              {#if completeness && completeness.kind === "evidence_completeness"}
-                {completeness.runs_with_all_step_results === 1
-                  ? m.ai_builder_review_completeness_one({
-                      incomplete: String(completeness.runs_missing_step_results)
-                    })
-                  : m.ai_builder_review_completeness({
-                      complete: String(completeness.runs_with_all_step_results),
-                      incomplete: String(completeness.runs_missing_step_results)
-                    })}
+          {@const incompleteCount =
+            completeness && completeness.kind === "evidence_completeness"
+              ? completeness.runs_missing_step_results
+              : 0}
+          {#if incompleteCount > 0 || omittedCount > 0 || hiddenCount > 0}
+            <footer class="border-default mt-4 border-t pt-3 text-xs">
+              <p class="text-secondary text-pretty">
+                {#if incompleteCount === 1}
+                  {m.ai_builder_review_completeness_one()}
+                {:else if incompleteCount > 1}
+                  {m.ai_builder_review_completeness({ incomplete: String(incompleteCount) })}
+                {/if}
+                {#if omittedCount > 0}
+                  {m.ai_builder_review_omitted({ count: String(omittedCount) })}
+                {/if}
+              </p>
+              {#if hiddenCount > 0}
+                <Button
+                  variant="link"
+                  class="mt-1 h-auto p-0 text-xs font-semibold"
+                  onclick={showHidden}
+                >
+                  {m.ai_builder_review_show_hidden({ count: String(hiddenCount) })}
+                </Button>
               {/if}
-              {#if omittedCount > 0}
-                {m.ai_builder_review_omitted({ count: String(omittedCount) })}
-              {/if}
-            </p>
-            {#if hiddenCount > 0}
-              <Button
-                variant="link"
-                class="mt-1 h-auto p-0 text-xs font-semibold"
-                onclick={showHidden}
-              >
-                {m.ai_builder_review_show_hidden({ count: String(hiddenCount) })}
-              </Button>
-            {/if}
-          </footer>
+            </footer>
+          {/if}
         {/if}
       </div>
     </section>

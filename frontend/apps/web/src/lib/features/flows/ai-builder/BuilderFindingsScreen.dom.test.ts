@@ -68,9 +68,9 @@ describe("BuilderFindingsScreen", () => {
       onclose: vi.fn(),
       onretry: vi.fn()
     });
-    expect(
-      screen.getByText(m.ai_builder_review_lead({ version: "4", total: "4", failed: "1" }))
-    ).toBeTruthy();
+    const header = screen.getByTestId("builder-findings").textContent ?? "";
+    expect(header).toContain(m.ai_builder_review_lead({ version: "4", total: "4" }));
+    expect(header).toContain(m.ai_builder_review_lead_failed({ failed: "1" }));
     const cards = screen.getAllByRole("listitem");
     expect(cards).toHaveLength(2);
     expect(
@@ -243,7 +243,7 @@ describe("BuilderFindingsScreen suggestions", () => {
       onclose: vi.fn(),
       onretry: vi.fn()
     });
-    expect(screen.getByText(m.ai_builder_review_suggest_hint())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_review_suggestions_hint())).toBeTruthy();
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_review_suggest() }));
     expect(onsuggest).toHaveBeenCalledTimes(1);
   });
@@ -263,6 +263,16 @@ describe("BuilderFindingsScreen suggestions", () => {
     expect(section.textContent).toContain(
       m.ai_builder_review_suggestion_steps({ steps: "1 och 2" })
     );
+    // The quotes are evidence, folded until asked for; the finding reads first.
+    const sourceCount = makeSuggestions().suggestions[0].sources.length;
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name:
+          sourceCount === 1
+            ? m.ai_builder_review_suggestion_sources_show_one()
+            : m.ai_builder_review_suggestion_sources_show({ count: String(sourceCount) })
+      })
+    );
     expect(section.textContent).toContain("tre punkter");
     expect(section.textContent).toContain(
       m.ai_builder_review_suggestion_source({
@@ -271,17 +281,20 @@ describe("BuilderFindingsScreen suggestions", () => {
         field: m.ai_builder_review_suggestion_field_prompt()
       })
     );
-    expect(section.textContent).toContain(
-      m.ai_builder_review_suggestions_lead({ model: "GPT-test", runs: "2" })
-    );
-    // Coverage is stated as a consequence, in plain words, with the whole.
-    expect(section.textContent).toContain(
-      m.ai_builder_review_suggestions_coverage_truncated_unread({
-        total: "9",
-        truncated: "1",
-        unread: "3"
-      })
-    );
+    expect(section.textContent).toContain(m.ai_builder_review_suggestions_lead({ runs: "2" }));
+    expect(section.textContent).toContain(m.ai_builder_review_suggestions_partly_read());
+    // How much was read, and by which model, sits behind the info control as
+    // its accessible name: a consequence in plain words, with the whole.
+    const coverage = m.ai_builder_review_suggestions_coverage_truncated_unread({
+      total: "9",
+      truncated: "1",
+      unread: "3"
+    });
+    const readingNote = screen
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? "")
+      .find((label) => label.includes(coverage));
+    expect(readingNote).toContain("GPT-test");
 
     await fireEvent.click(
       screen.getByRole("button", { name: m.ai_builder_review_suggestion_investigate() })
@@ -321,7 +334,7 @@ describe("BuilderFindingsScreen suggestions", () => {
     expect(screen.getByTestId("suggestions-none")).toBeTruthy();
     // One sampled run reads as one run, not "1 runs".
     expect(screen.getByTestId("review-suggestions").textContent).toContain(
-      m.ai_builder_review_suggestions_lead_one({ model: "GPT-test" })
+      m.ai_builder_review_suggestions_lead_one()
     );
     unmount();
 
