@@ -3577,7 +3577,12 @@ class TestPlannerDiscoveryQuestionDispatch:
         ):
             events.append(encode_ai_builder_stream_event(event))
 
-        assert [event["event"] for event in events] == ["text", "question", "done"]
+        assert [event["event"] for event in events] == [
+            "status",
+            "text",
+            "question",
+            "done",
+        ]
         # The turn's one classifier call; the follow-up question is served
         # from the registry without a second, slot-focused call.
         assert planner.litellm_client.acompletion.await_count == 1
@@ -3640,6 +3645,11 @@ class TestPlannerDiscoveryQuestionDispatch:
         ):
             events.append(encode_ai_builder_stream_event(event))
 
-        assert [event["event"] for event in events] == ["text", "question", "done"]
-        assert json.loads(events[1]["data"])["question_id"] == ("post_processing_goal")
+        assert [event["event"] for event in events] == [
+            "status",
+            "text",
+            "question",
+            "done",
+        ]
+        assert json.loads(events[2]["data"])["question_id"] == ("post_processing_goal")
         repo.commit_turn.assert_awaited_once()

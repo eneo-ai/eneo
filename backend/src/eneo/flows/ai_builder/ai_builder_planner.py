@@ -36,12 +36,14 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
+    AIBuilderStatus,
     AIBuilderStatusEvent,
     AIBuilderStreamEvent,
 )
 from eneo.flows.ai_builder.ai_builder_events import (
     build_committed_turn_replay_events,
     build_done_event,
+    build_status_event,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderReviewContext,
@@ -373,6 +375,11 @@ class AIBuilderPlanner:
             content=message,
             metadata=user_message_metadata,
         )
+        # The two phases before any model call, named as they happen: reading
+        # the attached sources is real work on large files, and the reader's
+        # pass over the request is what the first question waits on.
+        if attachment_files:
+            yield build_status_event(AIBuilderStatus.READING_SOURCES)
         prepared_attachment_context = build_ai_builder_attachment_context_for_model(
             attachment_files or [],
             policy=attachment_context_policy,
@@ -470,6 +477,7 @@ class AIBuilderPlanner:
                 if metadata or file_ids
                 else None
             )
+            yield build_status_event(AIBuilderStatus.UNDERSTANDING_REQUEST)
             try:
                 prepared_request = await prepare_planner_request(
                     PlannerRequestPreparationInput(

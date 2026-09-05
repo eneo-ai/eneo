@@ -732,6 +732,30 @@ describe("FlowAIBuilder planner controls", () => {
 });
 
 describe("FlowAIBuilder discovery screens", () => {
+  it("names the reading and understanding phases on the reply screen without leaving it", async () => {
+    const { fetch } = makeFetch();
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch, stream });
+
+    await sendTask();
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(await screen.findByText(m.ai_builder_reply_reading())).toBeTruthy();
+
+    calls[0]!.emit([statusEvent("reading_sources")]);
+    expect(await screen.findByText(m.ai_builder_reply_reading_sources())).toBeTruthy();
+
+    calls[0]!.emit([statusEvent("understanding_request")]);
+    expect(await screen.findByText(m.ai_builder_reply_understanding())).toBeTruthy();
+    // Still the first phase: no build narration, and the composer's reply
+    // screen is what the question will replace.
+    expect(screen.queryByText(m.ai_builder_build_narration_reading())).toBeNull();
+
+    calls[0]!.emit([textEvent("Jag behöver veta formatet."), questionEvent(FORMAT_QUESTION)]);
+    expect(await screen.findByRole("heading", { name: FORMAT_QUESTION.question })).toBeTruthy();
+    calls[0]!.finish();
+  });
+
   it("sends the task, waits on the reply screen, then shows the first question", async () => {
     const { fetch } = makeFetch();
     const { stream, calls } = makeStream(() => "hold");

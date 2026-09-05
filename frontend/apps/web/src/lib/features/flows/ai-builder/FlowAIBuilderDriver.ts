@@ -14,7 +14,7 @@ import {
   toAIBuilderError
 } from "./aiBuilderError";
 import { classifyAIBuilderConflict } from "./aiBuilderConflict";
-import { isRecoverableCreateDraft, parseAIBuilderStreamEvent } from "./protocol";
+import { isDiscoveryStatus, isRecoverableCreateDraft, parseAIBuilderStreamEvent } from "./protocol";
 import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
@@ -1391,7 +1391,13 @@ export class FlowAIBuilderDriver {
       latestSummary !== null && this.isRequirementsSummaryConfirmed(latestSummary);
     if (latestSummary && !summaryConfirmed) return "confirming";
     if (this.#state.currentPlan) return "reviewing";
-    if (this.isStreaming && this.#state.statusMessage) return "building";
+    if (
+      this.isStreaming &&
+      this.#state.statusMessage &&
+      !isDiscoveryStatus(this.#state.statusMessage)
+    ) {
+      return "building";
+    }
     if (summaryConfirmed) return "building";
     return "discovering";
   }

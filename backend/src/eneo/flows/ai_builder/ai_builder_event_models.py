@@ -40,6 +40,8 @@ class AIBuilderStatus(StrEnum):
 
     ARCHITECTURE_COMMITTED = "architecture_committed"
     ARCHITECTURE_REVISED = "architecture_revised"
+    UNDERSTANDING_REQUEST = "understanding_request"
+    READING_SOURCES = "reading_sources"
     DRAFTING_FLOW = "drafting_flow"
     CHECKING_FLOW = "checking_flow"
     REPAIRING = "repairing"

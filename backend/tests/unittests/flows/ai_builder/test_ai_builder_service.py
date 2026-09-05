@@ -638,9 +638,17 @@ def _make_adapter() -> MagicMock:
     return adapter
 
 
+_DISCOVERY_STATUSES = {"understanding_request", "reading_sources"}
+
+
 async def _collect_events(gen) -> list[dict[str, str]]:
-    events = []
+    """Every wire event except the two phases each turn names before any
+    model call; these tests examine what follows them."""
+    events: list[dict[str, str]] = []
     async for event in gen:
+        status = getattr(getattr(event, "data", None), "status", None)
+        if getattr(event, "event", None) == "status" and status in _DISCOVERY_STATUSES:
+            continue
         events.append(encode_ai_builder_stream_event(event))
     return events
 

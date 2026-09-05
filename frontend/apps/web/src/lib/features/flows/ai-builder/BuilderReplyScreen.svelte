@@ -2,6 +2,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Markdown } from "@eneo/ui";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
+  import type { AIBuilderStatus } from "./protocol";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
   import type { AIBuilderEditContext } from "./protocol";
 
@@ -11,6 +12,8 @@
    */
   interface Props {
     waiting: boolean;
+    /** The phase the server reported for this turn, when it named one. */
+    status?: AIBuilderStatus | null;
     assistantText: string | null;
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
@@ -19,6 +22,7 @@
 
   let {
     waiting,
+    status = null,
     assistantText,
     editContext = null,
     editContextLabel = null,
@@ -36,7 +40,11 @@
       <div class="border-default bg-primary rounded-xl border p-[1.125rem] max-sm:p-4">
         {#if waiting}
           <p class="text-secondary text-[0.8125rem]" role="status" aria-live="polite">
-            {m.ai_builder_reply_reading()}
+            {status === "reading_sources"
+              ? m.ai_builder_reply_reading_sources()
+              : status === "understanding_request"
+                ? m.ai_builder_reply_understanding()
+                : m.ai_builder_reply_reading()}
           </p>
           <div class="mt-3 flex flex-col gap-[0.4375rem]" aria-hidden="true">
             <Skeleton class="bg-tertiary h-[0.6875rem] w-[74%] rounded" />

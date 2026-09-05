@@ -6747,5 +6747,7 @@
   "flow_history_review_with_builder": "Granska med AI-byggaren",
   "ai_builder_review_flow_too_large": "Flödet har fler steg än granskningen läser. Dela upp det eller granska ett mindre flöde.",
   "ai_builder_replace_edit_description_review": "Du har en pågående konversation eller ett AI-förslag som inte har godkänts. Om du fortsätter ersätts det med en granskning av körningarna.",
-  "ai_builder_review_flow_too_large_title": "Flödet är för stort att granska"
+  "ai_builder_review_flow_too_large_title": "Flödet är för stort att granska",
+  "ai_builder_reply_understanding": "Eneo förstår din beskrivning…",
+  "ai_builder_reply_reading_sources": "Eneo läser dina källor…"
 }

@@ -215,6 +215,22 @@ describe("FlowAIBuilderDriver", () => {
     );
   });
 
+  it("keeps the first phase for the reading and understanding statuses", () => {
+    // The two phases before any model call are progress, not building: the
+    // build screen must not appear while the Builder is still reading.
+    const { driver } = makeDriver();
+    driver.seedState({
+      messages: [{ role: "user", content: "Sammanfatta rapporter", timestamp: 1 }],
+      streamState: "streaming",
+      statusMessage: "understanding_request"
+    });
+    expect(driver.derivePhase()).toBe("discovering");
+    driver.seedState({ statusMessage: "reading_sources" });
+    expect(driver.derivePhase()).toBe("discovering");
+    driver.seedState({ statusMessage: "drafting_flow" });
+    expect(driver.derivePhase()).toBe("building");
+  });
+
   it("keeps a confirmation until the server discloses a new requirements version", async () => {
     // Later prose is evidence the server answers with a fresh summary when the
     // requirements change; the client never revokes a confirmation on its own.

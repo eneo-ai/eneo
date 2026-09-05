@@ -411,6 +411,8 @@ const statusEventDataSchema = z.object({
   status: z.enum([
     "architecture_committed",
     "architecture_revised",
+    "understanding_request",
+    "reading_sources",
     "drafting_flow",
     "checking_flow",
     "repairing"
@@ -888,4 +890,10 @@ function parseTelemetryEventData(data: string): AIBuilderUsageEventData {
     last_token_usage_source: parsed.last_token_usage_source ?? null,
     last_token_usage_estimated: parsed.last_token_usage_estimated ?? false
   };
+}
+
+/** Phases before any plan exists: the Builder is still reading and
+ *  understanding, so they must not move the session into the build phase. */
+export function isDiscoveryStatus(status: AIBuilderStatus): boolean {
+  return status === "understanding_request" || status === "reading_sources";
 }
