@@ -80,6 +80,7 @@ from eneo.flows.ai_builder.ai_builder_router import (
     cancel_session,
     create_session,
     detach_session_attachment,
+    get_flow_review_packet,
     get_plan,
     get_session,
     get_session_classifier_diagnostics,
@@ -390,7 +391,8 @@ def _make_container(
     user = MagicMock()
     user.id = user_id or uuid4()
     user.tenant_id = tenant_id or uuid4()
-    user.permissions = [Permission.FLOWS]
+    # The legacy grant plus the review feature, which nothing implies.
+    user.permissions = [Permission.FLOWS, Permission.FLOWS_AI_BUILDER_REVIEW]
     container.user.return_value = user
 
     # Space service + actor
@@ -2364,6 +2366,82 @@ class TestSendMessageEndpoint:
         service.prepare_message_context.assert_awaited_once()
 
     @pytest.mark.anyio
+    async def test_a_turn_that_names_or_continues_a_review_needs_the_review_permission(
+        self,
+    ):
+        """The review is a feature an organisation grants per role. A turn
+        that names a review, or continues one an earlier turn opened, is
+        refused before any preflight, evidence read or provider work; an
+        ordinary Builder turn in the same session is not."""
+        from eneo.flows.ai_builder.ai_builder_flow_review import (
+            AIBuilderReviewContext,
+            PersistedReviewContext,
+        )
+
+        container = _make_container()
+        container.user.return_value.permissions = [Permission.FLOWS]
+        session = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        named = AIBuilderReviewContext(
+            flow_version=1, definition_checksum="sum", finding_ids=["f1f1f1f1f1f1f1f1"]
+        )
+
+        with pytest.raises(UnauthorizedException) as explicit:
+            await send_message(
+                request=MagicMock(),
+                session_id=session.id,
+                body=SendMessageRequest(
+                    client_turn_id=uuid4(), message="Åtgärda", review_context=named
+                ),
+                container=container,
+            )
+        assert explicit.value.code == "insufficient_tenant_permission"
+
+        session.conversation = [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="Åtgärda",
+                metadata={
+                    "review_context": PersistedReviewContext(
+                        flow_version=1,
+                        definition_checksum="sum",
+                        finding_ids=["f1f1f1f1f1f1f1f1"],
+                    ).to_metadata()
+                },
+            )
+        ]
+        with pytest.raises(UnauthorizedException) as inherited:
+            await send_message(
+                request=MagicMock(),
+                session_id=session.id,
+                body=SendMessageRequest(client_turn_id=uuid4(), message="Och steg 3?"),
+                container=container,
+            )
+        assert inherited.value.code == "insufficient_tenant_permission"
+        service.preflight_message_turn.assert_not_called()
+        service.prepare_message_context.assert_not_called()
+
+        session.conversation = []
+
+        async def mock_events(*args, **kwargs):
+            yield build_done_event()
+
+        service.send_message.return_value = mock_events()
+        response = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(client_turn_id=uuid4(), message="Byt modell"),
+            container=container,
+        )
+        await _read_sse_events(response)
+        service.send_message.assert_called_once()
+
+    @pytest.mark.anyio
     async def test_a_suggestion_turn_retains_only_the_investigation_text(self):
         """The client's text never reaches the conversation, the retry snapshot
         or the fingerprint: the route canonicalises the request first."""
@@ -3127,6 +3205,35 @@ def _review_container(*, session: _SnapshotSession, flow_settings=None, provider
     )
     container.audit_service.return_value.log = AsyncMock()
     return container
+
+
+class TestReviewRoutesPermission:
+    @pytest.mark.anyio
+    async def test_the_packet_and_the_suggestions_need_the_review_permission(self):
+        container = _make_container()
+        container.user.return_value.permissions = [Permission.FLOWS]
+
+        with pytest.raises(UnauthorizedException) as packet:
+            await get_flow_review_packet(
+                request=_make_request(),
+                flow_id=uuid4(),
+                space_id=uuid4(),
+                container=container,
+            )
+        assert packet.value.code == "insufficient_tenant_permission"
+        container.ai_builder_flow_review_service.return_value.build_packet.assert_not_called()
+
+        container = _review_container(session=_SnapshotSession())
+        container.user.return_value.permissions = [Permission.FLOWS]
+        with pytest.raises(UnauthorizedException) as suggestions:
+            await post_flow_review_suggestions(
+                request=_make_request(),
+                flow_id=uuid4(),
+                space_id=uuid4(),
+                container=container,
+            )
+        assert suggestions.value.code == "insufficient_tenant_permission"
+        container.audit_service.return_value.log.assert_not_called()
 
 
 class TestReviewSuggestionsEndpoint:

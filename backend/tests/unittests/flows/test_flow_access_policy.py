@@ -190,6 +190,52 @@ def test_builder_actions_reject_service_key_principals(
     }
 
 
+_REVIEW_PERMISSIONS = (
+    Permission.FLOWS_MANAGE,
+    Permission.FLOWS_AI_BUILDER,
+    Permission.FLOWS_AI_BUILDER_REVIEW,
+)
+
+
+def test_builder_review_accepts_the_three_explicit_permissions() -> None:
+    assert (
+        user_can_perform_flow_action(
+            _user(*_REVIEW_PERMISSIONS), FlowApiAction.BUILDER_REVIEW
+        )
+        is True
+    )
+
+
+def test_builder_review_is_a_feature_the_builder_permissions_do_not_imply() -> None:
+    with pytest.raises(UnauthorizedException, match="review flow runs"):
+        require_flow_action(
+            _user(Permission.FLOWS_MANAGE, Permission.FLOWS_AI_BUILDER),
+            FlowApiAction.BUILDER_REVIEW,
+        )
+
+
+def test_legacy_flows_alias_does_not_grant_builder_review() -> None:
+    """An organisation turns the review on per role; an older coarse grant
+    never switches it on by itself."""
+    assert (
+        user_can_perform_flow_action(
+            _user(Permission.FLOWS), FlowApiAction.BUILDER_REVIEW
+        )
+        is False
+    )
+
+
+def test_builder_review_rejects_service_key_principals() -> None:
+    with pytest.raises(UnauthorizedException) as exc_info:
+        require_flow_action(
+            _service_key_user(*_REVIEW_PERMISSIONS), FlowApiAction.BUILDER_REVIEW
+        )
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
+    )
+
+
 def test_trace_requires_view_and_trace_permissions() -> None:
     user = _user(Permission.FLOWS_TRACE)
 

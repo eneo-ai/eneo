@@ -274,6 +274,7 @@ class TestPermissionSemantics:
             "flows_run",
             "flows_manage",
             "flows_ai_builder",
+            "flows_ai_builder_review",
             "flows_trace",
             "storage",
             "assistant_debug",

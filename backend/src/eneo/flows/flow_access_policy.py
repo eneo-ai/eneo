@@ -33,6 +33,9 @@ class FlowApiAction(str, Enum):
     BUILDER_PLAN_APPLY = "builder_plan_apply"
     BUILDER_PLAN_REVISE = "builder_plan_revise"
     BUILDER_CLIENT_ERROR_REPORT = "builder_client_error_report"
+    # Reviewing a published flow's runs: the facts packet, the model's
+    # suggestions, and any Builder turn that acts on either.
+    BUILDER_REVIEW = "builder_review"
     REVIEW = "review"
     RESUME = "resume"
     AUDIT_VIEW = "audit_view"
@@ -132,6 +135,17 @@ FLOW_ACTION_REQUIREMENTS: dict[FlowApiAction, FlowActionRequirement] = {
     FlowApiAction.BUILDER_CLIENT_ERROR_REPORT: FlowActionRequirement(
         required_permissions=_BUILDER_PERMISSIONS,
         denial_message="You do not have permission to use Flow AI Builder.",
+        service_key_capability="ai_builder",
+        requires_flow_edit=True,
+    ),
+    FlowApiAction.BUILDER_REVIEW: FlowActionRequirement(
+        required_permissions=(
+            *_BUILDER_PERMISSIONS,
+            Permission.FLOWS_AI_BUILDER_REVIEW,
+        ),
+        denial_message=(
+            "You do not have permission to review flow runs with the AI Builder."
+        ),
         service_key_capability="ai_builder",
         requires_flow_edit=True,
     ),

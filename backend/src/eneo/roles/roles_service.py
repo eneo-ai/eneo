@@ -54,7 +54,7 @@ class RolesService:
         raise BadRequestException(
             "The legacy 'flows' permission can only be honored for existing roles. "
             "Use the granular Flow permissions instead: flows_view, flows_run, "
-            "flows_manage, flows_ai_builder, and flows_trace."
+            "flows_manage, flows_ai_builder, flows_ai_builder_review, and flows_trace."
         )
 
     @validate_permissions(Permission.ADMIN)

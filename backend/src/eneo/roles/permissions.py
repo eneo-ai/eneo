@@ -33,6 +33,9 @@ class Permission(str, Enum):
     FLOWS_RUN = "flows_run"
     FLOWS_MANAGE = "flows_manage"
     FLOWS_AI_BUILDER = "flows_ai_builder"
+    # Deliberately outside the legacy `flows` alias: it is a feature an
+    # organisation grants per role, never implied by an older grant.
+    FLOWS_AI_BUILDER_REVIEW = "flows_ai_builder_review"
     FLOWS_TRACE = "flows_trace"
     STORAGE = "storage"
     MODULES = "modules"

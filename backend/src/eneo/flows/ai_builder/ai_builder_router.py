@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_context import (
     eligible_planner_models,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    latest_user_review_context,
     named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
     requirements_confirmation_from_metadata,
@@ -857,7 +858,7 @@ async def report_client_error(
             code=AIBuilderErrorCode.FLOW_NOT_PUBLISHED,
         ),
         403: _ai_builder_error_response(
-            description="Caller lacks space permission or API key scope for this space.",
+            description="Caller lacks the flow review permission (flows_ai_builder_review with the AI Builder permissions), space permission, or API key scope for this space.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
@@ -875,7 +876,7 @@ async def get_flow_review_packet(
         authorization = await _authorize_ai_builder_request(
             request,
             container,
-            action=FlowApiAction.BUILDER_SESSION_CREATE,
+            action=FlowApiAction.BUILDER_REVIEW,
             space_id=space_id,
         )
         _authorized_space(authorization)
@@ -909,7 +910,7 @@ async def get_flow_review_packet(
             code=AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT,
         ),
         403: _ai_builder_error_response(
-            description="Caller lacks space permission or API key scope for this space.",
+            description="Caller lacks the flow review permission (flows_ai_builder_review with the AI Builder permissions), space permission, or API key scope for this space.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
@@ -950,7 +951,7 @@ async def post_flow_review_suggestions(
                 authorization = await _authorize_ai_builder_request(
                     request,
                     container,
-                    action=FlowApiAction.BUILDER_SESSION_CREATE,
+                    action=FlowApiAction.BUILDER_REVIEW,
                     space_id=space_id,
                 )
                 space = _authorized_space(authorization)
@@ -1167,7 +1168,7 @@ async def list_sessions(
             code=AIBuilderErrorCode.SESSION_TURN_PROVIDER_OUTCOME_UNKNOWN,
         ),
         403: _ai_builder_error_response(
-            description="Caller lacks space permission or API key scope for this session.",
+            description="Caller lacks space permission or API key scope for this session, or, for a turn that names or continues a flow review, the flow review permission.",
             message="API key space scope does not match requested AI builder resource.",
             code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
             details={"auth_layer": "api_key_scope"},
@@ -1195,10 +1196,21 @@ async def send_message(
     database_session = cast(AsyncSession, container.session())
     async with database_session.begin():
         session: BuilderSession = await service.get_session(session_id)
+        # A turn that names a review, or continues one this session opened
+        # earlier, is the review feature: it is held to that permission
+        # before any preflight, evidence read or provider work.
+        acts_on_review = (
+            body.review_context is not None
+            or latest_user_review_context(session.conversation) is not None
+        )
         authorization = await _authorize_ai_builder_request(
             request,
             container,
-            action=FlowApiAction.BUILDER_MESSAGE_SEND,
+            action=(
+                FlowApiAction.BUILDER_REVIEW
+                if acts_on_review
+                else FlowApiAction.BUILDER_MESSAGE_SEND
+            ),
             space_id=session.space_id,
             session=session,
             require_creator=True,

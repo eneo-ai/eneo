@@ -21,6 +21,7 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.FLOWS_RUN: "Run published flows, upload runtime inputs, and manage flow runs.",
     Permission.FLOWS_MANAGE: "Create, update, publish, and delete flows and flow-managed resources.",
     Permission.FLOWS_AI_BUILDER: "Use the AI Builder to plan and edit flows.",
+    Permission.FLOWS_AI_BUILDER_REVIEW: "Review a published flow's runs with the AI Builder: measured facts, model suggestions read from bounded excerpts of runs you can already access, and changes prepared from them.",
     Permission.FLOWS_TRACE: "Inspect and export rich flow evidence, provenance, and AI Builder trace data.",
     Permission.STORAGE: "Administer file storage. Required for connecting an S3-compatible destination, changing it, rotating its keys, and setting upload limits.",
     Permission.MODULES: "Install and configure modules for the current Eneo organization.",

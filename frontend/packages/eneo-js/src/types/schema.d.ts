@@ -27189,6 +27189,7 @@ export interface components {
       | "flows_run"
       | "flows_manage"
       | "flows_ai_builder"
+      | "flows_ai_builder_review"
       | "flows_trace"
       | "storage"
       | "modules"
@@ -48705,7 +48706,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
-      /** @description Caller lacks space permission or API key scope for this space. */
+      /** @description Caller lacks the flow review permission (flows_ai_builder_review with the AI Builder permissions), space permission, or API key scope for this space. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -48794,7 +48795,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
-      /** @description Caller lacks space permission or API key scope for this space. */
+      /** @description Caller lacks the flow review permission (flows_ai_builder_review with the AI Builder permissions), space permission, or API key scope for this space. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -49860,7 +49861,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderPublicError"];
         };
       };
-      /** @description Caller lacks space permission or API key scope for this session. */
+      /** @description Caller lacks space permission or API key scope for this session, or, for a turn that names or continues a flow review, the flow review permission. */
       403: {
         headers: {
           [name: string]: unknown;
