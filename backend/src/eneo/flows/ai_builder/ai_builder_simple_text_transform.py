@@ -92,82 +92,25 @@ _MULTI_STEP_PREFERENCE_MARKERS: tuple[str, ...] = (
 
 # An explicitly requested extra step is the exception the restraint's own
 # wording promises ("om användaren inte uttryckligen ber om fler steg"); a
-# one-step translation flow may be told to grow (2026-09-05). A request that
-# mentions an extra step only to forbid it keeps the restraint.
-_STEP_ADDITION_MARKERS: tuple[str, ...] = (
-    "fler steg",
-    "lägg till ett steg",
-    "lägg till ett extra steg",
-    "lägg till ett avslutande steg",
-    "lägg till ett nytt steg",
-    "ytterligare ett steg",
-    "ytterligare steg",
-    "ett steg till",
-    "extra steg",
-    "avslutande steg",
-    "add a step",
-    "add an extra step",
-    "add a final step",
-    "add another step",
-    "additional step",
-    "another step",
+# one-step translation flow may be told to grow (2026-09-05). One pattern
+# recognises the addition phrase; whether it is affirmed or forbidden is read
+# from the words just before it, so "utan extra steg", "lägg inte till ett
+# steg" and "do not add a final step" keep the restraint while "lägg inte till
+# nya uppgifter" next to a requested step does not cancel it.
+_STEP_ADDITION_PATTERN = re.compile(
+    r"\blägg(?:a)?\s+(?:inte\s+)?till\s+(?:\w+\s+){0,3}steg\b"
+    r"|\b(?:ytterligare|extra|fler|nya|nytt|avslutande)\s+(?:\w+\s+)?steg\b"
+    r"|\bett\s+steg\s+till\b"
+    r"|\badd(?:s|ing)?\s+(?:\w+\s+){0,3}steps?\b"
+    r"|\b(?:another|additional|extra|more|final|new)\s+(?:\w+\s+)?steps?\b",
+    re.UNICODE,
 )
+_STEP_ADDITION_NEGATION_PATTERN = re.compile(
+    r"\b(?:inte|utan|inga|inget|ingen|aldrig|not|don't|dont|without|no|never)\b",
+    re.UNICODE,
+)
+_STEP_ADDITION_NEGATION_WINDOW = 24
 
-# Every negation names a step, so a prohibition on something else ("lägg
-# inte till nya uppgifter", "do not add new facts") cannot cancel a requested
-# step (gate 2026-09-05).
-_STEP_ADDITION_NEGATION_MARKERS: tuple[str, ...] = (
-    "utan extra steg",
-    "utan ytterligare steg",
-    "utan fler steg",
-    "utan avslutande steg",
-    "utan ett extra steg",
-    "utan ett avslutande steg",
-    "utan nya steg",
-    "inga extra steg",
-    "inga fler steg",
-    "inga ytterligare steg",
-    "inga nya steg",
-    "inget extra steg",
-    "inget avslutande steg",
-    "inget nytt steg",
-    "lägg inte till ett steg",
-    "lägg inte till något steg",
-    "lägg inte till fler steg",
-    "lägg inte till extra steg",
-    "lägg inte till nya steg",
-    "lägg inte till ett extra steg",
-    "lägg inte till ett avslutande steg",
-    "lägg inte till ett nytt steg",
-    "inte lägga till ett steg",
-    "inte lägga till fler steg",
-    "inte lägga till extra steg",
-    "inte lägga till nya steg",
-    "without extra steps",
-    "without an extra step",
-    "without additional steps",
-    "without an additional step",
-    "without another step",
-    "without more steps",
-    "without new steps",
-    "do not add a step",
-    "do not add another step",
-    "do not add extra steps",
-    "do not add an extra step",
-    "do not add additional steps",
-    "do not add more steps",
-    "do not add new steps",
-    "don't add a step",
-    "don't add another step",
-    "don't add extra steps",
-    "don't add more steps",
-    "no extra step",
-    "no additional step",
-    "no other step",
-    "no new step",
-    "no more steps",
-    "not add another step",
-)
 
 _FORM_COMPLEMENT_MARKERS: tuple[str, ...] = (
     "kompletterande formulärfält",
@@ -253,9 +196,13 @@ def user_requested_simple_text_transform(
 def _requests_extra_step(text: str) -> bool:
     """Affirmed step addition only; a forbidden extra step keeps the restraint."""
 
-    if _contains_any(text, _STEP_ADDITION_NEGATION_MARKERS):
-        return False
-    return _contains_any(text, _STEP_ADDITION_MARKERS)
+    for match in _STEP_ADDITION_PATTERN.finditer(text):
+        window = text[
+            max(0, match.start() - _STEP_ADDITION_NEGATION_WINDOW) : match.end()
+        ]
+        if _STEP_ADDITION_NEGATION_PATTERN.search(window) is None:
+            return True
+    return False
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:

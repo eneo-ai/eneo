@@ -1486,6 +1486,9 @@ def test_requested_extra_step_on_one_step_text_flow_passes_final_quality(
     [
         "Översätt texten utan extra steg.",
         "Translate this sentence. Do not add another step.",
+        "Translate this sentence. Do not add a final step.",
+        "Translate this sentence. Don't add an extra step.",
+        "Översätt meningen, lägg inte till ett avslutande steg.",
     ],
 )
 def test_forbidden_extra_step_on_one_step_text_flow_keeps_restraint(

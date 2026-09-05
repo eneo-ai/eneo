@@ -21,6 +21,9 @@ from eneo.flows.ai_builder.ai_builder_simple_text_transform import (
         "Översätt texten utan extra steg.",
         "Translate this sentence. Do not add another step.",
         "Översätt meningen, lägg inte till ett steg.",
+        "Translate this sentence. Do not add a final step.",
+        "Translate this sentence. Don't add an extra step.",
+        "Översätt meningen i ett steg.",
     ],
 )
 def test_flags_direct_text_transform(text: str) -> None:
