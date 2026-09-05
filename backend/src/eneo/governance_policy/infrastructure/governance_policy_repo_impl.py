@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from eneo.database.database import AsyncSession
+from eneo.database.tables.capabilities_table import GovernancePolicyCapabilities
 from eneo.database.tables.governance_policy_table import (
     GovernancePolicies,
     GovernancePolicyCompletionModels,
@@ -18,6 +19,7 @@ from eneo.database.tables.governance_policy_table import (
 )
 from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
+    PolicyCapability,
     PolicyCompletionModel,
     PolicyMcpServer,
     PolicyScope,
@@ -53,7 +55,20 @@ class GovernancePolicyRepoImpl:
         )
         provider_ids = [r[0] for r in (await self.session.execute(provider_stmt)).all()]
 
+        capabilities = (
+            await self.session.scalars(
+                sa.select(GovernancePolicyCapabilities).where(
+                    GovernancePolicyCapabilities.policy_id == row.id
+                )
+            )
+        ).all()
         return GovernancePolicy(
+            capabilities=[
+                PolicyCapability(
+                    purpose=c.purpose, is_default_enabled=c.is_default_enabled
+                )
+                for c in capabilities
+            ],
             id=row.id,
             tenant_id=row.tenant_id,
             scope=PolicyScope(row.scope),
@@ -145,6 +160,29 @@ class GovernancePolicyRepoImpl:
             )
         )
         await self.session.execute(update)
+
+        owner = sa.select(GovernancePolicies.id).where(
+            GovernancePolicies.id == policy.id,
+            GovernancePolicies.tenant_id == policy.tenant_id,
+        )
+        await self.session.execute(
+            sa.delete(GovernancePolicyCapabilities).where(
+                GovernancePolicyCapabilities.policy_id.in_(owner)
+            )
+        )
+        if policy.capabilities:
+            await self.session.execute(
+                sa.insert(GovernancePolicyCapabilities).values(
+                    [
+                        {
+                            "policy_id": policy.id,
+                            "purpose": c.purpose,
+                            "is_default_enabled": c.is_default_enabled,
+                        }
+                        for c in policy.capabilities
+                    ]
+                )
+            )
 
         # Replace m2m rows (simple + correct; small N per policy).
         await self.session.execute(

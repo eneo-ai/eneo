@@ -18,6 +18,10 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
+)
 from eneo.prompts.prompt import Prompt
 from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
@@ -76,6 +80,7 @@ class Assistant(Entity):
         data_retention_days: Optional[int] = None,
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -106,6 +111,10 @@ class Assistant(Entity):
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         )
         self._metadata_json = metadata_json
+        self.enabled_capabilities: list[CapabilityPurpose] = list(
+            enabled_capabilities or []
+        )
+        self.available_capabilities: list[CapabilityAvailability] = []
         self.icon_id = icon_id
 
         # Temporary attributes for update flow - not persisted directly

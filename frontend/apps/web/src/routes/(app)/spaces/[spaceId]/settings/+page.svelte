@@ -241,10 +241,10 @@
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
 
-        <Settings.Row title={m.capabilities()} description={m.capabilities_row_description()}>
-          <div>
+        <Settings.Row title={m.capabilities()} description={m.capabilities_space_description()}>
+          <div class="border-default overflow-hidden rounded-xl border">
             {#each CAPABILITIES as capability (capability.purpose)}
-              <CapabilityRow {capability} selectableServers={data.mcpServers} />
+              <CapabilityRow {capability} />
             {/each}
           </div>
         </Settings.Row>

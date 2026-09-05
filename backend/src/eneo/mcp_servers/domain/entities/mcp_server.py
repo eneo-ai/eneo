@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
 # provider pin, and the ask path substitutes the active provider. The tuple
 # order is the order resolved providers are prepended in at ask time.
 GENERAL_PURPOSE = "general"
-CAPABILITY_PURPOSES: tuple[str, ...] = ("web_search", "image_generation")
+CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = ("web_search", "image_generation")
 
 # Who a capability provider serves. "everyone" is the tenant's default provider
 # for its purpose (at most one active per tenant and purpose); "groups" targets
@@ -68,6 +69,8 @@ class MCPServerBackingModel:
     is_enabled: bool
     is_deleted: bool
     security_classification: "SecurityClassification | None"
+    is_deprecated: bool = False
+    provider_is_active: bool = True
 
 
 def is_capability_purpose(purpose: str | None) -> bool:
@@ -271,9 +274,35 @@ class MCPServer(Entity):
     @property
     def is_backing_model_available(self) -> bool:
         """False when the provider runs on a model that is disabled or deleted."""
-        if self.image_model is None:
-            return True
-        return self.image_model.is_enabled and not self.image_model.is_deleted
+        return self.backing_model_blocker is None
+
+    @property
+    def backing_model_blocker(self) -> str | None:
+        if not is_builtin_provider(self.http_auth_type):
+            return None
+        model = self.image_model
+        if model is None or model.is_deleted:
+            return "model_missing"
+        if not model.is_enabled:
+            return "model_disabled"
+        if model.is_deprecated:
+            return "model_deprecated"
+        if not model.provider_is_active:
+            return "model_provider_inactive"
+        return None
+
+    @property
+    def readiness_reason(self) -> str | None:
+        if self.backing_model_blocker:
+            return self.backing_model_blocker
+        if not any(
+            t.is_enabled_by_default
+            and not t.removed_from_remote
+            and (t.description is not None or t.input_schema is not None)
+            for t in self.tools
+        ):
+            return "no_approved_tools"
+        return None
 
     def is_default_provider(self) -> bool:
         """True for a capability provider that serves everyone in the tenant."""

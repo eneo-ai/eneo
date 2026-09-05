@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from eneo.governance_policy.domain.governance_policy import PolicyScope
@@ -11,7 +12,13 @@ from eneo.governance_policy.domain.policy_resolver import (
     resolve,
     resolve_personal_default,
 )
-from eneo.mcp_servers.domain.entities.mcp_server import is_capability_purpose
+from eneo.mcp_servers.application.capability_resolver import (
+    describe_capability_availability,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    allowed_capability_purposes,
+    is_capability_purpose,
+)
 from eneo.skills.domain.skill import PersonalChatPinOverride, SkillRuntimeResolution
 
 if TYPE_CHECKING:
@@ -151,10 +158,20 @@ class EffectiveConfigService:
         library_prompt_text = await _load_prompt_text()
         governance_skill_resolution = await _load_governance_skills()
 
-        return resolve_personal_default(
+        effective = resolve_personal_default(
             policy=policy,
             tenant_completion_models=tenant_models,
             tenant_mcp_servers=tenant_mcp_servers,
             library_prompt_text=library_prompt_text,
             governance_skill_resolution=governance_skill_resolution,
         )
+        availability = [
+            describe_capability_availability(
+                tenant_mcp_servers,
+                purpose,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+            )
+            for purpose in effective.enabled_capabilities
+        ]
+        return replace(effective, available_capabilities=availability)

@@ -309,6 +309,7 @@ async def create_mcp_server(
         audience_priority=data.audience_priority,
         user_group_ids=data.user_group_ids,
         image_model_id=data.image_model_id,
+        activate=data.activate,
     )
 
     # If connection failed, return 400 error with message
@@ -329,6 +330,26 @@ async def create_mcp_server(
         description=f"Created MCP server '{result.server.name}'",
         metadata=AuditMetadata.standard(actor=user, target=result.server),
     )
+
+    if data.activate:
+        await audit_service.log_async(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.MCP_SERVER_ENABLED,
+            entity_type=EntityType.MCP_SERVER,
+            entity_id=result.server.id,
+            description=f"Activated {result.server.purpose} provider",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=result.server,
+                extra={
+                    "purpose": result.server.purpose,
+                    "deactivated_server_ids": [
+                        str(i) for i in result.deactivated_server_ids or []
+                    ],
+                },
+            ),
+        )
 
     return MCPServerCreateResponse(
         server=assembler.from_domain_to_model(result.server),

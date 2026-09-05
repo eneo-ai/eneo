@@ -92,11 +92,7 @@
     const context = mcpServerPreferencesContext();
     if (!context) return;
 
-    saveMcpServerPreferences(
-      context,
-      mcpServers.map((server) => server.id),
-      disabledServerIds
-    );
+    saveMcpServerPreferences(context, toolPreferenceIds, disabledServerIds);
   }
 
   onMount(() => {
@@ -286,14 +282,37 @@
   const generalMcpServers = $derived(
     mcpServers.filter((server) => !isCapabilityPurpose(server.purpose))
   );
-  const capabilityServers = $derived(
-    mcpServers.filter(
-      (server) => isCapabilityPurpose(server.purpose) && canUseCapability(user, server.purpose)
-    )
-  );
+  const capabilityServers = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner) return [];
+    const effective = "effective_config" in partner ? partner.effective_config : undefined;
+    const purposes = effective?.mcp_enforced
+      ? effective.enabled_capabilities
+      : "enabled_capabilities" in partner
+        ? partner.enabled_capabilities
+        : [];
+    const availability = effective?.mcp_enforced
+      ? effective.available_capabilities
+      : "available_capabilities" in partner
+        ? partner.available_capabilities
+        : [];
+    return (purposes ?? [])
+      .filter((p) => canUseCapability(user, p))
+      .map((purpose) => {
+        const state = availability?.find((c) => c.purpose === purpose);
+        return {
+          id: "capability:" + purpose,
+          purpose,
+          name: purpose,
+          available: state?.available ?? false,
+          reason: state?.reason ?? "no_active_provider"
+        };
+      });
+  });
+  const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
 
   $effect(() => {
-    const validIds = new Set(mcpServers.map((server) => server.id));
+    const validIds = new Set(toolPreferenceIds);
     let selectionChanged = false;
     for (const id of Array.from(disabledMcpServerIds)) {
       if (!validIds.has(id)) {
@@ -315,10 +334,15 @@
     if (conversation === seededConversation) return;
     seededConversation = conversation;
     untrack(() => {
-      const availableServerIds = mcpServers.map((server) => server.id);
+      const availableServerIds = toolPreferenceIds;
       const defaultDisabledServerIds =
         partner && "effective_config" in partner
-          ? (partner.effective_config?.default_disabled_mcp_server_ids ?? [])
+          ? [
+              ...(partner.effective_config?.default_disabled_mcp_server_ids ?? []),
+              ...(partner.effective_config?.default_disabled_capabilities ?? []).map(
+                (p) => "capability:" + p
+              )
+            ]
           : [];
       const preferencesContext = mcpServerPreferencesContext();
       const preferences =

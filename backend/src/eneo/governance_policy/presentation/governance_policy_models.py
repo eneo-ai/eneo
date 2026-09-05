@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.skills.presentation.skill_models import (
     AssistantSkillBindingInput,
     AssistantSkillBindingSummary,
@@ -35,7 +36,15 @@ class PolicyMcpServerInput(BaseModel):
     is_default_enabled: bool = True
 
 
+class PolicyCapabilityInput(BaseModel):
+    purpose: CapabilityPurpose
+    is_default_enabled: bool = True
+
+
 class McpRestrictionInput(BaseModel):
+    capabilities: list[PolicyCapabilityInput] = Field(
+        default_factory=list[PolicyCapabilityInput]
+    )
     enabled: bool
     servers: list[PolicyMcpServerInput] = []
     # Deny-set of tool IDs switched OFF on allowed servers; new tools synced
@@ -89,6 +98,9 @@ class PolicyMcpServerPublic(BaseModel):
 
 
 class McpRestrictionPublic(BaseModel):
+    capabilities: list[PolicyCapabilityInput] = Field(
+        default_factory=list[PolicyCapabilityInput]
+    )
     enabled: bool
     servers: list[PolicyMcpServerPublic]
     disabled_tool_ids: list[UUID]

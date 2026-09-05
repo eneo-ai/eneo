@@ -608,7 +608,11 @@ export class ChatService {
           tools,
           abortController,
           requireToolApproval,
-          disabledMcpServerIds,
+          disabledMcpServerIds: disabledMcpServerIds?.filter((id) => !id.startsWith("capability:")),
+          disabledCapabilities: disabledMcpServerIds
+            ?.filter((id) => id.startsWith("capability:"))
+            .map((id) => id.slice("capability:".length)) as
+            ("web_search" | "image_generation")[] | undefined,
           callbacks: {
             onFirstChunk: (chunk) => {
               if (isStale()) return;
@@ -1091,6 +1095,11 @@ function partnerRuntimeSignature(partner: ChatPartner | undefined) {
       available_mcp_server_ids:
         effectiveConfig?.available_mcp_servers?.map((server) => server.id) ?? [],
       default_disabled_mcp_server_ids: effectiveConfig?.default_disabled_mcp_server_ids ?? [],
+      enabled_capabilities: partner.enabled_capabilities ?? [],
+      available_capabilities: partner.available_capabilities ?? [],
+      effective_capabilities: effectiveConfig?.enabled_capabilities ?? [],
+      effective_capability_availability: effectiveConfig?.available_capabilities ?? [],
+      default_disabled_capabilities: effectiveConfig?.default_disabled_capabilities ?? [],
       prompt_locked: effectiveConfig?.prompt_locked ?? false,
       prompt_tokens: partner.model_info?.prompt_tokens ?? null,
       attachment_ids: partner.attachments?.map((attachment) => attachment.id) ?? []

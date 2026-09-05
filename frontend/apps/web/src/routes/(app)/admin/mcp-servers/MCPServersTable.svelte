@@ -6,6 +6,7 @@
 
 <script lang="ts">
   import { Button, Input } from "@eneo/ui";
+  import type { Snippet } from "svelte";
   import { AlertTriangle, ChevronRight } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
@@ -20,9 +21,11 @@
 
   type Props = {
     mcpServers: MCPServerSettings[];
+    actions?: Snippet;
+    filters?: Snippet;
   };
 
-  const { mcpServers }: Props = $props();
+  const { mcpServers, actions, filters }: Props = $props();
 
   const eneo = getEneo();
 
@@ -65,7 +68,7 @@
 
 <div class="flex w-full flex-col">
   <!-- Filter bar -->
-  <div class="flex items-center justify-between gap-4 pt-2 pb-4">
+  <div class="flex flex-wrap items-center justify-between gap-4 pt-2 pb-4">
     <Input.Text
       bind:value={filterValue}
       label={m.filter()}
@@ -74,6 +77,12 @@
       hiddenLabel={true}
       inputClass="!px-4 !rounded-lg !bg-secondary/50"
     />
+    {#if filters}
+      <div class="shrink-0">{@render filters()}</div>
+    {/if}
+    {#if actions}
+      <div class="ml-auto shrink-0">{@render actions()}</div>
+    {/if}
   </div>
 
   {#if switchError}

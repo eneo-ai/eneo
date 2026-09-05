@@ -1,31 +1,60 @@
 # Capabilities (web search, image generation)
 
-**Status:** ✅ v1
+**Status:** provider-independent capability configuration
 **Audience:** Tenant administrators configuring providers, operators tuning limits, developers extending the capability set
 
-Eneo has no built-in search engine or image generator. Each *capability* is served by an MCP server the tenant administrator registers and activates. Assistants and spaces turn a capability on or off; which provider actually serves a user is decided at ask time.
+Capabilities are functions an assistant can use: **Webbsökning** and
+**Bildgenerering**. Image generation can run through a configured image model
+or an external MCP server; web search uses an external server.
 
----
+## 1. Configuration and navigation
 
-## 1. Concepts
+Open **Admin → Verktyg** (/admin/tools). **Funktioner** is the default tab.
+Each function keeps its source identity, configuration status and activation
+action visible. The source's ellipsis menu contains **Ändra** and **Ta bort**;
+deletion still requires confirmation. Use the arrow beside the source to expand
+its tools, including read-only tool details for built-in image models.
+Saved inactive sources can be activated; active sources can be disabled; blocked
+sources show why they cannot currently serve requests. Group-specific sources
+appear beneath the tenant default.
 
-| Term | Meaning |
-|------|---------|
-| **Capability purpose** | The `purpose` of an MCP server: `general` (ordinary tools) or a capability, currently `web_search` and `image_generation`. |
-| **Provider** | An MCP server with a capability purpose. Registered under **Admin → MCP servers** like any other server, but activated rather than enabled. |
-| **Marker** | A capability server attached to a space or assistant. It requests the capability; it does not pin the provider. |
-| **Resolution** | At ask time every marker is replaced by the provider that serves the current user (see §3). Switching providers never requires editing spaces or assistants. |
-| **Image model** | A catalog entry under **Admin → Models → Image models**: which model a model provider serves for image generation, plus its default size and quality, cost per image, enablement and security classification. The built-in image provider runs on one of these. |
+The **MCP-servrar** tab appears first and lists ordinary external tool connections
+by default. Select **Visa funktionsservrar** to also show external connections
+providing a function. Authentication, tool discovery, approval and connection
+controls remain available for these connections. The connection form's **Funktion**
+selection distinguishes **Allmänna verktyg** from function sources. Internal image-model providers appear only under
+Funktioner. The former /admin/mcp-servers URL redirects to this tab.
 
-Only one marker per capability can be attached to a space or assistant.
+For image generation, choose **Bildmodell** or **Extern MCP-server**. The model
+picker lists enabled, current models on active providers. A saved model that
+becomes invalid stays visible with its blocking reason. **Lägg till bildmodell**
+opens the existing model wizard and selects the created model on return.
+Credentials, pricing, defaults and classification remain in **Modeller**.
 
-## 2. Administering providers
+**Spara och aktivera** saves and activates a model-backed source in one
+transaction. External connections are saved inactive; review and approve any
+pending tools, then activate. A failed activation leaves the saved connection
+available for repair/retry. Prepare replacements as separate sources: the
+activation action identifies the default that will be replaced.
 
-1. Create the server under **Admin → MCP servers**: use **Set up …** on the capability's card at the top of the page (it opens the dialog with **Used for** preset, and image generation on the built-in source), or add a server from the header and set **Used for** yourself. Capability servers are saved inactive.
-2. Sync and approve its tools.
-3. Activate it. Activation is atomic: activating a default provider deactivates the previous default for the same capability.
+## 2. Saved intent and provider lifecycle
 
-Changing a server's purpose re-homes it. Moving a general server into a capability keeps its space and assistant attachments as markers. Moving a provider back to general detaches it everywhere, because markers were admitted without the space classification check that general servers get.
+Spaces and assistants store enabled_capabilities, a list of purposes
+(web_search, image_generation). Governance policies store purposes with
+is_default_enabled. These rows reference their owner, never a provider.
+They remain intact when a provider is switched, disabled or deleted—even
+when the last provider disappears. A replacement restores availability.
+
+Omitting enabled_capabilities on updates preserves selections; [] clears
+them. Turning a function off always works. Newly enabling a function requires
+an eligible source and the applicable space/classification rules. Temporary
+unavailability does not prevent unrelated edits.
+
+Activation rechecks tenant ownership, enabled/current image model, active
+model provider, usable approved tools and connection validation before
+changing the default. A failed validation or transaction keeps the previous
+default active. Stored readiness describes configuration; it is **not** a
+claim of live health for an external server.
 
 ### Audience
 
@@ -38,11 +67,11 @@ An active default cannot be narrowed to user groups in place. Deactivate it firs
 
 ### Built-in image provider
 
-Image generation does not need an external MCP server. First add the image model under **Admin → Models → Image models**: pick the model provider and enter the model name the provider serves, for example `gpt-image-1` on OpenAI or Azure OpenAI, `imagen-4.0-generate-001` on Gemini, or whatever name a vLLM or other OpenAI-compatible endpoint exposes on its `/v1/images/generations` route. Default size and quality, cost per image and the security classification live on the model, like on any other catalog model. Then, in the MCP server dialog, set **Used for** to image generation, **Source** to *Built-in, via an image model*, and select the model.
+Image generation does not need an external MCP server. First add the image model under **Admin → Models → Image models**: pick the model provider and enter the model name the provider serves, for example `gpt-image-1` on OpenAI or Azure OpenAI, `imagen-4.0-generate-001` on Gemini, or whatever name a vLLM or other OpenAI-compatible endpoint exposes on its `/v1/images/generations` route. Default size and quality, cost per image and the security classification live on the model, like on any other catalog model. Alternatively, add the model directly from the function configuration wizard. Select it under **Verktyg → Funktioner → Bildgenerering**.
 
 Under the hood the row is an ordinary provider whose endpoint is Eneo's own loopback MCP server (`/internal-mcp/image_generation`), whose auth type is `internal`, and which references the image model through a foreign key. It carries no credentials and no classification of its own: on every request the ask path mints a short-lived token naming the provider row, and the loopback tool calls the model through LiteLLM with the credentials stored on the model's provider, using the model's defaults unless the assistant asks for a size or quality. The classification check at ask time uses the image model's classification. Every provider is reached through the same OpenAI Images API shaped call, so a self-hosted GPU endpoint and a hosted API take the identical path.
 
-Activation, audiences and permissions work exactly as for external providers, and the provider's tool is approved automatically on sync because it is Eneo's own code. Switching an existing external server to the built-in source replaces its tool catalog with the loopback's tools in the same save. Disabling the image model makes the capability unavailable until it is re-enabled or the provider is pointed at another model; deleting the model is refused while a provider runs on it. Web search has no built-in provider.
+Activation, audiences and permissions work exactly as for external providers, and the provider's tool is approved automatically on sync because it is Eneo's own code. To change the active source type, prepare a separate replacement and activate it after validation. Disabling the image model makes the capability unavailable until it is re-enabled or the provider is pointed at another model; deleting the model is refused while a provider runs on it. Web search has no built-in provider.
 
 The backend must be able to reach its own loopback URL (`INTERNAL_MCP_BASE_URL`, the same requirement as the knowledge and files servers).
 
@@ -53,13 +82,13 @@ For each capability an assistant requests, the provider is attached only when al
 - the user's role grants the capability permission (`web_search` or `image_generation`; roles can be edited under **Admin → Roles**);
 - a provider serves the user: a group-targeted provider covering one of their groups, else the tenant default;
 - the provider has at least one enabled, approved tool;
-- for a built-in provider, its image model is enabled;
+- for a built-in provider, its image model is enabled, not deprecated or deleted, and its model provider is active;
 - the provider's security classification (for a built-in provider, its image model's) meets the space's classification;
 - the completion model supports tool calling.
 
 Otherwise the capability is silently unavailable for that turn. Service API keys can use web search but not image generation: a generated image is stored as a file owned by a user, and a service key has no user.
 
-Users can switch a capability off for a single conversation from the toolbar popover.
+Conversation requests carry purpose-based disabled_capabilities; ordinary server opt-outs remain in disabled_mcp_server_ids. The chat toolbar persists purpose keys, so an opt-out survives a provider switch.
 
 ## 4. Generated images
 
@@ -75,4 +104,27 @@ Only `image/png`, `image/jpeg`, `image/webp` and `image/gif` are accepted. The m
 
 ## 5. Extending the capability set
 
-Adding a capability is one entry in `CAPABILITY_PURPOSES` (backend entity module), one permission value equal to the purpose, one descriptor in the frontend `capabilities.ts` module with its messages, and a migration granting the permission to existing roles. All admin, space, assistant and chat surfaces render from those lists.
+Adding a capability requires updating the backend `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, adding the matching permission and frontend `capabilities.ts` descriptor with its messages, and migrating the association-table purpose constraints and existing role permissions. All admin, space, assistant and chat surfaces render from those lists.
+
+
+## 6. Deployment and client changes
+
+Ship migration **202609041000**, backend, frontend and the bundled JavaScript
+client together. The migration backfills active and inactive capability
+attachments, collapses duplicate purposes, preserves a policy default as on
+when any duplicate was on, and removes obsolete provider attachments and
+capability tool overrides. Ordinary MCP associations and tool settings remain.
+
+There is no compatibility adapter for provider IDs used as capability
+selections. Clients must use the new purpose fields. Effective configuration
+responses include enabled_capabilities, available_capabilities and
+default_disabled_capabilities; admin providers include readiness_reason.
+
+Take a database backup before rollout, stop old writers, apply the migration,
+then start the matching application versions. Rollback requires restoring the
+backup with the previous application version: provider-based storage cannot
+represent saved intent after its last provider has been deleted.
+
+For devcontainer UI validation, Node 22 is supplied by the devcontainer feature,
+and post-create installs Chromium with its Linux dependencies. Bun remains the
+frontend package manager and script runner.

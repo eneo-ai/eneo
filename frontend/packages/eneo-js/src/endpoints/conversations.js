@@ -140,6 +140,7 @@ export function initConversations(client) {
      * @param {string} params.question Question to ask
      * @param {{id: string}[] | undefined} params.files Files to pass on
      * @param {boolean} [params.requireToolApproval] Should tool calls require user approval before execution? Defaults to false
+     * @param {("web_search" | "image_generation")[]} [params.disabledCapabilities] Capability purposes disabled for this request
      * @param {string[]} [params.disabledMcpServerIds] MCP server ids the user switched off for this message
      * @param {{assistants: {id: string; handle: string}[]} | undefined} [params.tools] Tool use
      * @param {Object} [params.callbacks]
@@ -163,6 +164,7 @@ export function initConversations(client) {
       tools,
       requireToolApproval,
       disabledMcpServerIds,
+      disabledCapabilities,
       abortController,
       callbacks
     }) => {
@@ -200,6 +202,7 @@ export function initConversations(client) {
               tools,
               stream: true,
               require_tool_approval: requireToolApproval,
+              disabled_capabilities: disabledCapabilities,
               // Spread (not a direct property) so it doesn't trip excess-property
               // checks until schema.d.ts is regenerated via `bun run update`.
               ...(disabledMcpServerIds && disabledMcpServerIds.length > 0

@@ -16,6 +16,7 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
+  import PolicyFunctions from "$lib/features/mcp/components/PolicyFunctions.svelte";
   import CapabilityToggle from "$lib/features/mcp/components/CapabilityToggle.svelte";
   import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
@@ -641,9 +642,9 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title={m.mcp_servers()}>
+      <Settings.Group title={m.tools()}>
         <Settings.Row
-          title={m.mcp_servers()}
+          title={m.tools()}
           description={m.select_mcp_servers_description()}
           hasChanges={$currentChanges.diff.mcp_servers !== undefined ||
             $currentChanges.diff.mcp_tools !== undefined}
@@ -689,21 +690,26 @@
           <Settings.Row
             title={m.capabilities()}
             description={m.capabilities_row_description()}
-            hasChanges={$currentChanges.diff.mcp_servers !== undefined}
+            hasChanges={$currentChanges.diff.enabled_capabilities !== undefined}
             revertFn={() => {
-              discardChanges("mcp_servers");
-              discardChanges("mcp_tools");
+              discardChanges("enabled_capabilities");
             }}
           >
             <div class="border-default overflow-hidden rounded-xl border">
               {#each CAPABILITIES as capability (capability.purpose)}
                 <CapabilityToggle
                   {capability}
-                  bind:selectedMCPServers={$update.mcp_servers}
-                  bind:selectedMCPTools={$update.mcp_tools}
+                  selectedModel={$update.completion_model}
+                  bind:enabledCapabilities={$update.enabled_capabilities}
                 />
               {/each}
             </div>
+          </Settings.Row>
+        </Settings.Group>
+      {:else if effectiveConfig}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row title={m.capabilities()} description={m.functions_policy_description()}>
+            <PolicyFunctions config={effectiveConfig} selectedModel={$update.completion_model} />
           </Settings.Row>
         </Settings.Group>
       {/if}

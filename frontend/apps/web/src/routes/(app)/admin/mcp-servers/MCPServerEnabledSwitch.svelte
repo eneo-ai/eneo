@@ -49,7 +49,11 @@
       } else {
         await eneo.mcpServers.enable({ mcp_server_id: mcpServer.mcp_server_id, env_vars: {} });
       }
-      await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
+      await Promise.all([
+        invalidate("admin:layout"),
+        invalidate("spaces:data"),
+        invalidate("admin:tools")
+      ]);
     } catch (e) {
       console.error(`Error toggling MCP server ${mcpServer.name}:`, e);
       // Provider switches have a translated message; the backend detail

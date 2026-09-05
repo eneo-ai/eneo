@@ -20,6 +20,7 @@
     description?: string | null;
     purpose?: string | null;
     tools: McpTool[];
+    is_available?: boolean;
   };
   type ReadableMap<K, V> = {
     has(key: K): boolean;
@@ -136,6 +137,8 @@
                   <capability.icon class="text-tertiary h-4 w-4" aria-hidden="true" />
                 </span>
                 <Switch
+                  disabled={!selection.isSelected &&
+                    !allMcpServers.find((s) => s.purpose === capability.purpose)?.is_available}
                   checked={selection.isSelected}
                   onCheckedChange={(v) => toggleCapability(capability.purpose, v)}
                   aria-label={m.governance_mcp_allow_aria({ name: capability.label() })}

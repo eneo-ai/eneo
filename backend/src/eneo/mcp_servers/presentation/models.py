@@ -68,6 +68,7 @@ class MCPServerPublic(BaseModel):
     image_model_id: Optional[UUID] = None
     image_model: Optional[MCPServerBackingModelPublic] = None
     is_enabled: bool = True
+    readiness_reason: str | None = None
     # Capability providers: who this provider serves. "everyone" is the
     # tenant default; "groups" serves the listed user groups (lowest
     # audience_priority wins when a user matches several providers).
@@ -93,6 +94,7 @@ class MCPServerList(BaseListModel[MCPServerPublic]):
 
 
 class MCPServerCreate(BaseModel):
+    activate: bool = False
     """DTO for creating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: str

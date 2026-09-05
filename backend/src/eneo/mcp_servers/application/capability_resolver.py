@@ -1,11 +1,8 @@
 """Resolve the MCP provider that serves a user for a capability purpose.
 
-Capabilities (web search, image generation) are configured through the
-ordinary MCP inheritance chain (admin activates providers, spaces include
-them, assistants attach them), but the attached server is a capability marker,
-not a provider pin: at ask time the provider that serves the current user for
-that purpose is resolved and attached in its place. Switching providers
-therefore never requires touching spaces or assistants.
+Spaces, assistants, and governance policies store capability purposes.
+At ask time the provider serving the current user is resolved from that
+purpose. Provider deletion or replacement never removes saved intent.
 
 Per purpose a tenant may have one active default provider (audience
 "everyone") and any number of active group-targeted providers (audience
@@ -31,6 +28,10 @@ from eneo.database.tables.mcp_server_table import (
 )
 from eneo.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
+)
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
     CAPABILITY_PURPOSES,
@@ -166,11 +167,12 @@ async def resolve_capability_servers(
     attached_servers: Sequence["MCPServer"],
     *,
     supports_tool_calling: bool,
+    requested_capabilities: Sequence[str] = (),
     user_group_ids: "set[UUID] | None" = None,
     allowed_purposes: "set[str] | None" = None,
     space_security_classification: "SecurityClassification | None" = None,
 ) -> CapabilityResolution:
-    """Replace attached capability markers with the providers serving the user.
+    """Resolve independent purposes to the providers serving the user.
 
     Capability-purpose servers among ``attached_servers`` are stripped (they
     may be stale or deactivated) and, for every requested purpose in
@@ -187,11 +189,7 @@ async def resolve_capability_servers(
         for server in attached_servers
         if not is_capability_purpose(server.purpose)
     ]
-    requested_purposes = {
-        server.purpose
-        for server in attached_servers
-        if is_capability_purpose(server.purpose)
-    }
+    requested_purposes = set(requested_capabilities)
     if allowed_purposes is not None:
         requested_purposes &= allowed_purposes
     capability_servers: list["MCPServer"] = []
@@ -213,3 +211,85 @@ async def resolve_capability_servers(
     return CapabilityResolution(
         general_servers=general_servers, capability_servers=capability_servers
     )
+
+
+def describe_capability_availability(
+    providers: Sequence["MCPServer"],
+    purpose: CapabilityPurpose,
+    classification: "SecurityClassification | None" = None,
+    *,
+    user_group_ids: set[UUID] | None = None,
+    allowed_purposes: set[str] | None = None,
+) -> CapabilityAvailability:
+    """Describe stored configuration readiness for a tenant or a specific user."""
+    candidates = [p for p in providers if p.purpose == purpose and p.is_enabled]
+    if allowed_purposes is not None and purpose not in allowed_purposes:
+        return CapabilityAvailability(
+            purpose=purpose, available=False, reason="permission"
+        )
+    if user_group_ids is not None:
+        selected = select_provider_for_user(candidates, user_group_ids)
+        candidates = [selected] if selected else []
+    ready = [p for p in candidates if p.readiness_reason is None]
+    available = any(meets_security_classification(p, classification) for p in ready)
+    reason = (
+        None
+        if available
+        else (
+            "no_active_provider"
+            if not candidates
+            else "classification"
+            if ready
+            else next(
+                (p.readiness_reason for p in candidates if p.readiness_reason),
+                "no_approved_tools",
+            )
+        )
+    )
+    return CapabilityAvailability(purpose=purpose, available=available, reason=reason)
+
+
+async def capability_availability(
+    session: "AsyncSession",
+    tenant_id: UUID,
+    space_security_classification: "SecurityClassification | None" = None,
+    *,
+    user_group_ids: set[UUID] | None = None,
+    allowed_purposes: set[str] | None = None,
+) -> list[CapabilityAvailability]:
+    """Stored readiness, never a live external connection-health claim."""
+    result: list[CapabilityAvailability] = []
+    for purpose in CAPABILITY_PURPOSES:
+        providers = await get_active_capability_servers(session, tenant_id, purpose)
+        result.append(
+            describe_capability_availability(
+                providers,
+                purpose,
+                space_security_classification,
+                user_group_ids=user_group_ids,
+                allowed_purposes=allowed_purposes,
+            )
+        )
+    return result
+
+
+async def validate_capability_additions(
+    session: "AsyncSession",
+    tenant_id: UUID,
+    selected: Sequence[str],
+    previous: Sequence[str],
+    classification: "SecurityClassification | None" = None,
+) -> None:
+    """Only new grants require readiness; removals and retained intent always survive."""
+    from eneo.main.exceptions import BadRequestException
+
+    unknown = set(selected) - set(CAPABILITY_PURPOSES)
+    if unknown:
+        raise BadRequestException("Unknown capability")
+    added = set(selected) - set(previous)
+    if not added:
+        return
+    states = await capability_availability(session, tenant_id, classification)
+    unavailable = [s.purpose for s in states if s.purpose in added and not s.available]
+    if unavailable:
+        raise BadRequestException("Capability unavailable: " + ", ".join(unavailable))

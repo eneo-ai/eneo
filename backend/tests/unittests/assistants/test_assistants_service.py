@@ -940,7 +940,7 @@ async def test_update_allows_mcp_alongside_knowledge(setup: Setup):
     mcp_id = uuid4()
     # Mock DB to return the MCP server as tenant-enabled and space-assigned
     mock_result = MagicMock()
-    mock_result.fetchall.return_value = [(mcp_id,)]
+    mock_result.fetchall.return_value = [(mcp_id, "general")]
     setup.service.repo.session.execute = AsyncMock(return_value=mock_result)
 
     await setup.service.update_assistant(

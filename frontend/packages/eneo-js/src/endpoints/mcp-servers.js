@@ -60,6 +60,7 @@ export function initMCPServers(client) {
      * @param {"everyone" | "groups"} [params.audience] Capability providers: who this provider serves
      * @param {number} [params.audience_priority] Lowest number wins when a user matches several group providers
      * @param {string[]} [params.user_group_ids] User groups served when audience is "groups"
+     * @param {boolean} [params.activate] Activate a newly created capability provider transactionally
      * @param {string} [params.image_model_id] Built-in providers only: the catalog image model to call
      * @throws {EneoError}
      * */
@@ -82,7 +83,8 @@ export function initMCPServers(client) {
       audience,
       audience_priority,
       user_group_ids,
-      image_model_id
+      image_model_id,
+      activate
     }) => {
       /** @type {any} */
       const body = {
@@ -104,7 +106,8 @@ export function initMCPServers(client) {
         audience,
         audience_priority,
         user_group_ids,
-        image_model_id
+        image_model_id,
+        activate
       };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",

@@ -588,3 +588,29 @@ def test_select_model_none_current_falls_back_to_allowed():
 def test_select_model_enforced_empty_whitelist_returns_none():
     cfg = _eff_config(available_models=[])
     assert select_effective_completion_model(_mk_model(), cfg) is None
+
+
+def test_capability_intent_and_default_survive_without_any_provider():
+    from eneo.governance_policy.domain.governance_policy import PolicyCapability
+
+    policy = _empty_policy()
+    policy.set_mcp_restriction(
+        enabled=True,
+        servers=[],
+        disabled_tool_ids=[],
+        capabilities=[
+            PolicyCapability(purpose="image_generation", is_default_enabled=False)
+        ],
+    )
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+    assert cfg.enabled_capabilities == ["image_generation"]
+    assert cfg.default_disabled_capabilities == ["image_generation"]
+    assert cfg.available_capabilities[0].available is False
+    assert cfg.available_mcp_servers == []

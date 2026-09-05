@@ -138,6 +138,7 @@ class MCPServerCreateResult:
 
     server: MCPServer
     connection: ConnectionResult
+    deactivated_server_ids: list[UUID] | None = None
 
 
 @dataclass
@@ -333,6 +334,8 @@ class MCPServerService:
             or model.provider_id is None
         ):
             raise BadRequestException("Image model not found in this organisation")
+        if model.is_deprecated:
+            raise BadRequestException("Image model is deprecated")
         if not model.is_org_enabled:
             raise BadRequestException("Image model is disabled")
         try:
@@ -428,6 +431,7 @@ class MCPServerService:
         audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
         user_group_ids: list[UUID] | None = None,
         image_model_id: UUID | None = None,
+        activate: bool = False,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
@@ -530,8 +534,17 @@ class MCPServerService:
             )
             await self.tool_repo.upsert_by_server_and_name(tool)
 
+        deactivated_server_ids = []
+        if activate:
+            activated = await self.activate_capability_server(mcp_server.id)
+            mcp_server = activated.server
+            deactivated_server_ids = activated.deactivated_server_ids
         connection_result.tools_discovered = len(tools)
-        return MCPServerCreateResult(server=mcp_server, connection=connection_result)
+        return MCPServerCreateResult(
+            server=mcp_server,
+            connection=connection_result,
+            deactivated_server_ids=deactivated_server_ids,
+        )
 
     @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(
@@ -620,7 +633,12 @@ class MCPServerService:
         effective_purpose = purpose if purpose is not None else mcp_server.purpose
         if is_builtin_provider(effective_auth_type):
             model_changing = not isinstance(image_model_id, NotProvided)
-            if auth_type_changed or model_changing or purpose is not None:
+            if (
+                mcp_server.is_enabled
+                or auth_type_changed
+                or model_changing
+                or purpose is not None
+            ):
                 model = await self._resolve_builtin_image_model(
                     effective_purpose,
                     image_model_id if model_changing else mcp_server.image_model_id,
@@ -1285,6 +1303,10 @@ class MCPServerService:
                 "Only capability MCP servers can be activated as a provider"
             )
 
+        if is_builtin_provider(server.http_auth_type):
+            await self._resolve_builtin_image_model(
+                server.purpose, server.image_model_id
+            )
         tools = await self.get_tools_with_tenant_settings(mcp_server_id)
         if not self._usable_tools(tools):
             raise BadRequestException(

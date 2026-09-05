@@ -1,6 +1,7 @@
 from importlib import import_module
 
 _TABLE_MODULES = (
+    "eneo.database.tables.capabilities_table",
     "eneo.database.tables.ai_models_table",
     "eneo.database.tables.allowed_origins_table",
     "eneo.database.tables.api_keys_v2_table",

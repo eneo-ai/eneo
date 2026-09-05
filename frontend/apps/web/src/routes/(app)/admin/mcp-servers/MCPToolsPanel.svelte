@@ -60,7 +60,7 @@
         display_name: trimmed === "" ? null : trimmed
       });
       tools = tools.map((t) => (t.id === tool.id ? updated : t));
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
       cancelRename();
     } catch (error) {
       renameError = getErrorMessage(error);
@@ -84,7 +84,7 @@
       await eneoClient.mcpServers.syncTools({ mcp_server_id: mcpServerId });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to sync tools:", error);
     } finally {
@@ -100,7 +100,7 @@
       });
 
       tools = tools.map((t) => (t.id === tool.id ? updated : t));
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to update tool:", error);
     }
@@ -127,7 +127,7 @@
         console.error(`${failures.length} tools failed to enable`);
       }
     } finally {
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
       bulkUpdating = false;
     }
   }
@@ -144,7 +144,7 @@
         console.error(`${failures.length} tools failed to disable`);
       }
     } finally {
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
       bulkUpdating = false;
     }
   }
@@ -158,7 +158,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to approve tool:", error);
     } finally {
@@ -175,7 +175,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to reject tool:", error);
     } finally {
@@ -191,7 +191,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to approve all:", error);
     } finally {
@@ -209,7 +209,7 @@
       });
       const response = await eneoClient.mcpServers.listTools({ mcp_server_id: mcpServerId });
       tools = response.items || [];
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to reject all:", error);
     } finally {

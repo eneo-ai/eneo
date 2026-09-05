@@ -58,6 +58,7 @@ def _server(
             _classification(security_level) if security_level is not None else None
         ),
         image_model=backing_model,
+        http_auth_type="internal" if backing_model else "none",
     )
     server.tools = tools or [_tool()]
     return server
@@ -248,7 +249,13 @@ class TestResolveCapabilityServers:
         general = _server("general")
 
         resolution = await resolve_capability_servers(
-            AsyncMock(), uuid4(), [general], supports_tool_calling=True
+            AsyncMock(),
+            uuid4(),
+            [general],
+            requested_capabilities=[
+                s.purpose for s in [general] if s.purpose != "general"
+            ],
+            supports_tool_calling=True,
         )
 
         assert resolution.general_servers == [general]
@@ -272,7 +279,13 @@ class TestResolveCapabilityServers:
         markers = [_server(purpose) for purpose in reversed(CAPABILITY_PURPOSES)]
 
         resolution = await resolve_capability_servers(
-            AsyncMock(), uuid4(), [*markers, general], supports_tool_calling=True
+            AsyncMock(),
+            uuid4(),
+            [*markers, general],
+            requested_capabilities=[
+                s.purpose for s in [*markers, general] if s.purpose != "general"
+            ],
+            supports_tool_calling=True,
         )
 
         assert resolution.general_servers == [general]
@@ -290,7 +303,13 @@ class TestResolveCapabilityServers:
         markers = [_server(purpose) for purpose in CAPABILITY_PURPOSES]
 
         resolution = await resolve_capability_servers(
-            AsyncMock(), uuid4(), markers, supports_tool_calling=False
+            AsyncMock(),
+            uuid4(),
+            markers,
+            requested_capabilities=[
+                s.purpose for s in markers if s.purpose != "general"
+            ],
+            supports_tool_calling=False,
         )
 
         assert resolution.general_servers == []
@@ -312,7 +331,13 @@ class TestResolveCapabilityServers:
         markers = [_server(purpose) for purpose in CAPABILITY_PURPOSES]
 
         resolution = await resolve_capability_servers(
-            AsyncMock(), uuid4(), markers, supports_tool_calling=True
+            AsyncMock(),
+            uuid4(),
+            markers,
+            requested_capabilities=[
+                s.purpose for s in markers if s.purpose != "general"
+            ],
+            supports_tool_calling=True,
         )
 
         assert resolution.capability_servers == [web_search]
@@ -332,6 +357,11 @@ class TestResolveCapabilityServers:
             AsyncMock(),
             uuid4(),
             [_server("image_generation")],
+            requested_capabilities=[
+                s.purpose
+                for s in [_server("image_generation")]
+                if s.purpose != "general"
+            ],
             supports_tool_calling=True,
         )
 
@@ -350,6 +380,9 @@ class TestResolveCapabilityServers:
             AsyncMock(),
             uuid4(),
             markers,
+            requested_capabilities=[
+                s.purpose for s in markers if s.purpose != "general"
+            ],
             supports_tool_calling=True,
             allowed_purposes={"web_search"},
         )
@@ -374,6 +407,9 @@ class TestResolveCapabilityServers:
             AsyncMock(),
             uuid4(),
             [_server("web_search")],
+            requested_capabilities=[
+                s.purpose for s in [_server("web_search")] if s.purpose != "general"
+            ],
             supports_tool_calling=True,
             user_group_ids={group_id},
         )
@@ -381,6 +417,9 @@ class TestResolveCapabilityServers:
             AsyncMock(),
             uuid4(),
             [_server("web_search")],
+            requested_capabilities=[
+                s.purpose for s in [_server("web_search")] if s.purpose != "general"
+            ],
             supports_tool_calling=True,
             user_group_ids={uuid4()},
         )
@@ -401,6 +440,9 @@ class TestResolveCapabilityServers:
             AsyncMock(),
             uuid4(),
             [_server("web_search")],
+            requested_capabilities=[
+                s.purpose for s in [_server("web_search")] if s.purpose != "general"
+            ],
             supports_tool_calling=True,
             space_security_classification=_classification(1),
         )
@@ -442,7 +484,13 @@ class TestBackingModel:
         )
 
         resolution = await resolve_capability_servers(
-            AsyncMock(), uuid4(), [marker], supports_tool_calling=True
+            AsyncMock(),
+            uuid4(),
+            [marker],
+            requested_capabilities=[
+                s.purpose for s in [marker] if s.purpose != "general"
+            ],
+            supports_tool_calling=True,
         )
 
         assert resolution.capability_servers == []
@@ -458,7 +506,40 @@ class TestBackingModel:
         )
 
         resolution = await resolve_capability_servers(
-            AsyncMock(), uuid4(), [marker], supports_tool_calling=True
+            AsyncMock(),
+            uuid4(),
+            [marker],
+            requested_capabilities=[
+                s.purpose for s in [marker] if s.purpose != "general"
+            ],
+            supports_tool_calling=True,
         )
 
         assert resolution.capability_servers == [provider]
+
+
+async def test_provider_attachment_without_purpose_grant_does_not_enable_capability(
+    monkeypatch,
+):
+    lookup = AsyncMock()
+    monkeypatch.setattr(capability_resolver, "get_active_capability_servers", lookup)
+    result = await resolve_capability_servers(
+        AsyncMock(), uuid4(), [_server("image_generation")], supports_tool_calling=True
+    )
+    assert result.capability_servers == []
+    assert result.general_servers == []
+    lookup.assert_not_awaited()
+
+
+async def test_retaining_or_removing_unavailable_capability_does_not_require_provider(
+    monkeypatch,
+):
+    lookup = AsyncMock()
+    monkeypatch.setattr(capability_resolver, "get_active_capability_servers", lookup)
+    await capability_resolver.validate_capability_additions(
+        AsyncMock(), uuid4(), ["image_generation"], ["image_generation"]
+    )
+    await capability_resolver.validate_capability_additions(
+        AsyncMock(), uuid4(), [], ["image_generation"]
+    )
+    lookup.assert_not_awaited()

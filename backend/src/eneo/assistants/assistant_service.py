@@ -70,6 +70,9 @@ from eneo.main.models import (
 from eneo.mcp_servers.application.capability_resolver import (
     resolve_capability_servers,
 )
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
     GENERAL_PURPOSE,
     allowed_capability_purposes,
@@ -565,6 +568,7 @@ class AssistantService:
         name: str,
         space_id: UUID,
         template_data: Optional["TemplateCreate"] = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -577,6 +581,21 @@ class AssistantService:
         completion_model = await self.get_completion_model(space=space)
         assert space.id is not None
 
+        if enabled_capabilities:
+            from eneo.mcp_servers.application.capability_resolver import (
+                validate_capability_additions,
+            )
+
+            if set(enabled_capabilities) - set(space.enabled_capabilities):
+                raise BadRequestException("Capability is not enabled in this space")
+            await validate_capability_additions(
+                self.repo.session,
+                self.user.tenant_id,
+                enabled_capabilities,
+                [],
+                space.security_classification,
+            )
+
         if not template_data:
             assistant = self.factory.create_assistant(
                 name=name,
@@ -585,6 +604,7 @@ class AssistantService:
                 completion_model=completion_model,
             )
 
+            assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
             space.add_assistant(assistant)
             refreshed_space = await self.space_repo.update(space)
             assistant = refreshed_space.get_assistant(assistant.id)
@@ -595,6 +615,7 @@ class AssistantService:
                 template_data=template_data,
                 completion_model=completion_model,
                 name=name,
+                enabled_capabilities=enabled_capabilities,
             )
 
         # TODO: Review how we get the permissions to the presentation layer
@@ -610,6 +631,7 @@ class AssistantService:
         template_data: "TemplateCreate",
         completion_model: Optional["CompletionModel"],
         name: str | None = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
         template = await self.assistant_template_service.get_assistant_template(
             assistant_template_id=template_data.id
@@ -657,6 +679,8 @@ class AssistantService:
             template=template,
             description=template.description,
         )
+
+        assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
 
         # Validate before persisting: the factory-built assistant already carries
         # the final model + attachments, so a set that doesn't fit is rejected
@@ -877,6 +901,26 @@ class AssistantService:
             effective_mcp_servers = assistant.mcp_servers
         if assistant.has_knowledge():
             effective_mcp_servers = []
+        requested_capabilities = set(assistant.enabled_capabilities)
+        if not space.is_personal():
+            requested_capabilities &= set(space.enabled_capabilities)
+        if effective_config is not None and effective_config.mcp_enforced:
+            requested_capabilities = set(effective_config.enabled_capabilities)
+        if requested_capabilities:
+            resolution = await resolve_capability_servers(
+                self.repo.session,
+                self.user.tenant_id,
+                effective_mcp_servers,
+                requested_capabilities=sorted(requested_capabilities),
+                supports_tool_calling=model.supports_tool_calling,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                space_security_classification=space.security_classification,
+            )
+            effective_mcp_servers = [
+                *resolution.general_servers,
+                *resolution.capability_servers,
+            ]
         await self._validate_skill_activation_fit(
             validation_plan=validation_plan,
             candidate_skill_ids=candidate_skill_ids,
@@ -1286,6 +1330,7 @@ class AssistantService:
         websites: list[UUID] | None = None,
         integration_knowledge_ids: list[UUID] | None = None,
         mcp_server_ids: list[UUID] | None = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
         mcp_tools: list[tuple[UUID, bool]] | None = None,
         attachment_ids: list[UUID] | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
@@ -1354,6 +1399,7 @@ class AssistantService:
                 websites,
                 integration_knowledge_ids,
                 mcp_server_ids,
+                enabled_capabilities,
                 mcp_tools,
                 attachment_ids,
                 insight_enabled,
@@ -1532,6 +1578,10 @@ class AssistantService:
             )
             mcp_servers_result = await self.repo.session.execute(mcp_servers_query)
             enabled_server_rows = mcp_servers_result.fetchall()
+            if any(is_capability_purpose(row[1]) for row in enabled_server_rows):
+                raise BadRequestException(
+                    "Use enabled_capabilities for functions, not MCP server IDs"
+                )
             enabled_server_ids = {row[0] for row in enabled_server_rows}
             duplicate_purposes = duplicate_capability_purposes(
                 row[1] for row in enabled_server_rows
@@ -1618,6 +1668,32 @@ class AssistantService:
         # Store MCP server IDs and tool settings for repository to handle.
         setattr(assistant, "_mcp_server_ids", mcp_server_ids)
         setattr(assistant, "_mcp_tool_settings", mcp_tools)
+
+        if enabled_capabilities is not None:
+            from eneo.mcp_servers.application.capability_resolver import (
+                validate_capability_additions,
+            )
+
+            added = set(enabled_capabilities) - set(assistant.enabled_capabilities)
+            offered = set(space.enabled_capabilities)
+            if (
+                update_effective_config is not None
+                and not isinstance(update_effective_config, NotProvided)
+                and update_effective_config.mcp_enforced
+            ):
+                offered = set(update_effective_config.enabled_capabilities)
+            if added - offered:
+                raise BadRequestException(
+                    "Capability is not enabled in this space or policy"
+                )
+            await validate_capability_additions(
+                self.repo.session,
+                self.user.tenant_id,
+                enabled_capabilities,
+                assistant.enabled_capabilities,
+                space.security_classification,
+            )
+            assistant.enabled_capabilities = sorted(set(enabled_capabilities))
 
         assistant.update(
             name=name,
@@ -2727,6 +2803,7 @@ class AssistantService:
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
@@ -2896,28 +2973,31 @@ class AssistantService:
                 server for server in base_mcp_servers if server.id not in disabled_ids
             ]
 
-        # Capabilities: an attached capability-purpose server (web search,
-        # image generation) is a capability marker, not a provider pin. The
-        # provider serving THIS user for each requested purpose (their user
-        # groups' provider, else the tenant default) is resolved here and
-        # attached in its place, so switching providers never requires
-        # reconfiguring spaces or assistants. Attached (possibly stale or
-        # deactivated) capability servers are stripped from the ordinary set;
-        # if the user's role lacks the capability, no provider serves them,
-        # the provider fails the space's security classification, or the
-        # model cannot call tools, that capability is silently unavailable
-        # this turn.
+        # Resolve stored purposes independently of provider attachments. User group
+        # routing, permissions, classification, tool calling and opt-outs are
+        # checked for this turn without modifying saved selections.
         capability_base = (
             mcp_servers_override
             if mcp_servers_override is not None
             else list(assistant_to_ask.mcp_servers)
         )
+        # Provider IDs never grant a capability, including old attachments after a purpose edit.
+        mcp_servers_override = [
+            s for s in capability_base if not is_capability_purpose(s.purpose)
+        ]
         capability_mcp_servers: list["MCPServer"] = []
-        if any(is_capability_purpose(server.purpose) for server in capability_base):
+        requested_capabilities = set(assistant_to_ask.enabled_capabilities)
+        if not space.is_personal():
+            requested_capabilities &= set(space.enabled_capabilities)
+        if effective_config is not None and effective_config.mcp_enforced:
+            requested_capabilities = set(effective_config.enabled_capabilities)
+        requested_capabilities -= set(disabled_capabilities or [])
+        if requested_capabilities:
             resolution = await resolve_capability_servers(
                 self.repo.session,
                 self.user.tenant_id,
                 capability_base,
+                requested_capabilities=sorted(requested_capabilities),
                 supports_tool_calling=effective_completion_model.supports_tool_calling,
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
@@ -3301,6 +3381,11 @@ class AssistantService:
         mcp_server_db = await self.repo.session.scalar(mcp_server_query)
         if mcp_server_db is None:
             raise BadRequestException("MCP server is not enabled for this tenant")
+
+        if is_capability_purpose(mcp_server_db.purpose):
+            raise BadRequestException(
+                "Use enabled_capabilities for functions, not MCP server IDs"
+            )
 
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant

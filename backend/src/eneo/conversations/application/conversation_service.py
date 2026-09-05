@@ -16,6 +16,9 @@ from eneo.files.file_models import FileType
 from eneo.files.file_reference import url_only_file_ids
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
 from eneo.sessions.session import SessionUpdate
 
 if TYPE_CHECKING:
@@ -79,6 +82,7 @@ class ConversationService:
         version: int = 1,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> "AssistantResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
@@ -139,6 +143,7 @@ class ConversationService:
                     version=version,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                 )
 
         # case 2: starting a new conversation
@@ -166,6 +171,7 @@ class ConversationService:
                     version=version,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                 )
             else:
                 # should never happen due to model validation, but just to be safe

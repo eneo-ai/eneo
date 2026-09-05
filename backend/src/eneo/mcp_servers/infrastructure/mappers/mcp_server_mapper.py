@@ -108,6 +108,7 @@ class MCPServerMapper:
                 model_inspector = inspect(model_loaded)
                 model_sc = None
                 provider_name = None
+                provider_is_active = False
                 if model_inspector is not None:
                     sc_value = (
                         model_inspector.attrs.security_classification.loaded_value
@@ -117,6 +118,7 @@ class MCPServerMapper:
                     provider_value = model_inspector.attrs.provider.loaded_value
                     if provider_value is not NEVER_SET and provider_value is not None:
                         provider_name = provider_value.name
+                        provider_is_active = provider_value.is_active
                 image_model = MCPServerBackingModel(
                     id=model_loaded.id,
                     name=model_loaded.name,
@@ -124,6 +126,8 @@ class MCPServerMapper:
                     provider_name=provider_name,
                     is_enabled=model_loaded.is_enabled,
                     is_deleted=model_loaded.deleted_at is not None,
+                    is_deprecated=model_loaded.is_deprecated,
+                    provider_is_active=provider_is_active,
                     security_classification=model_sc,
                 )
 

@@ -21,6 +21,7 @@
   import { m } from "$lib/paraglide/messages";
   import { serverDisplayName } from "$lib/features/chat/internalToolLabels";
   import { BookOpen, Paperclip, Plug, ShieldCheck } from "lucide-svelte";
+  import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getCapability } from "$lib/features/mcp/capabilities";
   import type { SvelteSet } from "svelte/reactivity";
 
@@ -30,6 +31,8 @@
     description?: string | null;
     icon_url?: string | null;
     purpose?: string | null;
+    available?: boolean;
+    reason?: string | null;
   };
 
   type InternalMcpServer = {
@@ -95,11 +98,11 @@
   <Popover.Trigger
     class={buttonVariants({ variant: activeCount > 0 ? "secondary" : "ghost", size: "sm" }) +
       " h-9 gap-1.5 rounded-lg"}
-    title={m.mcp_servers()}
+    title={m.tools()}
     aria-label={m.mcp_servers_status_aria({ active: activeCount, total })}
   >
     <Plug class="size-4" aria-hidden="true" />
-    <span class="hidden sm:inline">{m.mcp_servers()}</span>
+    <span class="hidden sm:inline">{m.tools()}</span>
     <Badge
       variant={activeCount > 0 ? "default" : "outline"}
       class="ml-0.5 px-1.5 tabular-nums"
@@ -109,7 +112,7 @@
 
   <Popover.Content side="top" align="start" class="w-80 gap-0 p-0">
     <div class="border-b px-3 py-2.5">
-      <Popover.Title class="text-sm">{m.mcp_servers()}</Popover.Title>
+      <Popover.Title class="text-sm">{m.tools()}</Popover.Title>
       <div class="text-muted-foreground mt-0.5 flex items-center justify-between gap-2 text-xs">
         <span>{m.mcp_servers_active_count({ active: activeCount, total })}</span>
         {#if servers.length > 1}
@@ -175,11 +178,15 @@
             />
             <span class="min-w-0 flex-1 {on ? '' : 'opacity-60'}">
               <span class="text-foreground block truncate text-sm font-medium">{label}</span>
+              {#if server.available === false}<span class="text-muted-foreground block text-xs"
+                  >{readinessMessage(server.reason)}</span
+                >{/if}
             </span>
             <Switch
               checked={on}
               onCheckedChange={(value) => setServer(server.id, value)}
               aria-label={label}
+              disabled={!on && server.available === false}
             />
           </label>
         {/each}
@@ -187,11 +194,7 @@
     {/if}
 
     {#if servers.length > 0}
-      <div
-        class="flex max-h-64 flex-col overflow-y-auto p-1"
-        role="group"
-        aria-label={m.mcp_servers()}
-      >
+      <div class="flex max-h-64 flex-col overflow-y-auto p-1" role="group" aria-label={m.tools()}>
         {#each servers as server (server.id)}
           {@const on = !disabledServerIds.has(server.id)}
           {@const descId = server.description ? `mcp-desc-${server.id}` : undefined}

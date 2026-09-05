@@ -54,13 +54,13 @@ describe("ChatMcpServers", () => {
     expect([...disabledServerIds].sort()).toEqual(["server-a", "server-b"]);
   });
 
-  it("toggles a capability row through disabledServerIds like any server", async () => {
+  it("toggles a stable capability-purpose key", async () => {
     const disabledServerIds = new SvelteSet<string>();
 
     render(ChatMcpServers, {
       servers: [],
       capabilityServers: [
-        { id: "image-provider", name: "Acme Images", purpose: "image_generation" }
+        { id: "capability:image_generation", name: "Acme Images", purpose: "image_generation" }
       ],
       disabledServerIds,
       autoAcceptTools: true
@@ -71,6 +71,6 @@ describe("ChatMcpServers", () => {
       .click();
     await page.getByRole("switch", { name: m.image_generation() }).click();
 
-    expect([...disabledServerIds]).toEqual(["image-provider"]);
+    expect([...disabledServerIds]).toEqual(["capability:image_generation"]);
   });
 });

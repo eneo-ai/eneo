@@ -9638,6 +9638,10 @@ export interface components {
     };
     /** AskAssistant */
     AskAssistant: {
+      /** Disabled Capabilities */
+      disabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Disabled Mcp Server Ids */
+      disabled_mcp_server_ids?: string[];
       /** Question */
       question: string;
       /** Session Id */
@@ -9712,6 +9716,8 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       logging_enabled?: boolean | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /**
        * Space Id
        * Format: uuid
@@ -9887,6 +9893,10 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
       name: string;
       prompt?: components["schemas"]["PromptPublic"] | null;
@@ -10567,6 +10577,18 @@ export interface components {
        */
       deactivated_server_ids?: string[];
     };
+    /** CapabilityAvailability */
+    CapabilityAvailability: {
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: "web_search" | "image_generation";
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?: string | null;
+    };
     /** CapabilityPublic */
     CapabilityPublic: {
       target: components["schemas"]["StorageKind"];
@@ -11234,6 +11256,8 @@ export interface components {
        * @default []
        */
       disabled_mcp_server_ids?: string[];
+      /** Disabled Capabilities */
+      disabled_capabilities?: ("web_search" | "image_generation")[];
     };
     /** Counts */
     Counts: {
@@ -11512,6 +11536,8 @@ export interface components {
     CreateSpaceAssistantRequest: {
       /** Name */
       name: string;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -11810,6 +11836,10 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
       name: string;
       prompt?: components["schemas"]["PromptPublic"] | null;
@@ -12013,15 +12043,14 @@ export interface components {
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
     };
-    /**
-     * EffectiveConfigPublic
-     * @description Frontend hint surface for personal-assistant governance.
-     *
-     *     Only meaningful on default assistants in personal spaces. `prompt_locked`
-     *     is exposed as a boolean — we never leak the admin-prompt text to the
-     *     user-facing API.
-     */
+    /** EffectiveConfigPublic */
     EffectiveConfigPublic: {
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Default Disabled Capabilities */
+      default_disabled_capabilities?: ("web_search" | "image_generation")[];
       /** Models Enforced */
       models_enforced: boolean;
       /** Available Models */
@@ -13795,11 +13824,13 @@ export interface components {
       /** Is Enabled */
       is_enabled: boolean;
     };
-    /**
-     * MCPServerCreate
-     * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
-     */
+    /** MCPServerCreate */
     MCPServerCreate: {
+      /**
+       * Activate
+       * @default false
+       */
+      activate?: boolean;
       /** Name */
       name: string;
       /** Http Url */
@@ -13908,6 +13939,8 @@ export interface components {
        * @default true
        */
       is_enabled?: boolean;
+      /** Readiness Reason */
+      readiness_reason?: string | null;
       /**
        * Audience
        * @default everyone
@@ -14025,6 +14058,8 @@ export interface components {
        * @default true
        */
       is_enabled?: boolean;
+      /** Readiness Reason */
+      readiness_reason?: string | null;
       /**
        * Audience
        * @default everyone
@@ -14266,6 +14301,8 @@ export interface components {
     };
     /** McpRestrictionInput */
     McpRestrictionInput: {
+      /** Capabilities */
+      capabilities?: components["schemas"]["PolicyCapabilityInput"][];
       /** Enabled */
       enabled: boolean;
       /**
@@ -14281,6 +14318,8 @@ export interface components {
     };
     /** McpRestrictionPublic */
     McpRestrictionPublic: {
+      /** Capabilities */
+      capabilities?: components["schemas"]["PolicyCapabilityInput"][];
       /** Enabled */
       enabled: boolean;
       /** Servers */
@@ -16178,6 +16217,8 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       logging_enabled?: boolean | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -16345,6 +16386,8 @@ export interface components {
     };
     /** PartialUpdateSpaceRequest */
     PartialUpdateSpaceRequest: {
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -16539,6 +16582,19 @@ export interface components {
      * @enum {string}
      */
     PolicyActor: "migration" | "storage_admin";
+    /** PolicyCapabilityInput */
+    PolicyCapabilityInput: {
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: "web_search" | "image_generation";
+      /**
+       * Is Default Enabled
+       * @default true
+       */
+      is_default_enabled?: boolean;
+    };
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -18719,6 +18775,10 @@ export interface components {
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
       /** Completion Models */
@@ -20354,6 +20414,8 @@ export interface components {
     UpdateInterval: "never" | "daily" | "every_other_day" | "weekly";
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
+      /** Capabilities */
+      capabilities?: ("web_search" | "image_generation")[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */

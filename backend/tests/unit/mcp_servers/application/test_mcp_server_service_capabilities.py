@@ -637,6 +637,7 @@ class TestBuiltinProvider:
         model.tenant_id = tenant_id
         model.provider_id = provider_id or uuid4()
         model.is_org_enabled = enabled
+        model.is_deprecated = False
         return model
 
     def _patch(self, monkeypatch, service, model=None):
@@ -926,3 +927,39 @@ class TestBuiltinProvider:
         assert result.server.http_url.endswith("/internal-mcp/image_generation/mcp")
         assert result.server.image_model_id == replacement.id
         service.image_model_repo.one_or_none.assert_awaited_once_with(replacement.id)
+
+
+class TestActivationReadiness(TestBuiltinProvider):
+    @pytest.mark.parametrize(
+        "failure", ["disabled", "deprecated", "deleted", "foreign", "provider_inactive"]
+    )
+    async def test_invalid_model_never_replaces_default(self, monkeypatch, failure):
+        service, repo, _, user = _make_service()
+        model = self._patch(monkeypatch, service)
+        server = _make_server(user.tenant_id, purpose="image_generation")
+        server.http_auth_type = "internal"
+        server.image_model_id = model.id
+        repo.one.return_value = server
+        if failure == "disabled":
+            model.is_org_enabled = False
+        elif failure == "deprecated":
+            model.is_deprecated = True
+        elif failure == "deleted":
+            service.image_model_repo.one_or_none.return_value = None
+        elif failure == "foreign":
+            model.tenant_id = uuid4()
+        else:
+            import eneo.mcp_servers.application.mcp_server_service as module
+
+            monkeypatch.setattr(
+                module,
+                "load_active_litellm_provider",
+                AsyncMock(side_effect=BadRequestException("Inactive provider")),
+            )
+        with pytest.raises(
+            (BadRequestException, NotFoundException, ProviderNotFoundException)
+        ):
+            await service.activate_capability_server(server.id)
+        repo.session.execute.assert_not_awaited()
+        repo.update.assert_not_awaited()
+        assert server.is_enabled is False

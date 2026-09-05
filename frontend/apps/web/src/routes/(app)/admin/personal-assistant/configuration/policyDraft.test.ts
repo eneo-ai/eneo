@@ -414,7 +414,7 @@ describe("PolicyDraft", () => {
 
     expect(draft.skillCatalogPage).toEqual(skills);
   });
-  it("stores one marker per capability and keeps a stale marker selectable", async () => {
+  it("stores purposes independently of providers and preserves defaults", async () => {
     const update = vi.fn(async () => {});
     const draft = new PolicyDraft();
     const base = {
@@ -432,7 +432,8 @@ describe("PolicyDraft", () => {
           enabled: true,
           // A previously active search server: deactivated, but the policy
           // still holds it as the web-search marker.
-          servers: [{ mcp_server_id: "old-search", is_default_enabled: true }],
+          servers: [],
+          capabilities: [{ purpose: "web_search", is_default_enabled: true }],
           disabled_tool_ids: []
         },
         prompt_enforcement: { enabled: false, prompt_library_id: null },
@@ -498,15 +499,15 @@ describe("PolicyDraft", () => {
       "web_search",
       "image_generation"
     ]);
-    // The stale marker keeps web search switched on in the draft.
-    expect(draft.mcpSelections.has("old-search")).toBe(true);
+    // Stored intent stays selected across provider changes.
+    expect(draft.mcpSelections.has("capability:web_search")).toBe(true);
     expect(draft.mcpSummary).toContain("1");
 
     draft.toggleCapability("web_search", false);
     expect(draft.mcpSelections.size).toBe(0);
 
     draft.toggleCapability("web_search", true);
-    expect(Array.from(draft.mcpSelections.keys())).toEqual(["default-search"]);
+    expect(Array.from(draft.mcpSelections.keys())).toEqual(["capability:web_search"]);
 
     draft.toggleCapability("image_generation", true);
     draft.toggleCapabilityDefault("image_generation", false);
@@ -516,9 +517,10 @@ describe("PolicyDraft", () => {
     expect(update).toHaveBeenCalledWith({
       mcp_restriction: {
         enabled: true,
-        servers: [
-          { mcp_server_id: "default-search", is_default_enabled: true },
-          { mcp_server_id: "images", is_default_enabled: false }
+        servers: [],
+        capabilities: [
+          { purpose: "web_search", is_default_enabled: true },
+          { purpose: "image_generation", is_default_enabled: false }
         ],
         disabled_tool_ids: []
       }

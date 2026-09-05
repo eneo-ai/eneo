@@ -291,7 +291,8 @@ describe("ChatService turn diagnostics", () => {
         order: 1,
         serverName: "warehouse",
         toolName: "query",
-        status: "complete"
+        status: "complete",
+        usage: null
       }
     ]);
   });
@@ -389,5 +390,36 @@ describe("ChatService turn diagnostics", () => {
     await vi.waitFor(() => expect(chat.pendingDiagnosticsMessageIds).toEqual([]));
     expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Live answer");
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("ChatService independent capabilities", () => {
+  it("sends capability opt-outs separately from external server IDs", async () => {
+    const ask = completedAsk();
+    const chat = chatService(vi.fn(), { ask });
+    await chat.askQuestion("Hello", [], undefined, undefined, undefined, [
+      "ordinary-server",
+      "capability:image_generation"
+    ]);
+    expect(ask.mock.calls[0][0]).toMatchObject({
+      disabledMcpServerIds: ["ordinary-server"],
+      disabledCapabilities: ["image_generation"]
+    });
+  });
+
+  it("refreshes a partner when only capability availability changes", () => {
+    const chat = chatService();
+    chat.changeChatPartner(
+      assistantPartner({
+        enabled_capabilities: ["image_generation"],
+        available_capabilities: [
+          { purpose: "image_generation", available: false, reason: "no_provider" }
+        ]
+      })
+    );
+    expect(chat.partner).toMatchObject({
+      enabled_capabilities: ["image_generation"],
+      available_capabilities: [{ available: false }]
+    });
   });
 });

@@ -20,6 +20,7 @@ from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts
 from eneo.database.tables.app_template_table import AppTemplates
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.assistant_template_table import AssistantTemplates
+from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
@@ -1505,7 +1506,7 @@ class SpaceRepository:
         group_chats = await self._get_group_chats(space_id=entry_in_db.id)
         services = await self._get_services(space_id=entry_in_db.id)
 
-        return self.factory.create_space_from_db(
+        space = self.factory.create_space_from_db(
             entry_in_db,
             user=self.user,
             collections_in_db=collections,
@@ -1523,6 +1524,44 @@ class SpaceRepository:
             integration_knowledge_in_db=integration_knowledge_union,
             security_classification=entry_in_db.security_classification,
         )
+        from eneo.mcp_servers.application.capability_resolver import (
+            capability_availability,
+        )
+
+        space.available_capabilities = await capability_availability(
+            self.session, self.user.tenant_id, space.security_classification
+        )
+        if space.is_personal():
+            space.enabled_capabilities = [
+                s.purpose for s in space.available_capabilities if s.available
+            ]
+        assistants_with_default = [
+            *space.assistants,
+            *([space.default_assistant] if space.default_assistant else []),
+        ]
+        if assistants_with_default:
+            from eneo.mcp_servers.domain.entities.mcp_server import (
+                allowed_capability_purposes,
+            )
+
+            personal_availability = await capability_availability(
+                self.session,
+                self.user.tenant_id,
+                space.security_classification,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+            )
+            for assistant in assistants_with_default:
+                assistant.available_capabilities = [
+                    state
+                    if space.is_personal()
+                    or state.purpose in space.enabled_capabilities
+                    else state.model_copy(
+                        update={"available": False, "reason": "space_disabled"}
+                    )
+                    for state in personal_availability
+                ]
+        return space
 
     async def _get_record_with_options(
         self,
@@ -1563,6 +1602,10 @@ class SpaceRepository:
             raise UniqueException("Users can only have one personal space") from e
 
         assert entry_in_db is not None
+        entry_in_db.capabilities = [
+            SpaceCapabilities(purpose=p)
+            for p in sorted(set(space.enabled_capabilities))
+        ]
         await self._set_completion_models(entry_in_db, space.completion_models)
         await self._set_embedding_models(entry_in_db, space.embedding_models)
         await self._set_transcription_models(entry_in_db, space.transcription_models)
@@ -1689,6 +1732,10 @@ class SpaceRepository:
         entry_in_db = await self._get_record_with_options(query)
         assert entry_in_db is not None
 
+        entry_in_db.capabilities = [
+            SpaceCapabilities(purpose=p)
+            for p in sorted(set(space.enabled_capabilities))
+        ]
         await self._set_completion_models(entry_in_db, space.completion_models)
         await self._set_embedding_models(entry_in_db, space.embedding_models)
         await self._set_transcription_models(entry_in_db, space.transcription_models)

@@ -26,7 +26,11 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided, is_provided
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    CAPABILITY_PURPOSES,
     GENERAL_PURPOSE,
     MCPServer,
     duplicate_capability_purposes,
@@ -78,6 +82,9 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_completion_models: list["CompletionModel"]
     affected_embedding_models: list["EmbeddingModel"]
     affected_transcription_models: list["TranscriptionModel"]
+    affected_capabilities: list[CapabilityPurpose] = field(
+        default_factory=list[CapabilityPurpose]
+    )
     affected_mcp_servers: list[MCPServer] = field(
         default_factory=_empty_mcp_server_list
     )
@@ -206,6 +213,14 @@ class SpaceService:
         servers_db = result.scalars().all()
 
         # Convert to domain entities
+        space.enabled_capabilities = sorted(
+            {
+                purpose
+                for purpose in CAPABILITY_PURPOSES
+                if any(s.purpose == purpose for s in servers_db)
+            }
+        )
+        servers_db = [s for s in servers_db if not is_capability_purpose(s.purpose)]
         space.mcp_servers = [
             MCPServer(
                 id=server.id,
@@ -325,6 +340,7 @@ class SpaceService:
         completion_model_ids: list[UUID] | None = None,
         transcription_model_ids: list[UUID] | None = None,
         mcp_server_ids: list[UUID] | None = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
         mcp_tools: list["MCPToolSetting"] | None = None,
         security_classification: Union[ModelId, NotProvided, None] = NOT_PROVIDED,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
@@ -449,6 +465,27 @@ class SpaceService:
                 for server in servers_db
             ]
 
+        if mcp_servers is not None and any(
+            is_capability_purpose(s.purpose) for s in mcp_servers
+        ):
+            raise BadRequestException(
+                "Use enabled_capabilities for functions, not MCP server IDs"
+            )
+        if enabled_capabilities is not None:
+            from eneo.mcp_servers.application.capability_resolver import (
+                validate_capability_additions,
+            )
+
+            await validate_capability_additions(
+                self.repo.session,
+                self.user.tenant_id,
+                enabled_capabilities,
+                space.enabled_capabilities,
+                space_security_classification
+                if is_provided(security_classification)
+                else space.security_classification,
+            )
+            space.enabled_capabilities = sorted(set(enabled_capabilities))
         if mcp_servers is not None:
             await self._validate_capability_markers(
                 mcp_servers,
@@ -527,13 +564,38 @@ class SpaceService:
             s for s in current_mcp_servers if s.id not in remaining_mcp_server_ids
         ]
 
+        affected_capabilities: list[CapabilityPurpose] = []
+        if space.enabled_capabilities:
+            from eneo.mcp_servers.application.capability_resolver import (
+                capability_availability,
+            )
+
+            previous_available = {
+                state.purpose
+                for state in space.available_capabilities
+                if state.available
+            }
+            space.available_capabilities = await capability_availability(
+                self.repo.session, self.user.tenant_id, security_classification
+            )
+            affected_capabilities = [
+                state.purpose
+                for state in space.available_capabilities
+                if state.purpose in space.enabled_capabilities
+                and state.purpose in previous_available
+                and not state.available
+            ]
+
         affected_assistants: list["Assistant"] = []
         for assistant in space.assistants:
+            if set(assistant.enabled_capabilities) & set(affected_capabilities):
+                affected_assistants.append(assistant)
             if (
                 assistant.completion_model is not None
                 and assistant.completion_model.id not in remaining_completion_model_ids
             ):
-                affected_assistants.append(assistant)
+                if assistant not in affected_assistants:
+                    affected_assistants.append(assistant)
             if (
                 assistant.embedding_model_id is not None
                 and assistant.embedding_model_id not in remaining_embedding_model_ids
@@ -591,6 +653,7 @@ class SpaceService:
             affected_embedding_models=affected_embedding_models,
             affected_transcription_models=affected_transcription_models,
             affected_mcp_servers=affected_mcp_servers,
+            affected_capabilities=affected_capabilities,
         )
 
     async def delete_personal_space(self, user: UserInDB):

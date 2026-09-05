@@ -62,6 +62,7 @@ type McpServer = {
   purpose?: string | null;
   is_available?: boolean;
   is_enabled?: boolean;
+  readiness_reason?: string | null;
   audience?: string | null;
   tools?: McpTool[] | null;
 };
@@ -69,11 +70,16 @@ type PromptOption = { id: string; name: string; description?: string | null };
 
 type PolicyModel = { completion_model_id: string; is_default: boolean };
 type PolicyMcpServer = { mcp_server_id: string; is_default_enabled: boolean };
+type PolicyCapability = {
+  purpose: "web_search" | "image_generation";
+  is_default_enabled?: boolean;
+};
 type Policy = {
   models_restriction: { enabled: boolean; models: PolicyModel[]; provider_ids?: string[] | null };
   mcp_restriction: {
     enabled: boolean;
     servers: PolicyMcpServer[];
+    capabilities?: PolicyCapability[];
     disabled_tool_ids?: string[] | null;
   };
   prompt_enforcement: { enabled: boolean; prompt_library_id?: string | null };
@@ -94,6 +100,7 @@ type PolicyUpdate = {
   mcp_restriction?: {
     enabled: boolean;
     servers: PolicyMcpServer[];
+    capabilities?: PolicyCapability[];
     disabled_tool_ids: string[];
   };
   prompt_enforcement?: {
@@ -189,9 +196,20 @@ export class PolicyDraft {
     // when deactivated: the policy holds a capability marker that the ask
     // path resolves to the user's provider, so a marker for a since-replaced
     // server must keep the capability on rather than vanish from the draft.
-    this.#allMcpServers = (data.mcpSettings?.items ?? []).filter(
-      (s) => s.is_available || isCapabilityPurpose(s.purpose)
-    );
+    this.#allMcpServers = [
+      ...(data.mcpSettings?.items ?? []).filter(
+        (s) => s.is_available && !isCapabilityPurpose(s.purpose)
+      ),
+      ...CAPABILITIES.map((c) => ({
+        id: "capability:" + c.purpose,
+        name: c.label(),
+        purpose: c.purpose,
+        is_available: (data.mcpSettings?.items ?? []).some(
+          (s) => s.purpose === c.purpose && s.is_enabled && !s.readiness_reason
+        ),
+        tools: []
+      }))
+    ];
     this.promptOptions = data.promptLibrary.items;
     this.skillCatalogPage = data.skills;
     this.selectiveActivationEnabled = data.skillRuntimePolicy.selective_activation_enabled;
@@ -223,6 +241,11 @@ export class PolicyDraft {
       if (!this.#selectableServerIds.has(server.mcp_server_id)) continue;
       this.mcpSelections.set(server.mcp_server_id, {
         isDefaultEnabled: server.is_default_enabled
+      });
+    }
+    for (const c of policy.mcp_restriction.capabilities ?? []) {
+      this.mcpSelections.set("capability:" + c.purpose, {
+        isDefaultEnabled: c.is_default_enabled ?? true
       });
     }
     this.disabledMcpToolIds.clear();
@@ -320,11 +343,14 @@ export class PolicyDraft {
   // an orphaned (since-disabled) server in the saved policy must not register
   // as a pending change on a pristine load.
   #initialMcpServers = $derived(
-    new SvelteMap(
-      this.#policy.mcp_restriction.servers
+    new SvelteMap([
+      ...this.#policy.mcp_restriction.servers
         .filter((server) => this.#selectableServerIds.has(server.mcp_server_id))
-        .map((server) => [server.mcp_server_id, server.is_default_enabled])
-    )
+        .map((server) => [server.mcp_server_id, server.is_default_enabled] as const),
+      ...(this.#policy.mcp_restriction.capabilities ?? []).map(
+        (c) => ["capability:" + c.purpose, c.is_default_enabled ?? true] as const
+      )
+    ])
   );
   #initialDisabledToolIds = $derived(
     new SvelteSet(
@@ -536,42 +562,19 @@ export class PolicyDraft {
     if (this.mcpSelections.has(id)) this.mcpSelections.set(id, { isDefaultEnabled: on });
   };
 
-  #capabilityServers(purpose: string): McpServer[] {
-    return this.#allMcpServers.filter((s) => s.purpose === purpose);
-  }
-
-  /**
-   * Turn a capability on or off for the personal assistant. On stores ONE
-   * marker for the purpose (the active default server when there is one,
-   * else any active server, else any saved one); off removes every marker
-   * of that purpose so the policy self-heals after provider switches.
-   */
   toggleCapability = (purpose: string, on: boolean) => {
-    const servers = this.#capabilityServers(purpose);
-    if (!on) {
-      for (const server of servers) this.toggleMcp(server.id, false);
-      return;
-    }
-    if (servers.some((s) => this.mcpSelections.has(s.id))) return;
-    const marker =
-      servers.find((s) => s.is_enabled && s.audience !== "groups") ??
-      servers.find((s) => s.is_enabled) ??
-      servers[0];
-    if (marker) this.mcpSelections.set(marker.id, { isDefaultEnabled: true });
+    const id = "capability:" + purpose;
+    if (on) {
+      if (!this.#allMcpServers.find((s) => s.id === id)?.is_available) return;
+      this.mcpSelections.set(id, { isDefaultEnabled: true });
+    } else this.mcpSelections.delete(id);
   };
 
   toggleCapabilityDefault = (purpose: string, on: boolean) => {
-    for (const server of this.#capabilityServers(purpose)) {
-      this.toggleMcpDefault(server.id, on);
-    }
+    this.toggleMcpDefault("capability:" + purpose, on);
   };
 
-  /** Capabilities offered to the personal assistant, in canonical order. */
-  capabilityRows = $derived(
-    CAPABILITIES.filter((capability) =>
-      this.#allMcpServers.some((s) => s.purpose === capability.purpose)
-    )
-  );
+  capabilityRows = CAPABILITIES;
 
   toggleMcpTool = (toolId: string, on: boolean) => {
     if (on) this.disabledMcpToolIds.delete(toolId);
@@ -637,10 +640,18 @@ export class PolicyDraft {
       if (this.#mcpDirty) {
         update.mcp_restriction = {
           enabled: this.mcpEnabled,
-          servers: Array.from(this.mcpSelections.entries()).map(([id, v]) => ({
-            mcp_server_id: id,
-            is_default_enabled: v.isDefaultEnabled
-          })),
+          servers: Array.from(this.mcpSelections.entries())
+            .filter(([id]) => !id.startsWith("capability:"))
+            .map(([id, v]) => ({
+              mcp_server_id: id,
+              is_default_enabled: v.isDefaultEnabled
+            })),
+          capabilities: Array.from(this.mcpSelections.entries())
+            .filter(([id]) => id.startsWith("capability:"))
+            .map(([id, v]) => ({
+              purpose: id.slice("capability:".length) as PolicyCapability["purpose"],
+              is_default_enabled: v.isDefaultEnabled
+            })),
           disabled_tool_ids: disabledToolIdsForSelectedServers(
             this.#allMcpServers,
             this.mcpSelections.keys(),

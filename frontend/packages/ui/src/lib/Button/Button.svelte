@@ -27,6 +27,7 @@
     | "primary"
     | "primary-outlined"
     | "destructive"
+    | "warning-outlined"
     | "positive"
     | "positive-outlined"
     | "on-fill" = "simple";
@@ -68,6 +69,12 @@
             "hover:border-accent-stronger",
             "hover:bg-accent-stronger",
             "hover:text-on-fill"
+          ],
+          "warning-outlined": [
+            "border-warning-default",
+            "text-warning-stronger",
+            "hover:border-warning-stronger",
+            "hover:bg-warning-dimmer"
           ],
           destructive: [
             "border-negative-default",

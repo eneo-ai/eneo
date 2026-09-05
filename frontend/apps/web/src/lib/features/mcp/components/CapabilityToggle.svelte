@@ -1,114 +1,69 @@
-<!--
-    One capability (web search, image generation) as an assistant toggle. The
-    provider is configured globally by the admin and resolved at ask time, so
-    this is a pure on/off switch with no provider identity. Under the hood it
-    attaches/detaches the MCP server with this capability's purpose offered
-    through the space:
-    - Checked when the assistant has ANY server with this purpose attached.
-    - Turning ON attaches the offered active provider.
-    - Turning OFF detaches EVERY attached server with this purpose and its
-      tool overrides, so the assistant self-heals after provider switches.
--->
-
 <script lang="ts">
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { m } from "$lib/paraglide/messages";
   import { Input } from "@eneo/ui";
-  import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
-
-  interface MCPTool {
-    id: string;
-    name: string;
-    description?: string;
-    is_enabled: boolean;
-  }
-
-  interface MCPServer {
-    id: string;
-    name: string;
-    purpose?: string;
-    tools?: MCPTool[];
-    [key: string]: unknown;
-  }
-
-  type Props = {
-    capability: CapabilityDescriptor;
-    /** The assistant's attached MCP servers (bound to the edit draft). */
-    selectedMCPServers: { [key: string]: unknown }[] | undefined;
-    /** MCP tool overrides sent alongside the servers. */
-    selectedMCPTools?: Array<{ tool_id: string; is_enabled: boolean }>;
-  };
-
+  import { LockKeyhole } from "lucide-svelte";
+  import type { CapabilityDescriptor, CapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { readinessMessage } from "$lib/features/mcp/readiness";
   let {
     capability,
-    selectedMCPServers = $bindable([]),
-    selectedMCPTools = $bindable([])
-  }: Props = $props();
-
+    selectedModel,
+    enabledCapabilities = $bindable([])
+  }: {
+    capability: CapabilityDescriptor;
+    selectedModel?: { supports_tool_calling?: boolean } | null;
+    enabledCapabilities?: CapabilityPurpose[];
+  } = $props();
   const {
     state: { currentSpace }
   } = getSpacesManager();
-
-  let servers = $derived((selectedMCPServers ?? []) as unknown as MCPServer[]);
-
-  // The space offers at most the active provider.
-  let offeredProvider = $derived.by(() => {
-    const spaceServers = ($currentSpace.mcp_servers ?? []) as unknown as MCPServer[];
-    const provider = spaceServers.find((server) => server.purpose === capability.purpose);
-    if (!provider) return undefined;
-    return {
-      ...provider,
-      tools: provider.tools?.filter((tool) => tool.is_enabled) || []
-    };
-  });
-
-  let selectedCapabilityServers = $derived(
-    servers.filter((server) => server.purpose === capability.purpose)
+  const on = $derived(enabledCapabilities.includes(capability.purpose));
+  const availability = $derived(
+    $currentSpace.available_capabilities?.find((c) => c.purpose === capability.purpose)
   );
-  let capabilityOn = $derived(selectedCapabilityServers.length > 0);
-  let noProvider = $derived(!offeredProvider && !capabilityOn);
-
-  function toggleCapability() {
-    if (capabilityOn) {
-      const ids = new Set(selectedCapabilityServers.map((server) => server.id));
-      const toolIds = new Set(
-        selectedCapabilityServers.flatMap((server) => server.tools?.map((tool) => tool.id) ?? [])
-      );
-      selectedMCPServers = servers.filter((server) => !ids.has(server.id));
-      selectedMCPTools = selectedMCPTools.filter((tool) => !toolIds.has(tool.tool_id));
-    } else if (offeredProvider) {
-      const newServer = {
-        ...offeredProvider,
-        tools: offeredProvider.tools?.map((tool) => ({ ...tool, is_enabled: true })) || []
-      };
-      selectedMCPServers = [...servers, newServer];
-      const toolOverrides =
-        offeredProvider.tools?.map((tool) => ({ tool_id: tool.id, is_enabled: true })) ?? [];
-      selectedMCPTools = [...selectedMCPTools, ...toolOverrides];
-    }
+  const offered = $derived(($currentSpace.enabled_capabilities ?? []).includes(capability.purpose));
+  const blockingMessage = $derived(
+    !offered
+      ? readinessMessage("space_disabled")
+      : selectedModel?.supports_tool_calling === false
+        ? m.model_does_not_support_tools()
+        : !availability?.available
+          ? readinessMessage(availability?.reason ?? "no_active_provider")
+          : ""
+  );
+  function toggle() {
+    enabledCapabilities = on
+      ? enabledCapabilities.filter((p) => p !== capability.purpose)
+      : [...enabledCapabilities, capability.purpose];
   }
 </script>
 
 <div
-  class="border-default border-b transition-colors last:border-b-0 {capabilityOn
-    ? 'bg-accent-dimmer/20'
+  class="border-default flex items-center gap-3 border-b px-4 py-3 last:border-b-0 {blockingMessage
+    ? 'bg-secondary/40'
     : ''}"
-  class:opacity-60={noProvider}
 >
-  <div class="flex items-center">
-    <div class="flex w-10 shrink-0 items-center justify-center">
-      <capability.icon class="text-muted h-4 w-4" aria-hidden="true" />
+  <capability.icon class="text-muted h-4 w-4 shrink-0" aria-hidden="true" />
+  <Input.Switch
+    class="min-w-0 flex-1 [&_button:disabled]:opacity-50"
+    value={on}
+    disabled={!on && !!blockingMessage}
+    sideEffect={toggle}
+  >
+    <div class="flex flex-col gap-1">
+      <span class="flex flex-wrap items-center gap-2">
+        <span class="font-medium {blockingMessage ? 'text-secondary' : 'text-default'}"
+          >{capability.label()}</span
+        >
+        {#if blockingMessage}
+          <span
+            class="bg-warning-dimmer text-warning-stronger inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+          >
+            <LockKeyhole class="h-3 w-3" aria-hidden="true" />{m.not_available()}
+          </span>
+        {/if}
+      </span>
+      <span class="text-muted text-xs">{blockingMessage || capability.capabilityHint()}</span>
     </div>
-    <div class="flex-1 py-2.5 pr-4">
-      <!-- Locked via disabled (not pointer-events) so keyboard users cannot
-           flip a switch that attaches nothing. -->
-      <Input.Switch value={capabilityOn} disabled={noProvider} sideEffect={toggleCapability}>
-        <div class="flex flex-col gap-0.5">
-          <span class="text-default font-medium">{capability.label()}</span>
-          <p class="text-muted text-xs leading-snug">
-            {noProvider ? capability.notAvailableHereHint() : capability.capabilityHint()}
-          </p>
-        </div>
-      </Input.Switch>
-    </div>
-  </div>
+  </Input.Switch>
 </div>
