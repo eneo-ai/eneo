@@ -1284,7 +1284,11 @@ async def send_message(
                     acknowledge_duplicate_provider_spend=(
                         body.acknowledge_duplicate_provider_spend
                     ),
-                    message=body.message,
+                    message=(
+                        prepared_context.message
+                        if prepared_context.message is not None
+                        else body.message
+                    ),
                     file_ids=body.file_ids,
                     question_answer=body.question_answer,
                     edit_context=body.edit_context,

@@ -46,7 +46,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_status_event,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
-    AIBuilderReviewContext,
+    AIBuilderReviewReference,
     FlowReviewEvidence,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
@@ -270,7 +270,7 @@ class AIBuilderPlanner:
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderEditContext | None = None,
-        review_context: AIBuilderReviewContext | None = None,
+        review_context: AIBuilderReviewReference | None = None,
         review_evidence: FlowReviewEvidence | None = None,
         evidence_floor: int = 0,
         ui_language: str | None = None,

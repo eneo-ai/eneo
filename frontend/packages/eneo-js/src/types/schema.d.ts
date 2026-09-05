@@ -10419,11 +10419,10 @@ export interface components {
       /** Flow Version */
       flow_version: number;
       /**
-       * Kind
-       * @default flow_review
-       * @constant
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
        */
-      kind?: "flow_review";
+      kind: "flow_review";
     };
     /**
      * AIBuilderSavedFlowStepEditContext
@@ -10468,6 +10467,34 @@ export interface components {
     /** AIBuilderStatusEventData */
     AIBuilderStatusEventData: {
       status: components["schemas"]["AIBuilderStatus"];
+    };
+    /**
+     * AIBuilderSuggestionContext
+     * @description What a turn says when it acts on a model suggestion: the reviewed
+     *     version, the runs the suggestion was judged on, and the suggestion's
+     *     kind and steps. No model prose; the runs decide the floor, so a cohort
+     *     that has since turned over cannot lower it.
+     */
+    AIBuilderSuggestionContext: {
+      /** Definition Checksum */
+      definition_checksum: string;
+      /** Flow Version */
+      flow_version: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "flow_review_suggestion";
+      /** Sample Run Ids */
+      sample_run_ids: string[];
+      /** Step Orders */
+      step_orders: number[];
+      /**
+       * Suggestion Kind
+       * @enum {string}
+       */
+      suggestion_kind:
+        "duplicated_work" | "instruction_outcome_drift" | "step_not_useful" | "missing_check";
     };
     /** AIBuilderTextEvent */
     AIBuilderTextEvent: {
@@ -29082,8 +29109,16 @@ export interface components {
        * @description Optional reasoning effort advertised by the selected model. Omit it to use provider defaults; unsupported values are rejected before provider work.
        */
       reasoning_effort?: string | null;
-      /** @description The flow review this turn acts on: the reviewed published version and the finding ids it names. The findings are rebuilt from the runs on the server; a republished flow is refused as review_stale. */
-      review_context?: components["schemas"]["AIBuilderReviewContext"] | null;
+      /**
+       * Review Context
+       * @description The flow review this turn acts on: either the reviewed published version with the finding ids it names, or a model suggestion by kind and steps with the runs it was judged on. The facts are rebuilt from the runs on the server; a republished flow is refused as review_stale. For a suggestion the server writes the message text itself; the client's message is not used.
+       */
+      review_context?:
+        | (
+            | components["schemas"]["AIBuilderReviewContext"]
+            | components["schemas"]["AIBuilderSuggestionContext"]
+          )
+        | null;
       /** Ui Language */
       ui_language?: string | null;
     };

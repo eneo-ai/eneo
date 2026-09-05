@@ -71,9 +71,12 @@ from eneo.flows.ai_builder.ai_builder_events import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderFlowReviewService,
-    AIBuilderReviewContext,
+    AIBuilderReviewReference,
+    AIBuilderSuggestionContext,
     FlowReviewEvidence,
+    investigation_message,
     resolve_review_evidence,
+    resolve_suggestion_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import FlowReviewSample
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
@@ -183,9 +186,12 @@ class PreparedMessageContext:
     assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
     session_attachment_file_ids: tuple[UUID, ...]
-    review_context: AIBuilderReviewContext | None = None
+    review_context: AIBuilderReviewReference | None = None
     review_evidence: FlowReviewEvidence | None = None
     evidence_floor: int = 0
+    # The user message as the server will persist it: the client's text, or
+    # the fixed investigation text when the turn acts on a model suggestion.
+    message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -407,12 +413,16 @@ class AIBuilderService:
         reasoning_effort: str | None = None,
         message: str | None = None,
         message_file_ids: list[UUID] | None = None,
-        review_context: AIBuilderReviewContext | None = None,
+        review_context: AIBuilderReviewReference | None = None,
     ) -> PreparedMessageContext:
         """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
         review_evidence = await self._resolve_review_evidence(
             session=session, review_context=review_context
         )
+        if isinstance(review_context, AIBuilderSuggestionContext):
+            message = investigation_message(
+                review_context.suggestion_kind, review_context.step_orders
+            )
         # The floor this conversation is held to: whatever evidence this turn
         # reads, or any turn before it read. It only ever rises, and it is
         # written back on the accepted turn so a compacted conversation
@@ -540,6 +550,7 @@ class AIBuilderService:
             review_context=review_context,
             review_evidence=review_evidence,
             evidence_floor=evidence_floor,
+            message=message,
         )
 
     @staticmethod
@@ -554,7 +565,7 @@ class AIBuilderService:
         self,
         *,
         session: BuilderSession,
-        review_context: AIBuilderReviewContext | None,
+        review_context: AIBuilderReviewReference | None,
     ) -> FlowReviewEvidence | None:
         """The findings this turn acts on, rebuilt from the runs.
 
@@ -562,6 +573,8 @@ class AIBuilderService:
         unknown id is a typed refusal. A later turn in the same review inherits
         the last named findings; if the flow moved on since, the turn simply
         proceeds without evidence rather than failing a conversation mid-way.
+        A suggestion reference is held to the runs it was judged on; the
+        conversation floor those runs set is kept by the metadata regardless.
         """
         explicit = review_context is not None
         if review_context is None:
@@ -574,6 +587,13 @@ class AIBuilderService:
             flow_id=session.flow_id, space_id=session.space_id
         )
         try:
+            if isinstance(review_context, AIBuilderSuggestionContext):
+                levels = await self.flow_review_service.resolve_sample_run_levels(
+                    flow_id=session.flow_id, run_ids=review_context.sample_run_ids
+                )
+                return resolve_suggestion_evidence(
+                    packet, review_context, sample_run_levels=levels
+                )
             return resolve_review_evidence(packet, review_context)
         except AIBuilderBadRequestException:
             if explicit:
@@ -598,7 +618,7 @@ class AIBuilderService:
         file_ids: list[UUID] | None = None,
         question_answer: AIBuilderQuestionAnswerInput | None = None,
         edit_context: AIBuilderEditContext | None = None,
-        review_context: AIBuilderReviewContext | None = None,
+        review_context: AIBuilderReviewReference | None = None,
         review_evidence: FlowReviewEvidence | None = None,
         evidence_floor: int = 0,
         ui_language: str | None = None,

@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections import defaultdict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Protocol, Sequence
 from uuid import UUID
@@ -45,6 +45,9 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     select_sample_run_ids,
     structural_steps,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+    FlowReviewSuggestionKind,
+)
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
 from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunStatusSnapshot, FlowVersion
@@ -55,7 +58,7 @@ from eneo.flows.infrastructure.flow_run_repo import (
     FlowStepResultMetrics,
 )
 from eneo.flows.published_definition import parse_published_runtime_steps
-from eneo.main.exceptions import UnauthorizedException
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.users.user import UserInDB
 
 # Newest runs examined for the exact published version; a flow with a long
@@ -192,6 +195,54 @@ class PersistedReviewContext(AIBuilderReviewContext):
     evidence_classification_level: int = Field(default=0, ge=0)
 
 
+MAX_SUGGESTION_SAMPLE_RUNS = 3
+MAX_SUGGESTION_STEPS = 10
+
+
+class AIBuilderSuggestionContext(BaseModel):
+    """What a turn says when it acts on a model suggestion: the reviewed
+    version, the runs the suggestion was judged on, and the suggestion's
+    kind and steps. No model prose; the runs decide the floor, so a cohort
+    that has since turned over cannot lower it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["flow_review_suggestion"] = "flow_review_suggestion"
+    flow_version: int = Field(ge=1)
+    definition_checksum: str = Field(min_length=1, max_length=128)
+    sample_run_ids: list[UUID] = Field(
+        min_length=1, max_length=MAX_SUGGESTION_SAMPLE_RUNS
+    )
+    suggestion_kind: FlowReviewSuggestionKind
+    step_orders: list[int] = Field(min_length=1, max_length=MAX_SUGGESTION_STEPS)
+
+    def to_metadata(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
+
+class PersistedSuggestionContext(AIBuilderSuggestionContext):
+    evidence_classification_level: int = Field(default=0, ge=0)
+
+
+AIBuilderReviewReference = Annotated[
+    AIBuilderReviewContext | AIBuilderSuggestionContext,
+    Field(discriminator="kind"),
+]
+PersistedReviewReference = Annotated[
+    PersistedReviewContext | PersistedSuggestionContext,
+    Field(discriminator="kind"),
+]
+
+
+class FlowReviewSuggestionFocus(BaseModel):
+    """The suggestion a turn investigates: kind and steps, never its prose."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    suggestion_kind: FlowReviewSuggestionKind
+    step_orders: list[int]
+
+
 class FlowReviewEvidence(BaseModel):
     """The named findings of one review, resolved for one turn."""
 
@@ -204,6 +255,96 @@ class FlowReviewEvidence(BaseModel):
     failed_run_count: int
     steps: list[FlowReviewStep]
     facts: list[FlowReviewFact]
+    suggestion: FlowReviewSuggestionFocus | None = None
+
+
+_SUGGESTION_KIND_LABELS_SV: dict[str, str] = {
+    "duplicated_work": "möjligt dubbelarbete",
+    "instruction_outcome_drift": "att utdata kan avvika från instruktionen",
+    "step_not_useful": "att ett stegs utdata kanske inte används",
+    "missing_check": "en kontroll som kan saknas",
+}
+
+
+def _step_list_sv(step_orders: Sequence[int]) -> str:
+    steps = [str(order) for order in dict.fromkeys(sorted(step_orders))]
+    if len(steps) == 1:
+        return f"steg {steps[0]}"
+    return "steg " + ", ".join(steps[:-1]) + " och " + steps[-1]
+
+
+def investigation_message(
+    suggestion_kind: FlowReviewSuggestionKind, step_orders: Sequence[int]
+) -> str:
+    """The user message the server writes for a suggestion handoff.
+
+    Fixed text from kind and steps: the model's rationale and quotes stay on
+    the screen that showed them and never enter the conversation.
+    """
+
+    return (
+        f"Undersök {_SUGGESTION_KIND_LABELS_SV[suggestion_kind]} i "
+        f"{_step_list_sv(step_orders)} utifrån körningarna."
+    )
+
+
+def resolve_suggestion_evidence(
+    packet: FlowReviewPacket,
+    context: AIBuilderSuggestionContext,
+    *,
+    sample_run_levels: Mapping[UUID, int],
+) -> FlowReviewEvidence:
+    """The packet facts about the suggestion's steps, held to the sampled runs.
+
+    The floor is the packet's raised to the sampled runs' persisted levels:
+    the runs the model read decide it, whether or not they are still in the
+    cohort. A republished flow is refused like any other stale review.
+    """
+
+    if (
+        packet.flow_version != context.flow_version
+        or packet.definition_checksum != context.definition_checksum
+    ):
+        raise AIBuilderBadRequestException(
+            "The flow was published again after this review; review it anew.",
+            code=AIBuilderErrorCode.REVIEW_STALE,
+            context={
+                "reviewed_version": context.flow_version,
+                "published_version": packet.flow_version,
+            },
+        )
+    missing = [
+        run_id for run_id in context.sample_run_ids if run_id not in sample_run_levels
+    ]
+    if missing:
+        raise AIBuilderBadRequestException(
+            "A run this suggestion was judged on is no longer readable.",
+            code=AIBuilderErrorCode.REVIEW_STALE,
+            context={"missing_run_count": len(missing)},
+        )
+    steps = set(context.step_orders)
+    facts: list[FlowReviewFact] = [
+        fact
+        for fact in packet.facts
+        if not isinstance(fact, EvidenceCompletenessFact)
+        and getattr(fact, "step_order", None) in steps
+    ]
+    return FlowReviewEvidence(
+        flow_version=packet.flow_version,
+        definition_checksum=packet.definition_checksum,
+        evidence_classification_level=max(
+            packet.evidence_classification_level,
+            *(sample_run_levels[run_id] for run_id in context.sample_run_ids),
+        ),
+        completed_run_count=len(packet.cohort.completed_run_ids),
+        failed_run_count=len(packet.cohort.failed_run_ids),
+        steps=list(packet.steps),
+        facts=facts,
+        suggestion=FlowReviewSuggestionFocus(
+            suggestion_kind=context.suggestion_kind,
+            step_orders=sorted(steps),
+        ),
+    )
 
 
 def resolve_review_evidence(
@@ -266,6 +407,14 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
         f"{evidence.completed_run_count} lyckade och "
         f"{evidence.failed_run_count} misslyckade körningar lästes.",
     ]
+    if evidence.suggestion is not None:
+        lines.append(
+            "Ett modellförslag pekar på "
+            f"{_SUGGESTION_KIND_LABELS_SV[evidence.suggestion.suggestion_kind]} i "
+            f"{_step_list_sv(evidence.suggestion.step_orders)}. Det är en "
+            "hypotes, inte ett konstaterat fel: utred den mot punkterna nedan "
+            "och flödets steg, och fråga hellre än att ändra på lösa grunder."
+        )
     for fact in evidence.facts:
         if isinstance(fact, OutputNotObservedConsumedFact):
             lines.append(
@@ -636,6 +785,28 @@ class AIBuilderFlowReviewService:
                 used_excerpt_chars=budget.used,
             ),
         )
+
+    async def resolve_sample_run_levels(
+        self, *, flow_id: UUID, run_ids: Sequence[UUID]
+    ) -> dict[UUID, int]:
+        """The persisted evidence level of each run the caller may still view.
+
+        A run that is gone, no longer viewable, or without a level is left
+        out; the caller decides whether that makes its reference stale.
+        """
+
+        levels: dict[UUID, int] = {}
+        for run_id in dict.fromkeys(run_ids):
+            try:
+                run = await self.evidence_service.get_run(
+                    run_id=run_id, flow_id=flow_id, access_kind="evidence_view"
+                )
+            except (NotFoundException, UnauthorizedException):
+                continue
+            if run.evidence_classification_level is None:
+                continue
+            levels[run_id] = run.evidence_classification_level
+        return levels
 
     async def _published(
         self, *, flow_id: UUID, space_id: UUID

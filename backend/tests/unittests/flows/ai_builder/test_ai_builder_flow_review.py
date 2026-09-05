@@ -13,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     conversation_evidence_floor,
+    latest_user_review_context,
     metadata_for_user_message,
     review_context_from_metadata,
 )
@@ -743,3 +744,162 @@ async def test_a_retained_floor_refuses_a_lower_named_model_before_any_provider_
         )
     assert refused.value.code == AIBuilderErrorCode.PLANNER_MODEL_BELOW_EVIDENCE_LEVEL
     completion_service.resolve_model_route.assert_not_awaited()
+
+
+# ---- suggestion references ---------------------------------------------------
+
+
+def test_investigation_message_names_kind_and_steps_in_swedish():
+    from eneo.flows.ai_builder.ai_builder_flow_review import investigation_message
+
+    assert (
+        investigation_message("duplicated_work", [3, 2])
+        == "Undersök möjligt dubbelarbete i steg 2 och 3 utifrån körningarna."
+    )
+    assert (
+        investigation_message("missing_check", [1])
+        == "Undersök en kontroll som kan saknas i steg 1 utifrån körningarna."
+    )
+    assert "steg 1, 2 och 3" in investigation_message("step_not_useful", [1, 2, 3, 3])
+
+
+def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        render_review_evidence,
+        resolve_suggestion_evidence,
+    )
+
+    packet = _packet(version=2, checksum="sum")
+    run_a, run_b = uuid4(), uuid4()
+    context = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="sum",
+        sample_run_ids=[run_a, run_b],
+        suggestion_kind="duplicated_work",
+        step_orders=[2],
+    )
+    evidence = resolve_suggestion_evidence(
+        packet, context, sample_run_levels={run_a: 1, run_b: 3}
+    )
+    # The sampled runs decide the floor, above the packet's own level.
+    assert evidence.evidence_classification_level == 3
+    assert evidence.suggestion is not None
+    assert evidence.suggestion.step_orders == [2]
+    # Only facts about the named steps, never the completeness footnote.
+    assert all(getattr(fact, "step_order", None) == 2 for fact in evidence.facts)
+    rendered = render_review_evidence(evidence)
+    assert "Ett modellförslag pekar på möjligt dubbelarbete i steg 2" in rendered
+    assert "hypotes" in rendered
+
+    # A republished flow or a run that is no longer readable is stale.
+    with pytest.raises(AIBuilderBadRequestException) as stale:
+        resolve_suggestion_evidence(
+            _packet(version=3, checksum="new"),
+            context,
+            sample_run_levels={run_a: 1, run_b: 3},
+        )
+    assert stale.value.code == AIBuilderErrorCode.REVIEW_STALE
+    with pytest.raises(AIBuilderBadRequestException) as gone:
+        resolve_suggestion_evidence(packet, context, sample_run_levels={run_a: 1})
+    assert gone.value.code == AIBuilderErrorCode.REVIEW_STALE
+    assert gone.value.context == {"missing_run_count": 1}
+
+
+def test_suggestion_references_persist_with_the_resolved_level_and_parse_back():
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        PersistedSuggestionContext,
+    )
+
+    context = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="sum",
+        sample_run_ids=[uuid4()],
+        suggestion_kind="missing_check",
+        step_orders=[1, 2],
+    )
+    metadata = metadata_for_user_message(
+        review_context=context, review_evidence_level=3, evidence_floor=3
+    )
+    assert metadata is not None
+    persisted = review_context_from_metadata(metadata)
+    assert isinstance(persisted, PersistedSuggestionContext)
+    assert persisted.evidence_classification_level == 3
+    assert persisted.suggestion_kind == "missing_check"
+    conversation = [
+        ConversationMessage(role="user", content="Undersök …", metadata=metadata)
+    ]
+    assert conversation_evidence_floor(conversation) == 3
+    assert latest_user_review_context(conversation) == persisted
+
+
+@pytest.mark.asyncio
+async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
+    from eneo.main.exceptions import NotFoundException
+
+    flow_id = uuid4()
+    viewable, gone, denied, unlevelled = uuid4(), uuid4(), uuid4(), uuid4()
+
+    async def _get_run(*, run_id, flow_id, access_kind):
+        assert access_kind == "evidence_view"
+        if run_id == gone:
+            raise NotFoundException("gone")
+        if run_id == denied:
+            raise UnauthorizedException("no")
+        return SimpleNamespace(
+            id=run_id,
+            evidence_classification_level=None if run_id == unlevelled else 2,
+        )
+
+    service, _ = _service(
+        user,
+        flow=SimpleNamespace(id=flow_id, space_id=uuid4(), published_version=1),
+        version=None,
+        snapshots=[],
+        denied=set(),
+        evidence=SimpleNamespace(
+            get_run=_get_run, get_redacted_evidence_bundle=AsyncMock()
+        ),
+    )
+    levels = await service.resolve_sample_run_levels(
+        flow_id=flow_id, run_ids=[viewable, gone, denied, unlevelled, viewable]
+    )
+    assert levels == {viewable: 2}
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_suggestion_reference_is_refused_when_stale_but_an_inherited_one_is_dropped(
+    user,
+):
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderSuggestionContext
+
+    packet = _packet(version=3, checksum="new")
+    service, review = _builder_service(user, packet)
+    run_id = uuid4()
+    review.resolve_sample_run_levels = AsyncMock(return_value={})
+    stale = AIBuilderSuggestionContext(
+        flow_version=3,
+        definition_checksum="new",
+        sample_run_ids=[run_id],
+        suggestion_kind="duplicated_work",
+        step_orders=[1],
+    )
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await service._resolve_review_evidence(
+            session=_edit_session(user, review_metadata=None), review_context=stale
+        )
+    assert refused.value.code == AIBuilderErrorCode.REVIEW_STALE
+    assert (
+        await service._resolve_review_evidence(
+            session=_edit_session(user, review_metadata=stale.to_metadata()),
+            review_context=None,
+        )
+        is None
+    )
+    review.resolve_sample_run_levels = AsyncMock(return_value={run_id: 2})
+    evidence = await service._resolve_review_evidence(
+        session=_edit_session(user, review_metadata=None), review_context=stale
+    )
+    assert evidence is not None and evidence.suggestion is not None
+    assert evidence.evidence_classification_level == 2

@@ -43,7 +43,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
     StructuredQuestionPayload,
 )
-from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderReviewContext
+from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderReviewReference
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
 )
@@ -499,12 +499,15 @@ class SendMessageRequest(BaseModel):
     )
     question_answer: AIBuilderQuestionAnswerRequest | None = None
     edit_context: AIBuilderEditContext | None = None
-    review_context: AIBuilderReviewContext | None = Field(
+    review_context: AIBuilderReviewReference | None = Field(
         default=None,
         description=(
-            "The flow review this turn acts on: the reviewed published version "
-            "and the finding ids it names. The findings are rebuilt from the "
-            "runs on the server; a republished flow is refused as review_stale."
+            "The flow review this turn acts on: either the reviewed published "
+            "version with the finding ids it names, or a model suggestion by "
+            "kind and steps with the runs it was judged on. The facts are "
+            "rebuilt from the runs on the server; a republished flow is refused "
+            "as review_stale. For a suggestion the server writes the message "
+            "text itself; the client's message is not used."
         ),
     )
     ui_language: str | None = Field(default=None, max_length=16)

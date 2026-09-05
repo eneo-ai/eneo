@@ -416,6 +416,7 @@ def _make_container(
     )
     service.prepare_message_context.return_value = SimpleNamespace(
         review_context=None,
+        message=None,
         review_evidence=None,
         evidence_floor=0,
         planner_context=SimpleNamespace(
@@ -2312,6 +2313,7 @@ class TestSendMessageEndpoint:
         flow.id = session.flow_id
         service.prepare_message_context.return_value = SimpleNamespace(
             review_context=None,
+            message=None,
             review_evidence=None,
             evidence_floor=0,
             planner_context=SimpleNamespace(
@@ -2385,6 +2387,7 @@ class TestSendMessageEndpoint:
 
         service.prepare_message_context.return_value = SimpleNamespace(
             review_context=None,
+            message=None,
             review_evidence=None,
             evidence_floor=0,
             planner_context=SimpleNamespace(
