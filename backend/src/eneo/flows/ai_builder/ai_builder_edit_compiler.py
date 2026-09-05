@@ -77,6 +77,7 @@ from eneo.flows.step_lineage import (
 )
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
+_RUNTIME_STEP_REF_PATTERN = re.compile(r"^step_(\d+)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -905,7 +906,11 @@ def _rewrite_runtime_alias_value(
         return _rewrite_runtime_alias_string(value, existing_order_to_plan_ref)
     if isinstance(value, dict):
         return {
-            key: _rewrite_runtime_alias_value(inner, existing_order_to_plan_ref)
+            key: (
+                _rewrite_runtime_alias_step_ref(inner, existing_order_to_plan_ref)
+                if key == "step_ref"
+                else _rewrite_runtime_alias_value(inner, existing_order_to_plan_ref)
+            )
             for key, inner in cast(dict[str, Any], value).items()
         }
     if isinstance(value, list):
@@ -914,6 +919,22 @@ def _rewrite_runtime_alias_value(
             for item in cast(list[Any], value)
         ]
     return value
+
+
+def _rewrite_runtime_alias_step_ref(
+    value: Any,
+    existing_order_to_plan_ref: dict[int, str],
+) -> Any:
+    # A persisted source_refs entry names its producer by runtime alias
+    # ("step_2"). The compiled spec names steps by plan ref, and every reader
+    # of the spec (critics, projection completion) resolves plan refs only, so
+    # an untouched step's bindings must move with the templates (2026-09-05).
+    if not isinstance(value, str):
+        return value
+    match = _RUNTIME_STEP_REF_PATTERN.match(value)
+    if match is None:
+        return value
+    return existing_order_to_plan_ref.get(int(match.group(1)), value)
 
 
 def _rewrite_runtime_alias_string(

@@ -54,6 +54,9 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
 )
+from eneo.flows.input_binding_contract_rules import (
+    derive_structured_projection_contract,
+)
 from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_turn
 
 
@@ -1256,6 +1259,106 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
     reordered_consumer = result.compiled.content.spec.steps[2]
     assert reordered_consumer.input_bindings == {"question": "{{ step_a.output.text }}"}
     assert reordered_consumer.output_config == {"template": "{{ step_a.output.text }}"}
+
+
+@pytest.mark.asyncio
+async def test_ordered_edit_rewrites_source_ref_runtime_aliases_to_plan_refs() -> None:
+    # Live 2026-09-05: a builder-built flow (reader -> JSON summary -> text
+    # composer bound through source_refs) could not be edited at all. The
+    # compiled spec renamed steps to plan refs but left source_refs pointing
+    # at runtime aliases, so the composer critic saw no consumed structured
+    # priors and rejected an untouched topology.
+    documents_contract = {
+        "type": "object",
+        "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+    }
+    summary_contract = {
+        "type": "object",
+        "properties": {"points": {"type": "array", "items": {"type": "string"}}},
+    }
+    summarize_bindings = {
+        "source_refs": [
+            {
+                "label": "documents",
+                "output": "structured",
+                "step_ref": "step_1",
+                "field_path": "documents",
+            }
+        ]
+    }
+    # The persisted contract is the exact projection of the bound field.
+    summarize_contract = derive_structured_projection_contract(
+        input_bindings=summarize_bindings,
+        source_contracts_by_step_ref={"step_1": documents_contract},
+    )
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Read sources",
+            input_type="document",
+            output_type="json",
+            output_contract=documents_contract,
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Summarize",
+            input_source="previous_step",
+            input_type="json",
+            output_type="json",
+            input_bindings=summarize_bindings,
+            input_contract=summarize_contract,
+            output_contract=summary_contract,
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Write news",
+            input_source="previous_step",
+            input_bindings={
+                "source_refs": [
+                    {
+                        "label": "documents",
+                        "output": "structured",
+                        "step_ref": "step_1",
+                        "field_path": "documents",
+                    },
+                    {
+                        "label": "points",
+                        "output": "structured",
+                        "step_ref": "step_2",
+                        "field_path": "points",
+                    },
+                ]
+            },
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Shorten the news item.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_3",
+                    "name": "Write short news",
+                    "assistant_spec": {"instructions": "At most 80 words."},
+                },
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    steps = result.compiled.content.spec.steps
+    assert steps[1].input_contract == summarize_contract
+    assert [ref["step_ref"] for ref in steps[1].input_bindings["source_refs"]] == [
+        "step_a"
+    ]
+    assert [ref["step_ref"] for ref in steps[2].input_bindings["source_refs"]] == [
+        "step_a",
+        "step_b",
+    ]
 
 
 @pytest.mark.asyncio
