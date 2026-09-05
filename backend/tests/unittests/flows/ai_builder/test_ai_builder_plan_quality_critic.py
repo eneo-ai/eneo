@@ -1430,6 +1430,11 @@ def test_direct_text_transform_rule_does_not_judge_an_edit_request() -> None:
             "engelska. Lägg inte till nya uppgifter."
         ),
         "Add a final step to translate the news item into English. Do not add new facts.",
+        "Do not add new facts. Add a final step to translate the news item into English.",
+        (
+            "Lägg inte till fakta. Lägg till ett avslutande steg som översätter "
+            "intranätsnyheten till engelska."
+        ),
     ],
 )
 def test_requested_extra_step_on_one_step_text_flow_passes_final_quality(
@@ -1489,6 +1494,8 @@ def test_requested_extra_step_on_one_step_text_flow_passes_final_quality(
         "Translate this sentence. Do not add a final step.",
         "Translate this sentence. Don't add an extra step.",
         "Översätt meningen, lägg inte till ett avslutande steg.",
+        "Translate this sentence and add a heading to step 1.",
+        "Översätt meningen och lägg till en rubrik i steg 1.",
     ],
 )
 def test_forbidden_extra_step_on_one_step_text_flow_keeps_restraint(

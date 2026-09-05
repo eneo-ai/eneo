@@ -24,6 +24,8 @@ from eneo.flows.ai_builder.ai_builder_simple_text_transform import (
         "Translate this sentence. Do not add a final step.",
         "Translate this sentence. Don't add an extra step.",
         "Översätt meningen i ett steg.",
+        "Translate this sentence and add a heading to step 1.",
+        "Översätt meningen och lägg till en rubrik i steg 1.",
     ],
 )
 def test_flags_direct_text_transform(text: str) -> None:
@@ -54,6 +56,11 @@ def test_flags_direct_text_transform(text: str) -> None:
             "engelska. Lägg inte till nya uppgifter."
         ),
         "Add a final step to translate the news item into English. Do not add new facts.",
+        "Do not add new facts. Add a final step to translate the news item into English.",
+        (
+            "Lägg inte till fakta. Lägg till ett avslutande steg som översätter "
+            "intranätsnyheten till engelska."
+        ),
         "",
     ],
 )

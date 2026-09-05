@@ -92,24 +92,35 @@ _MULTI_STEP_PREFERENCE_MARKERS: tuple[str, ...] = (
 
 # An explicitly requested extra step is the exception the restraint's own
 # wording promises ("om användaren inte uttryckligen ber om fler steg"); a
-# one-step translation flow may be told to grow (2026-09-05). One pattern
-# recognises the addition phrase; whether it is affirmed or forbidden is read
-# from the words just before it, so "utan extra steg", "lägg inte till ett
-# steg" and "do not add a final step" keep the restraint while "lägg inte till
-# nya uppgifter" next to a requested step does not cancel it.
+# one-step translation flow may be told to grow (2026-09-05). The grammar
+# says what is added: only determiners and step modifiers may stand between
+# the verb and "steg"/"step", so "lägg till en rubrik i steg 1" is a change
+# inside a step, not another step. Negation is read within the addition's
+# own clause, so "Do not add new facts. Add a final step ..." still requests
+# a step while "do not add a final step" and "utan extra steg" do not.
+_SV_STEP_DETERMINERS = (
+    r"(?:ett|något|fler|flera|extra|nya|nytt|ytterligare|avslutande|inledande|"
+    r"sista|första|separat|eget)"
+)
+_EN_STEP_DETERMINERS = (
+    r"(?:a|an|another|one|more|extra|additional|new|final|last|first|separate|"
+    r"second)"
+)
 _STEP_ADDITION_PATTERN = re.compile(
-    r"\blägg(?:a)?\s+(?:inte\s+)?till\s+(?:\w+\s+){0,3}steg\b"
-    r"|\b(?:ytterligare|extra|fler|nya|nytt|avslutande)\s+(?:\w+\s+)?steg\b"
+    r"\blägg(?:a)?\s+(?:inte\s+)?till\s+(?:" + _SV_STEP_DETERMINERS + r"\s+){0,3}steg\b"
+    r"|\b(?:ytterligare|extra|fler|flera|nya|nytt|avslutande)\s+"
+    r"(?:" + _SV_STEP_DETERMINERS + r"\s+)?steg\b"
     r"|\bett\s+steg\s+till\b"
-    r"|\badd(?:s|ing)?\s+(?:\w+\s+){0,3}steps?\b"
-    r"|\b(?:another|additional|extra|more|final|new)\s+(?:\w+\s+)?steps?\b",
+    r"|\badd(?:s|ing)?\s+(?:" + _EN_STEP_DETERMINERS + r"\s+){0,3}steps?\b"
+    r"|\b(?:another|additional|extra|more|final|new)\s+"
+    r"(?:" + _EN_STEP_DETERMINERS + r"\s+)?steps?\b",
     re.UNICODE,
 )
 _STEP_ADDITION_NEGATION_PATTERN = re.compile(
     r"\b(?:inte|utan|inga|inget|ingen|aldrig|not|don't|dont|without|no|never)\b",
     re.UNICODE,
 )
-_STEP_ADDITION_NEGATION_WINDOW = 24
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.!?;,]")
 
 
 _FORM_COMPLEMENT_MARKERS: tuple[str, ...] = (
@@ -197,12 +208,15 @@ def _requests_extra_step(text: str) -> bool:
     """Affirmed step addition only; a forbidden extra step keeps the restraint."""
 
     for match in _STEP_ADDITION_PATTERN.finditer(text):
-        window = text[
-            max(0, match.start() - _STEP_ADDITION_NEGATION_WINDOW) : match.end()
-        ]
-        if _STEP_ADDITION_NEGATION_PATTERN.search(window) is None:
+        clause = text[_clause_start(text, match.start()) : match.end()]
+        if _STEP_ADDITION_NEGATION_PATTERN.search(clause) is None:
             return True
     return False
+
+
+def _clause_start(text: str, position: int) -> int:
+    boundaries = [m.end() for m in _CLAUSE_BOUNDARY_PATTERN.finditer(text, 0, position)]
+    return boundaries[-1] if boundaries else 0
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
