@@ -869,10 +869,14 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(rows.textContent).toContain(m.ai_builder_attachment_placeholders({ count: "5" }));
     // Every placeholder is inspectable without a pointer: the long list sits in
     // a native disclosure the keyboard can open.
-    const placeholderToggle = rows.querySelector("details > summary") as HTMLElement;
-    expect(placeholderToggle).toBeTruthy();
-    await fireEvent.click(placeholderToggle);
-    expect(rows.textContent).toContain("diarienummer, datum, namn, adress, beslutsfattare");
+    const placeholderDetails = rows.querySelector("details") as HTMLDetailsElement;
+    expect(placeholderDetails).toBeTruthy();
+    // Collapsed: the list is in the DOM but not exposed until the user opens it.
+    expect(placeholderDetails.open).toBe(false);
+    await fireEvent.click(placeholderDetails.querySelector("summary") as HTMLElement);
+    await waitFor(() => expect(placeholderDetails.open).toBe(true));
+    const placeholderList = placeholderDetails.querySelector("span") as HTMLElement;
+    expect(placeholderList.textContent).toContain("beslutsfattare");
     expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_full());
     expect(rows.textContent).toContain(m.ai_builder_attachment_coverage_inventory());
     expect(rows.textContent).toContain("underlag.pdf (1)");
