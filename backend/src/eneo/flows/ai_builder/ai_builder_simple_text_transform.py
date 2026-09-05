@@ -81,6 +81,25 @@ _QUALITY_STEP_MARKERS: tuple[str, ...] = (
 _MULTI_STEP_PREFERENCE_MARKERS: tuple[str, ...] = (
     "flera steg",
     "mellanliggande steg",
+    # An explicitly requested extra step is the exception the restraint's
+    # own wording promises ("om användaren inte uttryckligen ber om fler
+    # steg"); a one-step translation flow may be told to grow (2026-09-05).
+    "fler steg",
+    "lägg till ett steg",
+    "lägg till ett extra steg",
+    "lägg till ett avslutande steg",
+    "lägg till ett nytt steg",
+    "ytterligare ett steg",
+    "ytterligare steg",
+    "ett steg till",
+    "extra steg",
+    "avslutande steg",
+    "add a step",
+    "add an extra step",
+    "add a final step",
+    "add another step",
+    "additional step",
+    "another step",
     "inte bara minimal",
     "inte bara en minimal",
     "inte bara en kort kedja",

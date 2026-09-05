@@ -1416,6 +1416,61 @@ def test_direct_text_transform_rule_does_not_judge_an_edit_request() -> None:
     )
 
 
+def test_requested_extra_step_on_one_step_text_flow_passes_final_quality() -> None:
+    # Gate 2026-09-05: the flow being edited is one text step, and the user
+    # explicitly asks for another step. The restraint's own wording exempts
+    # a requested step, so the final contextual quality check must not send
+    # the compiled two-step proposal into repair.
+    from uuid import uuid4
+
+    from eneo.flows.domain.flow import Flow, FlowStep
+
+    one_step_flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Skriv intranätsnyhet",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Skriv intranätsnyhet",
+                input_source="flow_input",
+                input_type="text",
+                output_mode="pass_through",
+                output_type="text",
+            )
+        ],
+    )
+    conversation = [
+        {
+            "role": "user",
+            "content": (
+                "Lägg till ett avslutande steg som översätter intranätsnyheten "
+                "till engelska och levererar båda språken som text."
+            ),
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Skriv intranätsnyhet",
+        steps=[
+            _step("step_a", "Skriv intranätsnyhet", "Skriv nyheten."),
+            _step(
+                "step_b",
+                "Översätt intranätsnyheten",
+                "Översätt till engelska och leverera båda språken.",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+        ],
+    )
+
+    feedback = build_conversation_aware_quality_feedback(
+        conversation, spec, flow=one_step_flow
+    )
+
+    assert feedback is None or "ett enda text-till-text-steg" not in feedback
+
+
 def test_direct_text_transform_accepts_single_text_step() -> None:
     conversation = [
         {

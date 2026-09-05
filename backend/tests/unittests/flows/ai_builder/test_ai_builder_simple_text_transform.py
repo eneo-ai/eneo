@@ -40,6 +40,9 @@ def test_flags_direct_text_transform(text: str) -> None:
         "Translate this and use more than two steps.",
         "Översätt texten i flera steg.",
         "Translate this text, not just two steps.",
+        "Lägg till ett avslutande steg som översätter intranätsnyheten till engelska.",
+        "Översätt texten och lägg till ett steg som kontrollerar tonen.",
+        "Translate the text and add a final step that shortens it.",
         "",
     ],
 )
