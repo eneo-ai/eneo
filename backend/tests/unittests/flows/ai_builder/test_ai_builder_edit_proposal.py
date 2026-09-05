@@ -1262,6 +1262,56 @@ async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> 
 
 
 @pytest.mark.asyncio
+async def test_ordered_step_diff_keeps_placeholder_named_step_ref_on_its_producer() -> (
+    None
+):
+    # Gate 2026-09-05: alias translation must read the source_refs structure,
+    # not every key spelled "step_ref": a document placeholder may carry that
+    # name and its template must move with the producer like any other.
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Extract source"),
+        _flow_step(
+            step_order=2,
+            user_description="Write body",
+            input_source="previous_step",
+            input_bindings={"question": "{{ step_1.output.text }}"},
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Render",
+            input_source="previous_step",
+            output_config={
+                "step_ref": "{{ step_2.output.text }}",
+                "other": "{{ step_2.output.text }}",
+            },
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Insert a review step before the body writer.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {"name": "Review source", "instructions": "Review."},
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    renderer = result.compiled.content.spec.steps[3]
+    assert renderer.output_config == {
+        "step_ref": "{{ step_c.output.text }}",
+        "other": "{{ step_c.output.text }}",
+    }
+
+
+@pytest.mark.asyncio
 async def test_ordered_edit_rewrites_source_ref_runtime_aliases_to_plan_refs() -> None:
     # Live 2026-09-05: a builder-built flow (reader -> JSON summary -> text
     # composer bound through source_refs) could not be edited at all. The

@@ -71,6 +71,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.input_binding_contract_rules import SOURCE_REFS_BINDING_KEY
 from eneo.flows.step_lineage import (
     existing_step_order_from_ref,
     existing_step_ref_for_order,
@@ -880,8 +881,11 @@ def _rewrite_runtime_aliases_for_existing_step(
         )
 
     if step.input_bindings is not None:
-        rewritten_bindings = _rewrite_runtime_alias_value(
-            step.input_bindings,
+        rewritten_bindings = _rewrite_source_ref_step_aliases(
+            _rewrite_runtime_alias_value(
+                step.input_bindings,
+                existing_order_to_plan_ref,
+            ),
             existing_order_to_plan_ref,
         )
         if rewritten_bindings != step.input_bindings:
@@ -906,11 +910,7 @@ def _rewrite_runtime_alias_value(
         return _rewrite_runtime_alias_string(value, existing_order_to_plan_ref)
     if isinstance(value, dict):
         return {
-            key: (
-                _rewrite_runtime_alias_step_ref(inner, existing_order_to_plan_ref)
-                if key == "step_ref"
-                else _rewrite_runtime_alias_value(inner, existing_order_to_plan_ref)
-            )
+            key: _rewrite_runtime_alias_value(inner, existing_order_to_plan_ref)
             for key, inner in cast(dict[str, Any], value).items()
         }
     if isinstance(value, list):
@@ -921,20 +921,43 @@ def _rewrite_runtime_alias_value(
     return value
 
 
-def _rewrite_runtime_alias_step_ref(
-    value: Any,
+def _rewrite_source_ref_step_aliases(
+    input_bindings: Any,
     existing_order_to_plan_ref: dict[int, str],
 ) -> Any:
     # A persisted source_refs entry names its producer by runtime alias
-    # ("step_2"). The compiled spec names steps by plan ref, and every reader
-    # of the spec (critics, projection completion) resolves plan refs only, so
-    # an untouched step's bindings must move with the templates (2026-09-05).
-    if not isinstance(value, str):
-        return value
-    match = _RUNTIME_STEP_REF_PATTERN.match(value)
-    if match is None:
-        return value
-    return existing_order_to_plan_ref.get(int(match.group(1)), value)
+    # ("step_2") in its `step_ref` value, not in a template. The compiled spec
+    # names steps by plan ref and every reader of it (critics, projection
+    # completion) resolves plan refs only, so an untouched step's refs must
+    # move with the templates (2026-09-05). Only this structure is a
+    # reference: a placeholder elsewhere may be called "step_ref" too.
+    if not isinstance(input_bindings, dict):
+        return input_bindings
+    bindings = cast(dict[str, Any], input_bindings)
+    raw_refs = bindings.get(SOURCE_REFS_BINDING_KEY)
+    if not isinstance(raw_refs, list):
+        return bindings
+    rewritten_refs: list[Any] = []
+    for raw_ref in cast(list[Any], raw_refs):
+        if not isinstance(raw_ref, dict):
+            rewritten_refs.append(raw_ref)
+            continue
+        ref = cast(dict[str, Any], raw_ref)
+        step_ref = ref.get("step_ref")
+        match = (
+            _RUNTIME_STEP_REF_PATTERN.match(step_ref)
+            if isinstance(step_ref, str)
+            else None
+        )
+        plan_ref = (
+            existing_order_to_plan_ref.get(int(match.group(1)))
+            if match is not None
+            else None
+        )
+        rewritten_refs.append({**ref, "step_ref": plan_ref} if plan_ref else ref)
+    if rewritten_refs == raw_refs:
+        return bindings
+    return {**bindings, SOURCE_REFS_BINDING_KEY: rewritten_refs}
 
 
 def _rewrite_runtime_alias_string(

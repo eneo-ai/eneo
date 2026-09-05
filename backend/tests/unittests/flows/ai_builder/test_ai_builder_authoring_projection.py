@@ -152,20 +152,28 @@ def test_edit_overlay_rejects_output_contract_without_schema_envelope() -> None:
             ),
         )
 
-    explicit = {"type": "object", "properties": {"summary": {"type": "string"}}}
-    kept = compile_ordered_edit_proposal(
-        base_spec=_base_spec(),
-        proposal=_edit_proposal(
-            steps=[
-                ModifyExistingStep(
-                    existing_step_ref="existing_step_1",
-                    output_type=OutputType.JSON,
-                    output_contract=explicit,
-                )
-            ],
-        ),
-    )
-    assert kept.steps[0].output_contract == explicit
+    # Explicit schemas of every supported shape pass through untouched; the
+    # validator, not the projection, owns what a contract may be.
+    for explicit in (
+        {"type": "object", "properties": {"summary": {"type": "string"}}},
+        {"type": "array", "items": {"type": "string"}},
+        {"additionalProperties": {"type": "string"}},
+        {"const": {"summary": "approved"}},
+        {"$ref": "#/$defs/summary", "$defs": {"summary": {"type": "string"}}},
+    ):
+        kept = compile_ordered_edit_proposal(
+            base_spec=_base_spec(),
+            proposal=_edit_proposal(
+                steps=[
+                    ModifyExistingStep(
+                        existing_step_ref="existing_step_1",
+                        output_type=OutputType.JSON,
+                        output_contract=explicit,
+                    )
+                ],
+            ),
+        )
+        assert kept.steps[0].output_contract == explicit
 
 
 def test_edit_overlay_cleared_step_name_is_a_request_error() -> None:

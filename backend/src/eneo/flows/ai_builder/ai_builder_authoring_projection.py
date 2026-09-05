@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
+import jsonschema
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
@@ -272,23 +273,52 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
+# Draft 7 lists its keywords flat; 2020-12 adds a few and every "$" key.
+_JSON_SCHEMA_KEYWORDS: frozenset[str] = frozenset(
+    jsonschema.Draft7Validator.META_SCHEMA["properties"]
+) | frozenset(
+    {
+        "$defs",
+        "$anchor",
+        "$dynamicAnchor",
+        "$dynamicRef",
+        "$vocabulary",
+        "prefixItems",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+        "dependentRequired",
+        "dependentSchemas",
+        "minContains",
+        "maxContains",
+        "deprecated",
+        "writeOnly",
+    }
+)
+
+
 def _validated_output_contract(
     contract: FlowPersistedJsonObject | None,
     *,
     existing_step_ref: str,
 ) -> FlowPersistedJsonObject | None:
-    """Accept an object schema; name the envelope for anything else.
+    """Pass an explicit schema through; name the envelope for a bare field map.
 
     The edit tool asks for a JSON Schema object. A model that writes
     ``{"summary": {"type": "string"}}`` has named its fields without the
     envelope; compiled as-is that map became a contract with no properties
     and the critic then reported the named field as missing, which no repair
-    could satisfy (2026-09-05). Rewriting the map here is not safe either,
-    since keyword-only schemas look the same, so the shape is rejected with
-    the envelope spelled out.
+    could satisfy (2026-09-05). Only that shape is refused: a mapping with no
+    schema keyword at the top level whose values are all mappings. Array,
+    keyword-only and any other explicit schema is the validator's business.
     """
 
-    if contract is None or "properties" in contract or contract.get("type") == "object":
+    if not contract:
+        return contract
+    if any(
+        key in _JSON_SCHEMA_KEYWORDS or str(key).startswith("$") for key in contract
+    ):
+        return contract
+    if not all(isinstance(value, dict) for value in contract.values()):
         return contract
     raise BadRequestException(
         f"Step {existing_step_ref}: output_contract must be a JSON Schema object "
