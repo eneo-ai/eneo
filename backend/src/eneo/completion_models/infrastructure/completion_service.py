@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
@@ -25,7 +24,7 @@ from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import file_reference_base_url
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-from eneo.main.config import SETTINGS, Settings, get_settings
+from eneo.main.config import SETTINGS, Settings
 from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
@@ -37,14 +36,12 @@ from eneo.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from eneo.sessions.session import SessionInDB
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tokens.token_utils import log_token_count_drift
-from eneo.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.infrastructure.adapters.base_adapter import (
         CompletionModelAdapter,
     )
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.database.database import AsyncSession
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -59,12 +56,6 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
-
-
-async def generate_image(prompt: str):
-    flux = FluxAdapter()
-
-    return await flux.generate_image(prompt=prompt)
 
 
 @dataclass(frozen=True)
@@ -358,22 +349,7 @@ class CompletionService:
             unavailable_model_ids=frozenset(unavailable_model_ids),
         )
 
-    @staticmethod
-    def is_valid_arguments(arguments: str):
-        try:
-            # Attempt to parse the string
-            parsed = json.loads(arguments)
-            # Check if the parsed object is a dictionary
-            return isinstance(parsed, dict)
-        except (json.JSONDecodeError, TypeError):
-            # If there is a JSON decode error or TypeError, return False
-            return False
-
     async def _handle_tool_call(self, completion: AsyncGenerator[Completion]):
-        name = None
-        arguments = ""
-        function_called = False
-
         async for chunk in completion:
             # Pass through stop chunk (carries usage data)
             if chunk.stop:
@@ -396,30 +372,12 @@ class CompletionService:
                 yield chunk
                 continue
 
-            if chunk.tool_call:
-                if chunk.tool_call.name:
-                    name = chunk.tool_call.name
+            # Pass through generated images (MCP image content blocks) directly
+            if chunk.response_type == ResponseType.FILES:
+                yield chunk
+                continue
 
-                if chunk.tool_call.arguments:
-                    arguments += chunk.tool_call.arguments
-
-                if not name or not arguments or not self.is_valid_arguments(arguments):
-                    # Keep collecting the tool call
-                    continue
-                elif not function_called:
-                    call_args = json.loads(arguments)
-
-                    if name == "generate_image":
-                        yield Completion(response_type=ResponseType.ENEO_EVENT)
-
-                        chunk.image_data = await generate_image(**call_args)  # type: ignore[attr-defined]
-                        chunk.response_type = ResponseType.FILES
-
-                        yield chunk
-
-                    function_called = True
-
-            elif chunk.text:
+            if chunk.text:
                 chunk.response_type = ResponseType.TEXT
 
                 yield chunk
@@ -434,12 +392,10 @@ class CompletionService:
         prompt_files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
-        web_search_results: list["WebSearchResult"] | None = None,
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
         version: int = 1,
-        use_image_generation: bool = False,
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
         skill_runtime: SkillActivationRuntime | None = None,
@@ -454,8 +410,6 @@ class CompletionService:
             transcription_inputs = []
         if info_blob_chunks is None:
             info_blob_chunks = []
-        if web_search_results is None:
-            web_search_results = []
         if mcp_servers is None:
             mcp_servers = []
         # Org-level disable must be honored at runtime. Disabling a server only
@@ -477,12 +431,6 @@ class CompletionService:
 
         # Make sure everything fits in the context of the model
         max_tokens = model_adapter.get_token_limit_of_model()
-
-        # Image generation only works on streaming for now
-        # And only if feature flag is turned on
-        use_image_generation = (
-            use_image_generation and stream and get_settings().using_image_generation
-        )
 
         # Mint signed download URLs for attached files whose exact original is
         # durably stored, so the model can hand them to a URL-accepting MCP
@@ -531,8 +479,6 @@ class CompletionService:
                 prompt_files=prompt_files,
                 transcription_inputs=transcription_inputs,
                 version=version,
-                use_image_generation=use_image_generation,
-                web_search_results=web_search_results,
                 mcp_tools=(
                     [skill_runtime.tool_definition]
                     if skill_runtime is not None

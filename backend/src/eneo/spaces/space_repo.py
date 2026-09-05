@@ -20,6 +20,7 @@ from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts
 from eneo.database.tables.app_template_table import AppTemplates
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.assistant_template_table import AssistantTemplates
+from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
@@ -78,6 +79,7 @@ from eneo.main.exceptions import (
     UniqueException,
 )
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.domain.entities.mcp_server import GENERAL_PURPOSE
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
@@ -446,6 +448,9 @@ class SpaceRepository:
         await self.session.execute(stmt)
 
         if tool_settings:
+            # Last-wins dedupe: the composite PK (space_id, tool_id) makes a
+            # duplicated tool in the payload a 500 otherwise.
+            tool_settings = list({t[0]: t for t in tool_settings}.values())
             tool_ids = [t[0] for t in tool_settings]
 
             # Validate all tools belong to selected servers
@@ -1430,10 +1435,19 @@ class SpaceRepository:
             SecurityClassification as SecurityClassificationDBModel,
         )
 
+        # Capability servers are included even when deactivated: an attached
+        # one is a capability marker (resolved to the active provider at ask
+        # time), and dropping it here would flip the space's capability toggle
+        # off after a provider switch. General servers must be enabled.
         mcp_servers_query = (
             sa.select(MCPServersTable)
             .where(MCPServersTable.tenant_id == self.user.tenant_id)
-            .where(MCPServersTable.is_enabled == True)  # noqa: E712
+            .where(
+                sa.or_(
+                    MCPServersTable.is_enabled == True,  # noqa: E712
+                    MCPServersTable.purpose != GENERAL_PURPOSE,
+                )
+            )
             .options(
                 _selectinload(MCPServersTable.security_classification).selectinload(
                     SecurityClassificationDBModel.tenant
@@ -1458,6 +1472,7 @@ class SpaceRepository:
                 http_url=server.http_url,
                 http_auth_type=server.http_auth_type,
                 http_auth_config_schema=server.http_auth_config_schema,
+                purpose=server.purpose,
                 is_enabled=server.is_enabled,
                 env_vars=server.env_vars,
                 tags=server.tags,
@@ -1491,7 +1506,7 @@ class SpaceRepository:
         group_chats = await self._get_group_chats(space_id=entry_in_db.id)
         services = await self._get_services(space_id=entry_in_db.id)
 
-        return self.factory.create_space_from_db(
+        space = self.factory.create_space_from_db(
             entry_in_db,
             user=self.user,
             collections_in_db=collections,
@@ -1509,6 +1524,44 @@ class SpaceRepository:
             integration_knowledge_in_db=integration_knowledge_union,
             security_classification=entry_in_db.security_classification,
         )
+        from eneo.mcp_servers.application.capability_resolver import (
+            capability_availability,
+        )
+
+        space.available_capabilities = await capability_availability(
+            self.session, self.user.tenant_id, space.security_classification
+        )
+        if space.is_personal():
+            space.enabled_capabilities = [
+                s.purpose for s in space.available_capabilities if s.available
+            ]
+        assistants_with_default = [
+            *space.assistants,
+            *([space.default_assistant] if space.default_assistant else []),
+        ]
+        if assistants_with_default:
+            from eneo.mcp_servers.domain.entities.mcp_server import (
+                allowed_capability_purposes,
+            )
+
+            personal_availability = await capability_availability(
+                self.session,
+                self.user.tenant_id,
+                space.security_classification,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+            )
+            for assistant in assistants_with_default:
+                assistant.available_capabilities = [
+                    state
+                    if space.is_personal()
+                    or state.purpose in space.enabled_capabilities
+                    else state.model_copy(
+                        update={"available": False, "reason": "space_disabled"}
+                    )
+                    for state in personal_availability
+                ]
+        return space
 
     async def _get_record_with_options(
         self,
@@ -1549,6 +1602,10 @@ class SpaceRepository:
             raise UniqueException("Users can only have one personal space") from e
 
         assert entry_in_db is not None
+        entry_in_db.capabilities = [
+            SpaceCapabilities(purpose=p)
+            for p in sorted(set(space.enabled_capabilities))
+        ]
         await self._set_completion_models(entry_in_db, space.completion_models)
         await self._set_embedding_models(entry_in_db, space.embedding_models)
         await self._set_transcription_models(entry_in_db, space.transcription_models)
@@ -1675,6 +1732,10 @@ class SpaceRepository:
         entry_in_db = await self._get_record_with_options(query)
         assert entry_in_db is not None
 
+        entry_in_db.capabilities = [
+            SpaceCapabilities(purpose=p)
+            for p in sorted(set(space.enabled_capabilities))
+        ]
         await self._set_completion_models(entry_in_db, space.completion_models)
         await self._set_embedding_models(entry_in_db, space.embedding_models)
         await self._set_transcription_models(entry_in_db, space.transcription_models)

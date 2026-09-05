@@ -1,7 +1,12 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { writable } from "svelte/store";
@@ -11,8 +16,8 @@
   import { TriangleAlert, Clock } from "lucide-svelte";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
   // Rendered via svelte-headless-table's `createRender`, which requires the
   // legacy `export let` API. Keep this file on Svelte 4 component syntax.

@@ -439,9 +439,12 @@ class FileService:
                 ),
             ),
         )
+        # Read back inside the same transaction: with autobegin off, a session
+        # outside a request scope (a streaming response) has no transaction
+        # once the write block closes, so a read after it would fail.
         async with self._write_transaction():
             file_id = await self._persist_prepared_file(prepared)
-        info = await self.get_file_by_id(file_id)
+            info = await self.get_file_by_id(file_id)
         return File(
             **info.model_dump(),
             blob=image_data,

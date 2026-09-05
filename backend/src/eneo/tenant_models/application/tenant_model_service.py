@@ -2,11 +2,11 @@
 
 """Tenant-model orchestration service.
 
-Pulls the create/update/delete business logic out of the three tenant
-routers (`/api/v1/admin/tenant-models/{completion,embedding,transcription}/`)
+Pulls the create/update/delete business logic out of the four tenant
+routers (`/api/v1/admin/tenant-models/{completion,embedding,transcription,image}/`)
 so the routers stay thin and the rules are tested in one place.
 
-Three classes share helpers via composition rather than inheritance
+The classes share helpers via composition rather than inheritance
 because the create payloads diverge enough (different field sets,
 slightly different default-construction) that a single generic class
 would be more cryptic than helpful. The shared parts — provider
@@ -38,9 +38,11 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 from eneo.database.tables.ai_models_table import (
     CompletionModels,
     EmbeddingModels,
+    ImageModels,
     TranscriptionModels,
 )
 from eneo.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
+from eneo.image_models.domain.image_model_repo import ImageModelRepository
 from eneo.main.exceptions import (
     BadRequestException,
     ModelInUseException,
@@ -74,6 +76,11 @@ if TYPE_CHECKING:
     from eneo.embedding_models.presentation.tenant_embedding_models_router import (
         TenantEmbeddingModelCreate,
         TenantEmbeddingModelUpdate,
+    )
+    from eneo.image_models.domain.image_model import ImageModel
+    from eneo.image_models.presentation.tenant_image_models_router import (
+        TenantImageModelCreate,
+        TenantImageModelUpdate,
     )
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -868,4 +875,194 @@ class TenantTranscriptionModelService:
             entity_type=EntityType.TRANSCRIPTION_MODEL,
             target=snapshot,
             description=f"Deleted tenant transcription model {snapshot.name}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Image
+# ---------------------------------------------------------------------------
+
+
+class TenantImageModelService:
+    def __init__(
+        self,
+        session: "AsyncSession",
+        user: "UserInDB",
+        audit_service: "AuditService | None" = None,
+    ) -> None:
+        self.session = session
+        self.user = user
+        self.audit_service = audit_service
+
+    async def create(self, payload: "TenantImageModelCreate") -> "ImageModel":
+        await _validate_active_provider(
+            self.session, payload.provider_id, self.user.tenant_id
+        )
+        await _validate_unique_display_name(
+            self.session,
+            ImageModels,
+            tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
+            nickname=payload.display_name,
+        )
+
+        if payload.is_default:
+            await _unset_other_defaults(self.session, ImageModels, self.user.tenant_id)
+
+        classification_id = await resolve_tenant_security_classification(
+            self.session, payload.security_classification, self.user.tenant_id
+        )
+
+        new_model = ImageModels(
+            **dict(  # type: ignore[call-arg]
+                tenant_id=self.user.tenant_id,
+                provider_id=payload.provider_id,
+                name=payload.name,
+                nickname=payload.display_name,
+                family=payload.family,
+                hosting=payload.hosting,
+                org=None,
+                stability="stable",
+                open_source=False,
+                description=payload.description,
+                hf_link=None,
+                is_deprecated=False,
+                cost_per_image=payload.cost_per_image,
+                default_size=payload.default_size,
+                default_quality=payload.default_quality,
+                is_enabled=payload.is_active,
+                is_default=payload.is_default,
+                security_classification_id=classification_id,
+            )
+        )
+        self.session.add(new_model)
+        await self.session.flush()
+
+        repo = ImageModelRepository(self.session, self.user)
+        loaded = await repo.one(new_model.id)
+
+        await _audit(
+            self.audit_service,
+            user=self.user,
+            action=ActionType.IMAGE_MODEL_CREATED,
+            entity_type=EntityType.IMAGE_MODEL,
+            target=loaded,
+            description=f"Created tenant image model {loaded.name}",
+            extra={"provider_id": str(payload.provider_id)},
+        )
+        return loaded
+
+    async def update(
+        self, model_id: UUID, payload: "TenantImageModelUpdate"
+    ) -> "ImageModel":
+        stmt = sa.select(ImageModels).where(
+            ImageModels.id == model_id,
+            ImageModels.tenant_id == self.user.tenant_id,
+            ImageModels.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise NotFoundException(
+                "Model not found or does not belong to your organization"
+            )
+        _ensure_tenant_owned(model)
+
+        provided = payload.model_fields_set
+        if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                ImageModels,
+                tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
+            model.nickname = payload.display_name
+        if "description" in provided:
+            model.description = payload.description
+        if payload.hosting is not None:
+            model.hosting = payload.hosting
+        if payload.open_source is not None:
+            model.open_source = payload.open_source
+        if payload.stability is not None:
+            model.stability = payload.stability
+        if "cost_per_image" in provided:
+            model.cost_per_image = payload.cost_per_image
+        if payload.default_size is not None:
+            model.default_size = payload.default_size
+        if payload.default_quality is not None:
+            model.default_quality = payload.default_quality
+        if "is_default" in provided and payload.is_default is not None:
+            if payload.is_default:
+                await _unset_other_defaults(
+                    self.session, ImageModels, self.user.tenant_id
+                )
+            model.is_default = payload.is_default
+        if "security_classification" in provided:
+            model.security_classification_id = (
+                await resolve_tenant_security_classification(
+                    self.session,
+                    payload.security_classification,
+                    self.user.tenant_id,
+                )
+            )
+
+        await self.session.flush()
+
+        repo = ImageModelRepository(self.session, self.user)
+        loaded = await repo.one(model.id)
+
+        await _audit(
+            self.audit_service,
+            user=self.user,
+            action=ActionType.IMAGE_MODEL_UPDATED,
+            entity_type=EntityType.IMAGE_MODEL,
+            target=loaded,
+            description=f"Updated tenant image model {loaded.name}",
+            extra={"fields": sorted(provided)},
+        )
+        return loaded
+
+    async def delete(self, model_id: UUID) -> None:
+        from eneo.database.tables.mcp_server_table import MCPServers
+
+        stmt = sa.select(ImageModels).where(
+            ImageModels.id == model_id,
+            ImageModels.tenant_id == self.user.tenant_id,
+            ImageModels.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise NotFoundException(
+                "Model not found or does not belong to your organization"
+            )
+        _ensure_tenant_owned(model)
+
+        # Refuse while a built-in capability provider runs on this model. The
+        # FK is ON DELETE RESTRICT, so the eventual hard delete could not
+        # succeed anyway; refusing the soft delete keeps the provider row
+        # from pointing at a tombstone in the meantime.
+        provider_refs = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(MCPServers)
+            .where(MCPServers.image_model_id == model_id)
+        )
+        if provider_refs:
+            raise ModelInUseException()
+
+        # Soft delete: read paths filter deleted_at; the cleanup worker
+        # hard-deletes once nothing references the tombstone.
+        snapshot = _DeletedSnapshot(id=model.id, name=model.nickname)
+        model.deleted_at = sa.func.now()
+        await self.session.flush()
+
+        await _audit(
+            self.audit_service,
+            user=self.user,
+            action=ActionType.IMAGE_MODEL_DELETED,
+            entity_type=EntityType.IMAGE_MODEL,
+            target=snapshot,
+            description=f"Deleted tenant image model {snapshot.name}",
         )

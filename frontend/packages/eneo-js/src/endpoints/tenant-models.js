@@ -210,6 +210,75 @@ export function initTenantModels(client) {
         method: "delete",
         params: { path: { model_id: id } }
       });
+    },
+
+    /**
+     * List all Image Models for the tenant.
+     * @param {Object} [options]
+     * @param {string} [options.providerId] Filter by provider ID
+     * @param {boolean} [options.activeOnly] Only return active models
+     * @throws {EneoError}
+     * */
+    listImage: async (options) => {
+      /** @type {any} */
+      const fetchOptions = {
+        method: "get",
+        params: {
+          query: {
+            provider_id: options?.providerId,
+            active_only: options?.activeOnly
+          }
+        }
+      };
+      const res = await client.fetch("/api/v1/admin/tenant-models/image/", fetchOptions);
+
+      return res;
+    },
+
+    /**
+     * Create a new Image Model.
+     * @param {import('../types/resources').TenantImageModelCreate} model
+     * @throws {EneoError}
+     * */
+    createImage: async (model) => {
+      const res = await client.fetch("/api/v1/admin/tenant-models/image/", {
+        method: "post",
+        requestBody: {
+          "application/json": model
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Update an Image Model.
+     * @param {{id: string}} model
+     * @param {import('../types/resources').TenantImageModelUpdate} update
+     * @throws {EneoError}
+     * */
+    updateImage: async ({ id }, update) => {
+      const res = await client.fetch("/api/v1/admin/tenant-models/image/{model_id}/", {
+        method: "put",
+        params: { path: { model_id: id } },
+        requestBody: {
+          "application/json": update
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Delete an Image Model.
+     * @param {{id: string}} model
+     * @throws {EneoError}
+     * */
+    deleteImage: async ({ id }) => {
+      await client.fetch("/api/v1/admin/tenant-models/image/{model_id}/", {
+        method: "delete",
+        params: { path: { model_id: id } }
+      });
     }
   };
 }

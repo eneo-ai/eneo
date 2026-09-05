@@ -7,6 +7,7 @@ import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { eneoIcons } from "@eneo/ui/icons/vite-plugin-eneo-icons";
+import { svelteCssCache } from "./plugins/svelte-css-cache.js";
 
 const file = fileURLToPath(new URL("package.json", import.meta.url));
 const json = readFileSync(file, "utf8");
@@ -30,6 +31,7 @@ export default defineConfig({
     }) as PluginOption,
     tailwindcss() as PluginOption,
     eneoIcons() as PluginOption,
+    svelteCssCache(),
     sveltekit() as PluginOption
   ],
   test: {

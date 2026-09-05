@@ -49,3 +49,20 @@ test("ordinary chat requests do not send a debug capture field", async () => {
   const body = calls[0].request.requestBody["application/json"];
   assert.equal("debug" in body, false);
 });
+
+test("conversation capability opt-outs use purpose fields independently of MCP server IDs", async () => {
+  const calls = [];
+  const conversations = initConversations({
+    stream: async (endpoint, request) => calls.push({ endpoint, request })
+  });
+  await conversations.ask({
+    chatPartner: { id: "assistant-1", type: "assistant" },
+    question: "Hello",
+    files: [],
+    disabledCapabilities: ["image_generation"],
+    disabledMcpServerIds: ["ordinary-server"]
+  });
+  const body = calls[0].request.requestBody["application/json"];
+  assert.deepEqual(body.disabled_capabilities, ["image_generation"]);
+  assert.deepEqual(body.disabled_mcp_server_ids, ["ordinary-server"]);
+});

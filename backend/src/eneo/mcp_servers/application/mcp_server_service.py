@@ -1,27 +1,78 @@
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
-from eneo.main.exceptions import NameCollisionException, UnauthorizedException
+from eneo.main.config import get_settings
+from eneo.main.exceptions import (
+    BadRequestException,
+    NameCollisionException,
+    NotFoundException,
+    ProviderInactiveException,
+    ProviderNotFoundException,
+    UnauthorizedException,
+)
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    AUDIENCE_EVERYONE,
+    AUDIENCE_GROUPS,
+    AUDIENCES,
+    BUILTIN_PROVIDER_PURPOSES,
+    DEFAULT_AUDIENCE_PRIORITY,
+    GENERAL_PURPOSE,
+    INTERNAL_AUTH_TYPE,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
     MCPServer,
+    MCPServerAudienceGroup,
     MCPServerTool,
+    is_builtin_provider,
+    is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
+from eneo.model_providers.infrastructure.litellm_provider import (
+    load_active_litellm_provider,
+)
 from eneo.roles.permissions import Permission, validate_permissions
 
+_NAME_CONSTRAINT = "uq_mcp_servers_tenant_name_purpose"
+_ACTIVE_CAPABILITY_INDEX = "uq_mcp_servers_tenant_active_capability"
+
+
+def _violated_constraint(error: IntegrityError) -> str:
+    original = getattr(error, "orig", None)
+    reported = getattr(original, "constraint_name", None)
+    if reported:
+        return reported
+    return str(original if original is not None else error)
+
+
+def _raise_for_integrity_error(error: IntegrityError) -> None:
+    """Translate a catalog write conflict into the matching domain error."""
+    violated = _violated_constraint(error)
+    if _NAME_CONSTRAINT in violated:
+        raise NameCollisionException(
+            "An MCP server with this name already exists for this purpose."
+        ) from error
+    if _ACTIVE_CAPABILITY_INDEX in violated:
+        raise BadRequestException(
+            "Another default provider is already active for this capability. "
+            "Deactivate it first or target this provider at user groups."
+        ) from error
+    raise error
+
+
 if TYPE_CHECKING:
+    from eneo.image_models.domain.image_model import ImageModel
+    from eneo.image_models.domain.image_model_repo import ImageModelRepository
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -32,9 +83,44 @@ if TYPE_CHECKING:
         SecurityClassification,
     )
     from eneo.settings.encryption_service import EncryptionService
+    from eneo.user_groups.user_groups_repo import UserGroupsRepository
     from eneo.users.user import UserInDB
 
 logger = logging.getLogger(__name__)
+
+# RFC 9110 token syntax — the only characters legal in an HTTP field name.
+# Rejecting anything else also rules out CR/LF header injection.
+_HTTP_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+
+# Headers an admin-configured api_key_header credential must never occupy:
+# transport/framing headers, proxy/forwarding headers, MCP session headers,
+# and headers Eneo itself controls (Authorization, X-Eneo-* identity).
+_FORBIDDEN_HEADER_NAMES = frozenset(
+    {
+        "host",
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+        "upgrade",
+        "te",
+        "trailer",
+        "keep-alive",
+        "expect",
+        "via",
+        "cookie",
+        "set-cookie",
+        "forwarded",
+        "origin",
+        "referer",
+        "authorization",
+        "proxy-authorization",
+        "proxy-authenticate",
+        "mcp-session-id",
+        "mcp-protocol-version",
+    }
+)
+_FORBIDDEN_HEADER_PREFIXES = ("x-forwarded-", "x-real-", "x-eneo-", "sec-")
 
 
 @dataclass
@@ -52,6 +138,7 @@ class MCPServerCreateResult:
 
     server: MCPServer
     connection: ConnectionResult
+    deactivated_server_ids: list[UUID] | None = None
 
 
 @dataclass
@@ -72,6 +159,14 @@ class ToolChange:
     current_input_schema: dict[str, Any] | None = None
     pending_description: str | None = None
     pending_input_schema: dict[str, Any] | None = None
+
+
+@dataclass
+class CapabilityActivationResult:
+    """Result of activating a capability provider."""
+
+    server: MCPServer
+    deactivated_server_ids: list[UUID] = field(default_factory=lambda: [])
 
 
 @dataclass
@@ -98,15 +193,160 @@ class MCPServerService:
         mcp_server_tool_repo: "MCPServerToolRepository",
         user: "UserInDB",
         encryption_service: "EncryptionService | None" = None,
+        user_groups_repo: "UserGroupsRepository | None" = None,
+        image_model_repo: "ImageModelRepository | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
         self.user = user
         self.encryption_service = encryption_service
+        self.image_model_repo = image_model_repo
+        self.user_groups_repo = user_groups_repo
+
+    async def _resolve_audience(
+        self,
+        purpose: str,
+        audience: str,
+        user_group_ids: list[UUID],
+    ) -> list[MCPServerAudienceGroup]:
+        """Validate an audience for ``purpose`` and load its tenant groups.
+
+        Only capability providers have an audience; a group-targeted audience
+        needs at least one group and every group must belong to the tenant.
+        """
+        if audience not in AUDIENCES:
+            raise BadRequestException(f"Unknown audience '{audience}'")
+        if not is_capability_purpose(purpose):
+            if audience != AUDIENCE_EVERYONE or user_group_ids:
+                raise BadRequestException(
+                    "Only capability providers can target user groups"
+                )
+            return []
+        if audience == AUDIENCE_EVERYONE:
+            if user_group_ids:
+                raise BadRequestException(
+                    "A provider for everyone cannot also list user groups"
+                )
+            return []
+        if not user_group_ids:
+            raise BadRequestException(
+                "Select at least one user group for a group-targeted provider"
+            )
+        if self.user_groups_repo is None:
+            raise BadRequestException("User groups are not available")
+        tenant_groups = {
+            group.id: group
+            for group in await self.user_groups_repo.get_all_user_groups(
+                tenant_id=self.user.tenant_id
+            )
+        }
+        resolved: list[MCPServerAudienceGroup] = []
+        for group_id in dict.fromkeys(user_group_ids):
+            group = tenant_groups.get(group_id)
+            if group is None:
+                raise BadRequestException(f"User group {group_id} not found")
+            resolved.append(MCPServerAudienceGroup(id=group.id, name=group.name))
+        return resolved
 
     # Keys in http_auth_config_schema that contain secrets
     _SECRET_KEYS = ("token",)
+
+    @staticmethod
+    def _validate_auth_config(
+        http_auth_type: str, config: dict[str, Any] | None
+    ) -> None:
+        """Validate a plaintext auth config before it is tested or stored.
+
+        Enforces that credentials ride in headers (never URLs), that an
+        api_key_header name is legal HTTP token syntax and not a reserved
+        transport/session header, and that no secret can smuggle CR/LF into
+        the request stream.
+        """
+        if http_auth_type == "none":
+            return
+        if http_auth_type == INTERNAL_AUTH_TYPE:
+            if config:
+                raise BadRequestException(
+                    "A built-in provider carries no credentials; the ask path "
+                    "authenticates it with a scoped token."
+                )
+            return
+
+        token = (config or {}).get("token")
+        if token is not None:
+            if not isinstance(token, str) or not token.strip():
+                raise BadRequestException("Credential must be a non-empty string")
+            if any(ord(c) < 0x20 or c == "\x7f" for c in token):
+                raise BadRequestException(
+                    "Credential must not contain control characters"
+                )
+
+        if http_auth_type != "api_key_header":
+            return
+
+        header_name = (config or {}).get("header_name")
+        if not isinstance(header_name, str) or not header_name:
+            raise BadRequestException(
+                "api_key_header authentication requires a header name"
+            )
+        if not _HTTP_TOKEN_RE.match(header_name):
+            raise BadRequestException(
+                "Header name must use HTTP token syntax "
+                "(letters, digits, and !#$%&'*+-.^_`|~)"
+            )
+        lowered = header_name.lower()
+        if lowered in _FORBIDDEN_HEADER_NAMES or lowered.startswith(
+            _FORBIDDEN_HEADER_PREFIXES
+        ):
+            raise BadRequestException(
+                f"Header '{header_name}' is reserved and cannot carry credentials"
+            )
+
+    @staticmethod
+    def builtin_provider_url(purpose: str) -> str:
+        """Loopback endpoint of the built-in provider for ``purpose``."""
+        base = get_settings().internal_mcp_base_url.rstrip("/")
+        return f"{base}/internal-mcp/{purpose}/mcp"
+
+    async def _resolve_builtin_image_model(
+        self, purpose: str, image_model_id: UUID | None
+    ) -> "ImageModel":
+        """Validate a built-in provider's purpose and image model selection.
+
+        The image model must be one of the tenant's own enabled catalog rows
+        and its model provider must be active; the loopback tool loads the
+        credentials from that provider at call time.
+        """
+        if purpose not in BUILTIN_PROVIDER_PURPOSES:
+            raise BadRequestException(
+                "A built-in provider is available for: "
+                + ", ".join(BUILTIN_PROVIDER_PURPOSES)
+            )
+        if image_model_id is None:
+            raise BadRequestException("A built-in provider needs an image model")
+        if self.image_model_repo is None:
+            raise RuntimeError("MCPServerService requires image_model_repo")
+        model = await self.image_model_repo.one_or_none(image_model_id)
+        if (
+            model is None
+            or model.tenant_id != self.user.tenant_id
+            or model.provider_id is None
+        ):
+            raise BadRequestException("Image model not found in this organisation")
+        if model.is_deprecated:
+            raise BadRequestException("Image model is deprecated")
+        if not model.is_org_enabled:
+            raise BadRequestException("Image model is disabled")
+        try:
+            await load_active_litellm_provider(
+                session=self.repo.session,
+                provider_id=model.provider_id,
+                tenant_id=self.user.tenant_id,
+            )
+        except (ProviderNotFoundException, ProviderInactiveException) as exc:
+            raise BadRequestException(str(exc)) from exc
+        return model
 
     async def _get_server_for_tenant(self, mcp_server_id: UUID) -> MCPServer:
         """Fetch an MCP server and verify it belongs to the current user's tenant."""
@@ -148,11 +388,18 @@ class MCPServerService:
                     decrypted[key] = self.encryption_service.decrypt(decrypted[key])
         return decrypted
 
-    async def get_mcp_servers(self, tags: list[str] | None = None) -> list[MCPServer]:
-        """Get all MCP servers from global catalog with optional tag filtering."""
+    async def get_mcp_servers(
+        self,
+        tags: list[str] | None = None,
+        purpose: str | None = None,
+    ) -> list[MCPServer]:
+        """Get all MCP servers from global catalog with optional filtering."""
+        filters: dict[str, Any] = {"tenant_id": self.user.tenant_id}
+        if purpose is not None:
+            filters["purpose"] = purpose
         if tags:
-            return await self.repo.query(tags=tags, tenant_id=self.user.tenant_id)
-        return await self.repo.query(tenant_id=self.user.tenant_id)
+            return await self.repo.query(tags=tags, **filters)
+        return await self.repo.query(**filters)
 
     async def get_mcp_server(self, mcp_server_id: UUID) -> MCPServer:
         """Get a single MCP server by ID."""
@@ -169,6 +416,7 @@ class MCPServerService:
         name: str,
         http_url: str,
         http_auth_type: str = "none",
+        purpose: str = GENERAL_PURPOSE,
         description: str | None = None,
         http_auth_config_schema: dict[str, Any] | None = None,
         forward_identity: bool = False,
@@ -179,23 +427,62 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | None" = None,
+        audience: str = AUDIENCE_EVERYONE,
+        audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
+        user_group_ids: list[UUID] | None = None,
+        image_model_id: UUID | None = None,
+        activate: bool = False,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
         Validates connection BEFORE saving to database to avoid orphaned entries.
+
+        A built-in provider (``http_auth_type = "internal"``) ignores the given
+        URL and identity forwarding: its endpoint is Eneo's own loopback server
+        for the purpose, ``image_model_id`` selects the catalog model it calls,
+        and its security classification is that model's, never its own.
         """
-        http_url = str(http_url)
         if icon_url is not None:
             icon_url = str(icon_url)
         if documentation_url is not None:
             documentation_url = str(documentation_url)
 
-        # Create domain object (not saved yet)
+        self._validate_auth_config(http_auth_type, http_auth_config_schema)
+        if is_builtin_provider(http_auth_type):
+            model = await self._resolve_builtin_image_model(purpose, image_model_id)
+            image_model_id = model.id
+            if security_classification is not None:
+                raise BadRequestException(
+                    "A built-in provider takes its security classification "
+                    "from its image model"
+                )
+            http_url = self.builtin_provider_url(purpose)
+            forward_identity = False
+        elif image_model_id is not None:
+            raise BadRequestException(
+                "image_model_id applies only to built-in providers"
+            )
+        elif not http_url:
+            raise BadRequestException("http_url is required")
+        http_url = str(http_url)
+        user_groups = await self._resolve_audience(
+            purpose, audience, list(user_group_ids or [])
+        )
+
+        # Create domain object (not saved yet). Capability providers are saved
+        # inactive: at most one default provider may be enabled per tenant and
+        # purpose, and switching is an explicit activation step.
         mcp_server = MCPServer(
             tenant_id=self.user.tenant_id,
             name=name,
             http_url=http_url,
             http_auth_type=http_auth_type,
+            purpose=purpose,
+            is_enabled=not is_capability_purpose(purpose),
+            audience=audience,
+            audience_priority=audience_priority,
+            user_groups=user_groups,
+            image_model_id=image_model_id,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -233,9 +520,7 @@ class MCPServerService:
         try:
             mcp_server = await self.repo.add(mcp_server)
         except IntegrityError as e:
-            raise NameCollisionException(
-                "An MCP server with this name already exists."
-            ) from e
+            _raise_for_integrity_error(e)
 
         # Save discovered tools
         for tool_def in tools:
@@ -249,8 +534,17 @@ class MCPServerService:
             )
             await self.tool_repo.upsert_by_server_and_name(tool)
 
+        deactivated_server_ids = []
+        if activate:
+            activated = await self.activate_capability_server(mcp_server.id)
+            mcp_server = activated.server
+            deactivated_server_ids = activated.deactivated_server_ids
         connection_result.tools_discovered = len(tools)
-        return MCPServerCreateResult(server=mcp_server, connection=connection_result)
+        return MCPServerCreateResult(
+            server=mcp_server,
+            connection=connection_result,
+            deactivated_server_ids=deactivated_server_ids,
+        )
 
     @validate_permissions(Permission.ADMIN)
     async def update_mcp_server(
@@ -269,12 +563,31 @@ class MCPServerService:
         icon_url: str | None = None,
         documentation_url: str | None = None,
         security_classification: "SecurityClassification | NotProvided | None" = NOT_PROVIDED,
+        purpose: str | None = None,
+        audience: str | None = None,
+        audience_priority: int | None = None,
+        user_group_ids: list[UUID] | None = None,
+        image_model_id: "UUID | None | NotProvided" = NOT_PROVIDED,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
         Validates connection before saving when connection-affecting fields
         (URL, authentication, credentials, identity forwarding) change.
         Returns MCPServerUpdateResult with connection info when validation occurs.
+
+        Changing ``purpose`` re-homes the server: a move into a capability
+        purpose saves it as an inactive provider (activation stays an explicit
+        step, so the single-active-provider index never collides), a move back
+        to general makes it an ordinary enabled server with no audience. Space
+        and assistant attachments survive a move into a capability purpose
+        (they become capability markers) but are detached on the way back to
+        general: markers were admitted without the space's classification
+        check, and a general server is called directly.
+
+        Audience changes (``audience``, ``audience_priority``,
+        ``user_group_ids``) are validated against the effective purpose. An
+        active provider that becomes the default while another default is
+        active is rejected by the activation index.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
         # Track whether connection-affecting fields are actually changing
@@ -288,6 +601,75 @@ class MCPServerService:
             and forward_identity != mcp_server.forward_identity
         )
 
+        effective_auth_type = (
+            http_auth_type if http_auth_type is not None else mcp_server.http_auth_type
+        )
+        if http_auth_config_schema is not None:
+            # A token-only credential replacement keeps the stored header name.
+            if (
+                effective_auth_type == "api_key_header"
+                and "header_name" not in http_auth_config_schema
+                and mcp_server.http_auth_config_schema
+                and mcp_server.http_auth_config_schema.get("header_name")
+            ):
+                http_auth_config_schema = {
+                    "header_name": mcp_server.http_auth_config_schema["header_name"],
+                    **http_auth_config_schema,
+                }
+            self._validate_auth_config(effective_auth_type, http_auth_config_schema)
+        elif auth_type_changed and not is_builtin_provider(effective_auth_type):
+            # Stored credentials are re-validated against the new type. A move
+            # to built-in drops them instead (below), so there is nothing to
+            # validate.
+            self._validate_auth_config(
+                effective_auth_type,
+                self._decrypt_auth_config(mcp_server.http_auth_config_schema),
+            )
+
+        # Built-in providers: the URL is Eneo's loopback endpoint and the image
+        # model is validated whenever it (or the auth type, or the purpose)
+        # changes. The row never carries its own classification. Leaving the
+        # internal auth type drops the model.
+        effective_purpose = purpose if purpose is not None else mcp_server.purpose
+        if is_builtin_provider(effective_auth_type):
+            model_changing = not isinstance(image_model_id, NotProvided)
+            if (
+                mcp_server.is_enabled
+                or auth_type_changed
+                or model_changing
+                or purpose is not None
+            ):
+                model = await self._resolve_builtin_image_model(
+                    effective_purpose,
+                    image_model_id if model_changing else mcp_server.image_model_id,
+                )
+                mcp_server.image_model_id = model.id
+            if (
+                not isinstance(security_classification, NotProvided)
+                and security_classification is not None
+            ):
+                raise BadRequestException(
+                    "A built-in provider takes its security classification "
+                    "from its image model"
+                )
+            security_classification = None
+            builtin_url = self.builtin_provider_url(effective_purpose)
+            url_changed = builtin_url != mcp_server.http_url
+            http_url = builtin_url
+            forward_identity = False
+            identity_mode_changed = identity_mode_changed and bool(
+                mcp_server.forward_identity
+            )
+        else:
+            if not isinstance(image_model_id, NotProvided) and (
+                image_model_id is not None
+            ):
+                raise BadRequestException(
+                    "image_model_id applies only to built-in providers"
+                )
+            mcp_server.image_model_id = None
+            mcp_server.image_model = None
+
         # Apply changes to domain object
         if name is not None:
             mcp_server.name = name
@@ -295,8 +677,8 @@ class MCPServerService:
             mcp_server.http_url = str(http_url)
         if http_auth_type is not None:
             mcp_server.http_auth_type = http_auth_type
-            # If switching to "none", clear credentials
-            if http_auth_type == "none":
+            # Switching to a type without stored credentials clears them
+            if http_auth_type in ("none", INTERNAL_AUTH_TYPE):
                 mcp_server.http_auth_config_schema = None
         if description is not None:
             mcp_server.description = description
@@ -316,6 +698,51 @@ class MCPServerService:
             mcp_server.documentation_url = str(documentation_url)
         if not isinstance(security_classification, NotProvided):
             mcp_server.security_classification = security_classification
+        if purpose is not None and purpose != mcp_server.purpose:
+            if is_capability_purpose(mcp_server.purpose) and not is_capability_purpose(
+                purpose
+            ):
+                # Attachments of a capability server are markers admitted
+                # without the space's classification check. As a general
+                # server they would be called directly, so they are detached
+                # rather than re-homed.
+                assert mcp_server.id is not None
+                await self.repo.detach_from_spaces_and_assistants(mcp_server.id)
+            mcp_server.purpose = purpose
+            mcp_server.is_enabled = not is_capability_purpose(purpose)
+            if not is_capability_purpose(purpose):
+                mcp_server.audience = AUDIENCE_EVERYONE
+                mcp_server.audience_priority = DEFAULT_AUDIENCE_PRIORITY
+                mcp_server.user_groups = []
+        if audience is not None or user_group_ids is not None:
+            effective_audience = (
+                audience if audience is not None else mcp_server.audience
+            )
+            effective_group_ids = (
+                list(user_group_ids)
+                if user_group_ids is not None
+                else mcp_server.user_group_ids
+            )
+            if effective_audience == AUDIENCE_EVERYONE and audience is not None:
+                effective_group_ids = []
+            if (
+                mcp_server.is_enabled
+                and mcp_server.audience == AUDIENCE_EVERYONE
+                and effective_audience == AUDIENCE_GROUPS
+            ):
+                # The active default is what everyone outside a targeted group
+                # gets; silently narrowing it would leave the tenant without a
+                # provider. Deactivate first, or activate another default.
+                raise BadRequestException(
+                    "This server is the active default provider. Deactivate it "
+                    "before limiting it to user groups."
+                )
+            mcp_server.user_groups = await self._resolve_audience(
+                mcp_server.purpose, effective_audience, effective_group_ids
+            )
+            mcp_server.audience = effective_audience
+        if audience_priority is not None:
+            mcp_server.audience_priority = audience_priority
 
         # Validate connection before saving when connection config changes
         if (
@@ -324,7 +751,7 @@ class MCPServerService:
             or credentials_changed
             or identity_mode_changed
         ):
-            if mcp_server.http_auth_type == "none":
+            if mcp_server.http_auth_type in ("none", INTERNAL_AUTH_TYPE):
                 test_credentials = None
             elif http_auth_config_schema is not None:
                 # New credentials provided — use plaintext for test
@@ -345,6 +772,16 @@ class MCPServerService:
                 return MCPServerUpdateResult(
                     server=mcp_server, connection=connection_result
                 )
+            if is_builtin_provider(mcp_server.http_auth_type) and (
+                auth_type_changed or url_changed
+            ):
+                # Moving onto the loopback replaces whatever catalog served
+                # this row before, and the definitions are Eneo's own code:
+                # reconcile and approve them within the same update.
+                await self._sync_discovered_tool_definitions(
+                    mcp_server, discovered_tools
+                )
+                await self.approve_all_tool_changes(mcp_server.id)
             if identity_mode_changed and not mcp_server.forward_identity:
                 try:
                     await self._sync_discovered_tool_definitions(
@@ -373,9 +810,7 @@ class MCPServerService:
         try:
             mcp_server = await self.repo.update(mcp_server)
         except IntegrityError as e:
-            raise NameCollisionException(
-                "An MCP server with this name already exists."
-            ) from e
+            _raise_for_integrity_error(e)
         return MCPServerUpdateResult(server=mcp_server)
 
     @validate_permissions(Permission.ADMIN)
@@ -629,7 +1064,12 @@ class MCPServerService:
                 mcp_server.http_auth_config_schema
             )
 
-        return await self.discover_and_sync_tools(mcp_server, auth_credentials)
+        result = await self.discover_and_sync_tools(mcp_server, auth_credentials)
+        if is_builtin_provider(mcp_server.http_auth_type):
+            # The approval gate guards against a compromised remote; a built-in
+            # provider's definitions are Eneo's own code.
+            await self.approve_all_tool_changes(mcp_server_id)
+        return result
 
     @validate_permissions(Permission.ADMIN)
     async def approve_tool_changes(
@@ -722,23 +1162,60 @@ class MCPServerService:
             return []
         return await self.approve_tool_changes(mcp_server_id, pending_ids)
 
+    async def _get_tool_for_server(
+        self, mcp_server_id: UUID, tool_id: UUID
+    ) -> MCPServerTool:
+        """Load a tool addressed as ``/{mcp_server_id}/tools/{tool_id}``.
+
+        The tool must belong to that server within the caller's tenant; a
+        tool id from another server is treated as not found so an admin
+        cannot edit a tool through a path that names a different server.
+        """
+        tool = await self.tool_repo.one(id=tool_id)
+        server = await self._get_server_for_tenant(tool.mcp_server_id)
+        if server.id != mcp_server_id:
+            raise NotFoundException(
+                f"Tool {tool_id} does not belong to MCP server {mcp_server_id}"
+            )
+        return tool
+
     @validate_permissions(Permission.ADMIN)
     async def update_tool_default_enabled(
-        self, tool_id: UUID, is_enabled: bool
+        self, mcp_server_id: UUID, tool_id: UUID, is_enabled: bool
     ) -> MCPServerTool:
         """
         Update the global default enabled status for a tool (admin only).
 
         Args:
+            mcp_server_id: Server the tool is addressed under; the tool must
+                belong to it
             tool_id: ID of the tool to update
             is_enabled: Whether tool should be enabled by default
 
         Returns:
             Updated tool
         """
-        tool = await self.tool_repo.one(id=tool_id)
-        await self._get_server_for_tenant(tool.mcp_server_id)
+        tool = await self._get_tool_for_server(mcp_server_id, tool_id)
         tool.is_enabled_by_default = is_enabled
+        return await self.tool_repo.update(tool)
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_tool_display_name(
+        self, mcp_server_id: UUID, tool_id: UUID, display_name: str | None
+    ) -> MCPServerTool:
+        """Set or clear the admin display name for a tool (admin only).
+
+        Display-only: the protocol-level tool name is untouched, so calls keep
+        routing to the same remote tool. None or blank clears the override.
+        """
+        tool = await self._get_tool_for_server(mcp_server_id, tool_id)
+
+        if display_name is not None:
+            display_name = display_name.strip() or None
+        if display_name is not None and len(display_name) > 100:
+            raise BadRequestException("Display name must be 100 characters or less")
+
+        tool.display_name = display_name
         return await self.tool_repo.update(tool)
 
     @validate_permissions(Permission.ADMIN)
@@ -786,6 +1263,108 @@ class MCPServerService:
         # Return tool with tenant setting applied
         tool.is_enabled_by_default = is_enabled
         return tool
+
+    def _usable_tools(self, tools: list[MCPServerTool]) -> list[MCPServerTool]:
+        """Tools that can actually serve a request: enabled, present on the
+        remote, and with an admin-approved definition (a never-approved new
+        tool has no active description/schema yet)."""
+        return [
+            tool
+            for tool in tools
+            if tool.is_enabled_by_default
+            and not tool.removed_from_remote
+            and (tool.description is not None or tool.input_schema is not None)
+        ]
+
+    @validate_permissions(Permission.ADMIN)
+    async def activate_capability_server(
+        self, mcp_server_id: UUID
+    ) -> CapabilityActivationResult:
+        """Activate this server as a provider for its capability purpose
+        (admin only).
+
+        A default provider (audience "everyone") replaces the previously
+        active default for the same purpose in the same transaction, under
+        the partial unique index that allows at most one enabled default per
+        tenant and capability purpose. A group-targeted provider coexists with
+        the default and with other group-targeted providers, so activating it
+        deactivates nothing. Rejects servers that are unreachable or have no
+        usable tools.
+        """
+        import sqlalchemy as sa
+
+        from eneo.database.tables.mcp_server_table import (
+            MCPServers as MCPServersTable,
+        )
+
+        server = await self._get_server_for_tenant(mcp_server_id)
+        if not is_capability_purpose(server.purpose):
+            raise BadRequestException(
+                "Only capability MCP servers can be activated as a provider"
+            )
+
+        if is_builtin_provider(server.http_auth_type):
+            await self._resolve_builtin_image_model(
+                server.purpose, server.image_model_id
+            )
+        tools = await self.get_tools_with_tenant_settings(mcp_server_id)
+        if not self._usable_tools(tools):
+            raise BadRequestException(
+                "Provider has no enabled tools. Sync and approve its tools "
+                "before activating."
+            )
+
+        credentials = self._decrypt_auth_config(server.http_auth_config_schema)
+        _, connection = await self._test_connection_and_discover_tools(
+            server, credentials
+        )
+        if not connection.success:
+            raise BadRequestException(
+                connection.error_message
+                or "Provider is unreachable and cannot be activated"
+            )
+
+        # Deactivate the current default first so the partial unique index
+        # never sees two enabled default providers for this purpose. Both
+        # statements commit with the request's unit of work — the switch is
+        # all-or-nothing.
+        deactivated_ids: list[UUID] = []
+        if server.is_default_provider():
+            deactivate_stmt = (
+                sa.update(MCPServersTable)
+                .where(
+                    MCPServersTable.tenant_id == self.user.tenant_id,
+                    MCPServersTable.purpose == server.purpose,
+                    MCPServersTable.audience == AUDIENCE_EVERYONE,
+                    MCPServersTable.is_enabled == True,  # noqa: E712
+                    MCPServersTable.id != mcp_server_id,
+                )
+                .values(is_enabled=False)
+                .returning(MCPServersTable.id)
+            )
+            result = await self.repo.session.execute(deactivate_stmt)
+            deactivated_ids = [row[0] for row in result.fetchall()]
+
+        server.is_enabled = True
+        try:
+            server = await self.repo.update(server)
+        except IntegrityError as e:
+            _raise_for_integrity_error(e)
+        return CapabilityActivationResult(
+            server=server, deactivated_server_ids=deactivated_ids
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def deactivate_capability_server(self, mcp_server_id: UUID) -> MCPServer:
+        """Deactivate a capability provider, leaving the tenant without one
+        for that purpose."""
+        server = await self._get_server_for_tenant(mcp_server_id)
+        if not is_capability_purpose(server.purpose):
+            raise BadRequestException(
+                "Only capability MCP servers can be deactivated here"
+            )
+        server.is_enabled = False
+        return await self.repo.update(server)
 
     async def get_tools_with_tenant_settings(
         self, mcp_server_id: UUID

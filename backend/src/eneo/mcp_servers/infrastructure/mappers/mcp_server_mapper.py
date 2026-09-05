@@ -4,7 +4,12 @@ from sqlalchemy import inspect
 from sqlalchemy.orm.base import NEVER_SET
 
 from eneo.database.tables.mcp_server_table import MCPServers as MCPServersTable
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    MCPServerAudienceGroup,
+    MCPServerBackingModel,
+    MCPServerTool,
+)
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
@@ -29,6 +34,7 @@ class MCPServerToolMapper:
             mcp_server_id=db_model.mcp_server_id,
             name=db_model.name,
             title=db_model.title,
+            display_name=db_model.display_name,
             description=db_model.description,
             input_schema=db_model.input_schema,
             is_enabled_by_default=db_model.is_enabled_by_default,
@@ -51,6 +57,7 @@ class MCPServerToolMapper:
             "mcp_server_id": entity.mcp_server_id,
             "name": entity.name,
             "title": entity.title,
+            "display_name": entity.display_name,
             "description": entity.description,
             "input_schema": entity.input_schema,
             "is_enabled_by_default": entity.is_enabled_by_default,
@@ -82,6 +89,48 @@ class MCPServerMapper:
             if sc_loaded is not NEVER_SET and sc_loaded is not None:
                 security_classification = SecurityClassification.to_domain(sc_loaded)
 
+        user_groups: List[MCPServerAudienceGroup] = []
+        if inspector is not None:
+            groups_loaded = inspector.attrs.user_groups.loaded_value
+            if groups_loaded is not NEVER_SET and groups_loaded:
+                user_groups = [
+                    MCPServerAudienceGroup(id=group.id, name=group.name)
+                    for group in groups_loaded
+                ]
+
+        # The backing image model (built-in providers) is projected only when
+        # the reader eager-loaded it; its own relationships are read the same
+        # way so an unloaded classification never triggers a lazy load.
+        image_model = None
+        if inspector is not None:
+            model_loaded = inspector.attrs.image_model.loaded_value
+            if model_loaded is not NEVER_SET and model_loaded is not None:
+                model_inspector = inspect(model_loaded)
+                model_sc = None
+                provider_name = None
+                provider_is_active = False
+                if model_inspector is not None:
+                    sc_value = (
+                        model_inspector.attrs.security_classification.loaded_value
+                    )
+                    if sc_value is not NEVER_SET and sc_value is not None:
+                        model_sc = SecurityClassification.to_domain(sc_value)
+                    provider_value = model_inspector.attrs.provider.loaded_value
+                    if provider_value is not NEVER_SET and provider_value is not None:
+                        provider_name = provider_value.name
+                        provider_is_active = provider_value.is_active
+                image_model = MCPServerBackingModel(
+                    id=model_loaded.id,
+                    name=model_loaded.name,
+                    nickname=model_loaded.nickname,
+                    provider_name=provider_name,
+                    is_enabled=model_loaded.is_enabled,
+                    is_deleted=model_loaded.deleted_at is not None,
+                    is_deprecated=model_loaded.is_deprecated,
+                    provider_is_active=provider_is_active,
+                    security_classification=model_sc,
+                )
+
         return MCPServer(
             id=db_model.id,  # type: ignore[arg-type]
             created_at=db_model.created_at,  # type: ignore[arg-type]
@@ -92,7 +141,13 @@ class MCPServerMapper:
             http_url=db_model.http_url,
             http_auth_type=db_model.http_auth_type,
             http_auth_config_schema=db_model.http_auth_config_schema,
+            purpose=db_model.purpose,
             is_enabled=db_model.is_enabled,
+            audience=db_model.audience,
+            audience_priority=db_model.audience_priority,
+            user_groups=user_groups,
+            image_model_id=db_model.image_model_id,
+            image_model=image_model,
             forward_identity=db_model.forward_identity,
             tool_catalog_max_count=db_model.tool_catalog_max_count,
             tool_catalog_max_bytes=db_model.tool_catalog_max_bytes,
@@ -121,7 +176,11 @@ class MCPServerMapper:
             "http_url": entity.http_url,
             "http_auth_type": entity.http_auth_type,
             "http_auth_config_schema": entity.http_auth_config_schema,
+            "purpose": entity.purpose,
             "is_enabled": entity.is_enabled,
+            "audience": entity.audience,
+            "audience_priority": entity.audience_priority,
+            "image_model_id": entity.image_model_id,
             "forward_identity": entity.forward_identity,
             "tool_catalog_max_count": entity.tool_catalog_max_count,
             "tool_catalog_max_bytes": entity.tool_catalog_max_bytes,

@@ -10,7 +10,10 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    is_capability_purpose,
+)
 from eneo.roles.permissions import Permission, validate_permissions
 
 if TYPE_CHECKING:
@@ -180,6 +183,14 @@ class MCPServerSettingsService:
             raise UnauthorizedException()
 
         if is_org_enabled is not None:
+            # A capability provider's enabled flag is its active-provider
+            # state, guarded by the single-active-provider index; it only
+            # changes through the atomic activate/deactivate switch.
+            if is_capability_purpose(mcp_server.purpose):
+                raise BadRequestException(
+                    "Capability providers are switched with activate/deactivate, "
+                    "not enabled per tenant."
+                )
             mcp_server.is_enabled = is_org_enabled
         if env_vars is not None:
             mcp_server.env_vars = self._encrypt_env_vars(

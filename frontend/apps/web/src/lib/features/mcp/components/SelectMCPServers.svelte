@@ -11,6 +11,7 @@
   import { m } from "$lib/paraglide/messages";
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
 
   interface MCPTool {
     id: string;
@@ -23,6 +24,7 @@
     id: string;
     name: string;
     description?: string;
+    purpose?: string;
     tags?: string[];
     tools?: MCPTool[];
     [key: string]: unknown;
@@ -68,6 +70,12 @@
       tools: server.tools?.filter((tool) => tool.is_enabled) || []
     }));
   });
+
+  // This picker manages general-purpose servers only; capabilities (web
+  // search, image generation) have their own settings section (CapabilityToggle).
+  let generalAvailableServers = $derived(
+    availableServers.filter((server) => !isCapabilityPurpose(server.purpose))
+  );
 
   // Track expanded servers
   const expandedServers = new SvelteSet<string>();
@@ -232,7 +240,7 @@
       <span class="font-bold">{m.warning()}:&nbsp;</span>{m.model_does_not_support_tools()}
     </p>
   {/if}
-  {#if availableServers.length === 0}
+  {#if generalAvailableServers.length === 0}
     <div
       class="border-dimmer bg-secondary/30 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-8 text-center"
     >
@@ -259,7 +267,7 @@
     </div>
   {:else}
     <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
-      {#each availableServers as server (server.id)}
+      {#each generalAvailableServers as server (server.id)}
         {@const isSelected = isServerSelected(server.id)}
         {@const hasTools = isSelected && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
@@ -300,7 +308,9 @@
                     {/if}
                   </div>
                   {#if server.description}
-                    <p class="text-muted line-clamp-1 text-xs leading-snug">{server.description}</p>
+                    <p class="text-muted line-clamp-1 text-xs leading-snug">
+                      {server.description}
+                    </p>
                   {/if}
                 </div>
               </Input.Switch>

@@ -15,6 +15,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
+)
 from eneo.skills.domain.skill import SkillRuntimeResolution
 
 if TYPE_CHECKING:
@@ -38,6 +42,15 @@ class EffectiveConfig:
 
     prompt_enforced: bool
     enforced_prompt_text: str | None
+    enabled_capabilities: list[CapabilityPurpose] = field(
+        default_factory=list[CapabilityPurpose]
+    )
+    available_capabilities: list[CapabilityAvailability] = field(
+        default_factory=list[CapabilityAvailability]
+    )
+    default_disabled_capabilities: list[CapabilityPurpose] = field(
+        default_factory=list[CapabilityPurpose]
+    )
     reasoning_policy_configured: bool = False
     default_reasoning_effort: str | None = None
     reasoning_effort_user_configurable: bool = False
@@ -188,6 +201,28 @@ def resolve_personal_default(
         mcp_enforced=policy.mcp_restriction_enabled,
         available_mcp_servers=available_mcp_servers,
         default_disabled_mcp_server_ids=default_disabled_mcp_server_ids,
+        enabled_capabilities=[c.purpose for c in policy.capabilities]
+        if policy.mcp_restriction_enabled
+        else [],
+        default_disabled_capabilities=[
+            c.purpose for c in policy.capabilities if not c.is_default_enabled
+        ]
+        if policy.mcp_restriction_enabled
+        else [],
+        available_capabilities=[
+            CapabilityAvailability(
+                purpose=c.purpose,
+                available=any(
+                    s.purpose == c.purpose
+                    and s.is_enabled
+                    and s.readiness_reason is None
+                    for s in tenant_mcp_servers
+                ),
+            )
+            for c in policy.capabilities
+        ]
+        if policy.mcp_restriction_enabled
+        else [],
         prompt_enforced=policy.prompt_enforcement_enabled,
         enforced_prompt_text=enforced_prompt_text,
         reasoning_policy_configured=policy.reasoning_policy_configured,

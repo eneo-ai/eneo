@@ -1,10 +1,11 @@
 from typing import Any, Generic, Literal, Optional, TypeVar, Union
 from uuid import UUID
 
-from pydantic import AnyHttpUrl, BaseModel, Field, computed_field
+from pydantic import AnyHttpUrl, BaseModel, Field, computed_field, model_validator
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
 from eneo.mcp_servers.domain.entities.mcp_server import (
+    DEFAULT_AUDIENCE_PRIORITY,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_CATALOG_HARD_MAX_BYTES,
@@ -17,6 +18,33 @@ from eneo.security_classifications.presentation.security_classification_models i
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+MCPServerPurpose = Literal["general", "web_search", "image_generation"]
+MCPServerAudience = Literal["everyone", "groups"]
+
+
+class MCPServerAudienceGroupPublic(BaseModel):
+    id: UUID
+    name: str
+
+
+# "api_key_header" sends the credential in an admin-chosen header
+# (e.g. X-Api-Key). Header name is validated server-side against HTTP token
+# syntax and a deny-list of transport-level headers.
+# "internal" marks a built-in provider: the endpoint is one of Eneo's own
+# loopback MCP servers, authenticated with a per-request scoped token, and
+# ``image_model_id`` names the catalog image model it calls.
+MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal"]
+
+
+class MCPServerBackingModelPublic(BaseModel):
+    """The catalog image model a built-in provider runs on (read-only)."""
+
+    id: UUID
+    name: str
+    nickname: str
+    provider_name: Optional[str] = None
+    is_enabled: bool
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -34,7 +62,19 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer"
+    http_auth_type: str  # "none", "bearer", "api_key_header", "internal"
+    purpose: MCPServerPurpose = "general"
+    # Built-in providers only: the image model the loopback tool calls.
+    image_model_id: Optional[UUID] = None
+    image_model: Optional[MCPServerBackingModelPublic] = None
+    is_enabled: bool = True
+    readiness_reason: str | None = None
+    # Capability providers: who this provider serves. "everyone" is the
+    # tenant default; "groups" serves the listed user groups (lowest
+    # audience_priority wins when a user matches several providers).
+    audience: MCPServerAudience = "everyone"
+    audience_priority: int = DEFAULT_AUDIENCE_PRIORITY
+    user_groups: list[MCPServerAudienceGroupPublic] = []
     has_credentials: bool
     credential_preview: Optional[str] = None  # masked token, e.g. "••••••••sk12"
     forward_identity: bool = False
@@ -44,6 +84,8 @@ class MCPServerPublic(BaseModel):
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
+    # Effective classification: the row's own, or for a built-in provider the
+    # one of its image model.
     security_classification: Optional[SecurityClassificationPublic] = None
 
 
@@ -52,13 +94,19 @@ class MCPServerList(BaseListModel[MCPServerPublic]):
 
 
 class MCPServerCreate(BaseModel):
+    activate: bool = False
     """DTO for creating an MCP server (admin only, uses Streamable HTTP transport)."""
 
     name: str
-    http_url: AnyHttpUrl
-    http_auth_type: Literal["none", "bearer"] = "none"
+    # Required unless http_auth_type is "internal": a built-in provider's URL
+    # is Eneo's own loopback endpoint and is set server-side.
+    http_url: Optional[AnyHttpUrl] = None
+    http_auth_type: MCPServerAuthType = "none"
+    purpose: MCPServerPurpose = "general"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    # Built-in providers only: the catalog image model to call.
+    image_model_id: Optional[UUID] = None
     forward_identity: bool = False
     tool_catalog_max_count: int = Field(
         default=MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
@@ -81,6 +129,17 @@ class MCPServerCreate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Optional[ModelId] = None
+    audience: MCPServerAudience = "everyone"
+    audience_priority: int = Field(default=DEFAULT_AUDIENCE_PRIORITY, ge=0)
+    user_group_ids: list[UUID] = []
+
+    @model_validator(mode="after")
+    def require_url_for_external_servers(self) -> "MCPServerCreate":
+        if self.http_auth_type != "internal" and self.http_url is None:
+            raise ValueError("http_url is required")
+        if self.http_auth_type == "internal" and self.image_model_id is None:
+            raise ValueError("image_model_id is required for a built-in provider")
+        return self
 
 
 class MCPServerUpdate(BaseModel):
@@ -88,9 +147,15 @@ class MCPServerUpdate(BaseModel):
 
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
-    http_auth_type: Optional[Literal["none", "bearer"]] = None
+    http_auth_type: Optional[MCPServerAuthType] = None
+    # Moving into a capability purpose saves the server as an inactive
+    # provider; moving back to general makes it an ordinary enabled server.
+    purpose: Optional[MCPServerPurpose] = None
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
+    # Absent keeps the current model, null clears it (only valid when
+    # leaving the internal auth type), a UUID re-points the provider.
+    image_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED
     forward_identity: Optional[bool] = None
     tool_catalog_max_count: Optional[int] = Field(
         default=None,
@@ -113,6 +178,9 @@ class MCPServerUpdate(BaseModel):
     icon_url: Optional[AnyHttpUrl] = None
     documentation_url: Optional[AnyHttpUrl] = None
     security_classification: Union[ModelId, None, NotProvided] = NOT_PROVIDED
+    audience: Optional[MCPServerAudience] = None
+    audience_priority: Optional[int] = Field(default=None, ge=0)
+    user_group_ids: Optional[list[UUID]] = None
 
 
 class MCPServerSettingsPublic(MCPServerPublic):
@@ -175,6 +243,7 @@ class MCPServerToolPublic(BaseModel):
     mcp_server_id: UUID
     name: str
     title: Optional[str] = None
+    display_name: Optional[str] = None
     description: Optional[str]
     input_schema: Optional[dict[str, Any]]
     is_enabled_by_default: bool
@@ -192,6 +261,15 @@ class MCPServerToolUpdate(BaseModel):
     """DTO for updating tenant-level tool settings."""
 
     is_enabled: bool
+
+
+class MCPServerToolRename(BaseModel):
+    """DTO for setting an admin display name on a tool.
+
+    None clears the override, falling back to the remote-synced title.
+    """
+
+    display_name: Optional[str] = None
 
 
 class MCPConnectionStatus(BaseModel):
@@ -246,3 +324,10 @@ class ToolReviewResponse(BaseModel):
     approved_tools: list[MCPServerToolPublic] = []
     rejected_tools: list[MCPServerToolPublic] = []
     deleted_count: int = 0
+
+
+class CapabilityActivationResponse(BaseModel):
+    """Response after activating a capability provider."""
+
+    server: MCPServerPublic
+    deactivated_server_ids: list[UUID] = []

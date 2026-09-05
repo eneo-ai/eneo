@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
+from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.icons_table import Icons
@@ -20,6 +21,9 @@ from eneo.database.tables.websites_table import Websites
 
 
 class Assistants(BasePublic):
+    capabilities: Mapped[list[AssistantCapabilities]] = relationship(
+        lazy="selectin", cascade="all, delete-orphan"
+    )
     name: Mapped[str] = mapped_column()
     completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     guardrail_active: Mapped[Optional[bool]] = mapped_column()

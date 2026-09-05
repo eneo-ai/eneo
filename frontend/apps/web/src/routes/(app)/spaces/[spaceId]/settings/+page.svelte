@@ -13,6 +13,8 @@
   import EditNameAndDescription from "./EditNameAndDescription.svelte";
   import SelectCompletionModels from "./SelectCompletionModels.svelte";
   import SelectMCPServers from "./SelectMCPServers.svelte";
+  import CapabilityRow from "./CapabilityRow.svelte";
+  import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { Page, Settings } from "$lib/components/layout";
   import SpaceStorageOverview from "./SpaceStorageOverview.svelte";
   import SelectTranscriptionModels from "./SelectTranscriptionModels.svelte";
@@ -238,6 +240,14 @@
         ></SelectTranscriptionModels>
 
         <SelectMCPServers selectableServers={data.mcpServers}></SelectMCPServers>
+
+        <Settings.Row title={m.capabilities()} description={m.capabilities_space_description()}>
+          <div class="border-default overflow-hidden rounded-xl border">
+            {#each CAPABILITIES as capability (capability.purpose)}
+              <CapabilityRow {capability} />
+            {/each}
+          </div>
+        </Settings.Row>
       </Settings.Group>
 
       {#if !isOrgSpace && $currentSpace.permissions?.includes("edit")}

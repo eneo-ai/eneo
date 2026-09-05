@@ -663,12 +663,21 @@ class MCPClient:
         """Build authentication headers for this connection."""
         headers: dict[str, str] = {}
 
-        token: Optional[str] = None
-        if self.mcp_server.http_auth_type == "bearer":
+        if self.mcp_server.http_auth_type in ("bearer", "internal"):
+            # "internal" is a built-in provider on Eneo's own loopback server:
+            # the token is a per-request scoped access token minted by the
+            # ask path, never a stored credential.
             token = self.auth_credentials.get("token")
-
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        elif self.mcp_server.http_auth_type == "api_key_header":
+            # Admin-chosen header (e.g. X-Api-Key). The name is validated at
+            # configuration time against HTTP token syntax and a deny-list of
+            # transport/session headers, so it can be emitted as-is here.
+            header_name = self.auth_credentials.get("header_name")
+            token = self.auth_credentials.get("token")
+            if header_name and token:
+                headers[header_name] = token
 
         # Forward acting user/tenant identity only when this server opted in.
         # Added after the bearer token; the builder never emits Authorization,
@@ -977,6 +986,14 @@ class MCPClient:
                 "content": content_list,
                 "is_error": bool(response.isError),
             }
+            # Result-level `_meta` (MCP spec "General fields"): servers attach
+            # metadata such as OpenTelemetry GenAI usage attributes here.
+            # Capped like resource meta; absent when the server sent none.
+            result_meta = _truncate_meta(
+                getattr(response, "meta", None) or {}, RESOURCE_META_MAX_BYTES
+            )
+            if result_meta:
+                result["meta"] = result_meta
 
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result

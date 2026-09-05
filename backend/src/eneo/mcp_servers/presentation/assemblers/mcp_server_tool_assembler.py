@@ -15,6 +15,8 @@ class MCPServerToolAssembler:
             id=tool.id,
             mcp_server_id=tool.mcp_server_id,
             name=tool.name,
+            title=tool.title,
+            display_name=tool.display_name,
             description=tool.description,
             input_schema=tool.input_schema,
             is_enabled_by_default=tool.is_enabled_by_default,

@@ -12,7 +12,6 @@ from pydantic import (
 )
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.web_search import WebSearchResult
 from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.logging.logging import (
@@ -49,12 +48,6 @@ class QuestionsFiles(BaseModel):
     file: FileMetadata
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class WebSearchResultPublic(BaseModel):
-    id: UUID
-    title: str
-    url: str
 
 
 class McpToolReferencePublic(InDB):
@@ -102,6 +95,11 @@ class ToolCallInfo(BaseModel):
     # currently-registered tools. `tool_name` above is the unprefixed/display
     # form used by the UI.
     mcp_tool_name: Optional[str] = None
+    # The tool result's MCP `_meta`, as sent by the server (size-capped by the
+    # client). Model-backed tools report their own usage here under the
+    # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,
+    # `gen_ai.usage.output_tokens`, `gen_ai.request.model`.
+    meta: Optional[dict[str, Any]] = None
 
 
 class QuestionAdd(QuestionBase):
@@ -143,7 +141,6 @@ class Question(QuestionAdd, InDB):
         validation_alias=AliasPath("assistant", "name"), default=None
     )
     questions_files: list[QuestionsFiles] = []
-    web_search_results: list[WebSearchResult] = []
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
 
@@ -168,7 +165,6 @@ class Message(QuestionBase, InDB):
     files: list[FilePublic]
     tools: UseTools
     generated_files: list[FilePublic]
-    web_search_references: list[WebSearchResultPublic]
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: list[ToolCallInfo] = []
     skill_provenance: Optional[list[SkillExecutionReference]] = None

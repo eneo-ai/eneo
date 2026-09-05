@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
+    FunctionDefinition,
     Message,
     MessageToolCall,
 )
@@ -586,7 +587,19 @@ def test_history_images_increase_token_count(context_builder: ContextBuilder):
 def test_tool_definitions_increase_token_count(context_builder: ContextBuilder):
     without_tools = context_builder.build_context(input_str=QUESTION, max_tokens=10000)
     with_function = context_builder.build_context(
-        input_str=QUESTION, max_tokens=10000, use_image_generation=True
+        input_str=QUESTION,
+        max_tokens=10000,
+        mcp_tools=[
+            FunctionDefinition(
+                name="lookup_record",
+                description="Look up a record in the registry by id.",
+                schema={
+                    "type": "object",
+                    "properties": {"record_id": {"type": "string"}},
+                    "required": ["record_id"],
+                },
+            )
+        ],
     )
     with_extra_dicts = context_builder.build_context(
         input_str=QUESTION,

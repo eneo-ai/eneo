@@ -27,7 +27,6 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.completion_models.domain.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.web_search import WebSearchResult
 from eneo.files.file_models import File, FilePublic, FileRestrictions
 from eneo.groups_legacy.api.group_models import GroupInDBBase
 from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
@@ -40,6 +39,10 @@ from eneo.main.models import (
     NotProvided,
     ResourcePermissionsMixin,
     partial_model,
+)
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
 from eneo.questions.question import UseTools
@@ -99,6 +102,7 @@ class MCPServerPublicDict(TypedDict):
     description: str | None
     http_url: str | None
     http_auth_type: str | None
+    purpose: str
     tags: list[str] | None
     icon_url: str | None
     security_classification: dict[str, object] | None
@@ -122,6 +126,15 @@ def _empty_mcp_tool_reference_list() -> list[McpToolReference]:
 
 
 class EffectiveConfigPublic(BaseModel):
+    available_capabilities: list[CapabilityAvailability] = Field(
+        default_factory=list[CapabilityAvailability]
+    )
+    enabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
+    default_disabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
     """Frontend hint surface for personal-assistant governance.
 
     Only meaningful on default assistants in personal spaces. `prompt_locked`
@@ -171,6 +184,7 @@ _DEPRECATED_JSON_SCHEMA: dict[str, JsonValue] = {"deprecated": True}
 # attached to a `Field()` on a Union (incl. Optional). Routing the flag through
 # `json_schema_extra` keeps the OpenAPI spec marking the field deprecated.
 class AssistantCreatePublic(AssistantBase):
+    enabled_capabilities: list[CapabilityPurpose] | None = None
     space_id: UUID
     prompt: Optional[PromptCreate] = Field(
         default=None,
@@ -221,6 +235,7 @@ class AssistantCreatePublic(AssistantBase):
 
 @partial_model
 class AssistantUpdatePublic(AssistantCreatePublic):
+    enabled_capabilities: list[CapabilityPurpose] | None = None
     prompt: Optional[PromptCreate] = None
     attachments: Optional[list[ModelId]] = None
     groups: Optional[list[ModelId]] = None  # type: ignore[assignment]
@@ -299,6 +314,10 @@ class AssistantPublicBase(InDB):
 
 
 class AskAssistant(BaseModel):
+    disabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
+    disabled_mcp_server_ids: list[UUID] = Field(default_factory=list[UUID])
     question: str
     session_id: Optional[UUID] = None  # Add optional session_id field
     files: list[UUID] = Field(default_factory=_empty_uuid_list)
@@ -317,7 +336,6 @@ class AssistantResponse(BaseModel):
     info_blobs: list[InfoBlobInDBWithScore]
     completion_model: CompletionModel | CompletionModelPublic
     tools: UseTools
-    web_search_results: list[WebSearchResult]
     mcp_tool_references: list[McpToolReference] = Field(
         default_factory=_empty_mcp_tool_reference_list
     )
@@ -346,6 +364,12 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
 
 
 class AssistantPublic(InDB, ResourcePermissionsMixin):
+    enabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )
+    available_capabilities: list[CapabilityAvailability] = Field(
+        default_factory=list[CapabilityAvailability]
+    )
     name: str
     prompt: Optional[PromptPublic] = None
     space_id: UUID

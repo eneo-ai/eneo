@@ -11,6 +11,7 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     Context,
+    GeneratedImage,
     ResponseType,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
@@ -165,3 +166,45 @@ async def test_non_streaming_uses_adapter_cumulative_input_estimate():
     )
 
     assert response.total_token_count == 321
+
+
+async def test_generated_image_chunks_pass_through_tool_call_handling():
+    """MCP image blocks reach the ask path as FILES chunks, in stream order."""
+    completion_model = _make_completion_model()
+    image = GeneratedImage(data=b"\x89PNG", mime_type="image/png")
+
+    class _ImageAdapter(_DummyAdapter):
+        async def iterate_stream(self, **kwargs):
+            yield Completion(response_type=ResponseType.FILES, image=image)
+            yield Completion(
+                response_type=ResponseType.TOOL_CALL, tool_calls_metadata=[]
+            )
+            yield Completion(response_type=ResponseType.TEXT, text="done")
+
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=_ImageAdapter(model=completion_model))
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="draw a cat",
+        session=SimpleNamespace(
+            id=uuid4(),
+            user_id=uuid4(),
+            assistant=SimpleNamespace(id=uuid4()),
+            questions=[],
+        ),
+        stream=True,
+    )
+    chunks = [chunk async for chunk in response.completion]
+
+    assert [chunk.response_type for chunk in chunks] == [
+        ResponseType.FILES,
+        ResponseType.TOOL_CALL,
+        ResponseType.TEXT,
+    ]
+    assert chunks[0].image is image
