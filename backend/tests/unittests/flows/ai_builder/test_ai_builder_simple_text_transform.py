@@ -46,6 +46,11 @@ def test_flags_direct_text_transform(text: str) -> None:
         "Lägg till ett avslutande steg som översätter intranätsnyheten till engelska.",
         "Översätt texten och lägg till ett steg som kontrollerar tonen.",
         "Translate the text and add a final step that shortens it.",
+        (
+            "Lägg till ett avslutande steg som översätter intranätsnyheten till "
+            "engelska. Lägg inte till nya uppgifter."
+        ),
+        "Add a final step to translate the news item into English. Do not add new facts.",
         "",
     ],
 )

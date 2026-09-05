@@ -1416,7 +1416,25 @@ def test_direct_text_transform_rule_does_not_judge_an_edit_request() -> None:
     )
 
 
-def test_requested_extra_step_on_one_step_text_flow_passes_final_quality() -> None:
+@pytest.mark.parametrize(
+    "content",
+    [
+        (
+            "Lägg till ett avslutande steg som översätter intranätsnyheten "
+            "till engelska och levererar båda språken som text."
+        ),
+        # A prohibition on something other than steps must not cancel the
+        # requested step (gate 2026-09-05).
+        (
+            "Lägg till ett avslutande steg som översätter intranätsnyheten till "
+            "engelska. Lägg inte till nya uppgifter."
+        ),
+        "Add a final step to translate the news item into English. Do not add new facts.",
+    ],
+)
+def test_requested_extra_step_on_one_step_text_flow_passes_final_quality(
+    content: str,
+) -> None:
     # Gate 2026-09-05: the flow being edited is one text step, and the user
     # explicitly asks for another step. The restraint's own wording exempts
     # a requested step, so the final contextual quality check must not send
@@ -1442,15 +1460,7 @@ def test_requested_extra_step_on_one_step_text_flow_passes_final_quality() -> No
             )
         ],
     )
-    conversation = [
-        {
-            "role": "user",
-            "content": (
-                "Lägg till ett avslutande steg som översätter intranätsnyheten "
-                "till engelska och levererar båda språken som text."
-            ),
-        }
-    ]
+    conversation = [{"role": "user", "content": content}]
     spec = FlowDraftSpecCore(
         flow_name="Skriv intranätsnyhet",
         steps=[
