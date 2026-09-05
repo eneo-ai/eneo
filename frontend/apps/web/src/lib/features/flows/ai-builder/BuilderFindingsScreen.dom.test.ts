@@ -69,7 +69,7 @@ describe("BuilderFindingsScreen", () => {
       onretry: vi.fn()
     });
     expect(
-      screen.getByText(m.ai_builder_review_lead({ version: "4", completed: "3", failed: "1" }))
+      screen.getByText(m.ai_builder_review_lead({ version: "4", total: "4", failed: "1" }))
     ).toBeTruthy();
     const cards = screen.getAllByRole("listitem");
     expect(cards).toHaveLength(2);
@@ -272,10 +272,12 @@ describe("BuilderFindingsScreen suggestions", () => {
       })
     );
     expect(section.textContent).toContain(
-      m.ai_builder_review_suggestions_lead({
-        model: "GPT-test",
-        runs: "2",
-        included: "5",
+      m.ai_builder_review_suggestions_lead({ model: "GPT-test", runs: "2" })
+    );
+    // Coverage is stated as a consequence, in plain words, with the whole.
+    expect(section.textContent).toContain(
+      m.ai_builder_review_suggestions_coverage_truncated_unread({
+        total: "9",
         truncated: "1",
         unread: "3"
       })
@@ -319,12 +321,7 @@ describe("BuilderFindingsScreen suggestions", () => {
     expect(screen.getByTestId("suggestions-none")).toBeTruthy();
     // One sampled run reads as one run, not "1 runs".
     expect(screen.getByTestId("review-suggestions").textContent).toContain(
-      m.ai_builder_review_suggestions_lead_one({
-        model: "GPT-test",
-        included: "5",
-        truncated: "1",
-        unread: "3"
-      })
+      m.ai_builder_review_suggestions_lead_one({ model: "GPT-test" })
     );
     unmount();
 

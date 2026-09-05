@@ -141,10 +141,16 @@
           </h2>
           {#if packet || review.status === "loading"}
             <p class="text-accent-stronger mt-1 text-[0.8125rem] text-pretty">
-              {#if packet}
+              {#if packet && runCount === 1}
+                {packet.cohort.failed_run_ids.length === 1
+                  ? m.ai_builder_review_lead_one_failed({ version: String(packet.flow_version) })
+                  : m.ai_builder_review_lead_one_completed({
+                      version: String(packet.flow_version)
+                    })}
+              {:else if packet}
                 {m.ai_builder_review_lead({
                   version: String(packet.flow_version),
-                  completed: String(packet.cohort.completed_run_ids.length),
+                  total: String(runCount),
                   failed: String(packet.cohort.failed_run_ids.length)
                 })}
               {:else}
@@ -205,6 +211,12 @@
             </p>
           {/if}
         {:else if packet}
+          <h3 class="text-primary text-[0.9375rem] font-bold">
+            {m.ai_builder_review_facts_title()}
+          </h3>
+          <p class="text-secondary mt-0.5 mb-3 text-xs text-pretty">
+            {m.ai_builder_review_facts_hint()}
+          </p>
           {#if findings.length === 0}
             <p class="text-secondary text-[0.875rem] text-pretty" data-testid="findings-none">
               {hiddenCount > 0
@@ -252,8 +264,14 @@
             aria-label={m.ai_builder_review_suggestions_title()}
             data-testid="review-suggestions"
           >
+            <h3 class="text-primary text-[0.9375rem] font-bold">
+              {m.ai_builder_review_suggestions_title()}
+            </h3>
             {#if suggestions.status === "closed"}
-              <div class="flex flex-col gap-2">
+              <div class="mt-2 flex flex-col gap-2">
+                <p class="text-secondary text-xs text-pretty">
+                  {m.ai_builder_review_suggestions_hint()}
+                </p>
                 <Button
                   variant="outline"
                   size="sm"
@@ -294,25 +312,32 @@
               </div>
             {:else}
               {@const judged = suggestions.suggestions}
-              <h3 class="text-primary text-[0.9375rem] font-bold">
-                {m.ai_builder_review_suggestions_title()}
-              </h3>
-              {@const sampleCounts = {
-                model: judged.model_name,
-                runs: String(judged.sample.run_ids.length),
-                included: String(judged.sample.excerpts_included),
+              {@const unread =
+                judged.sample.excerpts_omitted_by_budget +
+                judged.sample.excerpts_omitted_by_reader +
+                judged.sample.excerpts_not_recorded +
+                judged.sample.excerpts_unavailable}
+              {@const coverage = {
+                total: String(
+                  judged.sample.excerpts_included + judged.sample.excerpts_truncated + unread
+                ),
                 truncated: String(judged.sample.excerpts_truncated),
-                unread: String(
-                  judged.sample.excerpts_omitted_by_budget +
-                    judged.sample.excerpts_omitted_by_reader +
-                    judged.sample.excerpts_not_recorded +
-                    judged.sample.excerpts_unavailable
-                )
+                unread: String(unread)
               }}
-              <p class="text-secondary mt-0.5 text-xs text-pretty">
+              <p class="text-secondary mt-0.5 text-xs text-pretty" data-testid="suggestions-lead">
                 {judged.sample.run_ids.length === 1
-                  ? m.ai_builder_review_suggestions_lead_one(sampleCounts)
-                  : m.ai_builder_review_suggestions_lead(sampleCounts)}
+                  ? m.ai_builder_review_suggestions_lead_one({ model: judged.model_name })
+                  : m.ai_builder_review_suggestions_lead({
+                      model: judged.model_name,
+                      runs: String(judged.sample.run_ids.length)
+                    })}
+                {#if judged.sample.excerpts_truncated > 0 && unread > 0}
+                  {m.ai_builder_review_suggestions_coverage_truncated_unread(coverage)}
+                {:else if judged.sample.excerpts_truncated > 0}
+                  {m.ai_builder_review_suggestions_coverage_truncated(coverage)}
+                {:else if unread > 0}
+                  {m.ai_builder_review_suggestions_coverage_unread(coverage)}
+                {/if}
               </p>
               {#if judged.suggestions.length === 0 && judged.unverified_count > 0}
                 <div
