@@ -36,7 +36,8 @@ import type {
   SessionStatus,
   TargetKind,
   AIBuilderFlowReviewState,
-  AIBuilderReviewContext
+  AIBuilderReviewReference,
+  AIBuilderFlowReviewSuggestionsState
 } from "./protocol";
 
 export class FlowAIBuilderService {
@@ -388,6 +389,7 @@ export class FlowAIBuilderService {
 
   async openReview(): Promise<void> {
     this.review = { status: "loading" };
+    this.suggestions = { status: "closed" };
     try {
       const packet = await this.#driver.fetchFlowReviewPacket();
       this.review = { status: "ready", packet };
@@ -405,6 +407,28 @@ export class FlowAIBuilderService {
 
   closeReview(): void {
     this.review = { status: "closed" };
+    this.suggestions = { status: "closed" };
+  }
+
+  /** The model's judgement over the same runs, asked for on demand from the
+   *  review screen; closed with it, never persisted. */
+  suggestions: AIBuilderFlowReviewSuggestionsState = $state({ status: "closed" });
+
+  async requestSuggestions(): Promise<void> {
+    this.suggestions = { status: "loading" };
+    try {
+      const suggestions = await this.#driver.fetchFlowReviewSuggestions();
+      this.suggestions = { status: "ready", suggestions };
+    } catch (error) {
+      this.suggestions = {
+        status: "failed",
+        error: parseAIBuilderError({
+          transport: "apply",
+          payload: error,
+          fallbackMessage: m.ai_builder_review_suggestions_failed()
+        })
+      };
+    }
   }
 
   async sendMessage(
@@ -412,7 +436,7 @@ export class FlowAIBuilderService {
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
     editContext?: AIBuilderEditContext | null,
-    reviewContext?: AIBuilderReviewContext | null
+    reviewContext?: AIBuilderReviewReference | null
   ): Promise<AIBuilderSendOutcome> {
     const outcome = await this.#driver.sendMessage(
       message,

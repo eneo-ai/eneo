@@ -4,26 +4,46 @@
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import IconX from "@lucide/svelte/icons/x";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import IconSparkles from "@lucide/svelte/icons/sparkles";
   import type {
     AIBuilderFlowReviewFact,
     AIBuilderFlowReviewState,
-    AIBuilderReviewContext
+    AIBuilderFlowReviewSuggestion,
+    AIBuilderFlowReviewSuggestionsState,
+    AIBuilderReviewReference
   } from "./protocol";
   import {
     describeReviewFact,
     dismissedFindingIds,
     rememberDismissedFinding
   } from "./flowReviewFindings";
+  import {
+    investigationMessage,
+    suggestionKindLabel,
+    suggestionSourceLabel,
+    suggestionStepsLabel,
+    suggestionsFailureCopy
+  } from "./flowReviewSuggestions";
 
   interface Props {
     review: AIBuilderFlowReviewState;
+    suggestions?: AIBuilderFlowReviewSuggestionsState;
     disabled?: boolean;
-    onprepare: (detail: { message: string; reviewContext: AIBuilderReviewContext }) => void;
+    onprepare: (detail: { message: string; reviewContext: AIBuilderReviewReference }) => void;
+    onsuggest?: () => void;
     onclose: () => void;
     onretry: () => void;
   }
 
-  let { review, disabled = false, onprepare, onclose, onretry }: Props = $props();
+  let {
+    review,
+    suggestions = { status: "closed" },
+    disabled = false,
+    onprepare,
+    onsuggest,
+    onclose,
+    onretry
+  }: Props = $props();
 
   let dismissed = $state<Set<string>>(new Set());
   $effect(() => {
@@ -67,6 +87,23 @@
         flow_version: packet.flow_version,
         definition_checksum: packet.definition_checksum,
         finding_ids: [fact.finding_id]
+      }
+    });
+  }
+
+  function investigate(suggestion: AIBuilderFlowReviewSuggestion) {
+    if (!packet || suggestions.status !== "ready") return;
+    // Fixed text from kind and steps; the server writes the same text itself
+    // and never sees the rationale or the quotes.
+    onprepare({
+      message: investigationMessage(suggestion),
+      reviewContext: {
+        kind: "flow_review_suggestion",
+        flow_version: suggestions.suggestions.flow_version,
+        definition_checksum: suggestions.suggestions.definition_checksum,
+        sample_run_ids: suggestions.suggestions.sample.run_ids,
+        suggestion_kind: suggestion.kind,
+        step_orders: suggestion.step_orders
       }
     });
   }
@@ -209,6 +246,122 @@
               {/each}
             </ul>
           {/if}
+
+          <section
+            class="border-default mt-5 border-t pt-4"
+            aria-label={m.ai_builder_review_suggestions_title()}
+            data-testid="review-suggestions"
+          >
+            {#if suggestions.status === "closed"}
+              <div class="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-8 w-fit gap-1.5"
+                  disabled={disabled || runCount === 0}
+                  onclick={() => onsuggest?.()}
+                >
+                  <IconSparkles class="size-3.5" aria-hidden="true" />
+                  {m.ai_builder_review_suggest()}
+                </Button>
+                <p class="text-secondary text-xs text-pretty">
+                  {m.ai_builder_review_suggest_hint()}
+                </p>
+              </div>
+            {:else if suggestions.status === "loading"}
+              <p class="text-secondary text-[0.8125rem]" aria-busy="true" role="status">
+                {m.ai_builder_review_suggestions_loading()}
+              </p>
+              <div class="mt-2.5 flex flex-col gap-2.5">
+                <Skeleton class="h-[5rem] w-full rounded-lg" />
+                <Skeleton class="h-[5rem] w-full rounded-lg" />
+              </div>
+            {:else if suggestions.status === "failed"}
+              {@const failure = suggestionsFailureCopy(suggestions.error)}
+              <div
+                class="bg-warning-dimmer border-warning-default/45 text-warning-stronger rounded-[9px] border px-3 py-2.5 text-[0.8125rem]"
+                role="status"
+              >
+                <p class="font-semibold">{failure.title}</p>
+                {#if failure.body}
+                  <p class="mt-0.5">{failure.body}</p>
+                {/if}
+                {#if failure.retry}
+                  <Button variant="outline" size="sm" class="mt-2.5" onclick={() => onsuggest?.()}>
+                    {m.ai_builder_review_retry()}
+                  </Button>
+                {/if}
+              </div>
+            {:else}
+              {@const judged = suggestions.suggestions}
+              <h3 class="text-primary text-[0.9375rem] font-bold">
+                {m.ai_builder_review_suggestions_title()}
+              </h3>
+              <p class="text-secondary mt-0.5 text-xs text-pretty">
+                {m.ai_builder_review_suggestions_lead({
+                  model: judged.model_id,
+                  runs: String(judged.sample.run_ids.length),
+                  included: String(judged.sample.excerpts_included),
+                  truncated: String(judged.sample.excerpts_truncated),
+                  unread: String(
+                    judged.sample.excerpts_omitted_by_budget +
+                      judged.sample.excerpts_omitted_by_reader +
+                      judged.sample.excerpts_not_recorded +
+                      judged.sample.excerpts_unavailable
+                  )
+                })}
+              </p>
+              {#if judged.suggestions.length === 0}
+                <p
+                  class="text-secondary mt-3 text-[0.875rem] text-pretty"
+                  data-testid="suggestions-none"
+                >
+                  {m.ai_builder_review_suggestions_none()}
+                </p>
+              {:else}
+                <ul class="mt-3 flex flex-col gap-2.5" data-testid="suggestions-list">
+                  {#each judged.suggestions as suggestion, index (index)}
+                    <li class="border-default bg-secondary rounded-lg border px-3.5 py-3">
+                      <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <p class="text-primary text-[0.9rem] font-semibold">
+                          {suggestionKindLabel(suggestion.kind)}
+                        </p>
+                        <span class="text-secondary text-xs">
+                          {suggestionStepsLabel(suggestion.step_orders)}
+                        </span>
+                      </div>
+                      <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
+                        {suggestion.rationale}
+                      </p>
+                      <ul class="mt-2 flex flex-col gap-1.5">
+                        {#each suggestion.sources as source, sourceIndex (sourceIndex)}
+                          <li class="text-xs">
+                            <span class="text-secondary">
+                              {suggestionSourceLabel(source, judged.sample.run_ids)}:
+                            </span>
+                            <q class="text-primary">{source.quote}</q>
+                          </li>
+                        {/each}
+                      </ul>
+                      <div class="mt-2.5">
+                        <Button
+                          size="sm"
+                          class="h-8"
+                          {disabled}
+                          onclick={() => investigate(suggestion)}
+                        >
+                          {m.ai_builder_review_suggestion_investigate()}
+                        </Button>
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              <p class="text-secondary mt-3 text-xs text-pretty">
+                {m.ai_builder_review_suggestion_disclaimer()}
+              </p>
+            {/if}
+          </section>
 
           <footer class="border-default mt-4 border-t pt-3 text-xs">
             <p class="text-secondary text-pretty">

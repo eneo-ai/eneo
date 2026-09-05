@@ -41,7 +41,8 @@ import type {
   RecoverableAIBuilderDraftSession,
   TargetKind,
   AIBuilderFlowReviewPacket,
-  AIBuilderReviewContext
+  AIBuilderReviewReference,
+  AIBuilderFlowReviewSuggestions
 } from "./protocol";
 
 export interface AIBuilderClientTransport {
@@ -63,6 +64,7 @@ const FLOW_AI_BUILDER_ROUTES = {
   planRevise: "/api/v1/flows/ai-builder/plans/{plan_id}/revise",
   clientErrors: "/api/v1/flows/ai-builder/client-errors",
   flowReviewPacket: "/api/v1/flows/ai-builder/flows/{flow_id}/review-packet",
+  flowReviewSuggestions: "/api/v1/flows/ai-builder/flows/{flow_id}/review-suggestions",
   flowUnpublish: "/api/v1/flows/{id}/unpublish/"
 } as const;
 
@@ -638,12 +640,27 @@ export class FlowAIBuilderDriver {
     })) as AIBuilderFlowReviewPacket;
   }
 
+  /** One bounded model judgement over the flow's recent runs. Nothing is
+   *  stored server-side; the screen holds the answer for the session. */
+  async fetchFlowReviewSuggestions(): Promise<AIBuilderFlowReviewSuggestions> {
+    if (!this.#flowId) {
+      throw new Error("A flow review needs an edit session's flow.");
+    }
+    return (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowReviewSuggestions, {
+      method: "post",
+      params: {
+        path: { flow_id: this.#flowId },
+        query: { space_id: this.#spaceId, ui_language: getLocale() }
+      }
+    })) as AIBuilderFlowReviewSuggestions;
+  }
+
   async sendMessage(
     message: string,
     questionAnswer?: StructuredQuestionAnswerMetadata,
     fileIds?: string[],
     editContext?: AIBuilderEditContext | null,
-    reviewContext?: AIBuilderReviewContext | null
+    reviewContext?: AIBuilderReviewReference | null
   ): Promise<AIBuilderSendOutcome> {
     if (
       !this.#state.session ||

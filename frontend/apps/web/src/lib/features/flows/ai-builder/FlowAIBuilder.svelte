@@ -28,7 +28,7 @@
     AIBuilderSavedFlowStepScope,
     ChatMessage,
     RequirementsSummary,
-    AIBuilderReviewContext
+    AIBuilderReviewReference
   } from "./protocol";
   import { isDiscoveryStatus } from "./protocol";
   import {
@@ -593,7 +593,7 @@
 
   function prepareChangeFromFinding(detail: {
     message: string;
-    reviewContext: AIBuilderReviewContext;
+    reviewContext: AIBuilderReviewReference;
   }) {
     // A finding is the whole change request; a lingering saved-step scope
     // would otherwise re-attach itself to the next message.
@@ -746,8 +746,10 @@
       {:else if screen === "findings"}
         <BuilderFindingsScreen
           review={service.review}
+          suggestions={service.suggestions}
           disabled={!service.canSendMessage}
           onprepare={prepareChangeFromFinding}
+          onsuggest={() => void service.requestSuggestions()}
           onclose={() => service.closeReview()}
           onretry={() => void service.openReview()}
         />

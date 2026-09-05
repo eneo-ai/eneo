@@ -195,3 +195,142 @@ describe("BuilderFindingsScreen", () => {
     expect(screen.getByTestId("findings-no-runs")).toBeTruthy();
   });
 });
+
+describe("BuilderFindingsScreen suggestions", () => {
+  const RUN_1 = "r1";
+  const RUN_2 = "r4";
+
+  function makeSuggestions() {
+    return {
+      model_id: "model-1",
+      generated_at: "2026-09-05T12:00:00Z",
+      flow_version: 4,
+      definition_checksum: "sum-4",
+      evidence_classification_level: 2,
+      sample: {
+        run_ids: [RUN_1, RUN_2],
+        excerpts_included: 5,
+        excerpts_truncated: 1,
+        excerpts_omitted_by_budget: 0,
+        excerpts_omitted_by_reader: 1,
+        excerpts_not_recorded: 2,
+        excerpts_unavailable: 0
+      },
+      suggestions: [
+        {
+          kind: "duplicated_work" as const,
+          step_orders: [2, 1],
+          rationale: "Steg 2 sammanfattar det steg 1 redan sammanfattade.",
+          sources: [
+            { run_id: RUN_1, step_order: 1, field: "output" as const, quote: "tre punkter" },
+            { run_id: RUN_2, step_order: 2, field: "prompt" as const, quote: "Sammanfatta ärendet" }
+          ],
+          fact_ids: []
+        }
+      ]
+    };
+  }
+
+  it("offers the model judgement behind one button that names what it reads", async () => {
+    const onsuggest = vi.fn();
+    render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: { status: "closed" },
+      onprepare: vi.fn(),
+      onsuggest,
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    expect(screen.getByText(m.ai_builder_review_suggest_hint())).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_review_suggest() }));
+    expect(onsuggest).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows suggestions with their sources and sends only kind and steps onward", async () => {
+    const onprepare = vi.fn();
+    render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: { status: "ready", suggestions: makeSuggestions() },
+      onprepare,
+      onsuggest: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    const section = screen.getByTestId("review-suggestions");
+    expect(section.textContent).toContain(m.ai_builder_review_suggestion_kind_duplicated_work());
+    expect(section.textContent).toContain(
+      m.ai_builder_review_suggestion_steps({ steps: "1 och 2" })
+    );
+    expect(section.textContent).toContain("tre punkter");
+    expect(section.textContent).toContain(
+      m.ai_builder_review_suggestion_source({
+        run: "2",
+        step: "2",
+        field: m.ai_builder_review_suggestion_field_prompt()
+      })
+    );
+    expect(section.textContent).toContain(
+      m.ai_builder_review_suggestions_lead({
+        model: "model-1",
+        runs: "2",
+        included: "5",
+        truncated: "1",
+        unread: "3"
+      })
+    );
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_review_suggestion_investigate() })
+    );
+    expect(onprepare).toHaveBeenCalledTimes(1);
+    const detail = onprepare.mock.calls[0][0];
+    expect(detail.reviewContext).toEqual({
+      kind: "flow_review_suggestion",
+      flow_version: 4,
+      definition_checksum: "sum-4",
+      sample_run_ids: [RUN_1, RUN_2],
+      suggestion_kind: "duplicated_work",
+      step_orders: [2, 1]
+    });
+    // The handoff never carries the rationale or a quote.
+    expect(detail.message).not.toContain("tre punkter");
+    expect(detail.message).not.toContain("sammanfattar");
+    expect(detail.message).toContain("1 och 2");
+  });
+
+  it("distinguishes an empty judgement from a failed one", () => {
+    const { unmount } = render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: { status: "ready", suggestions: { ...makeSuggestions(), suggestions: [] } },
+      onprepare: vi.fn(),
+      onsuggest: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    expect(screen.getByTestId("suggestions-none")).toBeTruthy();
+    unmount();
+
+    render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: {
+        status: "failed",
+        error: {
+          schema_version: 2,
+          code: "review_suggestions_invalid_output",
+          category: "bad_request",
+          message: "The review model's answer did not resolve in the sampled evidence.",
+          phase: "router",
+          request_id: null,
+          diagnostic_context: null,
+          details: {}
+        }
+      },
+      onprepare: vi.fn(),
+      onsuggest: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    expect(screen.getByText(m.ai_builder_review_suggestions_invalid_output())).toBeTruthy();
+    expect(screen.getByRole("button", { name: m.ai_builder_review_retry() })).toBeTruthy();
+  });
+});

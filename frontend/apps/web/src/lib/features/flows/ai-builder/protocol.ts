@@ -51,7 +51,19 @@ export type AIBuilderTurnRecoveryState = Extract<
 >;
 
 export type AIBuilderEditContext = NonNullable<AIBuilderSendMessageRequest["edit_context"]>;
-export type AIBuilderReviewContext = NonNullable<AIBuilderSendMessageRequest["review_context"]>;
+export type AIBuilderReviewReference = NonNullable<AIBuilderSendMessageRequest["review_context"]>;
+export type AIBuilderReviewContext = Extract<AIBuilderReviewReference, { kind: "flow_review" }>;
+export type AIBuilderSuggestionContext = Extract<
+  AIBuilderReviewReference,
+  { kind: "flow_review_suggestion" }
+>;
+export type AIBuilderFlowReviewSuggestions = components["schemas"]["FlowReviewSuggestions"];
+export type AIBuilderFlowReviewSuggestion = AIBuilderFlowReviewSuggestions["suggestions"][number];
+export type AIBuilderFlowReviewSuggestionsState =
+  | { status: "closed" }
+  | { status: "loading" }
+  | { status: "ready"; suggestions: AIBuilderFlowReviewSuggestions }
+  | { status: "failed"; error: AIBuilderError };
 export type AIBuilderFlowReviewPacket = components["schemas"]["FlowReviewPacket"];
 export type AIBuilderFlowReviewStep = AIBuilderFlowReviewPacket["steps"][number];
 export type AIBuilderFlowReviewFact = AIBuilderFlowReviewPacket["facts"][number];
