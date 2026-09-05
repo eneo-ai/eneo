@@ -5,9 +5,10 @@ module owns the closed set of judgements it may return, the prompt that asks
 for them, and the parser that admits an answer only when every claim points
 at something the sample actually contains: a step of the reviewed definition,
 an excerpt whose text holds the quoted words, a fact id from the packet.
-Invalid output is a distinct outcome from a valid empty list; a suggestion
-with an unknown kind or an unverifiable source makes the whole answer
-invalid rather than being dropped in silence.
+A malformed envelope is a distinct outcome from a valid empty list. Inside
+a valid envelope each suggestion is admitted or refused on its own evidence:
+a refused one leaves a reason code behind and is counted, never dropped in
+silence, while the verified ones beside it stand.
 """
 
 from __future__ import annotations
@@ -240,7 +241,7 @@ Svara med JSON enligt schemat. Föreslå bara det som utdragen faktiskt visar:
 Regler:
 - Varje förslag ska ha 1–{MAX_SOURCES_PER_SUGGESTION} källor: käll-id exakt som i underlaget och ett ordagrant citat (högst {MAX_QUOTE_CHARS} tecken) ur den källan.
 - Källor som är avklippta, utelämnade eller inte inspelade kan inte styrka att något saknas; missing_check och step_not_useful kräver att alla citerade källor ingår i sin helhet.
-- instruction_outcome_drift kräver minst en citerad utdata som ingår i sin helhet; ett avklippt utdrag säger inget om hur utdata slutade.
+- instruction_outcome_drift kräver, för varje angivet steg, ett citat ur stegets instruktion och ett ur stegets utdata från samma körning, och utdatan måste ingå i sin helhet; ett avklippt utdrag säger inget om hur utdata slutade.
 - "Avklippt" betyder att läsaren kortade utdraget, inte att flödet gjorde det: att en text slutar tvärt är aldrig ett bevis, och ett stegs utdata får inte bedömas som ofullständig av det skälet.
 - Citatet ska vara en exakt teckensträng ur utdraget som det visas här: fyll aldrig i ett avklippt ord och skriv inte om något.
 - Använd fact-id i fact_ids bara när faktumet stödjer förslaget.
@@ -456,19 +457,25 @@ def _parse_suggestion(
         ):
             return "absence_claim_without_complete_step_output"
     if kind == "instruction_outcome_drift":
-        # Whether an output follows its instruction can only be judged on
-        # the whole output: a cut excerpt shows neither what came after the
-        # cut nor whether the step finished. The claim must cite at least
-        # one output, and every cited output must be complete.
-        cited_outputs = [
-            availability
+        # Instruction versus outcome is judged per step and per run: for every
+        # named step the claim must cite that step's instruction and that
+        # step's complete output from the same run. A cut excerpt shows
+        # neither what came after the cut nor whether the step finished, and
+        # another step's output says nothing about this one.
+        cited = {
+            (source.run_id, source.step_order, source.field): availability
             for source, availability in zip(sources, availabilities)
-            if source.field == "output"
-        ]
-        if not cited_outputs:
-            return "drift_claim_without_output_source"
-        if any(availability != "included" for availability in cited_outputs):
-            return "drift_claim_cites_incomplete_output"
+        }
+        cited_runs = {source.run_id for source in sources}
+        for step in steps:
+            for run_id in cited_runs:
+                if (run_id, step, "prompt") not in cited:
+                    return "drift_claim_without_instruction_source"
+                output = cited.get((run_id, step, "output"))
+                if output is None:
+                    return "drift_claim_without_output_source"
+                if output != "included":
+                    return "drift_claim_cites_incomplete_output"
     return FlowReviewSuggestion(
         kind=cast(FlowReviewSuggestionKind, kind),
         step_orders=sorted(set(steps)),

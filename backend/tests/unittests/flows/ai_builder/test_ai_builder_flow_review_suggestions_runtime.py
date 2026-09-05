@@ -128,7 +128,7 @@ async def test_a_sourced_answer_becomes_suggestions_with_the_sample_floor():
             {
                 "suggestions": [
                     {
-                        "kind": "instruction_outcome_drift",
+                        "kind": "duplicated_work",
                         "step_orders": [1],
                         "rationale": "Utdata upprepar källan i stället för att sammanfatta.",
                         "sources": [
@@ -146,7 +146,7 @@ async def test_a_sourced_answer_becomes_suggestions_with_the_sample_floor():
     assert result.evidence_classification_level == 1
     assert result.flow_version == 2
     assert result.model_name == "gpt-test"
-    assert [item.kind for item in result.suggestions] == ["instruction_outcome_drift"]
+    assert [item.kind for item in result.suggestions] == ["duplicated_work"]
     assert result.sample.excerpts_included == 1
     (call,) = client.calls
     assert call["stream"] is False and call["max_tokens"] > 0

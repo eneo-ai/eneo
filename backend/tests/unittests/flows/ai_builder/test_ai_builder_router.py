@@ -2442,6 +2442,70 @@ class TestSendMessageEndpoint:
         service.send_message.assert_called_once()
 
     @pytest.mark.anyio
+    async def test_a_review_that_lands_between_the_first_read_and_preflight_is_still_gated(
+        self,
+    ):
+        """The first session read is unlocked; preflight reads again under lock.
+        A review turn committed in between must be caught on the preflight
+        snapshot, before any evidence is prepared."""
+        from eneo.flows.ai_builder.ai_builder_flow_review import PersistedReviewContext
+
+        container = _make_container()
+        container.user.return_value.permissions = [Permission.FLOWS]
+        first_read = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = first_read
+
+        locked_read = _make_session_domain(
+            session_id=first_read.id,
+            space_id=first_read.space_id,
+            flow_id=first_read.flow_id,
+            actor_user_id=first_read.actor_user_id,
+        )
+        locked_read.conversation = [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="Åtgärda",
+                metadata={
+                    "review_context": PersistedReviewContext(
+                        flow_version=1,
+                        definition_checksum="sum",
+                        finding_ids=["f1f1f1f1f1f1f1f1"],
+                    ).to_metadata()
+                },
+            )
+        ]
+
+        async def locked_preflight(**_: object) -> SessionTurnPreflight:
+            return SessionTurnPreflight(
+                session=locked_read,
+                baseline=SessionTurnPreparationBaseline(
+                    session_status=locked_read.status,
+                    latest_plan_id=None,
+                    planning_state_version=locked_read.planning_state_version,
+                    latest_turn_id=None,
+                    latest_turn_state=None,
+                    attachment_file_ids=(),
+                ),
+            )
+
+        service.preflight_message_turn.side_effect = locked_preflight
+
+        with pytest.raises(UnauthorizedException) as denied:
+            await send_message(
+                request=MagicMock(),
+                session_id=first_read.id,
+                body=SendMessageRequest(client_turn_id=uuid4(), message="Och steg 3?"),
+                container=container,
+            )
+        assert denied.value.code == "insufficient_tenant_permission"
+        service.prepare_message_context.assert_not_called()
+
+    @pytest.mark.anyio
     async def test_a_suggestion_turn_retains_only_the_investigation_text(self):
         """The client's text never reaches the conversation, the retry snapshot
         or the fingerprint: the route canonicalises the request first."""

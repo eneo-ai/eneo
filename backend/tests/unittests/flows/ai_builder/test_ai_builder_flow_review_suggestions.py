@@ -170,7 +170,7 @@ def test_empty_answer_is_valid_and_distinct_from_invalid_output():
     assert parse_review_suggestions("[]", sample=sample).outcome == "invalid"
 
 
-def test_unknown_kind_unverifiable_source_or_foreign_fact_invalidates_the_answer():
+def test_unknown_kind_unverifiable_source_or_foreign_fact_refuses_that_suggestion():
     sample = _sample()
     base = {
         "step_orders": [1],
@@ -244,43 +244,85 @@ def test_a_quote_across_line_breaks_still_resolves_in_the_excerpt():
     ]
 
 
-def test_a_drift_claim_needs_a_complete_cited_output():
-    """Instruction-versus-outcome can only be judged on the whole output: a
-    claim with no cited output, or with a cut one, is refused by code."""
+def test_a_drift_claim_needs_the_instruction_and_the_complete_output_of_each_named_step():
+    """Instruction-versus-outcome is judged per step and run: the claim must
+    cite the named step's instruction and its complete output from the same
+    run. An output of another step, an instruction alone, an output alone,
+    or a cut output is refused by code."""
     base = _sample()
-    drift = {
-        "kind": "instruction_outcome_drift",
-        "step_orders": [1],
-        "rationale": "x",
-    }
-    only_instruction = {
+    # Give step 2 a complete output and step 1 a prompt so a well-formed claim exists.
+    sample = base.model_copy(
+        update={
+            "excerpts": [
+                *base.excerpts[:2],
+                base.excerpts[2].model_copy(
+                    update={
+                        "availability": "included",
+                        "text": "Tre punkter om ärendet.",
+                        "recorded_chars": 23,
+                    }
+                ),
+                base.excerpts[3],
+                base.excerpts[1].model_copy(
+                    update={"step_order": 1, "text": "Skriv en sammanfattning."}
+                ),
+            ]
+        }
+    )
+    drift = {"kind": "instruction_outcome_drift", "rationale": "x"}
+
+    def problems(claim):
+        return list(parse_review_suggestions(_answer(claim), sample=sample).problems)
+
+    well_formed = {
         **drift,
         "step_orders": [2],
-        "sources": [{"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"}],
-    }
-    assert list(
-        parse_review_suggestions(_answer(only_instruction), sample=base).problems
-    ) == ["suggestion_1:drift_claim_without_output_source"]
-    with_output = {
-        **drift,
-        "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
+        "sources": [
+            {"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"},
+            {"source_id": "run1.step2.output", "quote": "Tre punkter"},
+        ],
     }
     assert [
         item.kind
         for item in parse_review_suggestions(
-            _answer(with_output), sample=base
+            _answer(well_formed), sample=sample
         ).suggestions
     ] == ["instruction_outcome_drift"]
-    cut = base.model_copy(
+
+    instruction_only = {**well_formed, "sources": well_formed["sources"][:1]}
+    assert problems(instruction_only) == [
+        "suggestion_1:drift_claim_without_output_source"
+    ]
+    output_only = {**well_formed, "sources": well_formed["sources"][1:]}
+    assert problems(output_only) == [
+        "suggestion_1:drift_claim_without_instruction_source"
+    ]
+    other_steps_output = {
+        **well_formed,
+        "sources": [
+            {"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"},
+            {"source_id": "run1.step1.output", "quote": "tre punkter"},
+        ],
+    }
+    assert problems(other_steps_output) == [
+        "suggestion_1:drift_claim_without_output_source"
+    ]
+    # Two named steps, evidence for one: refused for the step left uncovered.
+    partly_covered = {**well_formed, "step_orders": [1, 2]}
+    assert problems(partly_covered) == [
+        "suggestion_1:drift_claim_without_instruction_source"
+    ]
+    cut = sample.model_copy(
         update={
             "excerpts": [
-                base.excerpts[0].model_copy(update={"availability": "truncated"}),
-                *base.excerpts[1:],
+                *sample.excerpts[:2],
+                sample.excerpts[2].model_copy(update={"availability": "truncated"}),
+                *sample.excerpts[3:],
             ]
         }
     )
     assert list(
-        parse_review_suggestions(_answer(with_output), sample=cut).problems
+        parse_review_suggestions(_answer(well_formed), sample=cut).problems
     ) == ["suggestion_1:drift_claim_cites_incomplete_output"]
 
 

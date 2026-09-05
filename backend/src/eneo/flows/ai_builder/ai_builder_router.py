@@ -1226,6 +1226,14 @@ async def send_message(
                 body.acknowledge_duplicate_provider_spend
             ),
         )
+        # The first read was unlocked; preflight read the session again under
+        # lock. A review turn that committed in between must not slip past the
+        # review permission, so the decision is repeated on the snapshot the
+        # evidence preparation will use.
+        if not acts_on_review and (
+            latest_user_review_context(turn_preflight.session.conversation) is not None
+        ):
+            require_flow_action(container.user(), FlowApiAction.BUILDER_REVIEW)
 
     async def event_stream() -> AsyncGenerator[ServerSentEvent, None]:
         try:
