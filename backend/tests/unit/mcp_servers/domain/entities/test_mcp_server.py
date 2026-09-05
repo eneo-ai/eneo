@@ -97,8 +97,8 @@ class TestIsBackingModelAvailable:
 
     def test_disabled_or_deleted_model_makes_the_provider_unavailable(self):
         assert not _server(
-            image_model=_backing_model(enabled=False)
+            http_auth_type="internal", image_model=_backing_model(enabled=False)
         ).is_backing_model_available
         assert not _server(
-            image_model=_backing_model(deleted=True)
+            http_auth_type="internal", image_model=_backing_model(deleted=True)
         ).is_backing_model_available

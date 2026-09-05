@@ -291,6 +291,10 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
@@ -317,6 +321,10 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
@@ -344,6 +352,10 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
@@ -392,6 +404,10 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
@@ -429,6 +445,10 @@ class TestAssemblerHasCredentials:
         encrypted_token = enc.encrypt("my-secret-bearer-token-12345")
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
@@ -461,6 +481,10 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
