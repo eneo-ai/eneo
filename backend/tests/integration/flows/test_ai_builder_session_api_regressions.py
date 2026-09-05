@@ -326,6 +326,11 @@ def _semantic_create_proposal_arguments(
     }
 
 
+# The two phases every turn names before any model call; these tests examine
+# what follows them, so the parser leaves them out.
+_DISCOVERY_STATUSES = frozenset({"understanding_request", "reading_sources"})
+
+
 def _parse_sse_payload(body: str) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
     current_event: str | None = None
@@ -347,7 +352,12 @@ def _parse_sse_payload(body: str) -> list[dict[str, object]]:
                     parsed = json.loads(raw_data)
                 else:
                     parsed = {}
-                events.append({"event": current_event, "data": parsed})
+                if not (
+                    current_event == "status"
+                    and isinstance(parsed, dict)
+                    and parsed.get("status") in _DISCOVERY_STATUSES
+                ):
+                    events.append({"event": current_event, "data": parsed})
             current_event = None
             data_lines = []
 

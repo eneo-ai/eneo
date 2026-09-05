@@ -30,6 +30,7 @@
     RequirementsSummary,
     AIBuilderReviewContext
   } from "./protocol";
+  import { isDiscoveryStatus } from "./protocol";
   import {
     delegatedQuestionAnswer,
     type StructuredQuestionAnswerPayload
@@ -403,7 +404,7 @@
     if (!service.hasSession) {
       hadGenerationStatus = false;
     } else if (
-      service.statusMessage !== null ||
+      (service.statusMessage !== null && !isDiscoveryStatus(service.statusMessage)) ||
       service.hasSeenPlanInSession ||
       (service.phase === "building" && service.isStreaming)
     ) {
@@ -837,6 +838,7 @@
           waiting={service.isStreaming ||
             service.latestTurnState === "open" ||
             service.latestTurnState === "processing"}
+          status={service.statusMessage}
           assistantText={lastAssistantText}
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}

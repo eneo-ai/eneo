@@ -205,6 +205,18 @@ from eneo.flows.input_binding_contract_rules import source_ref_bindings
 from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
 
+_DISCOVERY_STATUSES = {"understanding_request", "reading_sources"}
+
+
+async def _visible(stream):
+    """The stream without the two phases every turn now names before any
+    model call; these tests examine what follows them."""
+    async for event in stream:
+        status = getattr(getattr(event, "data", None), "status", None)
+        if getattr(event, "event", None) == "status" and status in _DISCOVERY_STATUSES:
+            continue
+        yield event
+
 
 def _route(
     *,
@@ -1109,24 +1121,26 @@ async def _collect_send_message_events(
     client_turn_id = uuid4()
     return [
         encode_ai_builder_stream_event(event)
-        async for event in planner.send_message(
-            session_id=session_id,
-            client_turn_id=client_turn_id,
-            request_fingerprint="a" * 64,
-            request_snapshot={
-                "client_turn_id": str(client_turn_id),
-                "message": "Build a flow",
-            },
-            message="Build a flow",
-            completion_model_route=_route(),
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=100_000,
-            max_output_tokens=4_096,
-            budget_policy=_budget_policy(),
+        async for event in _visible(
+            planner.send_message(
+                session_id=session_id,
+                client_turn_id=client_turn_id,
+                request_fingerprint="a" * 64,
+                request_snapshot={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Build a flow",
+                },
+                message="Build a flow",
+                completion_model_route=_route(),
+                available_models=None,
+                available_kbs=None,
+                flow=None,
+                assistant_snapshots=None,
+                attachment_files=None,
+                max_input_tokens=100_000,
+                max_output_tokens=4_096,
+                budget_policy=_budget_policy(),
+            )
         )
     ]
 
@@ -1206,7 +1220,8 @@ async def test_requirements_confirmation_reuses_latest_saved_step_scope(
     )
 
     with pytest.raises(RuntimeError, match="scope captured"):
-        await anext(stream)
+        async for _ in stream:
+            pass
 
     assert resolve_context.await_args.kwargs["context"] == scoped_context
 
@@ -1244,7 +1259,8 @@ async def test_accepted_turn_persists_the_evidence_floor_it_was_held_to(
         budget_policy=_budget_policy(),
     )
     with pytest.raises(RuntimeError, match="accepted"):
-        await anext(stream)
+        async for _ in stream:
+            pass
     accepted = planner.repo.get_session.return_value.conversation[-1]
     assert accepted.role == "user"
     assert (accepted.metadata or {}).get("evidence_floor") == 3
@@ -1751,7 +1767,8 @@ async def test_send_message_builds_attachment_context_once_before_request_prepar
     )
 
     with pytest.raises(RuntimeError, match="request captured"):
-        await anext(stream)
+        async for _ in stream:
+            pass
 
     build_context.assert_called_once_with(
         attachments,
@@ -2983,9 +3000,15 @@ async def test_a_transient_status_reaches_the_client_before_the_provider_returns
             "event"
         ]
     )
-    # Two statuses arrived while the provider is still blocked, and the turn
-    # has not been recorded yet.
-    assert seen == ["status", "status"]
+    seen.append(
+        encode_ai_builder_stream_event(await asyncio.wait_for(anext(stream), 5))[
+            "event"
+        ]
+    )
+    # Three statuses arrived while the provider is still blocked (the
+    # understanding phase, then two from the submission), and the turn has
+    # not been recorded yet.
+    assert seen == ["status", "status", "status"]
     planner.repo.complete_session_turn.assert_not_awaited()
 
     provider_released.set()
@@ -3187,27 +3210,29 @@ async def test_send_message_refuses_unsupported_architecture_without_provider_or
 
     events = [
         encode_ai_builder_stream_event(event)
-        async for event in planner.send_message(
-            session_id=session_id,
-            client_turn_id=_TEST_CLIENT_TURN_ID,
-            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-            request_snapshot=_test_request_snapshot("Strukturerat textresultat"),
-            message="Strukturerat textresultat",
-            question_answer={
-                "kind": "structured_question_answer",
-                "question_id": "terminal_output",
-                "selected_values": ["structured_text"],
-            },
-            ui_language="sv",
-            completion_model_route=_route(),
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=_budget_policy(),
+        async for event in _visible(
+            planner.send_message(
+                session_id=session_id,
+                client_turn_id=_TEST_CLIENT_TURN_ID,
+                request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                request_snapshot=_test_request_snapshot("Strukturerat textresultat"),
+                message="Strukturerat textresultat",
+                question_answer={
+                    "kind": "structured_question_answer",
+                    "question_id": "terminal_output",
+                    "selected_values": ["structured_text"],
+                },
+                ui_language="sv",
+                completion_model_route=_route(),
+                available_models=None,
+                available_kbs=None,
+                flow=None,
+                assistant_snapshots=None,
+                attachment_files=None,
+                max_input_tokens=4096,
+                max_output_tokens=1024,
+                budget_policy=_budget_policy(),
+            )
         )
     ]
 
@@ -3297,27 +3322,29 @@ async def test_send_message_requires_one_template_before_proposal_without_provid
 
     events = [
         encode_ai_builder_stream_event(event)
-        async for event in planner.send_message(
-            session_id=session_id,
-            client_turn_id=_TEST_CLIENT_TURN_ID,
-            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-            request_snapshot=_test_request_snapshot("Single document"),
-            message="Single document",
-            question_answer={
-                "kind": "structured_question_answer",
-                "question_id": "document_material_scope",
-                "selected_values": ["single_document_case"],
-            },
-            ui_language="en",
-            completion_model_route=_route(),
-            available_models=None,
-            available_kbs=None,
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=100_000,
-            max_output_tokens=4_096,
-            budget_policy=_budget_policy(),
+        async for event in _visible(
+            planner.send_message(
+                session_id=session_id,
+                client_turn_id=_TEST_CLIENT_TURN_ID,
+                request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                request_snapshot=_test_request_snapshot("Single document"),
+                message="Single document",
+                question_answer={
+                    "kind": "structured_question_answer",
+                    "question_id": "document_material_scope",
+                    "selected_values": ["single_document_case"],
+                },
+                ui_language="en",
+                completion_model_route=_route(),
+                available_models=None,
+                available_kbs=None,
+                flow=None,
+                assistant_snapshots=None,
+                attachment_files=None,
+                max_input_tokens=100_000,
+                max_output_tokens=4_096,
+                budget_policy=_budget_policy(),
+            )
         )
     ]
 
@@ -3381,7 +3408,8 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
     )
 
     with pytest.raises(RuntimeError, match="preparation failed"):
-        await anext(stream)
+        async for _ in stream:
+            pass
 
     planner.repo.release_session_send.assert_awaited_once()
 
@@ -3508,6 +3536,9 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
         budget_policy=_budget_policy(),
     )
 
+    # The understanding phase is named before any provider work; the read
+    # that must block is the one after it.
+    await asyncio.wait_for(anext(stream), 1)
     pending_event = asyncio.create_task(anext(stream))
     await asyncio.wait_for(proposal_started.wait(), timeout=1)
     pending_event.cancel()
@@ -3593,24 +3624,28 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
 
     events = [
         encode_ai_builder_stream_event(event)
-        async for event in planner.send_message(
-            session_id=session_id,
-            client_turn_id=_TEST_CLIENT_TURN_ID,
-            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-            request_snapshot=_test_request_snapshot("Revise the plan"),
-            message="Revise the plan",
-            completion_model_route=_route(),
-            available_models=[_model_resource(str(local_model_id), "Renamed model")],
-            available_kbs=[],
-            flow=None,
-            assistant_snapshots=None,
-            attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
-            budget_policy=AIBuilderBudgetPolicy(
-                conversation_safety_buffer_tokens=128,
-                minimum_conversation_budget_tokens=256,
-            ),
+        async for event in _visible(
+            planner.send_message(
+                session_id=session_id,
+                client_turn_id=_TEST_CLIENT_TURN_ID,
+                request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                request_snapshot=_test_request_snapshot("Revise the plan"),
+                message="Revise the plan",
+                completion_model_route=_route(),
+                available_models=[
+                    _model_resource(str(local_model_id), "Renamed model")
+                ],
+                available_kbs=[],
+                flow=None,
+                assistant_snapshots=None,
+                attachment_files=None,
+                max_input_tokens=4096,
+                max_output_tokens=1024,
+                budget_policy=AIBuilderBudgetPolicy(
+                    conversation_safety_buffer_tokens=128,
+                    minimum_conversation_budget_tokens=256,
+                ),
+            )
         )
     ]
 
@@ -3775,16 +3810,18 @@ async def test_send_message_replays_the_exact_committed_error_without_provider_w
 
     events = [
         encode_ai_builder_stream_event(event)
-        async for event in planner.send_message(
-            session_id=session.id,
-            client_turn_id=_TEST_CLIENT_TURN_ID,
-            request_fingerprint=_TEST_REQUEST_FINGERPRINT,
-            request_snapshot=_test_request_snapshot("Build a flow"),
-            message="Build a flow",
-            completion_model_route=_route(),
-            turn_preflight=preflight,
-            max_input_tokens=100_000,
-            max_output_tokens=4_096,
+        async for event in _visible(
+            planner.send_message(
+                session_id=session.id,
+                client_turn_id=_TEST_CLIENT_TURN_ID,
+                request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+                request_snapshot=_test_request_snapshot("Build a flow"),
+                message="Build a flow",
+                completion_model_route=_route(),
+                turn_preflight=preflight,
+                max_input_tokens=100_000,
+                max_output_tokens=4_096,
+            )
         )
     ]
 

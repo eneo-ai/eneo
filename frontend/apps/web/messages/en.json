@@ -6747,5 +6747,7 @@
   "flow_history_review_with_builder": "Review with the AI builder",
   "ai_builder_review_flow_too_large": "The flow has more steps than the review reads. Split it or review a smaller flow.",
   "ai_builder_replace_edit_description_review": "You have a conversation or AI proposal in progress that has not been approved. Continuing will replace it with a review of the runs.",
-  "ai_builder_review_flow_too_large_title": "The flow is too large to review"
+  "ai_builder_review_flow_too_large_title": "The flow is too large to review",
+  "ai_builder_reply_understanding": "Eneo is understanding your description…",
+  "ai_builder_reply_reading_sources": "Eneo is reading your sources…"
 }

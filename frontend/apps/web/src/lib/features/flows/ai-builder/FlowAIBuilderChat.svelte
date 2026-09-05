@@ -29,7 +29,13 @@
   });
 
   const generatingText = $derived(
-    service.hasSeenPlanInSession ? m.ai_builder_updating_plan() : m.ai_builder_generating()
+    service.statusMessage === "reading_sources"
+      ? m.ai_builder_reply_reading_sources()
+      : service.statusMessage === "understanding_request"
+        ? m.ai_builder_reply_understanding()
+        : service.hasSeenPlanInSession
+          ? m.ai_builder_updating_plan()
+          : m.ai_builder_generating()
   );
 
   export function focusInput(intent?: string | AIBuilderSuggestChangeIntent) {

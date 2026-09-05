@@ -10429,6 +10429,8 @@ export interface components {
     AIBuilderStatus:
       | "architecture_committed"
       | "architecture_revised"
+      | "understanding_request"
+      | "reading_sources"
       | "drafting_flow"
       | "checking_flow"
       | "repairing";
