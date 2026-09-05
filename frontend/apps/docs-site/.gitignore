@@ -17,6 +17,10 @@
 /.next/
 /out/
 
+# multi-version build (scripts/build-versions.mjs)
+/site/
+*.__worktree/
+
 # production
 /build
 
