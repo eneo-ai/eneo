@@ -595,7 +595,7 @@ async def generate_review_suggestions(
             extra={"model": litellm_model, "problem_codes": list(parsed.problems)},
         )
         raise AIBuilderBadRequestException(
-            "The review model's answer did not resolve in the sampled evidence.",
+            "The review model answered in a format that could not be read.",
             code=AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT,
             context={"problems": list(parsed.problems)},
         )

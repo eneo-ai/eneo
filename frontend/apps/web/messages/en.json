@@ -6759,7 +6759,7 @@
   "ai_builder_review_suggestions_some_unverified": "{count} more suggestions could not be tied to the runs and are not shown.",
   "ai_builder_review_suggestions_some_unverified_one": "One more suggestion could not be tied to the runs and is not shown.",
   "ai_builder_review_suggestions_failed": "The suggestions could not be produced right now.",
-  "ai_builder_review_suggestions_invalid_output": "The model's answer could not be tied to the runs. Try again.",
+  "ai_builder_review_suggestions_invalid_output": "The model answered in a format that could not be read. Try again.",
   "ai_builder_review_suggestions_below_level": "The space's planning model may not read runs at this security level.",
   "ai_builder_review_suggestions_timeout": "Reading the runs took too long. Try again.",
   "ai_builder_review_suggestions_no_model": "The space has no planning model that may read the runs.",

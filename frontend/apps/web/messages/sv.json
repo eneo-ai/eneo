@@ -6759,7 +6759,7 @@
   "ai_builder_review_suggestions_some_unverified": "{count} förslag till gick inte att knyta till körningarna och visas inte.",
   "ai_builder_review_suggestions_some_unverified_one": "Ett förslag till gick inte att knyta till körningarna och visas inte.",
   "ai_builder_review_suggestions_failed": "Förslagen kunde inte tas fram just nu.",
-  "ai_builder_review_suggestions_invalid_output": "Modellens svar gick inte att knyta till körningarna. Försök igen.",
+  "ai_builder_review_suggestions_invalid_output": "Modellen svarade i ett format som inte gick att läsa. Försök igen.",
   "ai_builder_review_suggestions_below_level": "Ytans planeringsmodell får inte läsa körningar på den här säkerhetsnivån.",
   "ai_builder_review_suggestions_timeout": "Körningarna tog för lång tid att läsa. Försök igen.",
   "ai_builder_review_suggestions_no_model": "Ytan har ingen planeringsmodell som kan läsa körningarna.",
