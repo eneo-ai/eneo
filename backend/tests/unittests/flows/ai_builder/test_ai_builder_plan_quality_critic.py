@@ -1347,6 +1347,75 @@ def test_flags_direct_text_transform_with_unrequested_json_and_steps() -> None:
     ] == ["simple_text_transform_must_remain_single_step"]
 
 
+def test_direct_text_transform_rule_does_not_judge_an_edit_request() -> None:
+    # Live 2026-09-05: "add a translating step" on a four-step document flow
+    # read as a direct text transform and the edit was told to become one
+    # text step. The premise is a whole create request, never an edit.
+    conversation = [
+        {
+            "role": "user",
+            "content": "Översätt den här meningen till engelska: Vi ses imorgon.",
+        }
+    ]
+    spec = FlowDraftSpecCore(
+        flow_name="Översättning",
+        steps=[
+            _step(
+                "step_a",
+                "Analysera språk",
+                "Identifiera språk och ton.",
+                output_type=OutputType.JSON,
+                output_contract={"type": "object", "properties": {}},
+            ),
+            _step(
+                "step_b",
+                "Översätt",
+                "Översätt till engelska.",
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+            ),
+        ],
+    )
+
+    from uuid import uuid4
+
+    from eneo.flows.domain.flow import Flow, FlowStep
+
+    document_flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Sammanfatta tjänsteskrivelse",
+        steps=[
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=1,
+                user_description="Extrahera källfält",
+                input_source="flow_input",
+                input_type="document",
+                output_mode="pass_through",
+                output_type="json",
+            ),
+            FlowStep(
+                assistant_id=uuid4(),
+                step_order=2,
+                user_description="Skriv nyhet",
+                input_source="previous_step",
+                input_type="json",
+                output_mode="pass_through",
+                output_type="text",
+            ),
+        ],
+    )
+    issues = evaluate_critic_invariants(
+        build_conversation_critic_context(conversation, spec, flow=document_flow)
+    )
+
+    assert not any(
+        issue.id == "simple_text_transform_must_remain_single_step" for issue in issues
+    )
+
+
 def test_direct_text_transform_accepts_single_text_step() -> None:
     conversation = [
         {

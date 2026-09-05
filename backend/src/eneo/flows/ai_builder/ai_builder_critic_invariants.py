@@ -946,9 +946,29 @@ def _simple_text_transform_must_remain_single_step_evidence(
 ) -> bool:
     if not context.simple_text_transform:
         return False
+    # On edit the premise holds only when the flow being edited is itself one
+    # text step; a request like "add a translating step" on a multi-step
+    # document flow reads as a text transform too (live 2026-09-05: such a
+    # flow was told to become a single text step).
+    if context.flow is not None and not _flow_is_single_text_transform_step(
+        context.flow
+    ):
+        return False
     if context.spec.form_fields:
         return False
     return not _spec_is_single_text_transform_step(context.spec)
+
+
+def _flow_is_single_text_transform_step(flow: "Flow") -> bool:
+    if len(flow.steps) != 1:
+        return False
+    step = flow.steps[0]
+    return (
+        step.input_type == InputType.TEXT.value
+        and step.output_type == OutputType.TEXT.value
+        and step.output_mode == OutputMode.PASS_THROUGH.value
+        and step.output_contract is None
+    )
 
 
 def _spec_is_single_text_transform_step(spec: FlowDraftSpecCore) -> bool:
