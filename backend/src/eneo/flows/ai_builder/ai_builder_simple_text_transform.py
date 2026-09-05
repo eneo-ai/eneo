@@ -99,12 +99,12 @@ _MULTI_STEP_PREFERENCE_MARKERS: tuple[str, ...] = (
 # own clause, so "Do not add new facts. Add a final step ..." still requests
 # a step while "do not add a final step" and "utan extra steg" do not.
 _SV_STEP_DETERMINERS = (
-    r"(?:ett|något|fler|flera|extra|nya|nytt|ytterligare|avslutande|inledande|"
-    r"sista|första|separat|eget)"
+    r"(?:ett|två|tre|fyra|fem|\d+|något|fler|flera|extra|nya|nytt|ytterligare|"
+    r"avslutande|inledande|sista|första|separat|egna|eget)"
 )
 _EN_STEP_DETERMINERS = (
-    r"(?:a|an|another|one|more|extra|additional|new|final|last|first|separate|"
-    r"second)"
+    r"(?:a|an|another|one|two|three|four|five|\d+|more|extra|additional|new|"
+    r"final|last|first|separate|second|further)"
 )
 _STEP_ADDITION_PATTERN = re.compile(
     r"\blägg(?:a)?\s+(?:inte\s+)?till\s+(?:" + _SV_STEP_DETERMINERS + r"\s+){0,3}steg\b"
@@ -120,7 +120,12 @@ _STEP_ADDITION_NEGATION_PATTERN = re.compile(
     r"\b(?:inte|utan|inga|inget|ingen|aldrig|not|don't|dont|without|no|never)\b",
     re.UNICODE,
 )
-_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.!?;,]")
+# A comma is a list separator ("utan rubriker, extra steg eller nya
+# uppgifter") unless an imperative addition starts right after it ("lägg inte
+# till fakta, lägg till ett steg").
+_CLAUSE_BOUNDARY_PATTERN = re.compile(r"[.!?;]")
+_COMMA_BOUNDARY_PATTERN = re.compile(r",\s*$")
+_IMPERATIVE_ADDITION_PATTERN = re.compile(r"^(?:lägg|add)\b")
 
 
 _FORM_COMPLEMENT_MARKERS: tuple[str, ...] = (
@@ -208,15 +213,21 @@ def _requests_extra_step(text: str) -> bool:
     """Affirmed step addition only; a forbidden extra step keeps the restraint."""
 
     for match in _STEP_ADDITION_PATTERN.finditer(text):
-        clause = text[_clause_start(text, match.start()) : match.end()]
+        clause = text[_clause_start(text, match) : match.end()]
         if _STEP_ADDITION_NEGATION_PATTERN.search(clause) is None:
             return True
     return False
 
 
-def _clause_start(text: str, position: int) -> int:
+def _clause_start(text: str, match: re.Match[str]) -> int:
+    position = match.start()
     boundaries = [m.end() for m in _CLAUSE_BOUNDARY_PATTERN.finditer(text, 0, position)]
-    return boundaries[-1] if boundaries else 0
+    start = boundaries[-1] if boundaries else 0
+    if _IMPERATIVE_ADDITION_PATTERN.match(match.group(0)):
+        comma = _COMMA_BOUNDARY_PATTERN.search(text, start, position)
+        if comma is not None:
+            start = comma.end()
+    return start
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
