@@ -34,12 +34,12 @@ silently after a failure.
 
 | Owner         | Responsibility                                                                                                                                                                     |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Administrator | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > Storage** |
+| Administrator | Connect an S3-compatible destination, change or roll back that destination, rotate its access keys, and set the new-write target and business upload limits in **Admin > File storage** |
 | Operator      | Run PostgreSQL and any optional compatible endpoint; own TLS, certificates, capacity, backups, network reachability, and process safety tuning                                     |
 
 Storage administration uses the same administrator authority as API keys and
 models. Deployment-wide content inventory spans tenants, so it is part of that
-same administrative view. **Admin > Storage** leads with the active target,
+same administrative view. **Admin > File storage** leads with the active target,
 object-store health, recorded file-content distribution, and migration state.
 Changing the target, editing upload limits, and moving existing content remain
 separate actions; detailed limits and PostgreSQL allocation stay available in
@@ -64,7 +64,7 @@ references. The old columns remain the recovery source until a later contract
 release passes both the campaign-completion and locked live-reference checks
 defined in [Close the recovery window and reclaim
 disk](#close-the-recovery-window-and-reclaim-disk). Eligible new File and Icon
-writes use the target selected in **Admin > Storage**. InfoBlob generations and
+writes use the target selected in **Admin > File storage**. InfoBlob generations and
 Flow artifacts remain separate follow-up work. A target change affects new
 writes only; moving existing content remains a separate migration workflow.
 
@@ -72,7 +72,7 @@ writes only; moving existing content remains a separate migration workflow.
 
 For a new installation, the operator sets Eneo's root encryption key. A platform
 admin can then enter the endpoint, bucket, signing region, and access keys in
-**Admin > Storage**. Eneo tests the destination before encrypting and saving the
+**Admin > File storage**. Eneo tests the destination before encrypting and saving the
 credentials. Saving the connection does not select it for new writes or move
 existing content.
 
@@ -228,7 +228,7 @@ curl -fsS https://eneo.example.eu/api/readyz \
 ```
 
 After readiness reports `ready`, an administrator can select **Object store**
-in **Admin > Storage**. Selection fails clearly if the endpoint is unavailable
+in **Admin > File storage**. Selection fails clearly if the endpoint is unavailable
 or incompatible. The policy update takes effect without restarting backend or
 worker.
 
@@ -267,7 +267,7 @@ the optional service receives the matching credentials. There is deliberately
 no usable mutable-tag default.
 
 When readiness reports `ready`, an administrator can select **Object store** in
-**Admin > Storage**. The same deployment-wide policy applies to bundled and
+**Admin > File storage**. The same deployment-wide policy applies to bundled and
 external endpoints; there is no provider or vendor product branch.
 
 Remote-only settings are all-or-nothing. Do not model “off” with blank values:
@@ -305,7 +305,7 @@ Inline capacity and common reconciliation tuning live in `env_backend.env`.
 bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
 business limit. Lowering it affects new inline writes, not reads of existing
 rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
-of the admin policy and this ceiling. **Admin > Storage** shows the configured
+of the admin policy and this ceiling. **Admin > File storage** shows the configured
 limit, effective limit, and constraining source. Object-store session uploads
 use the same rule with the portable multipart envelope derived from configured
 transport settings. FastAPI/Starlette multipart parsing happens before route
@@ -343,7 +343,7 @@ Object content has these explicit runtime outcomes:
 | Complete settings; endpoint temporarily unavailable       | Stays live                           | Overall readiness remains 200/degraded; object-store operations return typed 503, inline operations continue |
 | Reachable bucket not paired with this PostgreSQL database | Startup fails                        | `configuration_required`; reconciliation does not mutate rows or objects                                     |
 
-Selecting **Object store** in **Admin > Storage** fails clearly while the
+Selecting **Object store** in **Admin > File storage** fails clearly while the
 endpoint is unavailable or incompatible; the previous committed policy remains
 active. If the endpoint fails after selection, eligible new remote-target writes
 fail. Eneo does not fall back to PostgreSQL inline or dual-write. Existing remote
@@ -418,7 +418,7 @@ the scheduling/registration adapter, not S3 or lifecycle logic.
 
 PostgreSQL inline remains a complete deployment without an object-store
 service or configuration. When compatible object storage is configured and
-ready, an administrator can use **Admin > Storage** to queue an explicit
+ready, an administrator can use **Admin > File storage** to queue an explicit
 move in either direction. Selecting the default target for new writes never
 moves existing content.
 
@@ -445,7 +445,7 @@ configured orphan grace has elapsed and two complete inventory observations
 have allowed bounded deletion. Object-store configuration remains required
 while any remote authority, staged move key, orphan candidate, or multipart
 cleanup record exists. To retire an endpoint, first move all eligible content
-inline, confirm **Admin > Storage** reports no active object-store content or
+inline, confirm **Admin > File storage** reports no active object-store content or
 nonterminal moves, then allow those cleanup observations to finish before
 removing configuration.
 
@@ -462,7 +462,7 @@ readable immediately.
    does not hold the write fence the switch relies on.
 1. Create an empty private bucket and a bucket-scoped application identity on
    the new service, and back up the current bucket.
-2. Select `postgres_inline` for new writes in **Admin > Storage**, let queued
+2. Select `postgres_inline` for new writes in **Admin > File storage**, let queued
    moves and in-flight uploads finish, then select **Pause moves**. Both are
    required: an empty queue does not by itself stop a new move from starting
    mid-copy. New uploads above `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail
@@ -479,7 +479,7 @@ readable immediately.
    differences. `--download` reads and compares the actual bytes;
    `--checksum` falls back to size-only comparison when a hash is
    unavailable — the multipart-uploaded S3 case — and is not proof.
-5. Use **Change destination** in **Admin > Storage**. Eneo probes the
+5. Use **Change destination** in **Admin > File storage**. Eneo probes the
    candidate, refuses a bucket paired with another Eneo installation, verifies
    the presence, size, and media type of every object the deployment still
    serves (byte equality is what step 4's `--download` comparison proves, and
@@ -548,7 +548,7 @@ is captured per object, so later multipart tuning cannot invalidate existing
 content. A range proves the chunks it covers; a full read still checks the
 canonical full-object SHA-256 and can detect corruption elsewhere.
 
-**Admin > Storage** reports two related measurements, not remaining capacity.
+**Admin > File storage** reports two related measurements, not remaining capacity.
 The file-content total is the sum of Eneo's recorded content sizes, excluding
 content whose deletion has completed (`tombstoned`). Its PostgreSQL and
 object-storage figures are parts of that total. **PostgreSQL on disk** comes
@@ -996,7 +996,7 @@ that trips this guard.
 
 Policy rollback does not move bytes. To stop new remote placement while keeping
 the current version, select
-`postgres_inline` in **Admin > Storage**. Existing remote content still needs
+`postgres_inline` in **Admin > File storage**. Existing remote content still needs
 the endpoint, credentials, certificates, and paired backup. Selection never
 migrates it implicitly.
 

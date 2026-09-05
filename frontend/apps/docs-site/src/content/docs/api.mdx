@@ -1,620 +1,301 @@
 # API Reference
 
-Eneo provides a comprehensive RESTful API for programmatic access to all platform features. This guide covers authentication, common endpoints, and usage examples.
+Eneo exposes a REST API (FastAPI) that the web app itself runs on. This page describes the API contract: where the API lives, how to authenticate, how the chat endpoint streams, and the pagination, error, and rate-limit conventions that apply everywhere. The endpoint catalogue is the OpenAPI specification served by your own instance, not this page.
 
-## Interactive API Documentation
+import { Callout } from 'nextra/components'
 
-The best way to explore the API is through the interactive documentation:
+---
 
-**Local Development:**
-- http://localhost:8123/docs (Swagger UI)
-- http://localhost:8123/redoc (ReDoc)
+## Base URL and OpenAPI specification
 
-**Production:**
-- https://your-domain.com/api/docs (Swagger UI)
-- https://your-domain.com/api/redoc (ReDoc)
+All versioned endpoints are mounted under the backend's `API_PREFIX`, which is `/api/v1` in the shipped configuration templates. A full URL therefore looks like `https://your-domain.com/api/v1/spaces/`.
 
-The interactive docs allow you to:
-- Browse all available endpoints
-- View request/response schemas
-- Test API calls directly in the browser
-- Download OpenAPI specification
+The interactive documentation and the specification are served at the **root** of the backend, not under the prefix:
+
+| Resource | Production (behind the reference Traefik setup) | Local development |
+|----------|--------------------------------------------------|-------------------|
+| Swagger UI | `https://your-domain.com/docs` | `http://localhost:8123/docs` |
+| OpenAPI JSON | `https://your-domain.com/openapi.json` | `http://localhost:8123/openapi.json` |
+| ReDoc | not routed | `http://localhost:8123/redoc` |
+| Backend version | `https://your-domain.com/version` | `http://localhost:8123/version` |
+
+The reference `docker-compose.yml` routes only `/api`, `/scim`, `/docs`, `/openapi.json`, and `/version` to the backend, so `/redoc` is available in local development only. `GET /version` returns `{"version": "..."}` and the OpenAPI document carries the same version string, so the spec you download always matches the running backend.
+
+<Callout type="info">
+Paths are exact. Most routers use a trailing slash (`/api/v1/users/me/`, `/api/v1/conversations/`), while the API key endpoints do not (`/api/v1/api-keys`). Copy paths from the specification rather than guessing.
+</Callout>
+
+Health probes live outside the versioned prefix and require no authentication: `GET /api/healthz` returns `200` or `503` with backend, worker, and object-store status, and `GET /api/healthz/crawler` returns crawler queue diagnostics. `/api/livez` and `/api/readyz` exist for orchestrators but are hidden from the specification.
+
+The specification includes the Server-Sent Event payload models described below under `components.schemas`, and names its API key security scheme `APIKeyAuth`.
 
 ---
 
 ## Authentication
 
-### API Keys
+Every endpoint under `/api/v1` accepts either an API key or a session token. Some operations are restricted to one of them; see [Session-only and user-only operations](#session-only-and-user-only-operations).
 
-Generate an API key for programmatic access:
+### API keys
 
-**Via Web Interface:**
-1. Log in to Eneo
-2. Go to **Settings** → **API Keys**
-3. Click **Generate New Key**
-4. Copy and save the key securely
-
-**Via API:**
-```bash
-curl -X POST "https://your-domain.com/api/api-keys" \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Integration Key",
-    "expires_in_days": 90
-  }'
-```
-
-### Using API Keys
-
-Include the API key in the `Authorization` header:
+Send the key in the `X-API-Key` header. The header name is configurable through the backend's `API_KEY_HEADER_NAME` setting; `X-API-Key` is the template default.
 
 ```bash
-curl -H "Authorization: Bearer YOUR_API_KEY" \
-  https://your-domain.com/api/spaces
+curl "https://your-domain.com/api/v1/spaces/" \
+  -H "X-API-Key: sk_..."
 ```
 
-### JWT Tokens (Session Authentication)
+Two key types exist: `sk_` secret keys for server-to-server use and `pk_` public keys for browser integrations. Keys are created in the web app under **Account → API keys** (`/account/api-keys`); tenant administrators manage every key in the tenant under **Admin → API keys** (`/admin/api-keys`). The account page has a **Create API Key** button. Keys can also be created with `POST /api/v1/api-keys`, which requires a session token and the `api_keys` role permission.
 
-For user-facing applications, use JWT tokens:
+An API key carries a scope (tenant, space, assistant, or app), a permission level, and optional guardrails. By default the HTTP method decides the required permission level: `GET`, `HEAD`, and `OPTIONS` need `read`; `POST`, `PUT`, and `PATCH` need `write`; `DELETE` needs `admin`. A few semantically read-only `POST` endpoints, including the chat endpoint, accept `read`. Scopes, permission levels, guardrails, ownership, and lifecycle are covered in [API Key Management](/docs/api-key-management).
 
-**Login:**
+### Session tokens
+
+Users who sign in with email and password obtain a JWT from the OAuth2 password-flow endpoint. The request body is form-encoded, not JSON:
+
 ```bash
-curl -X POST "https://your-domain.com/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "user@example.com",
-    "password": "password"
-  }'
+curl -X POST "https://your-domain.com/api/v1/users/login/token/" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=user@example.com" \
+  --data-urlencode "password=..."
 ```
 
-**Response:**
 ```json
 {
   "access_token": "eyJhbGc...",
-  "token_type": "bearer",
-  "user": {
-    "id": "user-123",
-    "email": "user@example.com",
-    "name": "John Doe"
-  }
+  "token_type": "bearer"
 }
 ```
 
-**Use the token:**
+Send the token as `Authorization: Bearer <access_token>`. Invalid credentials return `401`. Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant).
+
+If a request carries both an `Authorization: Bearer` token and an API key header, the bearer token is used and the API key is ignored.
+
+### Session-only and user-only operations
+
+The backend applies three guards on top of ordinary authentication. Each returns `403` with a stable `code`:
+
+| Guard | Rejects | `code` | Applies to |
+|-------|---------|--------|------------|
+| Session required | every API key, including tenant-admin service keys | `session_auth_required` | All API key mutations (`POST /api/v1/api-keys`, update, delete, revoke, rotate, extend, purge, suspend, reactivate, notification preferences), chat-turn diagnostics, Skills, module administration and the module login handoff, object-store connection and deployment-policy administration, and the logging endpoints behind Admin Insights |
+| User identity required | service keys (`ownership: "service"`) | `user_identity_required` | Endpoints scoped to the caller as a person, such as `GET /api/v1/users/me/` |
+| User required for creation | service keys | `service_key_cannot_create_resources` | `POST` endpoints that create user-owned resources (assistants, apps, services, spaces, group chats, collections, websites, files, info blobs, roles, MCP servers, help-assistant runs, and API keys) |
+
+Session tokens pass all three guards; user-owned API keys pass the second and third. Scoped keys are additionally checked against the resource they target and receive `403` with `code: "insufficient_scope"` when it lies outside the key's scope.
+
+---
+
+## Chat
+
+A single endpoint starts or continues a conversation with an assistant or a group chat:
+
+```http
+POST /api/v1/conversations/
+```
+
+### Request body
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `question` | string | Required. |
+| `session_id` | UUID | Continue an existing conversation. |
+| `assistant_id` | UUID | Start a new conversation with an assistant. |
+| `group_chat_id` | UUID | Start a new conversation with a group chat. |
+| `stream` | boolean | Default `false`. `true` returns Server-Sent Events. |
+| `files` | list of `{"id": UUID}` | Previously uploaded files to attach. |
+| `tools` | object | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise). |
+| `use_web_search` | boolean | Default `false`. |
+| `require_tool_approval` | boolean | Default `false`. Requires `stream: true`; not supported for group chats. |
+| `disabled_mcp_server_ids` | list of UUID | MCP servers to switch off for this message. It can only narrow the active set. |
+
+Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1` or `2`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`.
+
+Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`.
+
+### Non-streaming response
+
+With `stream: false` the endpoint returns one JSON object once the answer is complete. Its fields are `id`, `session_id`, `question`, `answer`, `files`, `generated_files`, `references`, `tools`, `web_search_references`, `mcp_tool_references`, `completion_model`, `created_at`, and `updated_at`. The exact schema is `AskChatResponse` in the specification.
+
 ```bash
-curl -H "Authorization: Bearer eyJhbGc..." \
-  https://your-domain.com/api/user/me
+curl -X POST "https://your-domain.com/api/v1/conversations/" \
+  -H "X-API-Key: sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{"assistant_id": "ASSISTANT_UUID", "question": "Summarise the travel policy."}'
 ```
+
+### Streaming response (Server-Sent Events)
+
+With `stream: true` the **same POST request** responds with `Content-Type: text/event-stream`. There is no separate `GET` stream endpoint, so the browser `EventSource` API cannot be used; read the response body of the `POST` instead. The server sends a comment line every 15 seconds to keep the connection alive.
+
+Each event is a standard SSE frame whose `event` field names the payload type and whose `data` field is one JSON document. Every payload carries `session_id`.
+
+| `event` | Payload model | Content |
+|---------|---------------|---------|
+| `first_chunk` | `SSEFirstChunk` | Emitted first. Same shape as the non-streaming response with an empty `answer`; carries the `session_id` to continue the conversation. |
+| `text` | `SSEText` | `answer` (a text delta) and `references` (knowledge chunks used). Concatenate the deltas to form the full answer. |
+| `reasoning` | `SSEReasoning` | `reasoning`, a chunk of the model's thinking text. |
+| `image` | `SSEFiles` | `generated_files`, files produced by the model. |
+| `eneo_event` | `SSEEneoEvent` | `eneo_event_type`, currently `generating_image`. |
+| `tool_call` | `SSEToolCall` | `tools` being executed (server, tool name, arguments, `tool_call_id`, status) and `mcp_tool_references`. Tool results are omitted from the stream; fetch them with `GET /api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/`. |
+| `tool_approval_required` | `SSEToolApprovalRequired` | `approval_id` and the pending `tools`. Only with `require_tool_approval: true`. |
+| `tool_approval_timeout` | `SSEToolApprovalTimeout` | `approval_id` and the `tools` whose approval expired. |
+| `token_usage` | `SSETokenUsage` | `usage` with prompt, completion, turn, and context token counts. |
+| `error` | `SSEError` | `error` (message) and optional numeric `error_code`. |
+
+```bash
+curl -N -X POST "https://your-domain.com/api/v1/conversations/" \
+  -H "X-API-Key: sk_..." \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"assistant_id": "ASSISTANT_UUID", "question": "Summarise the travel policy.", "stream": true}'
+```
+
+```text
+event: first_chunk
+data: {"session_id": "5f1c...", "question": "Summarise the travel policy.", "answer": "", ...}
+
+event: text
+data: {"session_id": "5f1c...", "answer": "Travel must", "references": []}
+
+event: text
+data: {"session_id": "5f1c...", "answer": " be approved", "references": []}
+
+event: token_usage
+data: {"session_id": "5f1c...", "eneo_event_type": "token_usage", "usage": {...}}
+```
+
+When a `tool_approval_required` event arrives, submit decisions with `POST /api/v1/conversations/approve-tools/?approval_id=<approval_id>` and a JSON body that is a list of `{"tool_call_id": string, "approved": boolean, "reason"?: string}`. Omitted tool calls are treated as rejected.
+
+### JavaScript client
+
+The repository ships a typed client, `@eneo/eneo-js` (`frontend/packages/eneo-js`), that the web app consumes as a workspace package. It sends the API key in `X-API-Key` (configurable via `apiKeyHeaderName`), a session token as `Authorization: Bearer`, or both, and wraps the streaming protocol above:
+
+```js
+import { createEneo } from "@eneo/eneo-js";
+
+const eneo = createEneo({
+  apiKey: process.env.ENEO_API_KEY,
+  baseUrl: "https://your-domain.com",
+});
+
+const conversation = await eneo.conversations.ask({
+  chatPartner: { type: "assistant", id: "ASSISTANT_UUID" },
+  question: "Summarise the travel policy.",
+  files: [],
+  callbacks: {
+    onText: (chunk) => process.stdout.write(chunk.answer),
+    onToolCall: (event) => console.log(event.tools),
+  },
+});
+
+// Resolves with the accumulated answer once the stream closes.
+console.log(conversation.session_id, conversation.answer);
+```
+
+`ask` always streams; pass `conversation: { id }` instead of `chatPartner` to continue a session. For endpoints without a wrapper, `eneo.client.fetch("/api/v1/...", { method, params, requestBody })` is typed against the generated OpenAPI schema. Every call may throw an `EneoError` carrying the failing request and the parsed error body.
+
+### Other conversation endpoints
+
+- `GET /api/v1/conversations/?assistant_id=...` or `?group_chat_id=...` lists conversations (cursor-paginated, see below). Exactly one of the two filters is required.
+- `GET /api/v1/conversations/{session_id}/` returns a conversation with its messages.
+- `DELETE /api/v1/conversations/{session_id}/` deletes it (`204`).
+- `PATCH /api/v1/conversations/{session_id}/name/` renames it with `{"name": "..."}`.
+- `POST /api/v1/conversations/{session_id}/title/` generates a title with the model.
+- `POST /api/v1/conversations/{session_id}/feedback/` records feedback.
+- `POST /api/v1/conversations/preflight` estimates the token cost of the next message before sending it.
 
 ---
 
-## Common Endpoints
+## Pagination
 
-### Users
+Two response shapes are used.
 
-#### Get Current User
-```http
-GET /api/user/me
-```
+**Plain lists** return `PaginatedResponse`: `items` plus `count`, the number of items in the response. `GET /api/v1/spaces/` is an example; it accepts the boolean query parameters `include_applications` and `include_personal` and returns every space the caller can access in one page.
 
-**Response:**
 ```json
 {
-  "id": "user-123",
-  "email": "user@example.com",
-  "name": "John Doe",
-  "created_at": "2025-01-15T10:30:00Z"
+  "items": [{ "id": "...", "name": "Marketing" }],
+  "count": 1
 }
 ```
 
-#### Update User Profile
-```http
-PATCH /api/user/me
-Content-Type: application/json
+**Cursor-paginated lists** return `CursorPaginatedResponse`, which adds `limit`, `next_cursor`, `previous_cursor`, and `total_count`. Request pages with the query parameters `limit`, `cursor`, and `previous` (`true` to page backwards). `GET /api/v1/conversations/` uses a timestamp cursor; `GET /api/v1/api-keys` uses an opaque string cursor. Always pass the cursor value back verbatim.
 
-{
-  "name": "Jane Doe",
-  "preferences": {
-    "theme": "dark",
-    "language": "en"
-  }
-}
-```
-
----
-
-### Spaces
-
-#### List Spaces
-```http
-GET /api/spaces
-```
-
-**Query Parameters:**
-- `limit` (optional): Number of results (default: 20)
-- `offset` (optional): Pagination offset (default: 0)
-
-**Response:**
 ```json
 {
-  "items": [
-    {
-      "id": "space-123",
-      "name": "Marketing Team",
-      "description": "Marketing AI assistants",
-      "created_at": "2025-01-10T09:00:00Z",
-      "role": "owner"
-    }
-  ],
-  "total": 1,
+  "items": [{ "id": "...", "name": "Travel policy" }],
+  "count": 1,
   "limit": 20,
-  "offset": 0
-}
-```
-
-#### Create Space
-```http
-POST /api/spaces
-Content-Type: application/json
-
-{
-  "name": "Marketing Team",
-  "description": "Marketing AI assistants",
-  "visibility": "private"
-}
-```
-
-#### Get Space Details
-```http
-GET /api/spaces/{space_id}
-```
-
-#### Update Space
-```http
-PATCH /api/spaces/{space_id}
-Content-Type: application/json
-
-{
-  "name": "Updated Name",
-  "description": "Updated description"
-}
-```
-
-#### Delete Space
-```http
-DELETE /api/spaces/{space_id}
-```
-
----
-
-### Assistants
-
-#### List Assistants in Space
-```http
-GET /api/spaces/{space_id}/assistants
-```
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "assistant-456",
-      "name": "Content Writer",
-      "model": "gpt-4",
-      "system_prompt": "You are a helpful content writer...",
-      "created_at": "2025-01-12T14:20:00Z"
-    }
-  ]
-}
-```
-
-#### Create Assistant
-```http
-POST /api/spaces/{space_id}/assistants
-Content-Type: application/json
-
-{
-  "name": "Content Writer",
-  "model": "gpt-4",
-  "system_prompt": "You are a helpful content writer...",
-  "temperature": 0.7,
-  "max_tokens": 2000
-}
-```
-
-#### Update Assistant
-```http
-PATCH /api/spaces/{space_id}/assistants/{assistant_id}
-Content-Type: application/json
-
-{
-  "system_prompt": "Updated prompt..."
+  "next_cursor": "2026-09-01T10:30:00Z",
+  "previous_cursor": null,
+  "total_count": 42
 }
 ```
 
 ---
 
-### Conversations
+## Errors
 
-#### Create Conversation
-```http
-POST /api/conversations
-Content-Type: application/json
+Errors are JSON. Four shapes occur, depending on where the error is raised:
 
-{
-  "assistant_id": "assistant-456",
-  "title": "Content Ideas"
-}
-```
+| Shape | When |
+|-------|------|
+| `{"detail": "message"}` | Simple HTTP errors, and authentication failures without a code. |
+| `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}` | `422` request validation errors (FastAPI default). |
+| `{"code": "...", "message": "...", "request_id"?: "...", "context"?: {...}}` | Structured errors from API key authentication, scope checks, and endpoints that raise coded errors. `code` is stable; `message` is not. |
+| `{"message": "...", "eneo_error_code": ..., "code"?: "...", "request_id"?: "...", "context"?: {...}, "details"?: {...}}` | Domain errors mapped by the global exception handlers (not found, unauthorized, conflicts, and so on). |
 
-**Response:**
-```json
-{
-  "id": "conv-789",
-  "assistant_id": "assistant-456",
-  "title": "Content Ideas",
-  "created_at": "2025-09-30T10:30:00Z"
-}
-```
+Unhandled failures return `500` with `{"error": "Internal server error", "error_id": "...", "message": "..."}`. Quote the `error_id` when reporting a problem; in development mode the body also contains a `detail` object with the exception type and path.
 
-#### List Conversations
-```http
-GET /api/conversations?assistant_id=assistant-456
-```
+Every response carries an `X-Trace-Id` header (and `X-Correlation-ID` for older clients). If you send `X-Correlation-ID` or `X-Request-ID` with a request, the value is echoed as `request_id` in structured error bodies, which makes client and server logs easy to correlate.
 
-#### Send Message
-```http
-POST /api/conversations/{conversation_id}/messages
-Content-Type: application/json
+Handle errors by `code` or `eneo_error_code`, never by parsing the English `message`.
 
-{
-  "content": "Write a blog post about AI in public sector",
-  "stream": false
-}
-```
-
-**Response (non-streaming):**
-```json
-{
-  "id": "msg-123",
-  "role": "assistant",
-  "content": "Here's a blog post about AI in public sector...",
-  "created_at": "2025-09-30T10:31:00Z"
-}
-```
-
-#### Stream Message (SSE)
-```http
-POST /api/conversations/{conversation_id}/messages
-Content-Type: application/json
-
-{
-  "content": "Write a blog post",
-  "stream": true
-}
-```
-
-**Response** (Server-Sent Events):
-```
-event: message
-data: {"type": "start", "id": "msg-123"}
-
-event: message
-data: {"type": "content", "delta": "Here's"}
-
-event: message
-data: {"type": "content", "delta": " a blog"}
-
-event: message
-data: {"type": "done"}
-```
-
-**Example client:**
-```javascript
-const eventSource = new EventSource(
-  '/api/conversations/conv-789/messages/stream'
-);
-
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  if (data.type === 'content') {
-    console.log(data.delta);
-  }
-};
-```
+| Status | Typical meaning |
+|--------|-----------------|
+| 400 | Invalid request, including bad target combinations and policy violations |
+| 401 | Missing, invalid, expired, revoked, or suspended credentials |
+| 403 | Authenticated but not permitted: scope, permission, ownership, or guard failures |
+| 404 | Resource not found or not visible to the caller |
+| 409 | Conflict, for example a file still referenced by a conversation |
+| 422 | Request body or query parameters failed validation |
+| 429 | Rate limit exceeded |
+| 503 | A dependency such as Redis or the worker is unavailable |
 
 ---
 
-### Documents
+## Rate limiting
 
-#### Upload Document
+Rate limiting applies to **API key** traffic only; session-token requests are not globally limited. A few endpoints enforce their own per-user limits regardless of credential type, such as chat preflight (600 requests per minute) and tool approval (20 per minute).
+
+Each API key gets a fixed window of `API_KEY_RATE_LIMIT_WINDOW_SECONDS` (default 3600 seconds, one hour) with a default budget by scope:
+
+| Scope | Default requests per window | Setting |
+|-------|-----------------------------|---------|
+| Tenant | 10 000 | `API_KEY_RATE_LIMIT_TENANT_DEFAULT` |
+| Space | 5 000 | `API_KEY_RATE_LIMIT_SPACE_DEFAULT` |
+| Assistant | 1 000 | `API_KEY_RATE_LIMIT_ASSISTANT_DEFAULT` |
+| App | 1 000 | `API_KEY_RATE_LIMIT_APP_DEFAULT` |
+
+A key's own `rate_limit` field overrides the default; `-1` disables the limit for that key (tenant administrators only, and not when the tenant policy sets `max_rate_limit_override`). See [API Key Management](/docs/api-key-management#tenant-policies).
+
+Rate-limit headers are sent **only on a `429` response**; successful responses carry none:
+
 ```http
-POST /api/spaces/{space_id}/knowledge/documents
-Content-Type: multipart/form-data
+HTTP/1.1 429 Too Many Requests
+Retry-After: 3600
+X-RateLimit-Limit: 5000
+X-RateLimit-Remaining: 0
 
-file: <binary file data>
+{"code": "rate_limit_exceeded", "message": "API key rate limit exceeded."}
 ```
 
-**Example with curl:**
-```bash
-curl -X POST "https://your-domain.com/api/spaces/space-123/knowledge/documents" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -F "file=@document.pdf"
-```
-
-**Response:**
-```json
-{
-  "id": "doc-456",
-  "filename": "document.pdf",
-  "size": 1048576,
-  "status": "processing",
-  "created_at": "2025-09-30T10:32:00Z"
-}
-```
-
-#### List Documents
-```http
-GET /api/spaces/{space_id}/knowledge/documents
-```
-
-**Response:**
-```json
-{
-  "items": [
-    {
-      "id": "doc-456",
-      "filename": "document.pdf",
-      "size": 1048576,
-      "status": "completed",
-      "chunks_count": 45,
-      "created_at": "2025-09-30T10:32:00Z"
-    }
-  ]
-}
-```
-
-#### Get Document Details
-```http
-GET /api/spaces/{space_id}/knowledge/documents/{document_id}
-```
-
-#### Delete Document
-```http
-DELETE /api/spaces/{space_id}/knowledge/documents/{document_id}
-```
+If Redis is unavailable the backend fails closed with `503` and `code: "rate_limit_unavailable"`, unless the operator has enabled `API_KEY_RATE_LIMIT_FAIL_OPEN`.
 
 ---
 
-### Web Crawling
+## Related pages
 
-#### Start Web Crawl
-```http
-POST /api/spaces/{space_id}/knowledge/web
-Content-Type: application/json
-
-{
-  "url": "https://example.com/docs",
-  "max_depth": 2,
-  "max_pages": 50,
-  "follow_links": true
-}
-```
-
-**Response:**
-```json
-{
-  "id": "crawl-789",
-  "url": "https://example.com/docs",
-  "status": "started",
-  "pages_crawled": 0,
-  "created_at": "2025-09-30T10:35:00Z"
-}
-```
-
-#### Get Crawl Status
-```http
-GET /api/spaces/{space_id}/knowledge/web/{crawl_id}
-```
-
-**Response:**
-```json
-{
-  "id": "crawl-789",
-  "url": "https://example.com/docs",
-  "status": "processing",
-  "pages_crawled": 23,
-  "pages_total": 50,
-  "progress": 46
-}
-```
-
----
-
-## SDK Examples
-
-### Python
-
-```python
-import requests
-
-class EneoClient:
-    def __init__(self, base_url: str, api_key: str):
-        self.base_url = base_url
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-
-    def list_spaces(self):
-        response = requests.get(
-            f"{self.base_url}/api/spaces",
-            headers=self.headers
-        )
-        return response.json()
-
-    def send_message(self, conversation_id: str, content: str):
-        response = requests.post(
-            f"{self.base_url}/api/conversations/{conversation_id}/messages",
-            headers=self.headers,
-            json={"content": content, "stream": False}
-        )
-        return response.json()
-
-# Usage
-client = EneoClient("https://your-domain.com", "your-api-key")
-spaces = client.list_spaces()
-print(spaces)
-```
-
-### JavaScript/TypeScript
-
-```typescript
-class EneoClient {
-  constructor(
-    private baseUrl: string,
-    private apiKey: string
-  ) {}
-
-  async listSpaces() {
-    const response = await fetch(`${this.baseUrl}/api/spaces`, {
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`
-      }
-    });
-    return response.json();
-  }
-
-  async sendMessage(conversationId: string, content: string) {
-    const response = await fetch(
-      `${this.baseUrl}/api/conversations/${conversationId}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ content, stream: false })
-      }
-    );
-    return response.json();
-  }
-
-  // Streaming example
-  async *streamMessage(conversationId: string, content: string) {
-    const response = await fetch(
-      `${this.baseUrl}/api/conversations/${conversationId}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ content, stream: true })
-      }
-    );
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = JSON.parse(line.slice(6));
-          if (data.type === 'content') {
-            yield data.delta;
-          }
-        }
-      }
-    }
-  }
-}
-
-// Usage
-const client = new EneoClient('https://your-domain.com', 'your-api-key');
-
-// Non-streaming
-const message = await client.sendMessage('conv-123', 'Hello!');
-console.log(message);
-
-// Streaming
-for await (const chunk of client.streamMessage('conv-123', 'Hello!')) {
-  process.stdout.write(chunk);
-}
-```
-
----
-
-## Rate Limits
-
-Default rate limits:
-- **Authenticated requests**: 60 requests per minute
-- **Document uploads**: 10 per minute
-- **AI requests**: 20 per minute
-
-Rate limit headers:
-```http
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 45
-X-RateLimit-Reset: 1727695200
-```
-
----
-
-## Error Handling
-
-### Error Response Format
-
-```json
-{
-  "detail": "Error message",
-  "error_code": "VALIDATION_ERROR",
-  "errors": [
-    {
-      "field": "email",
-      "message": "Invalid email format"
-    }
-  ]
-}
-```
-
-### HTTP Status Codes
-
-| Code | Meaning |
-|------|---------|
-| 200 | Success |
-| 201 | Created |
-| 204 | No Content |
-| 400 | Bad Request |
-| 401 | Unauthorized |
-| 403 | Forbidden |
-| 404 | Not Found |
-| 422 | Validation Error |
-| 429 | Rate Limit Exceeded |
-| 500 | Internal Server Error |
-
----
-
-## Additional Resources
-
-- **OpenAPI Spec**: Download from [/api/openapi.json](https://your-domain.com/api/openapi.json)
-- **Interactive Docs**: [https://your-domain.com/api/docs](https://your-domain.com/api/docs)
-- **Code Examples**: [GitHub examples folder](https://github.com/eneo-ai/eneo/tree/main/examples)
-- **Report API Issues**: [GitHub Issues](https://github.com/eneo-ai/eneo/issues)
-
----
-
-## Need Help?
-
-- Browse the [interactive API documentation](https://your-domain.com/api/docs)
-- Check [GitHub examples](https://github.com/eneo-ai/eneo/tree/main/examples)
-- Ask on [GitHub Discussions](https://github.com/eneo-ai/eneo/discussions)
-- Email: digitalisering@sundsvall.se (public sector organizations)
+- [API Key Management](/docs/api-key-management) for key types, scopes, permissions, guardrails, and lifecycle
+- [Authentication Architecture](/docs/authentication-architecture) for the session and federation model
+- [SCIM Provisioning](/guides/scim-provisioning) for the separate `/scim/v2` endpoint
+- [GitHub Issues](https://github.com/eneo-ai/eneo/issues) and [Discussions](https://github.com/eneo-ai/eneo/discussions) for questions and bug reports

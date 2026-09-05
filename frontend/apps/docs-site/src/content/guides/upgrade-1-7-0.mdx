@@ -179,8 +179,17 @@ docker exec eneo_db psql -U postgres -d eneo -c \
 
 **4. Worker healthy**
 
+The backend port is not published on the host in the reference stack, so query the health endpoint through your public domain:
+
 ```bash
-curl -s http://localhost:8000/api/healthz | python3 -m json.tool
+curl -s https://your-domain.com/api/healthz | python3 -m json.tool
+```
+
+Or run the check inside the backend container, where `localhost:8000` is the API:
+
+```bash
+docker compose exec backend python -c \
+  "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/api/healthz').read().decode())"
 ```
 
 ---

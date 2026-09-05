@@ -355,7 +355,7 @@ governance, per-message, and enabled-state filters.
 | User identity | Encoded in Eneo's scoped token | Optional `X-Eneo-*` forwarding, off by default |
 | Availability | Derived automatically from the current assistant, model, and files | Selected through admin, space, assistant/governance, and conversation controls |
 | Per-call user approval | Always auto-approved because tools are read-only core capabilities | Controlled by the conversation's tool-approval setting |
-| MCP protocol state | Stateless | Stateless or resumed per conversation and server |
+| MCP protocol state | Stateless | Stateless (fresh connection per completion) |
 | Circuit-breaker persistence | Throwaway server IDs mean failures remain request-local | Failures accumulate against the persistent server ID until cooldown |
 
 ### Naming and collision handling
@@ -521,6 +521,13 @@ rather than the public origin.
 The loopback endpoints require their scoped bearer tokens, but operators should
 still avoid exposing internal routes unnecessarily. Network isolation is an
 additional boundary, not a replacement for application authentication.
+
+Both retrieval paths run the same pgvector query: chunks in scope are ordered by
+cosine distance to the query embedding. The embedding column has no
+approximate-nearest-neighbour index (it is declared without a fixed dimension,
+so one cannot be created), and the repository disables sequential scans for the
+query to keep PostgreSQL on the scope indexes. Retrieval latency therefore
+grows with the size of the searched corpus rather than staying flat.
 
 ## Observability
 

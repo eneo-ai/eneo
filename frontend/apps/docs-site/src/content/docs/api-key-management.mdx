@@ -35,8 +35,8 @@ User keys are bound to a specific user via `owner_user_id`. On every request, th
 
 1. Looks up the owner in the database
 2. Verifies the owner account is **active** (not deactivated or deleted)
-3. For tenant-scoped admin keys: verifies the owner still has **admin** permissions
-4. For space/assistant/app-scoped keys: verifies the owner is still a **member** of the target space
+3. For tenant-scoped keys, whatever their permission level: verifies the owner still has the tenant **admin** permission (`403 owner_permission_revoked` otherwise)
+4. For space/assistant/app-scoped keys: verifies the owner is still a **member** of the target space (`403 owner_membership_revoked` otherwise)
 
 If any of these checks fail, the request is denied. This means user keys inherit the lifecycle of their owner: if a user is deactivated, suspended, or removed from a space, all their keys stop working.
 
@@ -91,9 +91,18 @@ The plain key is extracted from the header and hashed. The system supports two h
 - **HMAC-SHA256** (current standard) using a server-side secret
 - **SHA256** (legacy) as a fallback
 
-The key hash is looked up against the `api_keys_v2` table using the `idx_api_keys_v2_key_hash` index. Existing v2 keys found via the legacy SHA256 hash are upgraded to HMAC-SHA256 on use. Keys that were migrated from the retired v1 system keep their original `inp_`/`ina_` prefixes and resolve like any other v2 key.
+The key hash is looked up against the `api_keys_v2` table using the `idx_api_keys_v2_key_hash` index. Existing v2 keys found via the legacy SHA256 hash are upgraded to HMAC-SHA256 on use. Keys that were migrated from the retired v1 system keep their original `inp_`/`ina_` prefixes and resolve like any other v2 key. A key that does not resolve returns `401` with `code: "invalid_api_key"`.
 
-### 2. State Validation
+### 2. Ownership Resolution
+
+Based on the `ownership` field:
+
+- **User keys**: The owner is fetched from the database. The system verifies the owner exists and belongs to the key's tenant (`401 invalid_api_key` otherwise), is active (`403 owner_inactive`), and still has the required permissions for the key's scope (`403 owner_permission_revoked` or `403 owner_membership_revoked`).
+- **Service keys**: A synthetic user is constructed. No database user lookup occurs.
+
+Ownership is resolved before the key's own state is checked, so an expired key whose owner has been deactivated returns `403 owner_inactive` rather than `401`.
+
+### 3. State Validation
 
 The key's effective state is computed with the following priority:
 
@@ -105,19 +114,12 @@ suspended_at is set  → SUSPENDED (temporary)
 otherwise            → ACTIVE
 ```
 
-Only `ACTIVE` keys proceed. Revoked, expired, rotation-grace-expired, and suspended keys return `401` during API-key authentication.
-
-### 3. Ownership Resolution
-
-Based on the `ownership` field:
-
-- **User keys**: The owner is fetched from the database. The system verifies the owner is active, belongs to the correct tenant, and still has the required permissions for the key's scope.
-- **Service keys**: A synthetic user is constructed. No database user lookup occurs.
+Only `ACTIVE` keys proceed. Revoked, expired, rotation-grace-expired, and suspended keys return `401` with `code: "invalid_api_key"` during API-key authentication.
 
 ### 4. Guardrail Checks
 
 - **IP validation** (`sk_` keys): If `allowed_ips` is configured, the client IP must match at least one CIDR block
-- **Origin validation** (`pk_` keys): The request must include an `Origin` header. For new keys, the origin must match one of the key's configured `allowed_origins`.
+- **Origin validation** (`pk_` keys): The request must include an `Origin` header, and the origin must match one of the key's configured `allowed_origins`. A `pk_` key with no origins configured is rejected. Failures return `403` with `code: "origin_not_allowed"`.
 
 ### 5. Rate Limiting
 
@@ -130,7 +132,7 @@ Redis-based rate limiting with scope-aware defaults:
 | Assistant | 1,000 req/hour |
 | App | 1,000 req/hour |
 
-Per-key overrides are possible via the `rate_limit` field. The tenant policy `max_rate_limit_override` acts as an absolute ceiling.
+The window length is set by `API_KEY_RATE_LIMIT_WINDOW_SECONDS` (default 3600) and the per-scope defaults by the matching `API_KEY_RATE_LIMIT_*_DEFAULT` settings. Per-key overrides are possible via the `rate_limit` field: a positive integer replaces the default, and `-1` removes the limit for that key. Only tenant administrators may set `-1`, and it is rejected whenever the tenant policy `max_rate_limit_override` is set, because that policy acts as an absolute ceiling. When the limit is hit the request fails with `429` and `code: "rate_limit_exceeded"`; `Retry-After`, `X-RateLimit-Limit`, and `X-RateLimit-Remaining` headers are sent only on that response. Session-token requests are not rate limited by this mechanism. See the [API Reference](/docs/api#rate-limiting) for the full contract.
 
 ### 6. Permission Enforcement
 
@@ -215,7 +217,7 @@ Scope enforcement distinguishes between **list endpoints** (no resource ID in UR
 
 ### Creation
 
-Keys are created via `POST /api/v1/api-keys`. The policy service validates:
+Keys are created via `POST /api/v1/api-keys` (request fields: `name`, `description`, `key_type`, `permission`, `scope_type`, `scope_id`, `ownership`, `allowed_origins`, `allowed_ips`, `expires_at`, `rate_limit`, `resource_permissions`), or from the web app under **Account → API keys** and, for tenant administrators, **Admin → API keys**. Creation requires a session login and the `api_keys` role permission. `GET /api/v1/api-keys/policy-constraints` returns the tenant limits a client should respect before submitting (expiration rules, rate-limit ceiling, rotation grace). The policy service validates:
 
 - Scope and permission compatibility
 - Service key guardrails (admin-only creation, IP/expiry for write/admin permission)
@@ -236,7 +238,7 @@ Rotation creates a new key while keeping the old one temporarily valid:
 3. Both keys work during the grace period
 4. After the grace period, the old key stops working
 
-This enables zero-downtime key rotation for integrations.
+This enables zero-downtime key rotation for integrations. `POST /api/v1/api-keys/{id}/rotate` accepts `disable_grace_period` (revoke the old key immediately) and `update_expiration` together with `expires_at` (give the new key a different expiry).
 
 ### Suspension
 
@@ -263,6 +265,16 @@ Keys with an `expires_at` timestamp are checked at runtime:
 - State is computed dynamically: if `now > expires_at`, the key is `EXPIRED`
 - Expired keys cannot be reactivated
 - Tenant policy can require expiration on all keys (`require_expiration`) and cap the maximum duration (`max_expiration_days`)
+- `POST /api/v1/api-keys/{id}/extend` changes the expiration of an active key; passing `expires_at: null` removes it where the tenant policy allows
+- `GET /api/v1/api-keys/expiring-soon?days=30` summarises keys that expire within the look-ahead window (1 to 365 days)
+
+### Purge
+
+Revoked and expired keys stay listed until they are purged. `POST /api/v1/api-keys/{id}/purge` permanently deletes such a key while preserving its audit history; active or suspended keys cannot be purged, revoke them first.
+
+### Usage
+
+`GET /api/v1/api-keys/{id}/usage` returns the usage and authentication-failure audit events for a key you manage, cursor-paginated with `limit` (1 to 200) and `cursor`.
 
 ### State Priority
 
@@ -286,7 +298,7 @@ Tenant administrators can configure API key policies that apply to all keys in t
 | `revocation_cascade_enabled` | false | Reserved for delegated-key cascade support |
 | `require_expiration` | false | All new keys must have an expiry date |
 | `max_expiration_days` | null | Maximum days until expiry (null = unlimited) |
-| `auto_expire_unused_days` | null | Auto-revoke after N days of inactivity |
+| `auto_expire_unused_days` | null | Mark keys unused for N days as `EXPIRED` (audited as `API_KEY_EXPIRED`) |
 | `max_rate_limit_override` | null | Absolute ceiling on per-key rate limits |
 | `rotation_grace_hours` | 24 | Grace period for old keys during rotation |
 
@@ -325,7 +337,7 @@ Scope limits where the key can operate:
 - `assistant` keys are limited to one assistant and its conversations
 - `app` keys are limited to one app and its runs
 
-Tenant-scoped admin user keys require the owner to remain a tenant administrator. Tenant-scoped read/write user keys inherit the owner's live role permissions through endpoint-level guards. Space-, assistant-, and app-scoped user keys require the owner to remain a member of the target space.
+Tenant-scoped user keys require the owner to remain a tenant administrator, whatever the key's own permission level. Endpoint-level guards additionally apply the owner's live role permissions. Space-, assistant-, and app-scoped user keys require the owner to remain a member of the target space.
 
 ### Why does deletion fail even with admin permission?
 
@@ -370,7 +382,7 @@ The legacy v1 key system is retired. Keys that were used while the compatibility
 - Migrated user keys are tenant-scoped `sk_`-type keys tied to the original owner (`admin` if the owner had tenant admin permission at migration, otherwise `write`).
 - Migrated assistant keys are assistant-scoped `sk_`-type keys with read permission.
 
-Migrated keys have the full v2 lifecycle, audit, scope, and policy machinery, and appear in the API key management UI as "Legacy API key". v1 keys that were never used after the v2 system launched were never migrated and no longer authenticate — mint a new key via `/api/v1/api-keys` to replace them.
+Migrated keys have the full v2 lifecycle, audit, scope, and policy machinery, and appear in the API key management UI like any other key. v1 keys that were never used after the v2 system launched were never migrated and no longer authenticate — mint a new key via `/api/v1/api-keys` to replace them.
 
 We still recommend replacing migrated keys with purpose-made v2 keys: create a new key with the narrowest practical scope and permission, deploy it, confirm traffic and audit logs show the new key being used, then revoke the migrated key. For production automations owned by a team rather than a person, prefer a service `sk_` key with an IP allowlist or expiration date.
 

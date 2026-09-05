@@ -6,19 +6,22 @@ matters.
 
 ## Start here
 
-| If you need to…                   | Start with                                                       |
-| --------------------------------- | ---------------------------------------------------------------- |
-| Deploy Eneo                       | [Deploy Eneo](/guides/deployment)                                |
-| Upgrade legacy File/Icon storage  | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade) |
-| Choose where durable bytes live   | [Choose Content Storage](/guides/object-content-storage)         |
-| Configure login and access        | [Authentication & OIDC](/guides/authentication)                  |
-| Connect an AI provider            | [AI Provider Configuration](/guides/ai-providers)                |
-| Add documents to a knowledge base | [Document Processing](/guides/document-processing)               |
-| Connect SharePoint or OneDrive    | [SharePoint Integration](/guides/sharepoint-integration)         |
+| If you need to…                          | Start with                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| Deploy Eneo                              | [Deploy Eneo](/guides/deployment)                                      |
+| Upgrade to 1.7.0 (tenant models)         | [Upgrading to 1.7.0](/guides/upgrade-1-7-0)                            |
+| Upgrade legacy File/Icon storage         | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)       |
+| Choose where durable bytes live          | [Choose Content Storage](/guides/object-content-storage)               |
+| Configure login and access               | [Authentication & OIDC](/guides/oidc-federation)                        |
+| Give each tenant its own IdP             | [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant)   |
+| Provision users and groups from your IdP | [SCIM Provisioning](/guides/scim-provisioning)                         |
+| Connect an AI provider                   | [AI Provider Configuration](/guides/ai-providers)                      |
+| Add documents to a knowledge base        | [Document Processing](/guides/document-processing)                     |
+| Connect SharePoint or OneDrive           | [SharePoint Integration](/guides/sharepoint-integration)               |
 
 ## All guides
 
-### [Authentication & OIDC](/guides/authentication)
+### [Authentication & OIDC](/guides/oidc-federation)
 
 Learn how to configure single sign-on using OpenID Connect (OIDC) with various identity providers:
 
@@ -26,6 +29,22 @@ Learn how to configure single sign-on using OpenID Connect (OIDC) with various i
 - Keycloak
 - Auth0
 - Other OIDC-compliant providers
+
+### OIDC Federation
+
+Manage identity providers through the federation API instead of environment variables:
+
+- [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) — each tenant authenticates against its own IdP; covers prerequisites, DNS, IdP registration, tenant configuration via API, tenant resolution, and troubleshooting
+- [Single-Tenant Federation](/guides/oidc-federation/single-tenant) — one IdP for all users, managed through the federation API
+
+### [SCIM Provisioning](/guides/scim-provisioning)
+
+Automate user and group provisioning from your identity provider with SCIM 2.0:
+
+- Generate, check, and revoke a tenant SCIM token
+- Configure Azure Entra ID provisioning and attribute mappings
+- Verify the integration and the email claim OIDC sign-in depends on
+- Understand provisioning scope, deprovisioning, and multi-tenant behavior
 
 ### [Audit Logging](/guides/audit-logging)
 
@@ -45,13 +64,12 @@ Build focused, versioned instruction capabilities:
 
 ### [AI Provider Configuration](/guides/ai-providers)
 
-Connect Eneo to different AI providers and configure them for your organization:
+Connect Eneo to AI providers and configure them per tenant:
 
-- OpenAI (GPT-4, GPT-3.5)
-- Anthropic (Claude)
-- Azure OpenAI Service
-- Google Gemini
-- Local models (Ollama, LM Studio)
+- Add providers and models through the Admin → Models wizard (OpenAI, Anthropic, Azure OpenAI, Google Gemini, Mistral and other LiteLLM-supported providers)
+- Self-hosted models via any OpenAI-compatible endpoint (for example vLLM)
+- Credential management, encryption, and shared vs. strict mode
+- Cost management and budget alerts
 
 ### [MCP Servers](/guides/mcp-servers)
 
@@ -66,11 +84,20 @@ Connect assistants to external tools while keeping discovery and execution under
 
 Deploy Eneo in production environments:
 
-- Docker Compose setup
-- Kubernetes deployment
-- Reverse proxy configuration (Traefik, Nginx)
-- SSL/TLS certificates with Let's Encrypt
-- Environment configuration best practices
+- Docker Compose reference stack with Traefik and Let's Encrypt
+- Required secrets and environment configuration
+- Network isolation between proxy, data, and module tiers
+- Using nginx instead of Traefik
+- Object content storage options
+
+### [Upgrading to 1.7.0](/guides/upgrade-1-7-0)
+
+Run the tenant-specific AI models migration safely:
+
+- What changes and which tables are affected
+- Backups, dependency chain, and `ENCRYPTION_KEY` prerequisites
+- Upgrade procedure, impact on running jobs, and credential handling
+- Verification, rollback, and troubleshooting
 
 ### [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)
 
@@ -95,21 +122,19 @@ Choose and operate Eneo's durable byte backend:
 
 Upload and process documents for AI-powered knowledge bases:
 
-- Supported file formats (PDF, Word, Excel, PowerPoint)
-- Web crawling and content extraction
-- Chunking strategies for optimal retrieval
-- Vector search configuration
-- Performance optimization
+- Supported file formats (PDF, Word, Excel, PowerPoint) and size limits
+- Web crawling configuration and authenticated sites
+- How extraction, chunking, embedding, and retrieval work
+- Optimizing retrieval with chunk size and embedding model choices
 
 ### [SharePoint Integration](/guides/sharepoint-integration)
 
-Connect Eneo to Microsoft SharePoint and OneDrive for seamless document import:
+Connect Eneo to Microsoft SharePoint and OneDrive for document import:
 
-- Azure AD application registration
+- Backend configuration and webhook secret
+- Microsoft Entra ID application registration and permissions
 - Service account vs. tenant app authentication
-- Webhook configuration for real-time sync
-- Personal spaces OAuth flow
-- Troubleshooting and maintenance
+- Configuring and verifying the integration in Eneo
 
 ## Need more help?
 

@@ -8,16 +8,16 @@
 
 ## When to Use This Guide
 
-This guide applies when `FEDERATION_PER_TENANT_ENABLED=true`. Use this mode if:
+This guide applies when `FEDERATION_ENABLED=true` (`FEDERATION_PER_TENANT_ENABLED` is a deprecated alias). Use this mode if:
 - **Multi-tenant:** Each tenant needs their own IdP (Entra ID, Okta, Auth0, etc.)
 - **Single-tenant with API management:** You want to manage OIDC via API instead of environment variables (changes take effect without restart)
 
-**Not using federation?** For simple single-tenant deployments, keep `FEDERATION_PER_TENANT_ENABLED=false` and configure OIDC via environment variables (`OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`). See the [deployment templates](./deployment/env_backend.template).
+**Not using federation?** For simple single-tenant deployments, keep `FEDERATION_ENABLED=false` and configure OIDC via environment variables (`OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`). See the [deployment templates](./deployment/env_backend.template).
 
 ---
 
 ## 1. Before You Start
-- `FEDERATION_PER_TENANT_ENABLED=true` in backend `.env`
+- `FEDERATION_ENABLED=true` in backend `.env`
 - Super admin API key available (needed for every `/api/v1/sysadmin/...` call)
 - Redis running (recommended for the debug toggle; file fallback works)
 - Each tenant has a slug (`tenant.slug`). Backfill once with:
@@ -50,7 +50,7 @@ Terminology
    ```
 
 2. **Register redirect URI with the IdP** (must match `canonical_public_origin`):  
-   `https://examplea.eneo.local/auth/callback`
+   `https://examplea.eneo.local/login/callback`
 
 3. **Smoke test** the configuration (dry run; no user interaction):
    ```bash

@@ -38,13 +38,15 @@ Before configuring the integration in the Eneo UI, ensure the following environm
 SHAREPOINT_WEBHOOK_CLIENT_STATE=your-random-secret-min-32-characters
 ```
 
-Optionally, if Eneo cannot auto-detect its public URL (e.g., behind a reverse proxy), you may also need:
+Eneo also needs to know the public URL that Microsoft should send webhook notifications to. If `PUBLIC_ORIGIN` is set, Eneo derives it as `<PUBLIC_ORIGIN>/api/v1/integrations/sharepoint/webhook/`. If your public URL differs from that (for example behind a reverse proxy that rewrites paths), set it explicitly:
 
 ```bash
 # Optional: Explicit webhook callback URL
-# Only needed if auto-detection fails
+# Takes precedence over the URL derived from PUBLIC_ORIGIN
 SHAREPOINT_WEBHOOK_NOTIFICATION_URL=https://your-eneo-domain.com/api/v1/integrations/sharepoint/webhook/
 ```
+
+If neither variable is set, imports still work but no webhook subscriptions are created, so changes in SharePoint are not synchronized.
 
 You can also tune the maximum file size that Eneo downloads from SharePoint/OneDrive:
 
@@ -197,7 +199,7 @@ Fill in the form with the credentials from Microsoft Entra ID:
 
 ### Verify
 
-When the configuration is saved, the status displays as "Configured" on the integrations page. Users can now start importing from SharePoint in their shared spaces.
+When the configuration is saved, the status displays as "Organization Configured" on the integrations page. Users can now start importing from SharePoint in their shared spaces.
 
 ---
 
@@ -236,7 +238,7 @@ Because the import uses centralized credentials, the imported knowledge is not t
 
 This is the key difference from personal spaces, where the import is tied to the user's own OAuth token.
 
-> **Important:** This guarantee depends on the service account or tenant app being configured and active. If you import into a shared space before centralized authentication is configured — or after the tenant app is deactivated — Eneo falls back to the importing administrator's personal OAuth token, which re-introduces person-dependency. Always complete the integration setup before importing into shared spaces.
+> **Important:** This guarantee depends on the service account or tenant app being configured and active. Shared and organization spaces only ever offer the centralized integration: until centralized authentication is configured, SharePoint is simply not listed as an available knowledge source in those spaces, and it is not offered to non-administrators. Eneo never falls back to an administrator's personal OAuth token there. Complete the integration setup before expecting SharePoint imports in shared spaces.
 
 ### Importing in Personal Spaces
 
@@ -336,7 +338,7 @@ If your Eneo installation is behind an API gateway (such as WSO2, Kong, or nginx
 - `GET /api/v1/integrations/sharepoint/webhook/` - Subscription validation
 - `POST /api/v1/integrations/sharepoint/webhook/` - Change notifications
 
-> **Note:** The `/api/v1` prefix comes from the `API_PREFIX` setting (default `/api/v1`); the paths above are exactly what Eneo registers with Microsoft Graph. If your gateway rewrites or strips path prefixes, allowlist the path it actually forwards to Eneo.
+> **Note:** The `/api/v1/integrations/sharepoint/webhook/` path is fixed in Eneo's webhook registration and does not follow the `API_PREFIX` setting; it is exactly what Eneo registers with Microsoft Graph (or the value of `SHAREPOINT_WEBHOOK_NOTIFICATION_URL` when set). If your gateway rewrites or strips path prefixes, allowlist the path it actually forwards to Eneo.
 
 Microsoft cannot provide API keys or bearer tokens with webhook requests. Security is instead maintained via the `clientState` parameter, which is configured through the `SHAREPOINT_WEBHOOK_CLIENT_STATE` environment variable. Eneo validates that all incoming notifications contain this secret before processing them.
 

@@ -149,7 +149,7 @@ with the `modules` permission. No separate module-management environment key is
 required.
 
 Administrators with the Storage permission set upload limits and choose storage
-for eligible new File and Icon writes in **Admin > Storage**. Changes take effect
+for eligible new File and Icon writes in **Admin > File storage**. Changes take effect
 without restarting the backend or worker. Operators keep
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL, backup, and process
 safety ceiling; it is not the upload policy.
@@ -173,7 +173,7 @@ Then restart the backend.
 ### File Upload Errors (Large PDFs)
 
 Ask an administrator with the Storage permission to review the configured and
-effective limits in **Admin > Storage**. For PostgreSQL-inline session uploads,
+effective limits in **Admin > File storage**. For PostgreSQL-inline session uploads,
 the effective limit is the smaller of the admin policy and the operator's
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
 the effective limit is the smaller of the admin policy and the configured
