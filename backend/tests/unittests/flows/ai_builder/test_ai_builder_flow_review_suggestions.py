@@ -291,6 +291,26 @@ def test_a_drift_claim_is_one_step_in_one_run_with_its_instruction_and_complete_
     # the source cap.
     two_steps = {**well_formed, "step_orders": [1, 2]}
     assert problems(two_steps) == ["suggestion_1:drift_claim_names_several_steps"]
+    # An instruction from one run and an output from another is not a pair:
+    # the one-run rule is what stops the index below from combining them.
+    two_runs = sample.model_copy(
+        update={
+            "excerpts": [
+                *sample.excerpts,
+                sample.excerpts[2].model_copy(update={"run_id": sample.runs[1].run_id}),
+            ]
+        }
+    )
+    split_across_runs = {
+        **well_formed,
+        "sources": [
+            {"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"},
+            {"source_id": "run2.step2.output", "quote": "Tre punkter"},
+        ],
+    }
+    assert list(
+        parse_review_suggestions(_answer(split_across_runs), sample=two_runs).problems
+    ) == ["suggestion_1:drift_claim_cites_several_runs"]
     instruction_only = {**well_formed, "sources": well_formed["sources"][:1]}
     assert problems(instruction_only) == [
         "suggestion_1:drift_claim_without_output_source"

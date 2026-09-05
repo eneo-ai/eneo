@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
+import { getLocale, setLocale } from "$lib/paraglide/runtime";
 import type { AIBuilderFlowReviewPacket } from "./protocol";
 import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
 
@@ -243,17 +244,54 @@ describe("BuilderFindingsScreen suggestions", () => {
       onclose: vi.fn(),
       onretry: vi.fn()
     });
-    // What crosses to the model is named before the call: the recorded
-    // fields and the recipient, in either locale.
-    const hint = screen.getByText(m.ai_builder_review_suggestions_hint()).textContent ?? "";
-    expect(hint).toMatch(/instruktioner|instructions/i);
-    expect(hint).toMatch(/utdata|outputs/i);
-    expect(hint).toMatch(/planeringsmodell|planning model/i);
+    expect(screen.getByText(m.ai_builder_review_suggestions_hint())).toBeTruthy();
     await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_review_suggest() }));
     expect(onsuggest).toHaveBeenCalledTimes(1);
   });
 
-  it("shows suggestions with their sources and sends only kind and steps onward", async () => {
+  it.each(["sv", "en"] as const)(
+    "names what crosses each boundary before the call and beside the action (%s)",
+    async (locale) => {
+      // What is sent to the model before the call: the recorded fields and
+      // the recipient. What travels on investigate: reference metadata, never
+      // the reasoning or the quotes. Concepts, not sentences, in both locales.
+      const previous = getLocale();
+      try {
+        setLocale(locale, { reload: false });
+        const closed = render(BuilderFindingsScreen, {
+          review: { status: "ready", packet: makePacket() },
+          suggestions: { status: "closed" },
+          onprepare: vi.fn(),
+          onsuggest: vi.fn(),
+          onclose: vi.fn(),
+          onretry: vi.fn()
+        });
+        const hint = screen.getByTestId("review-suggestions").textContent ?? "";
+        expect(hint).toMatch(/instruktioner|instructions/i);
+        expect(hint).toMatch(/indata|inputs/i);
+        expect(hint).toMatch(/utdata|outputs/i);
+        expect(hint).toMatch(/planeringsmodell|planning model/i);
+        closed.unmount();
+
+        render(BuilderFindingsScreen, {
+          review: { status: "ready", packet: makePacket() },
+          suggestions: { status: "ready", suggestions: makeSuggestions() },
+          onprepare: vi.fn(),
+          onsuggest: vi.fn(),
+          onclose: vi.fn(),
+          onretry: vi.fn()
+        });
+        const note =
+          screen.getByText(m.ai_builder_review_suggestion_investigate_hint()).textContent ?? "";
+        expect(note).toMatch(/motivering|reasoning/i);
+        expect(note).toMatch(/citat|quotes/i);
+      } finally {
+        setLocale(previous, { reload: false });
+      }
+    }
+  );
+
+  it("shows suggestions with their quotes folded and sends reference metadata onward, never the reasoning or quotes", async () => {
     const onprepare = vi.fn();
     render(BuilderFindingsScreen, {
       review: { status: "ready", packet: makePacket() },
@@ -301,11 +339,6 @@ describe("BuilderFindingsScreen suggestions", () => {
       .find((label) => label.includes(coverage));
     expect(readingNote).toContain("GPT-test");
 
-    // The action boundary is stated next to the action: what travels, and
-    // that the reasoning and quotes do not.
-    const note =
-      screen.getByText(m.ai_builder_review_suggestion_investigate_hint()).textContent ?? "";
-    expect(note).toMatch(/citaten|quotes/i);
     await fireEvent.click(
       screen.getByRole("button", { name: m.ai_builder_review_suggestion_investigate() })
     );
