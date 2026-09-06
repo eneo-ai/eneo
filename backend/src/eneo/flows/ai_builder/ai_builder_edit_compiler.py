@@ -819,7 +819,9 @@ def _readable_field_value(
     if isinstance(value, dict):
         payload = cast(dict[str, Any], value)
         if field in ("input_contract", "output_contract"):
-            return ", ".join(schema_leaf_property_names(payload)) or None
+            # The short reading is the set of fields: a reordered schema is
+            # "ändrad" with the whole value behind the fold, not two long lists.
+            return ", ".join(sorted(schema_leaf_property_names(payload))) or None
         if field == "input_bindings":
             refs = source_ref_bindings(payload)
             if refs:

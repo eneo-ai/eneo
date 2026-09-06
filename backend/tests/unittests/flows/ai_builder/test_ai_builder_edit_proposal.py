@@ -1204,7 +1204,7 @@ async def test_output_contract_only_edit_names_the_fields() -> None:
     changes = result.compiled.content.edit.diff.step_changes
     assert changes[0].kind == "modified"
     assert [(c.field, c.previous, c.current) for c in changes[0].field_changes] == [
-        ("output_contract", "title, summary", "title, summary, author")
+        ("output_contract", "summary, title", "author, summary, title")
     ]
 
 
@@ -1298,7 +1298,7 @@ async def test_same_leaf_schema_change_shows_two_different_values() -> None:
     assert change.field == "output_contract"
     # The short reading is the leaf names, unchanged here; the complete value
     # travels beside it and is what shows the type.
-    assert change.previous == change.current == "title, summary"
+    assert change.previous == change.current == "summary, title"
     assert change.previous_detail is not None
     assert '"summary":{"type":"string"}' in change.previous_detail
     assert (
@@ -1403,8 +1403,8 @@ async def test_adding_a_leaf_and_changing_a_type_at_once_keeps_both_on_record() 
     assert result.compiled.content.edit is not None
     (change,) = result.compiled.content.edit.diff.step_changes[0].field_changes
     assert (change.previous, change.current) == (
-        "title, summary",
-        "title, summary, author",
+        "summary, title",
+        "author, summary, title",
     )
     assert change.current_detail is not None
     assert (
