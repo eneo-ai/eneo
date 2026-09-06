@@ -614,6 +614,7 @@
   }
 
   function cancelSavedFlowStepReplacement() {
+    showReplaceEditSessionDialog = false;
     pendingSavedFlowStepScope = null;
     pendingReviewReplacement = false;
   }
@@ -622,10 +623,14 @@
     const scope = pendingSavedFlowStepScope;
     const review = pendingReviewReplacement;
     if (scope === null && !review) return;
-    conversationRef?.resetComposerContext();
-    await service.startFreshSession("edit");
+    // Close the question before the replacement runs: the fresh session
+    // takes a moment, and a dialog left open across it re-reads its state
+    // and asks again, about a step that was never named.
+    showReplaceEditSessionDialog = false;
     pendingSavedFlowStepScope = null;
     pendingReviewReplacement = false;
+    conversationRef?.resetComposerContext();
+    await service.startFreshSession("edit");
     if (scope !== null) {
       await activateSavedFlowStep(scope);
     } else {

@@ -2632,6 +2632,12 @@ describe("FlowAIBuilder edit host contract", () => {
     expect(await screen.findByRole("heading", { name: m.ai_builder_review_title() })).toBeTruthy();
     expect(service().savedFlowStepScope).toBeNull();
     expect(posts).toBe(2);
+    // The question is answered once: it must not linger over the fresh
+    // session and ask again about a step nobody named.
+    await waitFor(() => expect(screen.queryByText(m.ai_builder_replace_edit_title())).toBeNull());
+    expect(
+      screen.queryByText(m.ai_builder_replace_edit_description({ stepName: m.flow_step_unnamed() }))
+    ).toBeNull();
   });
 
   it("waits for edit bootstrap before deciding whether a cold launch replaces an ongoing edit", async () => {
