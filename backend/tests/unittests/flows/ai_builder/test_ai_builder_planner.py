@@ -204,6 +204,7 @@ from eneo.flows.flow_resource_bindings import (
 from eneo.flows.input_binding_contract_rules import source_ref_bindings
 from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
+from tests.unittests.flows.ai_builder.conftest import SendLockReleaseSpy
 
 _DISCOVERY_STATUSES = {"understanding_request", "reading_sources"}
 
@@ -2732,6 +2733,7 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
 @pytest.mark.asyncio
 async def test_send_message_converts_dispatch_lease_lost_exception_to_events(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -2754,12 +2756,13 @@ async def test_send_message_converts_dispatch_lease_lost_exception_to_events(
 
     assert [event["event"] for event in events] == ["error", "done"]
     assert json.loads(events[0]["data"])["code"] == "session_send_lease_lost"
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio
 async def test_send_message_commits_planning_state_payload_too_large_error(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -2797,12 +2800,13 @@ async def test_send_message_commits_planning_state_payload_too_large_error(
         )
         == error
     )
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio
 async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_dispatch(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -2837,12 +2841,13 @@ async def test_send_message_emits_lease_lost_when_refresh_fails_during_server_di
 
     assert [event["event"] for event in events] == ["error", "done"]
     assert json.loads(events[0]["data"])["code"] == "session_send_lease_lost"
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio
 async def test_send_message_continues_to_proposal_after_confirmed_revision(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -2908,7 +2913,7 @@ async def test_send_message_continues_to_proposal_after_confirmed_revision(
     turn = cast(object, captured["turn"])
     assert getattr(turn, "base_planning_state_version") == 9
     planner.repo.complete_session_turn.assert_awaited_once()
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio
@@ -3091,6 +3096,7 @@ async def test_send_message_server_continuation_commits_the_exact_proposal_error
 @pytest.mark.asyncio
 async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -3149,12 +3155,13 @@ async def test_send_message_proposal_branch_ignores_in_process_lease_loss(
 
     assert [event["event"] for event in events] == ["text", "done"]
     assert events[0]["data"] == '{"text":"proposal result"}'
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio
 async def test_send_message_releases_pre_provider_dispatch_failure_for_safe_retry(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -3174,7 +3181,7 @@ async def test_send_message_releases_pre_provider_dispatch_failure_for_safe_retr
         await _collect_send_message_events(planner, session_id=session_id)
 
     planner.repo.mark_session_turn_processing.assert_not_awaited()
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio
@@ -3369,6 +3376,7 @@ async def test_send_message_requires_one_template_before_proposal_without_provid
 @pytest.mark.asyncio
 async def test_send_message_releases_lease_when_request_preparation_fails(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -3411,12 +3419,13 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
         async for _ in stream:
             pass
 
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio
 async def test_send_message_rejects_legacy_mcp_revision_before_provider_work(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     plan_id = uuid4()
@@ -3467,12 +3476,13 @@ async def test_send_message_rejects_legacy_mcp_revision_before_provider_work(
     planner.repo.accept_session_turn.assert_not_awaited()
     planner.repo.mark_session_turn_processing.assert_not_awaited()
     planner.repo.create_plan.assert_not_awaited()
-    planner.repo.release_session_send.assert_not_awaited()
+    send_lock_release.assert_not_released()
 
 
 @pytest.mark.asyncio
 async def test_send_message_releases_lease_when_stream_is_cancelled(
     monkeypatch: pytest.MonkeyPatch,
+    send_lock_release: SendLockReleaseSpy,
 ) -> None:
     planner = _make_planner()
     session_id = uuid4()
@@ -3545,7 +3555,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
     with pytest.raises(asyncio.CancelledError):
         await pending_event
 
-    planner.repo.release_session_send.assert_awaited_once()
+    send_lock_release.assert_released_once()
 
 
 @pytest.mark.asyncio

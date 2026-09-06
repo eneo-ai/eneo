@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
+import anyio
+
 from eneo.database.database import sessionmanager
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
@@ -28,6 +30,24 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+# How long the cleanup may spend clearing one row before it gives up. It is
+# this module's own safety bound, not operator policy: the send lease is how
+# long a lost turn stays unrecoverable, and it must not also decide how long a
+# stuck write may hold a request task and a pooled connection.
+_SEND_LOCK_RELEASE_TIMEOUT_SECONDS = 30.0
+
+
+@asynccontextmanager
+async def _lease_repository() -> AsyncGenerator[AIBuilderRepository]:
+    """Open a repository on a session of the lease's own.
+
+    The heartbeat and the release must not ride the request's connection: it
+    is cancelled and torn down the moment the client disconnects.
+    """
+
+    async with sessionmanager.session() as session:
+        yield AIBuilderRepository(session)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +107,7 @@ async def claim_ai_builder_send_turn(
         )
     )
     caught_error: Exception | None = None
+    released_state: BuilderTurnState | None = None
     try:
         yield ClaimedSessionSendTurn(
             turn=turn,
@@ -97,24 +118,34 @@ async def claim_ai_builder_send_turn(
         caught_error = error
     finally:
         lease_stop_event.set()
-        try:
-            await lease_task
-        except asyncio.CancelledError:
-            pass
-        except Exception as error:
-            logger.warning(
-                "AI Builder lease task exited with an unexpected error.",
-                exc_info=error,
+        # A client that reloads mid-stream cancels the response's scope, and
+        # every await here would then re-raise before it ran: the lock stayed
+        # for the whole lease and the user was told to wait 15 minutes. The
+        # cleanup is therefore shielded, and bounded, so a stuck write cannot
+        # hold the request task instead. The cancellation still propagates
+        # once the lock is released.
+        with anyio.move_on_after(
+            _SEND_LOCK_RELEASE_TIMEOUT_SECONDS,
+            shield=True,
+        ) as release_scope:
+            released_state = await _finalize_send_turn(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                lease=lease,
+                lease_task=lease_task,
+            )
+        if release_scope.cancelled_caught:
+            # Nothing further can be done here: the turn's own lease is
+            # what the next claim falls back to, and it projects the same
+            # terminal state once it runs out.
+            logger.error(
+                "AI Builder send lock release timed out; the lock is left to "
+                "its lease.",
                 extra={
                     "session_id": str(session_id),
                     "request_id": str(lease.request_id),
                 },
             )
-        released_state = await repo.release_session_send(
-            session_id=session_id,
-            tenant_id=tenant_id,
-            lease=lease,
-        )
     if caught_error is not None:
         if (
             released_state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
@@ -191,6 +222,34 @@ async def _maintain_send_lock_lease(
                 return
 
 
+async def _finalize_send_turn(
+    *,
+    session_id: UUID,
+    tenant_id: UUID,
+    lease: SessionSendLease,
+    lease_task: asyncio.Task[None],
+) -> BuilderTurnState | None:
+    try:
+        await lease_task
+    except asyncio.CancelledError:
+        pass
+    except Exception as error:
+        logger.warning(
+            "AI Builder lease task exited with an unexpected error.",
+            exc_info=error,
+            extra={
+                "session_id": str(session_id),
+                "request_id": str(lease.request_id),
+            },
+        )
+    async with _lease_repository() as repo:
+        return await repo.release_session_send(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            lease=lease,
+        )
+
+
 async def _refresh_session_send_lease(
     *,
     session_id: UUID,
@@ -198,8 +257,8 @@ async def _refresh_session_send_lease(
     lease: SessionSendLease,
     lock_lease_seconds: int,
 ) -> bool:
-    async with sessionmanager.session() as session:
-        return await AIBuilderRepository(session).refresh_session_send_lease(
+    async with _lease_repository() as repo:
+        return await repo.refresh_session_send_lease(
             session_id=session_id,
             tenant_id=tenant_id,
             lease=lease,

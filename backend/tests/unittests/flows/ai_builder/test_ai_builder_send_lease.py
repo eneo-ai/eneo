@@ -3,15 +3,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncGenerator
+from time import monotonic
 from types import SimpleNamespace
 from typing import cast
 from uuid import UUID, uuid4
 
+import anyio
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.flows.ai_builder import ai_builder_send_lease
 from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderTurnState,
     ConversationMessage,
     SessionStatus,
 )
@@ -98,7 +101,11 @@ class _FakeSendLeaseRepo:
         tenant_id: UUID,
         lease: SessionSendLease,
     ) -> None:
-        self.events.append("release")
+        # The request session is gone once the response scope is cancelled, so
+        # nothing may release through it. The checkpoint stands for the round
+        # trip a real release makes: a cancelled scope re-raises there.
+        await asyncio.sleep(0)
+        self.events.append("request-release")
         self.released_lease = lease
         assert session_id
         assert tenant_id
@@ -107,6 +114,9 @@ class _FakeSendLeaseRepo:
 class _FakeHeartbeatRepo:
     def __init__(self, request_repo: _FakeSendLeaseRepo) -> None:
         self.request_repo = request_repo
+        self.released_lease: SessionSendLease | None = None
+        self.released_state: BuilderTurnState | None = None
+        self.release_never_returns = False
 
     async def refresh_session_send_lease(
         self,
@@ -126,6 +136,51 @@ class _FakeHeartbeatRepo:
         assert lease == request_repo.claimed_lease
         assert lock_lease_seconds >= 30
         return request_repo.refresh_result
+
+    async def release_session_send(
+        self,
+        *,
+        session_id: UUID,
+        tenant_id: UUID,
+        lease: SessionSendLease,
+    ) -> BuilderTurnState | None:
+        await asyncio.sleep(0)
+        if self.release_never_returns:
+            await asyncio.Event().wait()
+        self.request_repo.events.append("release")
+        self.released_lease = lease
+        assert session_id
+        assert tenant_id
+        return self.released_state
+
+
+def _install_independent_session(
+    monkeypatch: pytest.MonkeyPatch,
+    request_repo: _FakeSendLeaseRepo,
+    heartbeat_repo: _FakeHeartbeatRepo,
+) -> None:
+    """Patch the heartbeat/release session scope the lease opens for itself."""
+
+    independent_session = cast(AsyncSession, object())
+
+    @contextlib.asynccontextmanager
+    async def session_scope() -> AsyncGenerator[AsyncSession, None]:
+        request_repo.events.append("heartbeat-session-open")
+        try:
+            yield independent_session
+        finally:
+            request_repo.events.append("heartbeat-session-close")
+
+    monkeypatch.setattr(
+        ai_builder_send_lease.sessionmanager,
+        "session",
+        session_scope,
+    )
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "AIBuilderRepository",
+        lambda session: heartbeat_repo if session is independent_session else None,
+    )
 
 
 def _force_fast_send_lock_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,7 +202,6 @@ async def test_unknown_outcome_wrap_logs_the_causing_error(
     record anywhere of what actually broke (81 in one dev space).
     """
 
-    from eneo.flows.ai_builder.ai_builder_domain_models import BuilderTurnState
     from eneo.flows.ai_builder.ai_builder_error_contract import (
         AIBuilderProviderOutcomeUnknownException,
     )
@@ -156,27 +210,9 @@ async def test_unknown_outcome_wrap_logs_the_causing_error(
     request_repo.refresh_result = True
     request_repo.finish_refresh.set()
     _force_fast_send_lock_refresh(monkeypatch)
-
-    async def release_unknown(**kwargs: object) -> BuilderTurnState:
-        request_repo.events.append("release")
-        return BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
-
-    monkeypatch.setattr(request_repo, "release_session_send", release_unknown)
-
-    @contextlib.asynccontextmanager
-    async def heartbeat_session_scope() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, object())
-
-    monkeypatch.setattr(
-        ai_builder_send_lease.sessionmanager,
-        "session",
-        heartbeat_session_scope,
-    )
-    monkeypatch.setattr(
-        ai_builder_send_lease,
-        "AIBuilderRepository",
-        lambda session: _FakeHeartbeatRepo(request_repo),
-    )
+    heartbeat_repo = _FakeHeartbeatRepo(request_repo)
+    heartbeat_repo.released_state = BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+    _install_independent_session(monkeypatch, request_repo, heartbeat_repo)
 
     # SimpleLogger instances are not registered with the logging manager, so
     # caplog cannot attach by name; route the module logger through a
@@ -247,27 +283,8 @@ async def test_claim_ai_builder_send_turn_refreshes_with_independent_session_bef
     request_repo = _FakeSendLeaseRepo()
     request_repo.fail_request_refresh = True
     heartbeat_repo = _FakeHeartbeatRepo(request_repo)
-    heartbeat_session = cast(AsyncSession, object())
     _force_fast_send_lock_refresh(monkeypatch)
-
-    @contextlib.asynccontextmanager
-    async def heartbeat_session_scope() -> AsyncGenerator[AsyncSession, None]:
-        request_repo.events.append("heartbeat-session-open")
-        try:
-            yield heartbeat_session
-        finally:
-            request_repo.events.append("heartbeat-session-close")
-
-    monkeypatch.setattr(
-        ai_builder_send_lease.sessionmanager,
-        "session",
-        heartbeat_session_scope,
-    )
-    monkeypatch.setattr(
-        ai_builder_send_lease,
-        "AIBuilderRepository",
-        lambda session: heartbeat_repo if session is heartbeat_session else None,
-    )
+    _install_independent_session(monkeypatch, request_repo, heartbeat_repo)
 
     async with claim_ai_builder_send_turn(
         repo=cast(AIBuilderRepository, request_repo),
@@ -287,9 +304,103 @@ async def test_claim_ai_builder_send_turn_refreshes_with_independent_session_bef
         "refresh-start",
         "refresh-end",
         "heartbeat-session-close",
+        "heartbeat-session-open",
         "release",
+        "heartbeat-session-close",
     ]
-    assert request_repo.released_lease == request_repo.claimed_lease
+    assert heartbeat_repo.released_lease == request_repo.claimed_lease
+    assert request_repo.released_lease is None
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_releases_the_send_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reload mid-stream must not strand the session for the whole lease.
+
+    Starlette cancels the response's scope when the client disconnects, and a
+    cancelled scope re-raises at every await inside it, including the ones
+    that clear the lock. The row then kept `processing` with a 15-minute lock
+    and the user was told to wait for it.
+    """
+
+    request_repo = _FakeSendLeaseRepo()
+    request_repo.fail_request_refresh = True
+    request_repo.finish_refresh.set()
+    heartbeat_repo = _FakeHeartbeatRepo(request_repo)
+    _install_independent_session(monkeypatch, request_repo, heartbeat_repo)
+
+    with anyio.CancelScope() as response_scope:
+        async with claim_ai_builder_send_turn(
+            repo=cast(AIBuilderRepository, request_repo),
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            accepted_turn=_accepted_turn(uuid4()),
+            preparation_baseline=_preparation_baseline(),
+        ):
+            response_scope.cancel()
+            await anyio.sleep(0)
+
+    assert response_scope.cancelled_caught
+    assert heartbeat_repo.released_lease == request_repo.claimed_lease
+    # The request's own connection goes down with the response scope, so the
+    # release must not be attempted on it.
+    assert request_repo.released_lease is None
+
+
+@pytest.mark.asyncio
+async def test_a_release_that_never_returns_is_bounded_and_logged(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A stuck cleanup must not hold the request task for the lease's length.
+
+    The lock is then left to its lease, which the next claim already projects
+    to the same terminal state; the log is the only trace that it happened.
+    """
+
+    request_repo = _FakeSendLeaseRepo()
+    request_repo.fail_request_refresh = True
+    request_repo.finish_refresh.set()
+    heartbeat_repo = _FakeHeartbeatRepo(request_repo)
+    heartbeat_repo.release_never_returns = True
+    _install_independent_session(monkeypatch, request_repo, heartbeat_repo)
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "_SEND_LOCK_RELEASE_TIMEOUT_SECONDS",
+        0.05,
+    )
+
+    import logging as std_logging
+
+    log_name = "test.ai_builder_send_lease.release_timeout"
+    monkeypatch.setattr(
+        ai_builder_send_lease,
+        "logger",
+        std_logging.getLogger(log_name),
+    )
+
+    started = monotonic()
+    with caplog.at_level("ERROR", logger=log_name):
+        async with claim_ai_builder_send_turn(
+            repo=cast(AIBuilderRepository, request_repo),
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            accepted_turn=_accepted_turn(uuid4()),
+            preparation_baseline=_preparation_baseline(),
+        ) as claimed:
+            session_id = claimed.turn.session_id
+
+    assert monotonic() - started < 5
+    timeout_records = [
+        record
+        for record in caplog.records
+        if "release timed out" in record.getMessage()
+    ]
+    assert len(timeout_records) == 1
+    assert timeout_records[0].session_id == str(session_id)
+    assert timeout_records[0].request_id == str(request_repo.claimed_lease.request_id)
+    assert heartbeat_repo.released_lease is None
 
 
 @pytest.mark.parametrize(

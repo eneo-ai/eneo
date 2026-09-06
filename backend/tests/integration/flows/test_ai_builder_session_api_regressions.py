@@ -7,10 +7,11 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
+import anyio
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
@@ -4822,6 +4823,129 @@ async def test_ai_builder_cancel_serializes_attachment_cleanup_with_turn_accepta
             .all()
         )
         assert remaining_file_ids == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_send_message_releases_the_lock_when_the_client_disconnects(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """A reload mid-turn must not hold the session for the whole lease.
+
+    Starlette cancels the response's scope when the browser goes away, and a
+    cancelled scope re-raises at every await inside it. The lock used to stay
+    behind with it, so the session read `processing` for 15 minutes and the
+    user was told to wait for a turn nobody was running.
+    """
+    from eneo.flows.ai_builder.ai_builder_planner import AIBuilderPlanner
+    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder Send Disconnect",
+    )
+
+    reached_the_provider = asyncio.Event()
+    litellm_client = AsyncMock()
+
+    async def never_answers(*_: object, **__: object) -> NoReturn:
+        reached_the_provider.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    litellm_client.acompletion = AsyncMock(side_effect=never_answers)
+
+    async with db_container() as container:
+        user = container.user()
+
+    # The SSE generator runs outside the request's transaction: every write
+    # commits on its own, which is what lets the release reach the row from a
+    # session of its own. A test that held one transaction open around the
+    # whole turn would hide exactly the boundary under test.
+    async with sessionmanager.session() as request_session:
+        repo = AIBuilderRepository(request_session)
+        session = await repo.create_session(
+            tenant_id=user.tenant_id,
+            space_id=UUID(space_id),
+            actor_user_id=user.id,
+            target_kind=TargetKind.CREATE,
+            flow_id=None,
+        )
+        planner = AIBuilderPlanner(
+            user=user,
+            repo=repo,
+            litellm_client=litellm_client,
+            quality_retry_warning_codes=set(),
+        )
+        client_turn_id = uuid4()
+        response_scope = anyio.CancelScope()
+
+        async def disconnect_once_the_turn_is_running() -> None:
+            await asyncio.wait_for(reached_the_provider.wait(), timeout=60)
+            response_scope.cancel()
+
+        disconnect = asyncio.create_task(disconnect_once_the_turn_is_running())
+        with response_scope:
+            async for _ in planner.send_message(
+                session_id=session.id,
+                client_turn_id=client_turn_id,
+                request_fingerprint="b" * 64,
+                request_snapshot={
+                    "client_turn_id": str(client_turn_id),
+                    "message": "Bygg ett flode.",
+                    "ui_language": "sv",
+                },
+                message="Bygg ett flode.",
+                completion_model_route=_route(kwargs={"api_key": "sk-test"}),
+                available_models=[],
+                available_kbs=[],
+                flow=None,
+                assistant_snapshots=None,
+                attachment_files=[],
+                max_input_tokens=128_000,
+                max_output_tokens=4096,
+                budget_policy=AIBuilderBudgetPolicy(
+                    conversation_safety_buffer_tokens=512,
+                    minimum_conversation_budget_tokens=2048,
+                ),
+            ):
+                pass
+        await disconnect
+
+    assert response_scope.cancelled_caught
+
+    async with sessionmanager.session() as verification_session:
+        repo = AIBuilderRepository(verification_session)
+        async with verification_session.begin():
+            row = (
+                await verification_session.execute(
+                    select(BuilderSessions).where(
+                        BuilderSessions.id == session.id,
+                        BuilderSessions.tenant_id == user.tenant_id,
+                    )
+                )
+            ).scalar_one()
+            assert row.active_request_id is None
+            assert row.lock_token is None
+            assert row.lock_expires_at is None
+            # The provider had been reached, so the outcome is genuinely
+            # unknown; the client offers the acknowledged retry for this state.
+            assert (
+                row.latest_turn_state == BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN.value
+            )
+
+        projected = await repo.get_session(
+            session_id=session.id,
+            tenant_id=user.tenant_id,
+        )
+        assert projected.latest_turn is not None
+        assert projected.latest_turn.state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
 
 
 @pytest.mark.integration
