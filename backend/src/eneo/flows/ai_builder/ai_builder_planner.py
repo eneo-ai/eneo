@@ -631,6 +631,9 @@ class AIBuilderPlanner:
                             ),
                             attachment_context=planner_turn_request.attachment_context,
                             flow_context=planner_turn_request.flow_context,
+                            # The continuation rebuilds the proposal prompt; the
+                            # run excerpts travel with it like on the first build.
+                            review_evidence=review_evidence,
                             is_edit_mode=flow is not None,
                             resource_catalog=planner_turn_request.resource_catalog,
                             flow=flow,
