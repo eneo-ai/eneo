@@ -17,6 +17,13 @@ AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT = 10_000
 # This effective default remains admin-changeable and deliberately below the
 # parser ceiling so normal sessions cannot consume the full safety envelope.
 AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS = 1_000
+# Measured operating default for the run evidence a review-backed proposal
+# carries (2026-09-06, gpt-5.6-luna on a five-step flow): investigations with
+# 12k-16k evidence tokens produced plans every time, those with 28k-37k
+# failed every time (schema rejections after repair) whatever the window. The
+# suggestions call is not bounded by this; it reads up to the model's window.
+# Admins change it; null removes the bound.
+AI_BUILDER_DEFAULT_REVIEW_INVESTIGATION_EVIDENCE_TOKENS = 16_000
 AI_BUILDER_BUDGET_FIELDS = frozenset(
     {
         "conversation_safety_buffer_tokens",
@@ -26,6 +33,7 @@ AI_BUILDER_BUDGET_FIELDS = frozenset(
         "max_template_inspection_uncompressed_bytes",
         "max_template_placeholders",
         "review_evidence_max_input_tokens",
+        "review_investigation_evidence_max_tokens",
     }
 )
 
@@ -114,12 +122,16 @@ def validate_ai_builder_budget_settings_object(
                 value_dict[field_name],
                 f"flow_settings.ai_builder.{field_name}",
             )
-    if "review_evidence_max_input_tokens" in value_dict:
-        validated["review_evidence_max_input_tokens"] = parse_ai_builder_budget_token(
-            value_dict["review_evidence_max_input_tokens"],
-            "flow_settings.ai_builder.review_evidence_max_input_tokens",
-            allow_none=True,
-        )
+    for field_name in (
+        "review_evidence_max_input_tokens",
+        "review_investigation_evidence_max_tokens",
+    ):
+        if field_name in value_dict:
+            validated[field_name] = parse_ai_builder_budget_token(
+                value_dict[field_name],
+                f"flow_settings.ai_builder.{field_name}",
+                allow_none=True,
+            )
     return validated
 
 

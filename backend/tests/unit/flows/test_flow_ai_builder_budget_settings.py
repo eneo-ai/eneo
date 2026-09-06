@@ -119,6 +119,7 @@ def test_budget_settings_validation_accepts_every_supported_field() -> None:
         "max_template_inspection_uncompressed_bytes": 6,
         "max_template_placeholders": 7,
         "review_evidence_max_input_tokens": 8,
+        "review_investigation_evidence_max_tokens": 9,
     }
 
     assert validate_ai_builder_budget_settings_object(value) == value

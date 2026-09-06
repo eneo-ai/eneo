@@ -109,6 +109,13 @@
     max: initial.aiBuilderBudgetSettings.budget_token_hard_limit,
     suggestion: 128_000
   });
+  // Off: the investigation's excerpts are bounded only by the window.
+  const builderInvestigationEvidence = new ToggleNumberField({
+    initial: initial.aiBuilderBudgetSettings.review_investigation_evidence_max_tokens ?? null,
+    min: 1,
+    max: initial.aiBuilderBudgetSettings.budget_token_hard_limit,
+    suggestion: 16_000
+  });
   const mappedCalls = new ToggleNumberField({
     initial: initial.mappedExecutionPolicy.max_provider_calls_per_mapped_step ?? null,
     min: 2,
@@ -153,6 +160,7 @@
     builderMaxAttachments,
     builderMaxMessageChars,
     builderReviewEvidenceCap,
+    builderInvestigationEvidence,
     mappedCalls,
     evidenceSources,
     evidencePassages,
@@ -281,6 +289,9 @@
     if (builderReviewEvidenceCap.dirty) {
       builderBudget.review_evidence_max_input_tokens = builderReviewEvidenceCap.value;
     }
+    if (builderInvestigationEvidence.dirty) {
+      builderBudget.review_investigation_evidence_max_tokens = builderInvestigationEvidence.value;
+    }
 
     const ragEvidence: FlowAdminSettingsUpdates["ragEvidence"] = {};
     if (evidenceSources.dirty) {
@@ -336,6 +347,9 @@
       builderMaxMessageChars.commit(updated.builderBudget.max_message_chars);
       builderReviewEvidenceCap.commit(
         updated.builderBudget.review_evidence_max_input_tokens ?? null
+      );
+      builderInvestigationEvidence.commit(
+        updated.builderBudget.review_investigation_evidence_max_tokens ?? null
       );
     }
     if (updated.ragEvidence) {
@@ -589,6 +603,19 @@
               value: String(data.aiBuilderBudgetSettings.budget_token_hard_limit)
             })}
             field={builderReviewEvidenceCap}
+          />
+          <Settings.ToggleNumberRow
+            title={m.ai_builder_limits_investigation_evidence_title()}
+            description={m.ai_builder_limits_investigation_evidence_description()}
+            toggleLabel={m.ai_builder_limits_investigation_evidence_label()}
+            valueLabel={m.flow_settings_value_max_label()}
+            unit={m.flow_settings_unit_tokens()}
+            offStatus={m.ai_builder_limits_investigation_evidence_off_status()}
+            info={m.ai_builder_limits_investigation_evidence_info()}
+            hint={m.ai_builder_limits_ceiling_hint({
+              value: String(data.aiBuilderBudgetSettings.budget_token_hard_limit)
+            })}
+            field={builderInvestigationEvidence}
           />
         </Settings.Group>
 

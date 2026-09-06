@@ -603,6 +603,8 @@ class AIBuilderBudgetSettingsPublic(BaseModel):
     # review's suggestions call and a review-backed proposal). None: the
     # model's own window.
     review_evidence_max_input_tokens: int | None
+    # Evidence share of a review-backed proposal prompt; None: no separate bound.
+    review_investigation_evidence_max_tokens: int | None
     max_attachments: int
     max_message_chars: int
     max_template_inspection_uncompressed_bytes: int
@@ -658,6 +660,15 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
             "Context-window ceiling, in tokens, for any request that carries run "
             "evidence: the review's suggestions call and a review-backed proposal. "
             "Send null to let the model's own context window decide."
+        ),
+    )
+    review_investigation_evidence_max_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_BUDGET_MAX_TOKENS,
+        description=(
+            "Tokens of run evidence a review-backed proposal prompt may carry, the "
+            "planner's measured reliable share; send null to remove the bound."
         ),
     )
 

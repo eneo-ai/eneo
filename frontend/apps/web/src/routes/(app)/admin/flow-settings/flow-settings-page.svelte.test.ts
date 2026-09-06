@@ -176,6 +176,7 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
       max_attachments: 100,
       max_message_chars: 50_000,
       review_evidence_max_input_tokens: null,
+      review_investigation_evidence_max_tokens: 16_000,
       max_attachments_hard_limit: 100,
       max_message_chars_hard_limit: 50_000
     },

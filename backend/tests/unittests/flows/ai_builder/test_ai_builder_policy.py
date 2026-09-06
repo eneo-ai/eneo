@@ -148,3 +148,18 @@ def test_the_review_evidence_cap_bounds_every_request_that_carries_run_evidence(
         context_window_tokens=1_000_000, model_output_ceiling_tokens=8_000
     )
     assert ordinary.context_window_tokens == 1_000_000
+
+
+def test_the_investigation_evidence_share_has_a_measured_default_admins_can_remove() -> (
+    None
+):
+    policy = resolve_ai_builder_budget_policy(None)
+    assert policy.review_investigation_evidence_max_tokens == 16_000
+    removed = resolve_ai_builder_budget_policy(
+        {"ai_builder": {"review_investigation_evidence_max_tokens": None}}
+    )
+    assert removed.review_investigation_evidence_max_tokens is None
+    raised = resolve_ai_builder_budget_policy(
+        {"ai_builder": {"review_investigation_evidence_max_tokens": 40_000}}
+    )
+    assert raised.review_investigation_evidence_max_tokens == 40_000

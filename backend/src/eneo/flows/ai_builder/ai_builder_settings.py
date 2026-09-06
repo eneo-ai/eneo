@@ -9,6 +9,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS,
+    AI_BUILDER_DEFAULT_REVIEW_INVESTIGATION_EVIDENCE_TOKENS,
     AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
     AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
@@ -122,6 +123,11 @@ class AIBuilderBudgetPolicy:
     # (the suggestions call and a review-backed proposal alike). None is the
     # model's own window: the capability decides, the tenant may cap it.
     review_evidence_max_input_tokens: int | None = None
+    # The share of a review-backed proposal prompt the run excerpts may take,
+    # bounded by what the planner reliably answers over, not by the window.
+    review_investigation_evidence_max_tokens: int | None = (
+        AI_BUILDER_DEFAULT_REVIEW_INVESTIGATION_EVIDENCE_TOKENS
+    )
 
     def classification_request_budget(
         self,
@@ -280,6 +286,15 @@ def resolve_ai_builder_budget_policy(
             "review_evidence_max_input_tokens",
             allow_none=True,
         )
+    investigation_evidence_cap = (
+        resolved_defaults.review_investigation_evidence_max_tokens
+    )
+    if "review_investigation_evidence_max_tokens" in raw:
+        investigation_evidence_cap = _parse_token_int(
+            raw["review_investigation_evidence_max_tokens"],
+            "review_investigation_evidence_max_tokens",
+            allow_none=True,
+        )
 
     operating_limits = {
         "max_attachments": resolved_defaults.max_attachments,
@@ -317,6 +332,7 @@ def resolve_ai_builder_budget_policy(
         ],
         max_template_placeholders=operating_limits["max_template_placeholders"],
         review_evidence_max_input_tokens=review_evidence_cap,
+        review_investigation_evidence_max_tokens=investigation_evidence_cap,
     )
 
 
@@ -330,6 +346,7 @@ def apply_ai_builder_budget_policy_patch(
     max_template_inspection_uncompressed_bytes: int | None = None,
     max_template_placeholders: int | None = None,
     review_evidence_max_input_tokens: int | None = None,
+    review_investigation_evidence_max_tokens: int | None = None,
     remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     result = (
@@ -352,6 +369,11 @@ def apply_ai_builder_budget_policy_patch(
         next_settings["review_evidence_max_input_tokens"] = _parse_token_int(
             review_evidence_max_input_tokens,
             "review_evidence_max_input_tokens",
+        )
+    if review_investigation_evidence_max_tokens is not None:
+        next_settings["review_investigation_evidence_max_tokens"] = _parse_token_int(
+            review_investigation_evidence_max_tokens,
+            "review_investigation_evidence_max_tokens",
         )
     operating_updates = {
         "max_attachments": max_attachments,

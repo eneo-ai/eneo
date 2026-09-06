@@ -896,6 +896,9 @@ class SettingService:
             conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
             minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
             review_evidence_max_input_tokens=policy.review_evidence_max_input_tokens,
+            review_investigation_evidence_max_tokens=(
+                policy.review_investigation_evidence_max_tokens
+            ),
             max_attachments=policy.max_attachments,
             max_message_chars=policy.max_message_chars,
             max_template_inspection_uncompressed_bytes=(

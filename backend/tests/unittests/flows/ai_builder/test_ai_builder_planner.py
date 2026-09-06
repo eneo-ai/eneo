@@ -5352,12 +5352,16 @@ def _review_evidence(excerpt_chars: int):
 
 
 def _build_review_backed_proposal(
-    *, review_evidence_max_input_tokens: int | None, window: int = 60_000
+    *,
+    review_evidence_max_input_tokens: int | None,
+    window: int = 60_000,
+    review_investigation_evidence_max_tokens: int | None = None,
 ) -> ProposalPrepared:
     policy = AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=128,
         minimum_conversation_budget_tokens=256,
         review_evidence_max_input_tokens=review_evidence_max_input_tokens,
+        review_investigation_evidence_max_tokens=review_investigation_evidence_max_tokens,
     )
     return build_proposal_prepared(
         requirements_state=RequirementsState(),
@@ -5422,3 +5426,18 @@ def test_a_review_backed_proposal_reports_its_evidence_fit_in_the_prompt_metrics
     assert metrics["review_excerpts_truncated"] == 1
     assert metrics["review_excerpts_included"] == 0
     assert metrics["review_excerpts_omitted_by_budget"] == 0
+
+
+def test_the_investigation_evidence_share_is_bounded_by_the_measured_policy() -> None:
+    # A window that could hold the whole excerpt still truncates it to the
+    # planner's reliable share; without the bound the excerpt travels whole.
+    bounded = _build_review_backed_proposal(
+        review_evidence_max_input_tokens=None,
+        window=1_000_000,
+        review_investigation_evidence_max_tokens=2_000,
+    )
+    assert "avklippt efter" in bounded.message_groups[0].messages[0]["content"]
+    unbounded = _build_review_backed_proposal(
+        review_evidence_max_input_tokens=None, window=1_000_000
+    )
+    assert "avklippt efter" not in unbounded.message_groups[0].messages[0]["content"]

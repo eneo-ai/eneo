@@ -10106,6 +10106,8 @@ export interface components {
       minimum_conversation_budget_tokens: number;
       /** Review Evidence Max Input Tokens */
       review_evidence_max_input_tokens: number | null;
+      /** Review Investigation Evidence Max Tokens */
+      review_investigation_evidence_max_tokens: number | null;
     };
     /** AIBuilderBudgetSettingsUpdate */
     AIBuilderBudgetSettingsUpdate: {
@@ -10126,6 +10128,11 @@ export interface components {
        * @description Context-window ceiling, in tokens, for any request that carries run evidence: the review's suggestions call and a review-backed proposal. Send null to let the model's own context window decide.
        */
       review_evidence_max_input_tokens?: number | null;
+      /**
+       * Review Investigation Evidence Max Tokens
+       * @description Tokens of run evidence a review-backed proposal prompt may carry, the planner's measured reliable share; send null to remove the bound.
+       */
+      review_investigation_evidence_max_tokens?: number | null;
     };
     /** AIBuilderConversationMessage */
     AIBuilderConversationMessage: {
