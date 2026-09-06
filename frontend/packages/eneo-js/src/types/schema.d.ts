@@ -10123,7 +10123,7 @@ export interface components {
       minimum_conversation_budget_tokens?: number | null;
       /**
        * Review Evidence Max Input Tokens
-       * @description Cap on the review model's input for run evidence; send null to let the model's context window decide.
+       * @description Context-window ceiling, in tokens, for any request that carries run evidence: the review's suggestions call and a review-backed proposal. Send null to let the model's own context window decide.
        */
       review_evidence_max_input_tokens?: number | null;
     };

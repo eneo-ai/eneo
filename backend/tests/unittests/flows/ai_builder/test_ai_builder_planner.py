@@ -5401,3 +5401,24 @@ def test_a_review_backed_proposal_is_bounded_by_the_tenant_cap_at_the_request() 
 def test_a_review_backed_proposal_whose_scaffold_exceeds_the_cap_is_refused() -> None:
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         _build_review_backed_proposal(review_evidence_max_input_tokens=1)
+
+
+def test_a_review_backed_proposal_reports_its_evidence_fit_in_the_prompt_metrics() -> (
+    None
+):
+    from unittest.mock import patch
+
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_planner_request_preparation.logger"
+    ) as logger_mock:
+        _build_review_backed_proposal(review_evidence_max_input_tokens=12_000)
+    metrics = next(
+        call.kwargs["extra"]
+        for call in logger_mock.info.call_args_list
+        if call.args and call.args[0] == "AI Builder plan proposal prompt metrics"
+    )
+    assert metrics["context_window_tokens"] == 12_000
+    assert isinstance(metrics["review_evidence_fit_ms"], int)
+    assert metrics["review_excerpts_truncated"] == 1
+    assert metrics["review_excerpts_included"] == 0
+    assert metrics["review_excerpts_omitted_by_budget"] == 0

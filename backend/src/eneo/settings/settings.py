@@ -599,7 +599,9 @@ class FlowRagEvidencePolicyUpdate(BaseModel):
 class AIBuilderBudgetSettingsPublic(BaseModel):
     conversation_safety_buffer_tokens: int
     minimum_conversation_budget_tokens: int
-    # None: the review model's own context window bounds the run evidence.
+    # Context-window ceiling for any request that carries run evidence (the
+    # review's suggestions call and a review-backed proposal). None: the
+    # model's own window.
     review_evidence_max_input_tokens: int | None
     max_attachments: int
     max_message_chars: int
@@ -653,8 +655,9 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
         ge=1,
         le=AI_BUILDER_BUDGET_MAX_TOKENS,
         description=(
-            "Cap on the review model's input for run evidence; send null to let "
-            "the model's context window decide."
+            "Context-window ceiling, in tokens, for any request that carries run "
+            "evidence: the review's suggestions call and a review-backed proposal. "
+            "Send null to let the model's own context window decide."
         ),
     )
 

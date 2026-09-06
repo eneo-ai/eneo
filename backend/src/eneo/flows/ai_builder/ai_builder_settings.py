@@ -118,8 +118,9 @@ class AIBuilderBudgetPolicy:
         AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
     )
     max_template_placeholders: int = AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS
-    # How much of a review model's window the run evidence may fill. None is
-    # the model's own window: the capability decides, the tenant may cap it.
+    # The context-window ceiling for any request that carries run evidence
+    # (the suggestions call and a review-backed proposal alike). None is the
+    # model's own window: the capability decides, the tenant may cap it.
     review_evidence_max_input_tokens: int | None = None
 
     def classification_request_budget(
