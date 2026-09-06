@@ -670,10 +670,16 @@ def _rehome_misplaced_create_children(
     return updated
 
 
+# The step union is anyOf on the wire (the native strict subset has no oneOf);
+# the kind enums keep its branches exclusive, so both read as a discriminated
+# union here.
+_UNION_KEYWORDS = ("anyOf", "oneOf")
+
+
 def _actionable_validation_error(
     error: jsonschema.ValidationError,
 ) -> jsonschema.ValidationError:
-    if error.validator != "oneOf" or not error.context:
+    if error.validator not in _UNION_KEYWORDS or not error.context:
         return error
 
     branch_index = _matching_discriminator_branch_index(error)
@@ -686,7 +692,11 @@ def _actionable_validation_error(
     ]
     candidates: list[jsonschema.ValidationError] = branch_errors or list(error.context)
     selected = next(
-        (candidate for candidate in candidates if candidate.validator == "required"),
+        (
+            candidate
+            for candidate in candidates
+            if str(candidate.validator) == "required"
+        ),
         None,
     ) or max(
         candidates,
@@ -705,7 +715,9 @@ def _matching_discriminator_branch_index(
         return None
     instance = cast(dict[str, object], instance_object)
     schema = cast(dict[str, object], schema_object)
-    raw_branches = schema.get("oneOf")
+    raw_branches = next(
+        (schema[keyword] for keyword in _UNION_KEYWORDS if keyword in schema), None
+    )
     if not isinstance(raw_branches, list):
         return None
     branches = cast(list[object], raw_branches)

@@ -693,7 +693,7 @@ class TestBuildToolSchema:
 
     @pytest.mark.parametrize(
         ("property_name", "value"),
-        [("output_fields", []), ("knowledge_refs", None)],
+        [("output_fields", []), ("knowledge_refs", "kb-1")],
     )
     def test_create_step_schema_rejects_invalid_empty_or_nullable_lists(
         self,
@@ -723,18 +723,26 @@ class TestBuildToolSchema:
                 tool_schema=schema,
             )
 
-    def test_edit_step_schema_keeps_its_existing_optional_shape(self) -> None:
+    def test_edit_added_step_shares_the_proposal_field_tree(self) -> None:
+        # One provider field tree for create and edit: the recursive edge is
+        # `children`, every node closed, so the edit tool projects strict.
         schema = build_propose_flow_tool_schema(
             resource_catalog=_empty_catalog(), current_steps=[]
         )
         add_step_schema = schema["function"]["parameters"]["properties"]["steps"][
             "items"
-        ]["oneOf"][1]["properties"]["step"]
+        ]["anyOf"][1]["properties"]["step"]
         field_schema = add_step_schema["properties"]["output_fields"]["items"]
+        create_field_schema = build_propose_flow_tool_schema(
+            resource_catalog=_empty_catalog()
+        )["function"]["parameters"]["properties"]["steps"]["items"]["properties"][
+            "output_fields"
+        ]["items"]
 
         assert add_step_schema["required"] == ["name", "instructions"]
-        assert field_schema["properties"]["name"]["pattern"]
-        assert "anyOf" not in field_schema
+        assert field_schema == create_field_schema
+        assert "children" in field_schema["properties"]
+        assert "fields" not in field_schema["properties"]
 
     @pytest.mark.parametrize(
         ("scope", "retired_key", "retired_value", "expected_path"),

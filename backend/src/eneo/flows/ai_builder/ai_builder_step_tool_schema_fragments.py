@@ -4,17 +4,17 @@ from typing import Any
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     MAX_STRUCTURED_FIELD_DEPTH,
-    STRUCTURED_FIELD_NAME_PATTERN,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 
 
 def build_previous_field_refs_schema() -> dict[str, Any]:
     return {
-        "type": "array",
+        "type": ["array", "null"],
         "description": (
             "Optional field-level reuse intent for earlier JSON-producing steps. "
-            "The backend compiles these into explicit underlag bindings."
+            "The backend compiles these into explicit underlag bindings. Null "
+            "keeps the current bindings; an empty list clears them."
         ),
         "items": {
             "type": "object",
@@ -102,70 +102,21 @@ def build_knowledge_refs_property_schema(
     kb_refs: list[str] | None,
 ) -> dict[str, Any]:
     knowledge_refs_schema: dict[str, Any] = {
-        "type": "array",
+        "type": ["array", "null"],
         "items": {"type": "string"},
         "uniqueItems": True,
-        "description": ("Portable knowledge slot refs this step needs."),
+        "description": (
+            "Portable knowledge slot refs this step needs. Null preserves an "
+            "existing step's refs and means none for a new step; an empty list "
+            "detaches every knowledge base."
+        ),
     }
     if kb_refs is not None:
         knowledge_refs_schema["items"]["enum"] = kb_refs
     return {"knowledge_refs": knowledge_refs_schema}
 
 
-def _structured_field_schema(*, depth: int) -> dict[str, Any]:
-    is_leaf_depth = depth >= MAX_STRUCTURED_FIELD_DEPTH
-    field_type_enum = (
-        ["string", "number", "boolean"]
-        if is_leaf_depth
-        else ["string", "number", "boolean", "object", "array"]
-    )
-    schema: dict[str, Any] = {
-        "type": "object",
-        "required": ["name", "field_type", "description", "required"],
-        "properties": {
-            "name": {
-                "type": "string",
-                "pattern": STRUCTURED_FIELD_NAME_PATTERN,
-                "description": (
-                    "ASCII English JSON schema key, for example `summary` or "
-                    "`date_or_year`. Put localized wording in the description."
-                ),
-            },
-            "field_type": {"type": "string", "enum": field_type_enum},
-            "description": {
-                "type": "string",
-                "description": (
-                    "Human-readable field meaning. Do not include template variables."
-                ),
-            },
-            "required": {"type": "boolean"},
-            "fields": (
-                False
-                if is_leaf_depth
-                else {
-                    "type": ["array", "null"],
-                    "items": _structured_field_schema(depth=depth + 1),
-                }
-            ),
-            "item_fields": (
-                False
-                if is_leaf_depth
-                else {
-                    "type": ["array", "null"],
-                    "items": _structured_field_schema(depth=depth + 1),
-                }
-            ),
-        },
-        "additionalProperties": False,
-    }
-    return schema
-
-
-def build_structured_field_schema() -> dict[str, Any]:
-    return _structured_field_schema(depth=1)
-
-
-def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
+def _proposal_structured_field_schema(*, depth: int) -> dict[str, Any]:
     is_leaf_depth = depth >= MAX_STRUCTURED_FIELD_DEPTH
     field_type_enum = (
         ["string", "number", "boolean", "array"]
@@ -178,7 +129,7 @@ def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
         else {
             "type": ["array", "null"],
             "minItems": 1,
-            "items": _create_structured_field_schema(depth=depth + 1),
+            "items": _proposal_structured_field_schema(depth=depth + 1),
         }
     )
     return {
@@ -222,18 +173,29 @@ def _create_structured_field_schema(*, depth: int) -> dict[str, Any]:
     }
 
 
-def build_create_structured_field_schema() -> dict[str, Any]:
-    return _create_structured_field_schema(depth=1)
+def build_proposal_structured_field_schema() -> dict[str, Any]:
+    """The one provider-facing field tree, for create and edit alike.
+
+    One recursive edge (``children``) with ``field_type`` telling the server
+    whether they are object members or array items; every node is a closed
+    object, so the tree projects into a native-strict tool schema.
+    """
+
+    return _proposal_structured_field_schema(depth=1)
+
+
+REVIEW_MODE_NONE = "none"
 
 
 def build_review_mode_schema() -> dict[str, Any]:
     return {
         "type": ["string", "null"],
-        "enum": [*(mode.value for mode in FlowStepReviewMode), None],
-        "default": None,
+        "enum": [*(mode.value for mode in FlowStepReviewMode), REVIEW_MODE_NONE, None],
         "description": (
             "Set when the run must pause after this step for human review before "
             "later steps continue. Use 'view' when the user approves or rejects "
-            "the output, and 'edit' when the user may edit the step output."
+            "the output, 'edit' when the user may edit the step output, 'none' "
+            "for no review pause; null preserves an existing step's setting and "
+            "means no review pause for a new step."
         ),
     }

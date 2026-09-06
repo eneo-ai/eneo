@@ -50,6 +50,9 @@ from eneo.flows.ai_builder.ai_builder_litellm_completion import (
     call_proposal_completion,
     make_usage_tracked_proposal_completion,
 )
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    build_decline_flow_change_tool_schema,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     ProposalCallKind,
     ProposalTurnTelemetry,
@@ -363,12 +366,28 @@ def _nested_key_values(value: object, key: str) -> list[object]:
             True,
             {},
             False,
+            [True],
+            id="capable-route-edit-initial",
+        ),
+        pytest.param(
+            TargetKind.EDIT,
+            True,
+            {},
+            True,
+            [True],
+            id="capable-route-edit-repair",
+        ),
+        pytest.param(
+            TargetKind.EDIT,
+            False,
+            {},
+            False,
             [],
-            id="capable-route-edit",
+            id="unmeasured-route-edit",
         ),
     ],
 )
-async def test_outbound_proposal_tools_follow_the_route_capability_on_create(
+async def test_outbound_proposal_tools_follow_the_route_capability(
     target_kind: TargetKind,
     supports_strict_tool_schema: bool,
     route_kwargs: dict[str, object],
@@ -408,7 +427,7 @@ async def test_outbound_proposal_tools_follow_the_route_capability_on_create(
         expected_strict_values
     )
     outbound_parameters = call_kwargs["tools"][0]["function"]["parameters"]
-    if target_kind == TargetKind.CREATE and supports_strict_tool_schema:
+    if supports_strict_tool_schema:
         assert outbound_parameters is not tool_schema["function"]["parameters"]
         validate_native_strict_schema(outbound_parameters)
         assert set(outbound_parameters["required"]) == set(
@@ -423,7 +442,51 @@ async def test_outbound_proposal_tools_follow_the_route_capability_on_create(
 
 
 @pytest.mark.asyncio
-async def test_edit_context_repair_omits_native_strict_on_a_capable_route() -> None:
+async def test_initial_edit_request_projects_both_tools_strict_on_a_capable_route() -> (
+    None
+):
+    # A normal initial edit turn offers propose_flow and decline_flow_change;
+    # the provider must accept the pair strict, and the repair call the one.
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+    tool_schema = build_propose_flow_tool_schema(
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[],
+            available_kbs=[],
+        ),
+        current_steps=[],
+    )
+    decline_tool_schema = build_decline_flow_change_tool_schema()
+    ctx = _make_context(
+        flow=MagicMock(),
+        proposal_tool_schema=tool_schema,
+        decline_tool_schema=decline_tool_schema,
+        route=_route(supports_strict_tool_schema=True),
+    )
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ctx.completion_request(temperature=0.2),
+    )
+    initial_tools = litellm_client.acompletion.await_args.kwargs["tools"]
+    assert _nested_key_values(initial_tools, "strict") == [True, True]
+    for tool in initial_tools:
+        validate_native_strict_schema(tool["function"]["parameters"])
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=ctx.completion_request(temperature=0.2, counts_as_repair=True),
+    )
+    repair_tools = litellm_client.acompletion.await_args.kwargs["tools"]
+    assert _nested_key_values(repair_tools, "strict") == [True]
+    assert "strict" not in tool_schema["function"]
+    assert "strict" not in decline_tool_schema["function"]
+
+
+@pytest.mark.asyncio
+async def test_edit_context_repair_stays_native_strict_on_a_capable_route() -> None:
+    # The repair call is where a large review-backed edit used to fail on
+    # schema conformance; it carries the same strict projection as the first.
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
     tool_schema = build_propose_flow_tool_schema(
@@ -448,8 +511,9 @@ async def test_edit_context_repair_omits_native_strict_on_a_capable_route() -> N
     )
 
     call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert _nested_key_values(call_kwargs["tools"], "strict") == []
-    assert call_kwargs["tools"] == [tool_schema]
+    assert _nested_key_values(call_kwargs["tools"], "strict") == [True]
+    validate_native_strict_schema(call_kwargs["tools"][0]["function"]["parameters"])
+    assert "strict" not in tool_schema["function"]
 
 
 @pytest.mark.asyncio

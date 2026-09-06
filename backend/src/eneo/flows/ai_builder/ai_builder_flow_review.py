@@ -595,8 +595,8 @@ def validate_review_edit_proposal(
             "flow description. Say what you would change in plan_rationale."
         )
     if "form_fields" in proposal.model_fields_set:
-        # Omission preserves the fields; a list replaces them and null clears
-        # them, so both of the latter are changes this turn may not make.
+        # Omission (null on the wire) preserves the fields; a list replaces
+        # them and an empty list clears them, changes this turn may not make.
         return (
             "This turn investigates selected findings and must not change the "
             "flow's form fields. Omit form_fields to leave them as they are."

@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Literal
 
-import jsonschema
-from jsonschema_specifications import (  # pyright: ignore[reportMissingTypeStubs]  # ships without type stubs
-    REGISTRY,
-)
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
@@ -15,6 +10,7 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import (
     compile_input_reference_instruction_hint,
     compile_new_step_draft,
+    compile_output_contract,
     compile_review_policy,
     compile_step_input_bindings,
     derive_input_contract,
@@ -38,7 +34,6 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -256,11 +251,8 @@ def apply_existing_step_patch(
     ):
         if field_name in fields:
             updates[field_name] = getattr(patch, field_name)
-    if "output_contract" in fields:
-        updates["output_contract"] = _validated_output_contract(
-            patch.output_contract,
-            existing_step_ref=patch.existing_step_ref,
-        )
+    if "output_fields" in fields:
+        updates["output_contract"] = compile_output_contract(patch.output_fields)
     if "review_mode" in fields:
         updates["review_policy"] = compile_review_policy(patch.review_mode)
     if "assistant_spec" in fields:
@@ -275,66 +267,6 @@ def apply_existing_step_patch(
         )
 
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
-
-
-def _json_schema_keywords() -> frozenset[str]:
-    """Every keyword the installed metaschemas define, 2020-12 and draft 7.
-
-    The 2020-12 metaschema spreads its keywords over vocabulary schemas, so
-    they are read through the registry rather than listed by hand (a hand
-    list missed ``contentSchema``, 2026-09-05).
-    """
-
-    meta = cast(dict[str, Any], jsonschema.Draft202012Validator.META_SCHEMA)
-    resolver = REGISTRY.resolver(base_uri=str(meta["$id"]))
-    keywords: set[str] = set(meta.get("properties", {}))
-    for entry in cast(list[dict[str, Any]], meta.get("allOf", [])):
-        ref = entry.get("$ref")
-        if not isinstance(ref, str):
-            continue
-        vocabulary = resolver.lookup(ref).contents
-        if isinstance(vocabulary, Mapping):
-            keywords |= set(vocabulary.get("properties", {}))
-    keywords |= set(
-        cast(dict[str, Any], jsonschema.Draft7Validator.META_SCHEMA)["properties"]
-    )
-    return frozenset(keywords)
-
-
-_JSON_SCHEMA_KEYWORDS = _json_schema_keywords()
-
-
-def _validated_output_contract(
-    contract: FlowPersistedJsonObject | None,
-    *,
-    existing_step_ref: str,
-) -> FlowPersistedJsonObject | None:
-    """Pass an explicit schema through; name the envelope for a bare field map.
-
-    The edit tool asks for a JSON Schema object. A model that writes
-    ``{"summary": {"type": "string"}}`` has named its fields without the
-    envelope; compiled as-is that map became a contract with no properties
-    and the critic then reported the named field as missing, which no repair
-    could satisfy (2026-09-05). Only that shape is refused: a mapping with no
-    schema keyword at the top level whose values are all mappings. Array,
-    keyword-only and any other explicit schema is the validator's business.
-    """
-
-    if not contract:
-        return contract
-    if any(
-        key in _JSON_SCHEMA_KEYWORDS or str(key).startswith("$") for key in contract
-    ):
-        return contract
-    if not all(isinstance(value, dict) for value in contract.values()):
-        return contract
-    raise BadRequestException(
-        f"Step {existing_step_ref}: output_contract must be a JSON Schema object "
-        'such as {"type": "object", "properties": {"summary": {"type": "string"}}, '
-        '"required": ["summary"]}; top-level keys received: '
-        + ", ".join(sorted(str(key) for key in contract))
-        + "."
-    )
 
 
 def _compile_existing_step_modification(

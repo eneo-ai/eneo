@@ -12,7 +12,6 @@ from eneo.completion_models.infrastructure.completion_service import (
     completion_evidence_field_domain,
     completion_evidence_json_type,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderRequestEvidence,
     record_ai_builder_provider_failure,
@@ -163,12 +162,7 @@ async def call_proposal_completion(
 def _outbound_proposal_tool_schemas(
     request: ProposalCompletionRequest,
 ) -> list[dict[str, Any]]:
-    # Only create has a native-strict transport projection; edit still carries
-    # schema constructs that strict providers reject.
-    if (
-        request.target_kind != TargetKind.CREATE
-        or not request.route.supports_strict_tool_schema
-    ):
+    if not request.route.supports_strict_tool_schema:
         return request.tool_schemas
     return [
         cast(

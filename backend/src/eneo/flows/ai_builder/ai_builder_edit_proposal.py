@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
@@ -23,6 +23,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
     FlowBuilderProposalContent,
     TargetKind,
+)
+from eneo.flows.ai_builder.ai_builder_edit_admission import (
+    lower_edit_tool_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -137,19 +140,7 @@ async def process_edit_arguments(
 
     model_arguments: dict[str, Any] = dict(arguments)
     try:
-        raw_form_fields = model_arguments.get("form_fields")
-        if isinstance(raw_form_fields, list):
-            normalized_form_fields: list[Any] = []
-            for field in cast(list[Any], raw_form_fields):
-                normalized_form_fields.append(
-                    {
-                        **cast(dict[str, Any], field),
-                        "provenance": "model_proposed",
-                    }
-                    if isinstance(field, dict)
-                    else field
-                )
-            model_arguments["form_fields"] = normalized_form_fields
+        model_arguments = lower_edit_tool_arguments(model_arguments)
         authored_proposal = OrderedEditProposal.model_validate(model_arguments)
     except ValidationError as exc:
         logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
@@ -385,7 +376,7 @@ def _apply_server_owned_input_fields(
         record.value.variable_name: record.value
         for record in planning_state.input_fields
     }
-    if proposal.form_fields is None or "form_fields" not in proposal.model_fields_set:
+    if "form_fields" not in proposal.model_fields_set or proposal.form_fields is None:
         return proposal.model_copy(update={"form_fields": list(server_fields.values())})
     projected_fields = [
         server_fields.get(field.variable_name, field) for field in proposal.form_fields

@@ -20,6 +20,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
     build_knowledge_refs_property_schema,
     build_previous_field_refs_schema,
+    build_proposal_structured_field_schema,
     build_review_mode_schema,
 )
 from eneo.flows.domain.flow import FlowStep
@@ -53,9 +54,10 @@ def build_edit_flow_tool_schema(
             "description": (
                 "Edit an existing flow by returning the complete ordered step list. "
                 "Every existing step must appear once in steps unless its ref appears "
-                "in removed_existing_step_refs. Omit flow fields and form_fields to "
-                "preserve them; set form_fields to the complete desired list or null "
-                "to clear all flow-level inmatningsfält/form fields."
+                "in removed_existing_step_refs. Null keeps a current value: flow "
+                "fields, form_fields and every step field. Set form_fields to the "
+                "complete desired list, or an empty list to clear all flow-level "
+                "inmatningsfält/form fields."
             ),
             "parameters": {
                 "type": "object",
@@ -87,7 +89,7 @@ def build_edit_flow_tool_schema(
                             "steps with kind=add and a typed step payload."
                         ),
                         "items": {
-                            "oneOf": [
+                            "anyOf": [
                                 modify_step_schema,
                                 {
                                     "type": "object",
@@ -114,9 +116,9 @@ def build_edit_flow_tool_schema(
                         "type": ["array", "null"],
                         "items": _build_form_field_spec_schema(),
                         "description": (
-                            "Complete desired form field list. Omit to preserve current "
-                            "fields; set null to clear all fields; provide a list to add, "
-                            "modify, or remove fields by complete state."
+                            "Complete desired form field list. Null keeps the current "
+                            "fields; an empty list clears them; a list adds, modifies "
+                            "or removes fields by complete state."
                         ),
                     },
                     "assumptions": {
@@ -151,7 +153,10 @@ def _build_modify_step_schema(
                 "enum": valid_refs,
                 "description": f"Server alias for the existing step. Valid refs: {valid_refs}.",
             },
-            "name": {"type": ["string", "null"]},
+            "name": {
+                "type": ["string", "null"],
+                "description": "New step name, or null to keep the current one.",
+            },
             "assistant_spec": _build_assistant_spec_schema(kb_refs),
             "input_source": {
                 "type": ["string", "null"],
@@ -172,15 +177,19 @@ def _build_modify_step_schema(
             "uses_form_fields": {
                 "type": ["array", "null"],
                 "items": {"type": "string"},
+                "description": (
+                    "Form fields this step should consider. Null keeps the current "
+                    "bindings; an empty list clears them."
+                ),
             },
             "uses_previous_fields": build_previous_field_refs_schema(),
-            "output_contract": {
-                "type": ["object", "null"],
-                "additionalProperties": True,
+            "output_fields": {
+                "type": ["array", "null"],
+                "items": build_proposal_structured_field_schema(),
                 "description": (
-                    "JSON Schema for a JSON output step: an object with "
-                    '"type": "object", "properties": {field: schema}, and '
-                    '"required". Omit to keep the current contract.'
+                    "Complete structured fields of a JSON output step, replacing "
+                    "the current contract. Null keeps the current contract; an "
+                    "empty list removes it."
                 ),
             },
             "review_mode": build_review_mode_schema(),
@@ -212,12 +221,16 @@ def _build_form_field_spec_schema() -> dict[str, Any]:
 def _build_assistant_spec_schema(kb_refs: list[str] | None) -> dict[str, Any]:
     # No model_ref: an existing step's model changes only in the model picker.
     return {
-        "type": "object",
+        "type": ["object", "null"],
         "additionalProperties": False,
+        "description": "Assistant fields to change; null keeps the assistant as is.",
         "properties": {
             "instructions": {
-                "type": "string",
-                "description": "What this step's assistant should do.",
+                "type": ["string", "null"],
+                "description": (
+                    "What this step's assistant should do; null keeps the current "
+                    "instructions."
+                ),
             },
             **build_knowledge_refs_property_schema(kb_refs=kb_refs),
         },

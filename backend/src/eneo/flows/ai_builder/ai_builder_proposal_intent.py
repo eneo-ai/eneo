@@ -37,18 +37,16 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
     render_confirmed_runtime_input_requirements,
 )
 from eneo.flows.ai_builder.ai_builder_step_tool_schema_fragments import (
-    build_create_structured_field_schema,
     build_knowledge_refs_property_schema,
     build_model_ref_property_schema,
     build_previous_field_refs_schema,
     build_previous_output_refs_schema,
+    build_proposal_structured_field_schema,
     build_review_mode_schema,
-    build_structured_field_schema,
 )
 from eneo.flows.ai_builder.ai_builder_structured_field_normalizer import (
     normalize_structured_field_list,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.flow_authoring_spec import (
     InputSource,
@@ -527,14 +525,15 @@ class _CreateSemanticStepArguments(BaseModel):
 
     name: str
     instructions: str
-    output_fields: list["CreateStructuredFieldIntent"] | None = None
+    output_fields: list["ProposalStructuredFieldIntent"] | None = None
     model_ref: str | None = None
-    knowledge_refs: list[str] = Field(default_factory=list)
+    # Null on the wire (strict makes the property required) means none.
+    knowledge_refs: list[str] | None = None
     citations_requested: bool = False
 
 
-class CreateStructuredFieldIntent(BaseModel):
-    """Compact create-only field tree lowered into the authoring field model.
+class ProposalStructuredFieldIntent(BaseModel):
+    """Compact provider field tree lowered into the authoring field model.
 
     The provider only needs one recursive edge. ``field_type`` tells the server
     whether ``children`` are object members or array-item members; exposing both
@@ -548,10 +547,10 @@ class CreateStructuredFieldIntent(BaseModel):
     description: str
     required: bool = True
     nullable: bool = False
-    children: list["CreateStructuredFieldIntent"] | None = None
+    children: list["ProposalStructuredFieldIntent"] | None = None
 
     @model_validator(mode="after")
-    def _validate_children(self) -> "CreateStructuredFieldIntent":
+    def _validate_children(self) -> "ProposalStructuredFieldIntent":
         if self.nullable and self.field_type in ("object", "array"):
             raise ValueError(
                 f"Only primitive structured fields may be nullable ({self.name!r})."
@@ -589,6 +588,7 @@ class CreateStructuredFieldIntent(BaseModel):
 def _validate_create_semantic_step(value: object) -> dict[str, object]:
     step = _CreateSemanticStepArguments.model_validate(value)
     lowered = step.model_dump(exclude={"output_fields"})
+    lowered["knowledge_refs"] = step.knowledge_refs or []
     lowered["output_fields"] = (
         [field.to_structured_field_draft() for field in step.output_fields]
         if step.output_fields
@@ -627,11 +627,24 @@ class ModifyExistingStep(BaseModel):
     input_source: InputSource | None = None
     input_type: InputType | None = None
     output_type: OutputType | None = None
-    output_contract: FlowPersistedJsonObject | None = None
+    # Complete structured fields of the step's JSON output; None after
+    # admission of an empty list means "no structured contract".
+    output_fields: list[StructuredFieldDraft] | None = None
     review_mode: FlowStepReviewMode | None = None
     uses_form_fields: list[str] | None = None
     uses_previous_fields: list[PreviousFieldRef] | None = None
     document_delivery_mode: DocumentDeliveryMode | None = None
+
+    @field_validator("output_fields", mode="before")
+    @classmethod
+    def _normalize_output_fields(cls, value: Any) -> Any:
+        return normalize_structured_field_list(value)
+
+    @model_validator(mode="after")
+    def _validate_output_fields(self) -> "ModifyExistingStep":
+        if self.output_fields:
+            ensure_structured_field_depth(self.output_fields)
+        return self
 
 
 class AddStep(BaseModel):
@@ -868,12 +881,7 @@ def build_create_flow_tool_schema(
             name: step_schema["properties"][name] for name in ("name", "instructions")
         }
     else:
-        step_schema["properties"]["output_fields"].update(
-            {
-                "minItems": 1,
-                "items": build_create_structured_field_schema(),
-            }
-        )
+        step_schema["properties"]["output_fields"]["minItems"] = 1
         # Keep the only recursive step property last on the wire. Non-strict
         # providers are less likely to strand later step properties at the
         # proposal root when closing a nested field tree.
@@ -987,16 +995,17 @@ def build_semantic_step_schema(
                     "or nested item field, not only instruction prose or a generic "
                     "facts/notes envelope."
                 ),
-                "items": build_structured_field_schema(),
+                "items": build_proposal_structured_field_schema(),
             },
             **(
                 {
                     "uses_form_fields": {
-                        "type": "array",
+                        "type": ["array", "null"],
                         "items": {"type": "string"},
                         "description": (
                             "Names of form fields this edit step should consider. "
-                            "The backend compiles them into underlag/input_bindings."
+                            "The backend compiles them into underlag/input_bindings. "
+                            "Null or an empty list: none."
                         ),
                     }
                 }

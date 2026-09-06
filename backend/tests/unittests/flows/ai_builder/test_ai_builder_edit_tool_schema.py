@@ -64,7 +64,7 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
 
 def _modify_step_schema(schema):
     step_variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
-        "oneOf"
+        "anyOf"
     ]
     return next(
         variant
@@ -75,7 +75,7 @@ def _modify_step_schema(schema):
 
 def _add_step_payload_schema(schema):
     step_variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
-        "oneOf"
+        "anyOf"
     ]
     add_schema = next(
         variant
@@ -368,7 +368,7 @@ class TestBuildEditFlowToolSchema:
             tool_name=PROPOSE_FLOW_TOOL_NAME,
         )
         variants = schema["function"]["parameters"]["properties"]["steps"]["items"][
-            "oneOf"
+            "anyOf"
         ]
         assert [variant["properties"]["kind"]["enum"][0] for variant in variants] == [
             "modify",
@@ -408,8 +408,8 @@ class TestBuildEditFlowToolSchema:
             "items": {"type": "string"},
         }
         description = form_fields["description"]
-        assert "Omit to preserve" in description
-        assert "set null to clear all" in description
+        assert "Null keeps the current fields" in description
+        assert "an empty list clears them" in description
 
     def test_add_payload_exposes_shared_semantic_step_shape(self):
         schema = build_edit_flow_tool_schema(
@@ -432,16 +432,17 @@ class TestBuildEditFlowToolSchema:
         assert "document_delivery_mode" not in add_payload["properties"]
         assert "instructions" in add_payload["properties"]
         assert "output_fields" in add_payload["properties"]
-        field_name_schema = add_payload["properties"]["output_fields"]["items"][
-            "properties"
-        ]["name"]
-        assert "ASCII English JSON schema key" in field_name_schema["description"]
-        assert field_name_schema["pattern"] == r"^[A-Za-z_][A-Za-z0-9_]*$"
+        field_schema = add_payload["properties"]["output_fields"]["items"]
+        # The shared proposal field tree: one recursive edge, closed nodes.
+        assert "children" in field_schema["properties"]
+        assert "fields" not in field_schema["properties"]
+        assert "JSON schema key" in field_schema["properties"]["name"]["description"]
         assert "uses_previous_fields" not in add_payload["properties"]
         assert "uses_previous_outputs" not in add_payload["properties"]
         assert add_payload["properties"]["review_mode"]["enum"] == [
             "view",
             "edit",
+            "none",
             None,
         ]
 
@@ -481,7 +482,8 @@ class TestBuildEditFlowToolSchema:
         assert "input_contract" not in modify_step["properties"]
         assert "input_config" not in modify_step["properties"]
         assert "output_config" not in modify_step["properties"]
-        assert "output_contract" in modify_step["properties"]
+        assert "output_contract" not in modify_step["properties"]
+        assert "output_fields" in modify_step["properties"]
         assert "uses_form_fields" in modify_step["properties"]
 
     def test_modify_step_schema_uses_generated_flow_schema_values(self):
@@ -500,4 +502,4 @@ class TestBuildEditFlowToolSchema:
             *document_delivery_mode_values(),
             None,
         ]
-        assert props["review_mode"]["enum"] == ["view", "edit", None]
+        assert props["review_mode"]["enum"] == ["view", "edit", "none", None]

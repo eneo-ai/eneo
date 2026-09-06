@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
+import jsonschema
 import pytest
 
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
@@ -13,7 +14,17 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     create_compile_context_from_planning_state,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_edit_admission import lower_edit_tool_arguments
+from eneo.flows.ai_builder.ai_builder_edit_compiler import _step_field_changes
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
+from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
+    build_edit_flow_tool_schema,
+)
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    ReviewEditScope,
+    validate_review_edit_effect,
+    validate_review_edit_proposal,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
@@ -22,7 +33,10 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     REJECTED_PROPOSAL_CAPTURE_DIR_ENV,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import FlowInputFieldIntent
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    FlowInputFieldIntent,
+    OrderedEditProposal,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_policy import resolve_ui_language
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CorrectableFailure,
@@ -35,6 +49,8 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import build_native_strict_tool_schema
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     ConfirmedRuntimeMetadataField,
@@ -48,11 +64,13 @@ from eneo.flows.assistant_authoring_snapshot import (
 )
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
     FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
     OutputType,
+    StepSpec,
 )
 from eneo.flows.input_binding_contract_rules import (
     derive_structured_projection_contract,
@@ -720,10 +738,13 @@ async def test_edit_removing_required_source_reader_field_is_rejected() -> None:
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
-                    "output_contract": {
-                        "type": "object",
-                        "properties": {"title": {"type": "string"}},
-                    },
+                    "output_fields": [
+                        {
+                            "name": "title",
+                            "field_type": "string",
+                            "description": "Title",
+                        }
+                    ],
                 },
                 {"kind": "modify", "existing_step_ref": "existing_step_2"},
             ],
@@ -774,10 +795,13 @@ async def test_edit_removing_terminal_schema_source_leaf_is_rejected() -> None:
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
-                    "output_contract": {
-                        "type": "object",
-                        "properties": {"title": {"type": "string"}},
-                    },
+                    "output_fields": [
+                        {
+                            "name": "title",
+                            "field_type": "string",
+                            "description": "Title",
+                        }
+                    ],
                 },
                 {"kind": "modify", "existing_step_ref": "existing_step_2"},
             ],
@@ -1185,14 +1209,23 @@ async def test_output_contract_only_edit_names_the_fields() -> None:
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
-                    "output_contract": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "summary": {"type": "string"},
-                            "author": {"type": "string"},
+                    "output_fields": [
+                        {
+                            "name": "title",
+                            "field_type": "string",
+                            "description": "Title",
                         },
-                    },
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Summary",
+                        },
+                        {
+                            "name": "author",
+                            "field_type": "string",
+                            "description": "Author",
+                        },
+                    ],
                 },
                 {"kind": "modify", "existing_step_ref": "existing_step_2"},
             ],
@@ -1279,13 +1312,18 @@ async def test_same_leaf_schema_change_shows_two_different_values() -> None:
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
-                    "output_contract": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "summary": {"type": "array", "items": {"type": "string"}},
+                    "output_fields": [
+                        {
+                            "name": "title",
+                            "field_type": "string",
+                            "description": "Title",
                         },
-                    },
+                        {
+                            "name": "summary",
+                            "field_type": "array",
+                            "description": "Summary points",
+                        },
+                    ],
                 },
                 {"kind": "modify", "existing_step_ref": "existing_step_2"},
             ],
@@ -1306,69 +1344,32 @@ async def test_same_leaf_schema_change_shows_two_different_values() -> None:
     )
 
 
-@pytest.mark.asyncio
-async def test_json_typed_values_are_compared_as_json() -> None:
-    # Python reads True and 1 as equal; a JSON schema does not. The published
-    # contract carries `const: true`, the proposal `const: 1`: a modification.
-    flow = _flow(
-        _flow_step(
-            step_order=1,
-            user_description="Read source",
-            input_type="document",
-            output_type="json",
+def test_json_typed_values_are_compared_as_json() -> None:
+    # Python reads True and 1 as equal; a JSON Schema does not, and a schema is
+    # exactly what a contract is. The diff owner compares canonical JSON.
+    def step(flag_const: object) -> StepSpec:
+        return StepSpec(
+            plan_step_ref="step_1",
+            existing_step_ref="existing_step_1",
+            name="Extract",
+            assistant_spec=AssistantSpec(instructions="Extract."),
+            input_source=InputSource.FLOW_INPUT,
+            input_type=InputType.TEXT,
+            output_mode=OutputMode.PASS_THROUGH,
+            output_type=OutputType.JSON,
             output_contract={
                 "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "summary": {"type": "string"},
-                    "flag": {"const": True},
-                },
+                "properties": {"flag": {"const": flag_const}},
             },
-        ),
-        _flow_step(
-            step_order=2,
-            user_description="Write report",
-            input_source="previous_step",
-            input_type="json",
-        ),
-    )
-    result = await _process(
-        flow=flow,
-        planning_state=_planning_state_with_slots(
-            primary_runtime_input="documents",
-            post_processing_goal="summarize_or_overview",
-        ),
-        arguments={
-            "plan_rationale": "Loosen the flag.",
-            "steps": [
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "output_contract": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "summary": {"type": "string"},
-                            "flag": {"const": 1},
-                        },
-                    },
-                },
-                {"kind": "modify", "existing_step_ref": "existing_step_2"},
-            ],
-        },
-    )
+        )
 
-    assert isinstance(result, ProposalReady)
-    assert result.compiled.content.edit is not None
-    change = result.compiled.content.edit.diff.step_changes[0]
-    assert change.kind == "modified"
-    (field_change,) = change.field_changes
-    assert field_change.previous_detail is not None
-    assert '"const":true' in field_change.previous_detail
+    (change,) = _step_field_changes(step(True), step(1), step_label=lambda ref: ref)
+    assert change.field == "output_contract"
     assert (
-        field_change.current_detail is not None
-        and '"const":1' in field_change.current_detail
+        change.previous_detail is not None and '"const":true' in change.previous_detail
     )
+    assert change.current_detail is not None and '"const":1' in change.current_detail
+    assert _step_field_changes(step(True), step(True), step_label=lambda ref: ref) == []
 
 
 @pytest.mark.asyncio
@@ -1385,14 +1386,23 @@ async def test_adding_a_leaf_and_changing_a_type_at_once_keeps_both_on_record() 
                 {
                     "kind": "modify",
                     "existing_step_ref": "existing_step_1",
-                    "output_contract": {
-                        "type": "object",
-                        "properties": {
-                            "title": {"type": "string"},
-                            "summary": {"type": "array", "items": {"type": "string"}},
-                            "author": {"type": "string"},
+                    "output_fields": [
+                        {
+                            "name": "title",
+                            "field_type": "string",
+                            "description": "Title",
                         },
-                    },
+                        {
+                            "name": "summary",
+                            "field_type": "array",
+                            "description": "Summary points",
+                        },
+                        {
+                            "name": "author",
+                            "field_type": "string",
+                            "description": "Author",
+                        },
+                    ],
                 },
                 {"kind": "modify", "existing_step_ref": "existing_step_2"},
             ],
@@ -1407,9 +1417,8 @@ async def test_adding_a_leaf_and_changing_a_type_at_once_keeps_both_on_record() 
         "author, summary, title",
     )
     assert change.current_detail is not None
-    assert (
-        '"summary":{"items":{"type":"string"},"type":"array"}' in change.current_detail
-    )
+    assert '"summary":{"description":"Summary points"' in change.current_detail
+    assert '"type":"array"' in change.current_detail
 
 
 @pytest.mark.asyncio
@@ -1610,6 +1619,132 @@ async def test_approval_diff_reports_an_existing_step_renamed_by_preparation() -
         (change.field, change.previous, change.current)
         for change in existing_change.field_changes
     ]
+
+
+async def test_strict_shaped_edit_compiles_like_the_sparse_one_and_passes_review_scope() -> (
+    None
+):
+    # A strict provider sends every property, null where it changes nothing.
+    # That payload must validate against the projected strict schema, lower to
+    # the same proposal as the sparse one, compile to the same spec and diff,
+    # and read as "changed nothing" to the review scope.
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extract case",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Write report",
+            input_source="previous_step",
+            input_type="json",
+        ),
+    )
+    schema = build_edit_flow_tool_schema(
+        flow.steps,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+    )
+
+    def strict_modify(ref: str, **changes: object) -> dict[str, object]:
+        return {
+            "kind": "modify",
+            "existing_step_ref": ref,
+            "name": None,
+            "assistant_spec": {"instructions": None, "knowledge_refs": None},
+            "input_source": None,
+            "input_type": None,
+            "output_type": None,
+            "document_delivery_mode": None,
+            "uses_form_fields": None,
+            "uses_previous_fields": None,
+            "output_fields": None,
+            "review_mode": None,
+            **changes,
+        }
+
+    strict_arguments: dict[str, object] = {
+        "plan_rationale": "Sharpen the extraction instructions.",
+        "assumptions": [],
+        "flow_name": None,
+        "flow_description": None,
+        "steps": [
+            strict_modify(
+                "existing_step_1",
+                assistant_spec={
+                    "instructions": "Extract the case facts as JSON.",
+                    "knowledge_refs": None,
+                },
+            ),
+            strict_modify("existing_step_2"),
+        ],
+        "removed_existing_step_refs": [],
+        "form_fields": None,
+    }
+    sparse_arguments: dict[str, object] = {
+        "plan_rationale": "Sharpen the extraction instructions.",
+        "steps": [
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_1",
+                "assistant_spec": {"instructions": "Extract the case facts as JSON."},
+            },
+            {"kind": "modify", "existing_step_ref": "existing_step_2"},
+        ],
+    }
+    strict_schema = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
+    jsonschema.validate(strict_arguments, strict_schema["function"]["parameters"])
+
+    strict_result = await _process(flow=flow, arguments=strict_arguments)
+    sparse_result = await _process(flow=flow, arguments=sparse_arguments)
+
+    assert isinstance(strict_result, ProposalReady)
+    assert isinstance(sparse_result, ProposalReady)
+    assert strict_result.compiled.content.spec == sparse_result.compiled.content.spec
+    assert strict_result.compiled.content.edit is not None
+    assert sparse_result.compiled.content.edit is not None
+    assert (
+        strict_result.compiled.content.edit.diff
+        == sparse_result.compiled.content.edit.diff
+    )
+    assert [c.kind for c in strict_result.compiled.content.edit.diff.step_changes] == [
+        "modified",
+        "unchanged",
+    ]
+
+    # Held to a review scope that names only step 1, the strict payload
+    # authored nothing on step 2 and nothing at flow level.
+    scope = ReviewEditScope(
+        step_refs=frozenset({"existing_step_1"}),
+        removable_step_refs=frozenset(),
+        may_add=False,
+    )
+    lowered = OrderedEditProposal.model_validate(
+        lower_edit_tool_arguments(strict_arguments)
+    )
+    assert (
+        validate_review_edit_proposal(
+            scope=scope,
+            proposal=lowered,
+            flow_name=flow.name,
+            flow_description=flow.description,
+            current_step_refs=["existing_step_1", "existing_step_2"],
+        )
+        is None
+    )
+    assert (
+        validate_review_edit_effect(
+            scope=scope, diff=strict_result.compiled.content.edit.diff
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio

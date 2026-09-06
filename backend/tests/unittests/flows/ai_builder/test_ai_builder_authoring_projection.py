@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
     PreviousFieldRef,
     PreviousOutputRef,
+    StructuredFieldDraft,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AddStep as IntentAddStep,
@@ -125,57 +126,46 @@ def test_edit_overlay_null_description_keeps_current_and_blank_clears() -> None:
     assert cleared.flow_description == ""
 
 
-def test_edit_overlay_rejects_output_contract_without_schema_envelope() -> None:
-    # Live 2026-09-05: the model named the fields without the schema envelope;
-    # compiled as-is the contract had no properties and the critic reported
-    # `summary` missing although it was there. The shape is refused with the
-    # envelope spelled out so the repair call can fix it.
-    with pytest.raises(
-        BadRequestException, match=r"output_contract must be a JSON Schema object"
-    ):
-        compile_ordered_edit_proposal(
-            base_spec=_base_spec(),
-            proposal=_edit_proposal(
-                steps=[
-                    ModifyExistingStep(
-                        existing_step_ref="existing_step_1",
-                        output_type=OutputType.JSON,
-                        output_contract={
-                            "summary": {"type": "string"},
-                            "key_points": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        },
-                    )
-                ],
-            ),
-        )
+def test_edit_overlay_compiles_output_fields_into_the_contract_and_clears_on_empty() -> (
+    None
+):
+    # The modify branch authors the same structured field tree as a new step;
+    # the one contract compiler turns it into the step's JSON Schema, and an
+    # empty list (admitted as None) removes the contract.
+    compiled = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep(
+                    existing_step_ref="existing_step_1",
+                    output_type=OutputType.JSON,
+                    output_fields=[
+                        StructuredFieldDraft(
+                            name="summary",
+                            field_type="string",
+                            description="One-paragraph summary.",
+                        )
+                    ],
+                )
+            ],
+        ),
+    )
+    contract = compiled.steps[0].output_contract
+    assert contract is not None
+    assert list(contract["properties"]) == ["summary"]
+    assert contract["required"] == ["summary"]
 
-    # Explicit schemas of every supported shape pass through untouched; the
-    # validator, not the projection, owns what a contract may be.
-    for explicit in (
-        {"type": "object", "properties": {"summary": {"type": "string"}}},
-        {"type": "array", "items": {"type": "string"}},
-        {"additionalProperties": {"type": "string"}},
-        {"const": {"summary": "approved"}},
-        {"$ref": "#/$defs/summary", "$defs": {"summary": {"type": "string"}}},
-        {"contentSchema": {"type": "object"}},
-        {"prefixItems": [{"type": "string"}]},
-    ):
-        kept = compile_ordered_edit_proposal(
-            base_spec=_base_spec(),
-            proposal=_edit_proposal(
-                steps=[
-                    ModifyExistingStep(
-                        existing_step_ref="existing_step_1",
-                        output_type=OutputType.JSON,
-                        output_contract=explicit,
-                    )
-                ],
-            ),
-        )
-        assert kept.steps[0].output_contract == explicit
+    cleared = compile_ordered_edit_proposal(
+        base_spec=_base_spec(),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep.model_validate(
+                    {"existing_step_ref": "existing_step_1", "output_fields": []}
+                )
+            ],
+        ),
+    )
+    assert cleared.steps[0].output_contract is None
 
 
 def test_edit_overlay_cleared_step_name_is_a_request_error() -> None:
