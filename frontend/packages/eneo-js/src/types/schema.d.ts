@@ -30905,11 +30905,18 @@ export interface components {
     };
     /**
      * StepFieldChange
-     * @description One field of a modified step, before and after, as the user reads it.
+     * @description One field of a modified step, before and after.
+     *
+     *     ``previous`` / ``current`` are the short reading (a name, leaf names, a
+     *     mode); for a structured value ``previous_detail`` / ``current_detail``
+     *     carry its complete canonical JSON, so what the short reading cannot show
+     *     (a type, a constraint, an expiry) is still on record and on screen.
      */
     StepFieldChange: {
       /** Current */
       current?: string | null;
+      /** Current Detail */
+      current_detail?: string | null;
       /**
        * Field
        * @enum {string}
@@ -30931,6 +30938,8 @@ export interface components {
         | "review_policy";
       /** Previous */
       previous?: string | null;
+      /** Previous Detail */
+      previous_detail?: string | null;
     };
     /** StepRunInput */
     StepRunInput: {

@@ -7,6 +7,9 @@
     label: string;
     previous: string;
     current: string;
+    /** The complete value of a structured field, canonical JSON; null for plain values. */
+    previousDetail?: string | null;
+    currentDetail?: string | null;
   }
 </script>
 
@@ -68,6 +71,15 @@
   let previousInstructionsOpen = $state(false);
 
   const summaryChanges = $derived(fieldChanges.filter((change) => change.field !== "instructions"));
+  let openDetails = $state<Record<string, boolean>>({});
+
+  function prettyDetail(detail: string): string {
+    try {
+      return JSON.stringify(JSON.parse(detail), null, 2);
+    } catch {
+      return detail;
+    }
+  }
   const instructionsChange = $derived(
     fieldChanges.find((change) => change.field === "instructions") ?? null
   );
@@ -207,11 +219,59 @@
               {#each summaryChanges as change (change.field)}
                 <dt class="text-secondary">{change.label}</dt>
                 <dd class="m-0 min-w-0 break-words">
-                  <span class="sr-only">{m.ai_builder_step_change_previous_label()}: </span>
-                  <span class="text-secondary">{change.previous}</span>
-                  <span class="text-secondary mx-1" aria-hidden="true">→</span>
-                  <span class="sr-only">{m.ai_builder_step_change_current_label()}: </span>
-                  <span class="text-primary font-semibold">{change.current}</span>
+                  {#if change.previous === change.current}
+                    <!-- The short reading cannot show this difference (a type, a
+                         constraint); the complete value below can. -->
+                    <span class="text-primary font-semibold">
+                      {m.ai_builder_step_change_changed()}
+                    </span>
+                  {:else}
+                    <span class="sr-only">{m.ai_builder_step_change_previous_label()}: </span>
+                    <span class="text-secondary">{change.previous}</span>
+                    <span class="text-secondary mx-1" aria-hidden="true">→</span>
+                    <span class="sr-only">{m.ai_builder_step_change_current_label()}: </span>
+                    <span class="text-primary font-semibold">{change.current}</span>
+                  {/if}
+                  {#if change.previousDetail || change.currentDetail}
+                    <Collapsible.Root
+                      open={openDetails[change.field] ?? false}
+                      onOpenChange={(open) => (openDetails[change.field] = open)}
+                    >
+                      <span class="text-secondary mx-1" aria-hidden="true">·</span>
+                      <Collapsible.Trigger
+                        class="text-accent-stronger focus-visible:ring-accent-stronger rounded-sm text-xs font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {openDetails[change.field]
+                          ? m.ai_builder_step_change_hide_detail()
+                          : m.ai_builder_step_change_show_detail()}
+                      </Collapsible.Trigger>
+                      <Collapsible.Content class="collapsible-animate">
+                        <div
+                          class="mt-2 grid gap-2 sm:grid-cols-2"
+                          data-testid="step-field-change-detail"
+                        >
+                          <div>
+                            <div class="text-secondary mb-1 text-[0.6875rem] font-bold">
+                              {m.ai_builder_step_change_previous_label()}
+                            </div>
+                            <pre
+                              class="bg-tertiary text-secondary m-0 max-h-64 overflow-auto rounded-md p-2 font-mono text-[0.6875rem] leading-snug break-all whitespace-pre-wrap">{change.previousDetail
+                                ? prettyDetail(change.previousDetail)
+                                : m.ai_builder_step_change_none()}</pre>
+                          </div>
+                          <div>
+                            <div class="text-secondary mb-1 text-[0.6875rem] font-bold">
+                              {m.ai_builder_step_change_current_label()}
+                            </div>
+                            <pre
+                              class="bg-tertiary text-primary m-0 max-h-64 overflow-auto rounded-md p-2 font-mono text-[0.6875rem] leading-snug break-all whitespace-pre-wrap">{change.currentDetail
+                                ? prettyDetail(change.currentDetail)
+                                : m.ai_builder_step_change_none()}</pre>
+                          </div>
+                        </div>
+                      </Collapsible.Content>
+                    </Collapsible.Root>
+                  {/if}
                 </dd>
               {/each}
               {#if instructionsChange}

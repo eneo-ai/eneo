@@ -348,7 +348,9 @@
       current:
         change.field === "instructions"
           ? (change.current ?? "")
-          : fieldChangeValue(change.field, change.current ?? null)
+          : fieldChangeValue(change.field, change.current ?? null),
+      previousDetail: change.previous_detail ?? null,
+      currentDetail: change.current_detail ?? null
     }));
   }
 

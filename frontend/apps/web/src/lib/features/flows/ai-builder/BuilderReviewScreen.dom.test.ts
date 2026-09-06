@@ -485,6 +485,14 @@ describe("BuilderReviewScreen plan document", () => {
                         current: "Strukturera transkriberingen"
                       },
                       { field: "output_type", previous: "text", current: "json" },
+                      {
+                        field: "output_contract",
+                        previous: "talare",
+                        current: "talare",
+                        previous_detail:
+                          '{"properties":{"talare":{"type":"string"}},"type":"object"}',
+                        current_detail: '{"properties":{"talare":{"type":"array"}},"type":"object"}'
+                      },
                       { field: "review_policy", previous: null, current: "view" },
                       {
                         field: "instructions",
@@ -530,7 +538,24 @@ describe("BuilderReviewScreen plan document", () => {
     expect(rows[1]).toBe(
       `${m.ai_builder_step_change_previous_label()}: ${m.flow_type_text()} → ${m.ai_builder_step_change_current_label()}: ${m.flow_output_type_simple_structured()}`
     );
-    expect(rows[2]).toBe(
+    // A structured value whose short reading did not change says so and
+    // keeps the complete value behind its own fold.
+    expect(rows[2]).toContain(m.ai_builder_step_change_changed());
+    const detailFold = within(changes).getByRole("button", {
+      name: m.ai_builder_step_change_show_detail()
+    });
+    expect(detailFold.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(detailFold);
+    await waitFor(() =>
+      expect(
+        within(changes)
+          .getByRole("button", { name: m.ai_builder_step_change_hide_detail() })
+          .getAttribute("aria-expanded")
+      ).toBe("true")
+    );
+    const detail = await within(changes).findByTestId("step-field-change-detail");
+    expect(detail.textContent).toContain('"type": "array"');
+    expect(rows[3]).toBe(
       `${m.ai_builder_step_change_previous_label()}: ${m.flow_step_review_policy_none()} → ${m.ai_builder_step_change_current_label()}: ${m.flow_step_review_policy_view()}`
     );
     expect(
@@ -540,6 +565,7 @@ describe("BuilderReviewScreen plan document", () => {
     ).toEqual([
       m.ai_builder_step_change_field_name(),
       m.ai_builder_step_change_field_output_type(),
+      m.ai_builder_step_change_field_output_contract(),
       m.flow_step_review_policy(),
       m.ai_builder_step_instructions()
     ]);

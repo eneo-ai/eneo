@@ -369,7 +369,9 @@ const stepFieldChangeSchema = z.object({
     "review_policy"
   ]),
   previous: nullableStringSchema,
-  current: nullableStringSchema
+  current: nullableStringSchema,
+  previous_detail: nullableStringSchema.optional(),
+  current_detail: nullableStringSchema.optional()
 });
 
 const stepChangeSchema = z.object({

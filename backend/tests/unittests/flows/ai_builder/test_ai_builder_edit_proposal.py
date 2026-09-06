@@ -1296,11 +1296,120 @@ async def test_same_leaf_schema_change_shows_two_different_values() -> None:
     assert result.compiled.content.edit is not None
     (change,) = result.compiled.content.edit.diff.step_changes[0].field_changes
     assert change.field == "output_contract"
-    assert change.previous != change.current
+    # The short reading is the leaf names, unchanged here; the complete value
+    # travels beside it and is what shows the type.
+    assert change.previous == change.current == "title, summary"
+    assert change.previous_detail is not None
+    assert '"summary":{"type":"string"}' in change.previous_detail
     assert (
-        change.previous is not None and '"summary":{"type":"string"}' in change.previous
+        change.current_detail is not None and '"type":"array"' in change.current_detail
     )
-    assert change.current is not None and '"type":"array"' in change.current
+
+
+@pytest.mark.asyncio
+async def test_json_typed_values_are_compared_as_json() -> None:
+    # Python reads True and 1 as equal; a JSON schema does not. The published
+    # contract carries `const: true`, the proposal `const: 1`: a modification.
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Read source",
+            input_type="document",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "flag": {"const": True},
+                },
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Write report",
+            input_source="previous_step",
+            input_type="json",
+        ),
+    )
+    result = await _process(
+        flow=flow,
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            post_processing_goal="summarize_or_overview",
+        ),
+        arguments={
+            "plan_rationale": "Loosen the flag.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_contract": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "summary": {"type": "string"},
+                            "flag": {"const": 1},
+                        },
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    change = result.compiled.content.edit.diff.step_changes[0]
+    assert change.kind == "modified"
+    (field_change,) = change.field_changes
+    assert field_change.previous_detail is not None
+    assert '"const":true' in field_change.previous_detail
+    assert (
+        field_change.current_detail is not None
+        and '"const":1' in field_change.current_detail
+    )
+
+
+@pytest.mark.asyncio
+async def test_adding_a_leaf_and_changing_a_type_at_once_keeps_both_on_record() -> None:
+    result = await _process(
+        flow=_source_reader_flow(),
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            post_processing_goal="summarize_or_overview",
+        ),
+        arguments={
+            "plan_rationale": "Add the author and make the summary a list.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_contract": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "summary": {"type": "array", "items": {"type": "string"}},
+                            "author": {"type": "string"},
+                        },
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    (change,) = result.compiled.content.edit.diff.step_changes[0].field_changes
+    assert (change.previous, change.current) == (
+        "title, summary",
+        "title, summary, author",
+    )
+    assert change.current_detail is not None
+    assert (
+        '"summary":{"items":{"type":"string"},"type":"array"}' in change.current_detail
+    )
 
 
 @pytest.mark.asyncio

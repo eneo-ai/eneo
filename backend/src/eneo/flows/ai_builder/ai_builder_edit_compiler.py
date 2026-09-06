@@ -7,7 +7,6 @@ that every existing step is either represented in order or explicitly removed.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -67,6 +66,7 @@ from eneo.flows.application.flow_authoring_description_semantics import (
 )
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_authoring_name import normalize_flow_name
@@ -784,18 +784,17 @@ def _step_field_changes(
         )
         value_before = source_before.get(field)
         value_after = source_after.get(field)
-        if value_before == value_after:
+        # Equality is JSON equality: Python reads True and 1 as equal, a JSON
+        # schema does not, and a schema is exactly what these values may be.
+        if canonical_json_bytes(value_before) == canonical_json_bytes(value_after):
             continue
-        readable_before = _readable_field_value(field, value_before, step_label)
-        readable_after = _readable_field_value(field, value_after, step_label)
-        if readable_before == readable_after:
-            # The short reading hides the difference (a field's type, a
-            # source's output kind, a review's expiry): show the whole value.
-            readable_before = _lossless_field_value(value_before)
-            readable_after = _lossless_field_value(value_after)
         changes.append(
             StepFieldChange(
-                field=field, previous=readable_before, current=readable_after
+                field=field,
+                previous=_readable_field_value(field, value_before, step_label),
+                current=_readable_field_value(field, value_after, step_label),
+                previous_detail=_detail_field_value(value_before),
+                current_detail=_detail_field_value(value_after),
             )
         )
     return changes
@@ -833,14 +832,17 @@ def _readable_field_value(
         if field == "review_policy":
             mode = payload.get("mode")
             return str(mode) if mode is not None else None
-        return _lossless_field_value(payload)
+        return _detail_field_value(payload)
     return str(value)
 
 
-def _lossless_field_value(value: Any) -> str | None:
-    if value is None:
+def _detail_field_value(value: Any) -> str | None:
+    """The complete value of a structured field, in the canonical encoding."""
+
+    if not isinstance(value, (dict, list)):
         return None
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload = cast(dict[str, Any] | list[Any], value)
+    return canonical_json_bytes(payload).decode("utf-8")
 
 
 def _compute_confidence(

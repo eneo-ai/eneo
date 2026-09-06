@@ -28,11 +28,19 @@ StepChangeField = Literal[
 
 
 class StepFieldChange(BaseModel):
-    """One field of a modified step, before and after, as the user reads it."""
+    """One field of a modified step, before and after.
+
+    ``previous`` / ``current`` are the short reading (a name, leaf names, a
+    mode); for a structured value ``previous_detail`` / ``current_detail``
+    carry its complete canonical JSON, so what the short reading cannot show
+    (a type, a constraint, an expiry) is still on record and on screen.
+    """
 
     field: StepChangeField
     previous: str | None = None
     current: str | None = None
+    previous_detail: str | None = None
+    current_detail: str | None = None
 
 
 def _default_step_field_changes() -> list[StepFieldChange]:
