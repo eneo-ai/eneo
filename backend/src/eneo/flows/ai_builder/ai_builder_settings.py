@@ -153,11 +153,8 @@ class AIBuilderBudgetPolicy:
         because the input can be as large as the window allows.
         """
 
-        window = context_window_tokens
-        if self.review_evidence_max_input_tokens is not None:
-            window = min(window, self.review_evidence_max_input_tokens)
         return AIBuilderRequestBudget(
-            context_window_tokens=window,
+            context_window_tokens=self.review_evidence_window(context_window_tokens),
             model_output_ceiling_tokens=model_output_ceiling_tokens,
             target_output_tokens=AI_BUILDER_CLASSIFICATION_OUTPUT_TARGET_TOKENS,
             minimum_output_tokens=AI_BUILDER_CLASSIFICATION_MINIMUM_OUTPUT_TOKENS,
@@ -166,15 +163,30 @@ class AIBuilderBudgetPolicy:
             request_id=request_id,
         )
 
+    def review_evidence_window(self, context_window_tokens: int) -> int:
+        """The window a request that carries run evidence may use: the model's,
+        capped by the tenant's review-evidence cap. One meaning for every such
+        request, the suggestions call and the review-backed proposal alike:
+        the cap bounds the whole request input."""
+
+        if self.review_evidence_max_input_tokens is None:
+            return context_window_tokens
+        return min(context_window_tokens, self.review_evidence_max_input_tokens)
+
     def proposal_request_budget(
         self,
         *,
         context_window_tokens: int,
         model_output_ceiling_tokens: int,
         request_id: str | None = None,
+        carries_review_evidence: bool = False,
     ) -> AIBuilderRequestBudget:
         return AIBuilderRequestBudget(
-            context_window_tokens=context_window_tokens,
+            context_window_tokens=(
+                self.review_evidence_window(context_window_tokens)
+                if carries_review_evidence
+                else context_window_tokens
+            ),
             model_output_ceiling_tokens=model_output_ceiling_tokens,
             target_output_tokens=AI_BUILDER_PROPOSAL_OUTPUT_TARGET_TOKENS,
             minimum_output_tokens=AI_BUILDER_PROPOSAL_MINIMUM_OUTPUT_TOKENS,

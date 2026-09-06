@@ -4978,7 +4978,7 @@
   "ai_builder_limits_review_evidence_label": "Limit how much run evidence a review may send to the model",
   "ai_builder_limits_review_evidence_description": "When flow authors let Eneo suggest improvements, the model reads instructions, inputs and outputs from a sample of runs. Without a limit the model's own context window decides how much is sent.",
   "ai_builder_limits_review_evidence_off_status": "No limit of its own – the model's context window decides.",
-  "ai_builder_limits_review_evidence_info": "The limit is in tokens and covers the whole review request. A lower limit cuts cost and latency but truncates long outputs; the model and the user are told what was not read.",
+  "ai_builder_limits_review_evidence_info": "The limit is in tokens and covers the whole request, both when Eneo suggests improvements and when a suggestion is investigated in the AI builder. A lower limit cuts cost and latency but truncates long outputs; the model and the user are told what was not read.",
   "ai_builder_limits_max_message_chars_title": "Maximum instruction length",
   "flow_knowledge_evidence_title": "Flow knowledge evidence",
   "flow_input_limits_audio_description": "Largest allowed size per audio file transcribed in a flow. Larger files are stopped at upload, before the run starts. Leave empty to use the deployment default.",

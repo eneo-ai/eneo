@@ -5305,3 +5305,99 @@ def test_replayed_requirements_whose_core_cannot_fit_are_rejected() -> None:
 
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         _fit_replayed_requirements(disclosure, fits=lambda _payload: False)
+
+
+def _review_evidence(excerpt_chars: int):
+    from uuid import uuid4
+
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        FlowReviewEvidence,
+        FlowReviewSuggestionFocus,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+        ReviewSampleExcerpt,
+        ReviewSampleRun,
+    )
+
+    run_id = uuid4()
+    return FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=0,
+        completed_run_count=1,
+        failed_run_count=0,
+        steps=[],
+        facts=[],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[1]
+            )
+        ],
+        sample_runs=[
+            ReviewSampleRun(
+                run_id=run_id, status="completed", evidence_classification_level=0
+            )
+        ],
+        excerpts=[
+            ReviewSampleExcerpt(
+                run_id=run_id,
+                step_order=1,
+                field="output",
+                availability="included",
+                text="ord " * (excerpt_chars // 4),
+                recorded_chars=excerpt_chars,
+            )
+        ],
+    )
+
+
+def _build_review_backed_proposal(
+    *, review_evidence_max_input_tokens: int | None, window: int = 60_000
+) -> ProposalPrepared:
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=128,
+        minimum_conversation_budget_tokens=256,
+        review_evidence_max_input_tokens=review_evidence_max_input_tokens,
+    )
+    return build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="sv",
+        slot_classification_metadata=None,
+        conversation=[
+            ConversationMessage(role="user", content="Undersök dubbelarbete.")
+        ],
+        planning_state=_document_architecture_state(),
+        attachment_context=None,
+        flow_context=None,
+        review_evidence=_review_evidence(200_000),
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=window,
+        max_output_tokens=1024,
+        budget_policy=policy,
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+
+
+def test_a_review_backed_proposal_is_bounded_by_the_tenant_cap_at_the_request() -> None:
+    # The cap shrinks the budget every later step and the provider boundary
+    # use, and the excerpt that cannot fit is marked, not silently dropped.
+    prepared = _build_review_backed_proposal(review_evidence_max_input_tokens=12_000)
+    assert prepared.request_budget.context_window_tokens == 12_000
+    system = prepared.message_groups[0].messages[0]["content"]
+    assert "avklippt efter" in system
+    uncapped = _build_review_backed_proposal(review_evidence_max_input_tokens=None)
+    assert uncapped.request_budget.context_window_tokens == 60_000
+
+
+def test_a_review_backed_proposal_whose_scaffold_exceeds_the_cap_is_refused() -> None:
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        _build_review_backed_proposal(review_evidence_max_input_tokens=1)

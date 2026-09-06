@@ -47,7 +47,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.main.logging import get_logger
-from eneo.tokens.token_utils import count_tokens, measure_provider_input_reserve
+from eneo.tokens.token_utils import measure_provider_input_reserve
 
 logger = get_logger(__name__)
 
@@ -589,10 +589,20 @@ async def generate_review_suggestions(
         provider_type=completion_model_route.provider_type,
     ).mode
     response_format = review_suggestions_response_format(structured_output_mode)
-    response_format_tokens = count_tokens(
-        json.dumps(response_format, ensure_ascii=False, separators=(",", ":")),
+    # The schema travels with the request and is measured like it: with the
+    # reserving counter, whose fallback over-reserves rather than guesses.
+    response_format_tokens = measure_provider_input_reserve(
+        [
+            {
+                "role": "system",
+                "content": json.dumps(
+                    response_format, ensure_ascii=False, separators=(",", ":")
+                ),
+            }
+        ],
+        [],
         litellm_model,
-    )
+    ).tokens
     request_budget = budget_policy.review_request_budget(
         context_window_tokens=max_input_tokens,
         model_output_ceiling_tokens=max_output_tokens,

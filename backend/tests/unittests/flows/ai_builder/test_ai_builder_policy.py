@@ -132,15 +132,19 @@ def test_review_evidence_cap_is_the_models_window_unless_the_tenant_caps_it() ->
         )
 
 
-def test_the_review_evidence_cap_governs_the_investigation_prompt_too() -> None:
-    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
-        review_evidence_token_limit,
-    )
-
-    uncapped = resolve_ai_builder_budget_policy(None)
-    assert review_evidence_token_limit(50_000, uncapped) == 50_000
+def test_the_review_evidence_cap_bounds_every_request_that_carries_run_evidence() -> (
+    None
+):
     capped = resolve_ai_builder_budget_policy(
         {"ai_builder": {"review_evidence_max_input_tokens": 12_000}}
     )
-    assert review_evidence_token_limit(50_000, capped) == 12_000
-    assert review_evidence_token_limit(8_000, capped) == 8_000
+    review_backed = capped.proposal_request_budget(
+        context_window_tokens=1_000_000,
+        model_output_ceiling_tokens=8_000,
+        carries_review_evidence=True,
+    )
+    assert review_backed.context_window_tokens == 12_000
+    ordinary = capped.proposal_request_budget(
+        context_window_tokens=1_000_000, model_output_ceiling_tokens=8_000
+    )
+    assert ordinary.context_window_tokens == 1_000_000

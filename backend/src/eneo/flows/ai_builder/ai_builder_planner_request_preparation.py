@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias
@@ -653,9 +654,13 @@ def build_proposal_prepared(
             else ()
         ),
     )
+    # A review-backed proposal carries run excerpts: the tenant's review-evidence
+    # cap bounds this whole request (prompt, attachments, conversation, tools)
+    # through the one budget every later step and the provider boundary use.
     proposal_request_budget = budget_policy.proposal_request_budget(
         context_window_tokens=max_input_tokens,
         model_output_ceiling_tokens=max_output_tokens,
+        carries_review_evidence=review_evidence is not None,
     )
     incompatible_field_names = (
         compile_context.incompatible_confirmed_form_field_names
@@ -728,27 +733,32 @@ def build_proposal_prepared(
         confirmed_requirements,
         fits=lambda requirements: prompt_fits(None, requirements),
     )
-    # Run excerpts were read whole; the model's window decides how much of
-    # them this prompt carries, after the facts and the replayed requirements
-    # and before attachments, which are fitted into what remains. The tenant's
-    # review-evidence cap governs this request too, and the measurement is
-    # the reserving one because it decides admission.
-    evidence_token_limit = review_evidence_token_limit(
-        system_prompt_token_limit, budget_policy
-    )
 
+    # Run excerpts were read whole; the (capped) window decides how much of
+    # them this prompt carries, after the facts and the replayed requirements
+    # and before attachments, which are fitted into what remains. The
+    # measurement is the reserving one because it decides admission, and a
+    # prompt that does not fit even without excerpts is refused here, before
+    # any provider work.
     def evidence_fits(evidence: FlowReviewEvidence) -> bool:
         prompt = build_proposal_prompt(None, replayed_requirements, evidence)
         reserve = measure_provider_input_reserve(
             [{"role": "system", "content": prompt}], [], litellm_model
         )
-        return reserve.tokens <= evidence_token_limit
+        return reserve.tokens <= system_prompt_token_limit
 
-    fitted_review_evidence = (
-        fit_review_evidence(review_evidence, fits=evidence_fits)
-        if review_evidence is not None
-        else None
-    )
+    review_evidence_fit_ms: int | None = None
+    fitted_review_evidence: FlowReviewEvidence | None = None
+    if review_evidence is not None:
+        fit_started = time.monotonic()
+        fitted_review_evidence = fit_review_evidence(
+            review_evidence, fits=evidence_fits
+        )
+        review_evidence_fit_ms = int((time.monotonic() - fit_started) * 1000)
+        if not evidence_fits(fitted_review_evidence):
+            raise AIBuilderKnownProviderRejectionException(
+                build_ai_builder_request_budget_exhausted_error(request_id=None)
+            )
     fitted_attachment_context = (
         fit_ai_builder_attachment_context(
             attachment_context,
@@ -795,6 +805,9 @@ def build_proposal_prepared(
                 if replayed_requirements is not None
                 else 0
             ),
+            "context_window_tokens": proposal_request_budget.context_window_tokens,
+            "review_evidence_fit_ms": review_evidence_fit_ms,
+            **_review_excerpt_counts(fitted_review_evidence),
         },
     )
 
@@ -864,17 +877,14 @@ def _committed_change_is_still_unbuilt(
     return prior_spec.steps[-1].output_type is not compile_context.final_output_type
 
 
-def review_evidence_token_limit(
-    system_prompt_token_limit: int, budget_policy: AIBuilderBudgetPolicy
-) -> int:
-    """What a review-backed proposal prompt may hold: the prompt limit, capped
-    by the tenant's review-evidence cap so one setting governs every request
-    that carries run excerpts."""
-
-    cap = budget_policy.review_evidence_max_input_tokens
-    if cap is None:
-        return system_prompt_token_limit
-    return max(0, min(system_prompt_token_limit, cap))
+def _review_excerpt_counts(evidence: FlowReviewEvidence | None) -> dict[str, int]:
+    if evidence is None:
+        return {}
+    counts = {"included": 0, "truncated": 0, "omitted_by_budget": 0}
+    for excerpt in evidence.excerpts:
+        if excerpt.availability in counts:
+            counts[excerpt.availability] += 1
+    return {f"review_excerpts_{key}": value for key, value in counts.items()}
 
 
 def _proposal_system_prompt_token_limit(

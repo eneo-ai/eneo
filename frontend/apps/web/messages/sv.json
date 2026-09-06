@@ -4978,7 +4978,7 @@
   "ai_builder_limits_review_evidence_label": "Begränsa hur mycket körningsunderlag granskningen får skicka till modellen",
   "ai_builder_limits_review_evidence_description": "När flödesförfattare låter Eneo föreslå förbättringar läser modellen instruktioner, indata och utdata från ett urval körningar. Utan gräns avgör modellens eget kontextfönster hur mycket som skickas.",
   "ai_builder_limits_review_evidence_off_status": "Ingen egen gräns – modellens kontextfönster avgör.",
-  "ai_builder_limits_review_evidence_info": "Gränsen anges i tokens och gäller hela granskningsanropet. En lägre gräns sänker kostnad och svarstid men gör att långa utdata klipps; modellen och användaren får veta vad som inte lästes.",
+  "ai_builder_limits_review_evidence_info": "Gränsen anges i tokens och gäller hela anropet, både när Eneo föreslår förbättringar och när ett förslag undersöks i AI-byggaren. En lägre gräns sänker kostnad och svarstid men gör att långa utdata klipps; modellen och användaren får veta vad som inte lästes.",
   "ai_builder_limits_max_message_chars_title": "Längsta instruktion",
   "flow_knowledge_evidence_title": "Kunskapsunderlag i flöden",
   "flow_input_limits_audio_description": "Största tillåtna storlek per ljudfil som transkriberas i ett flöde. Större filer stoppas redan vid uppladdningen, innan körningen startar. Lämna tomt för att använda driftmiljöns standard.",
