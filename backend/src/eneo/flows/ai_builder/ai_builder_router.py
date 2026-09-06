@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, Any, NoReturn, cast
@@ -105,7 +106,10 @@ from eneo.flows.ai_builder.ai_builder_events import (
     build_usage_event,
     encode_ai_builder_stream_event,
 )
-from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewPacket
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    FlowReviewPacket,
+    ReviewSampleAudit,
+)
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import FlowReviewSample
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     FlowReviewSuggestions,
@@ -153,6 +157,7 @@ from eneo.server.dependencies.container import (
     get_container_for_explicit_transaction,
 )
 from eneo.server.exception_handlers import extract_request_id
+from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -648,6 +653,56 @@ def _requirements_summary_for_assistant_message(
     return requirements_summary_from_metadata(message.metadata)
 
 
+@asynccontextmanager
+async def audited_evidence_snapshot(
+    container: Container,
+    user: UserInDB,
+    *,
+    evidence_detail: str,
+) -> AsyncGenerator[ReviewSampleAudit, None]:
+    """Read run evidence with every read recorded, or not at all.
+
+    Authorization, the reads and their audit rows share one snapshot, and the
+    rows commit before the caller may hand anything to a provider. A failure
+    raised by the body keeps its own type — the audit write reports itself.
+    Only the commit that carries the audits, failing after the body
+    succeeded, is an audit failure.
+    """
+
+    audited_runs: list[FlowRun] = []
+
+    async def _audit(run: FlowRun) -> None:
+        await log_flow_trace_audit_or_raise(
+            container=container,
+            user=user,
+            run=run,
+            action=ActionType.FLOW_EVIDENCE_VIEWED,
+            description=f"AI builder review read flow run {run.id}",
+            extra={"evidence_detail": evidence_detail},
+        )
+        audited_runs.append(run)
+
+    body_failure: BaseException | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            try:
+                yield _audit
+            except BaseException as exc:
+                body_failure = exc
+                raise
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if exc is body_failure or not audited_runs:
+            raise
+        raise_flow_trace_audit_unavailable(
+            user=user,
+            run=audited_runs[-1],
+            action=ActionType.FLOW_EVIDENCE_VIEWED,
+            cause=exc,
+        )
+
+
 def _turn_lifecycle_response(
     turn: BuilderTurnLifecycle,
 ) -> AIBuilderTurnLifecycleResponse:
@@ -957,59 +1012,30 @@ async def post_flow_review_suggestions(
     """Audit, read and prepare inside one evidence snapshot; call the provider after it."""
 
     user = container.user()
-    audited_runs: list[FlowRun] = []
-
-    async def _audit(run: FlowRun) -> None:
-        await log_flow_trace_audit_or_raise(
-            container=container,
-            user=user,
-            run=run,
-            action=ActionType.FLOW_EVIDENCE_VIEWED,
-            description=f"AI builder review sample read flow run {run.id}",
-            extra={"evidence_detail": "ai_builder_review_sample"},
-        )
-        audited_runs.append(run)
-
     service = container.ai_builder_service()
-    # A failure raised by the reads or the preparation keeps its own type; the
-    # audit write already reports itself. Only the commit that carries the
-    # audits, failing after the body succeeded, is an audit failure.
-    body_failure: BaseException | None = None
-    try:
-        async with flow_run_evidence_snapshot_transaction(container):
-            try:
-                authorization = await _authorize_ai_builder_request(
-                    request,
-                    container,
-                    action=FlowApiAction.BUILDER_REVIEW,
-                    space_id=space_id,
-                )
-                space = _authorized_space(authorization)
-                tenant = await _get_tenant_repo(container).get(user.tenant_id)
-                active_provider_ids = await _active_provider_ids(container)
-                sample: FlowReviewSample = await container.ai_builder_flow_review_service().build_review_sample(
-                    flow_id=flow_id, space_id=space_id, audit=_audit
-                )
-                # Route resolution reads provider credentials: inside the snapshot.
-                prepared = await service.prepare_review_judgement(
-                    sample=sample,
-                    space=space,
-                    active_provider_ids=active_provider_ids,
-                    tenant_flow_settings=tenant.flow_settings if tenant else None,
-                )
-            except BaseException as exc:
-                body_failure = exc
-                raise
-    except AuditLoggingUnavailableException:
-        raise
-    except Exception as exc:
-        if exc is body_failure or not audited_runs:
-            raise
-        raise_flow_trace_audit_unavailable(
-            user=user,
-            run=audited_runs[-1],
-            action=ActionType.FLOW_EVIDENCE_VIEWED,
-            cause=exc,
+    async with audited_evidence_snapshot(
+        container, user, evidence_detail="ai_builder_review_sample"
+    ) as audit:
+        authorization = await _authorize_ai_builder_request(
+            request,
+            container,
+            action=FlowApiAction.BUILDER_REVIEW,
+            space_id=space_id,
+        )
+        space = _authorized_space(authorization)
+        tenant = await _get_tenant_repo(container).get(user.tenant_id)
+        active_provider_ids = await _active_provider_ids(container)
+        sample: FlowReviewSample = (
+            await container.ai_builder_flow_review_service().build_review_sample(
+                flow_id=flow_id, space_id=space_id, audit=audit
+            )
+        )
+        # Route resolution reads provider credentials: inside the snapshot.
+        prepared = await service.prepare_review_judgement(
+            sample=sample,
+            space=space,
+            active_provider_ids=active_provider_ids,
+            tenant_flow_settings=tenant.flow_settings if tenant else None,
         )
 
     return await service.judge_review_sample(
@@ -1256,12 +1282,15 @@ async def send_message(
             ),
         )
         # The first read was unlocked; preflight read the session again under
-        # lock. A review turn that committed in between must not slip past the
-        # review permission, so the decision is repeated on the snapshot the
-        # evidence preparation will use.
-        if not acts_on_review and conversation_acts_on_a_review(
-            turn_preflight.session.conversation
-        ):
+        # lock. That snapshot is the one the turn actually runs on, so it
+        # decides both things at once: whether the review permission is
+        # required, and whether the turn reads run evidence. Deciding them
+        # separately let a review that committed in between be gated and then
+        # prepared without its evidence.
+        review_turn = body.review_context is not None or (
+            conversation_acts_on_a_review(turn_preflight.session.conversation)
+        )
+        if review_turn and not acts_on_review:
             require_flow_action(container.user(), FlowApiAction.BUILDER_REVIEW)
 
     async def event_stream() -> AsyncGenerator[ServerSentEvent, None]:
@@ -1276,23 +1305,55 @@ async def send_message(
                         event=wire_event["event"],
                     )
                 return
+
+            async def _prepare(
+                audit: ReviewSampleAudit | None,
+                authorized_space: "Space",
+            ) -> PreparedMessageContext:
+                return await service.prepare_message_context(
+                    session=turn_preflight.session,
+                    space=authorized_space,
+                    model_id=body.model_id,
+                    active_provider_ids=await _active_provider_ids(container),
+                    reasoning_effort=body.reasoning_effort,
+                    tenant_flow_settings=(tenant.flow_settings if tenant else None),
+                    message=body.message,
+                    message_file_ids=body.file_ids,
+                    review_context=body.review_context,
+                    review_evidence_audit=audit,
+                )
+
             try:
-                async with database_session.begin():
-                    prepared_context: PreparedMessageContext = (
-                        await service.prepare_message_context(
-                            session=turn_preflight.session,
-                            space=space,
-                            model_id=body.model_id,
-                            active_provider_ids=await _active_provider_ids(container),
-                            reasoning_effort=body.reasoning_effort,
-                            tenant_flow_settings=(
-                                tenant.flow_settings if tenant else None
-                            ),
-                            message=body.message,
-                            message_file_ids=body.file_ids,
-                            review_context=body.review_context,
+                if review_turn:
+                    # The turn reads run content again, so the reads, their
+                    # audit rows and the authorization share one snapshot and
+                    # the rows commit before the planner may see any of it.
+                    # Access is re-decided here rather than inherited from the
+                    # earlier transaction: evidence viewing can be granted by
+                    # run ownership alone, while reading runs to propose an
+                    # edit needs the review permission and edit access, and a
+                    # role can change between the two transactions.
+                    async with audited_evidence_snapshot(
+                        container,
+                        container.user(),
+                        evidence_detail="ai_builder_review_investigation",
+                    ) as audit:
+                        review_space = _authorized_space(
+                            await _authorize_ai_builder_request(
+                                request,
+                                container,
+                                action=FlowApiAction.BUILDER_REVIEW,
+                                space_id=turn_preflight.session.space_id,
+                                session=turn_preflight.session,
+                                require_creator=True,
+                            )
                         )
-                    )
+                        prepared_context: PreparedMessageContext = await _prepare(
+                            audit, review_space
+                        )
+                else:
+                    async with database_session.begin():
+                        prepared_context = await _prepare(None, space)
             except Exception:
                 replay_preflight = await service.preflight_message_turn(
                     session_id=session_id,

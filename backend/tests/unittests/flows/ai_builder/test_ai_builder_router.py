@@ -2506,6 +2506,139 @@ class TestSendMessageEndpoint:
         service.prepare_message_context.assert_not_called()
 
     @pytest.mark.anyio
+    async def test_a_review_that_lands_at_preflight_gets_the_audited_read_too(self):
+        """Gating the late review is not enough: it must also read its runs.
+
+        The turn runs on the preflight snapshot, so that snapshot decides both
+        the permission and whether run evidence is read. Deciding them from
+        different reads once left a review gated and then prepared with no
+        evidence at all.
+        """
+        from eneo.flows.ai_builder.ai_builder_flow_review import PersistedReviewContext
+
+        container = _make_container()
+        container.session.return_value = _SnapshotSession()
+        container.audit_service.return_value.log = AsyncMock()
+        first_read = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = first_read
+
+        locked_read = _make_session_domain(
+            session_id=first_read.id,
+            space_id=first_read.space_id,
+            flow_id=first_read.flow_id,
+            actor_user_id=first_read.actor_user_id,
+        )
+        locked_read.conversation = [
+            ConversationMessage(
+                message_id="user-1",
+                role="user",
+                content="Undersök …",
+                metadata={
+                    "review_context": PersistedReviewContext(
+                        flow_version=1,
+                        definition_checksum="sum",
+                        finding_ids=["f1f1f1f1f1f1f1f1"],
+                    ).to_metadata()
+                },
+            )
+        ]
+
+        async def locked_preflight(**_: object) -> SessionTurnPreflight:
+            return SessionTurnPreflight(
+                session=locked_read,
+                baseline=SessionTurnPreparationBaseline(
+                    session_status=locked_read.status,
+                    latest_plan_id=None,
+                    planning_state_version=locked_read.planning_state_version,
+                    latest_turn_id=None,
+                    latest_turn_state=None,
+                    attachment_file_ids=(),
+                ),
+            )
+
+        service.preflight_message_turn.side_effect = locked_preflight
+
+        async def mock_events(*args, **kwargs):
+            yield build_done_event()
+
+        service.send_message.return_value = mock_events()
+
+        response = await send_message(
+            request=MagicMock(),
+            session_id=first_read.id,
+            body=SendMessageRequest(client_turn_id=uuid4(), message="Och steg 3?"),
+            container=container,
+        )
+        await _read_sse_events(response)
+
+        prepared = service.prepare_message_context.call_args.kwargs
+        assert prepared["review_evidence_audit"] is not None
+
+    @pytest.mark.anyio
+    async def test_evidence_is_not_read_when_access_is_revoked_before_the_snapshot(
+        self,
+    ):
+        """Access is re-decided where the reads happen, not inherited.
+
+        Evidence viewing can be granted by run ownership alone; reading runs
+        in order to propose an edit needs the review permission and edit
+        access. A role can change between the first transaction and the
+        snapshot the reads run in, so the snapshot asks again.
+        """
+        from eneo.flows.ai_builder.ai_builder_flow_review import (
+            AIBuilderReviewContext,
+        )
+
+        container = _make_container()
+        container.session.return_value = _SnapshotSession()
+        container.audit_service.return_value.log = AsyncMock()
+        session = _make_session_domain(
+            flow_id=uuid4(),
+            actor_user_id=container.user.return_value.id,
+        )
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+
+        granted = container.space_service.return_value.get_space
+        calls = {"n": 0}
+
+        async def _get_space(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise UnauthorizedException("space access revoked")
+            return granted.return_value
+
+        container.space_service.return_value.get_space = _get_space
+
+        async def mock_events(*args, **kwargs):
+            yield build_done_event()
+
+        service.send_message.return_value = mock_events()
+
+        response = await send_message(
+            request=MagicMock(),
+            session_id=session.id,
+            body=SendMessageRequest(
+                client_turn_id=uuid4(),
+                message="Undersök …",
+                review_context=AIBuilderReviewContext(
+                    flow_version=1,
+                    definition_checksum="sum",
+                    finding_ids=["f1f1f1f1f1f1f1f1"],
+                ),
+            ),
+            container=container,
+        )
+        events = await _read_sse_events(response)
+
+        service.prepare_message_context.assert_not_called()
+        assert any("error" in str(event) for event in events)
+
+    @pytest.mark.anyio
     async def test_a_suggestion_turn_retains_only_the_investigation_text(self):
         """The client's text never reaches the conversation, the retry snapshot
         or the fingerprint: the route canonicalises the request first."""
@@ -2516,6 +2649,10 @@ class TestSendMessageEndpoint:
         )
 
         container = _make_container()
+        # A suggestion turn reads run evidence again, so it runs under the
+        # same audited snapshot the suggestions route uses.
+        container.session.return_value = _SnapshotSession()
+        container.audit_service.return_value.log = AsyncMock()
         session = _make_session_domain(
             flow_id=uuid4(),
             actor_user_id=container.user.return_value.id,

@@ -74,6 +74,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderReviewReference,
     AIBuilderSuggestionContext,
     FlowReviewEvidence,
+    ReviewSampleAudit,
     resolve_review_evidence,
     resolve_suggestion_evidence,
 )
@@ -411,10 +412,13 @@ class AIBuilderService:
         message: str | None = None,
         message_file_ids: list[UUID] | None = None,
         review_context: AIBuilderReviewReference | None = None,
+        review_evidence_audit: ReviewSampleAudit | None = None,
     ) -> PreparedMessageContext:
         """Pre-fetch planner, provider, and flow-edit context before SSE streaming."""
         review_evidence = await self._resolve_review_evidence(
-            session=session, review_context=review_context
+            session=session,
+            review_context=review_context,
+            audit=review_evidence_audit,
         )
         # The floor this conversation is held to: whatever evidence this turn
         # reads, or any turn before it read. It only ever rises, and it is
@@ -558,6 +562,7 @@ class AIBuilderService:
         *,
         session: BuilderSession,
         review_context: AIBuilderReviewReference | None,
+        audit: ReviewSampleAudit | None = None,
     ) -> FlowReviewEvidence | None:
         """The findings this turn acts on, rebuilt from the runs.
 
@@ -565,8 +570,11 @@ class AIBuilderService:
         unknown id is a typed refusal. A later turn in the same review inherits
         the last named findings; if the flow moved on since, the turn simply
         proceeds without evidence rather than failing a conversation mid-way.
-        A suggestion reference is held to the runs it was judged on; the
-        conversation floor those runs set is kept by the metadata regardless.
+        A suggestion reference is held to the runs it was judged on, and
+        those runs are read again now, through ``audit``, so the turn tests
+        the suggestions against what the runs say rather than repeating what
+        an earlier read of them made the model say. Without an audit hook no
+        content is read and the turn keeps the facts alone.
         """
         explicit = review_context is not None
         if review_context is None:
@@ -575,16 +583,33 @@ class AIBuilderService:
             return None
         if self.flow_review_service is None:
             raise RuntimeError("AIBuilderFlowReviewService is required for reviews.")
-        packet = await self.flow_review_service.build_packet(
-            flow_id=session.flow_id, space_id=session.space_id
-        )
+        sample: FlowReviewSample | None = None
+        if isinstance(review_context, AIBuilderSuggestionContext) and audit is not None:
+            sample = await self.flow_review_service.build_review_sample(
+                flow_id=session.flow_id,
+                space_id=session.space_id,
+                audit=audit,
+                run_ids=review_context.sample_run_ids,
+            )
+            packet = sample.packet
+        else:
+            packet = await self.flow_review_service.build_packet(
+                flow_id=session.flow_id, space_id=session.space_id
+            )
         try:
             if isinstance(review_context, AIBuilderSuggestionContext):
-                levels = await self.flow_review_service.resolve_sample_run_levels(
-                    flow_id=session.flow_id, run_ids=review_context.sample_run_ids
+                levels = (
+                    {
+                        run.run_id: run.evidence_classification_level
+                        for run in sample.runs
+                    }
+                    if sample is not None
+                    else await self.flow_review_service.resolve_sample_run_levels(
+                        flow_id=session.flow_id, run_ids=review_context.sample_run_ids
+                    )
                 )
                 return resolve_suggestion_evidence(
-                    packet, review_context, sample_run_levels=levels
+                    packet, review_context, sample_run_levels=levels, sample=sample
                 )
             return resolve_review_evidence(packet, review_context)
         except AIBuilderBadRequestException:
