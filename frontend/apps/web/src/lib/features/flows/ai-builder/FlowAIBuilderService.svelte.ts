@@ -362,8 +362,9 @@ export class FlowAIBuilderService {
   }
 
   async startFreshSession(targetKind: TargetKind): Promise<boolean> {
-    this.clearSavedFlowStepScope();
-    return this.#driver.startFreshSession(targetKind);
+    const replaced = await this.#driver.startFreshSession(targetKind);
+    if (replaced) this.clearSavedFlowStepScope();
+    return replaced;
   }
 
   async loadDraftSessions(): Promise<void> {

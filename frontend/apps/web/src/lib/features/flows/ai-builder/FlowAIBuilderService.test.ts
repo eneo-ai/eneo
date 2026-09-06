@@ -152,6 +152,40 @@ describe("FlowAIBuilderService", () => {
     expect(service.savedFlowStepScope).toBeNull();
   });
 
+  it("keeps the saved-step scope when a fresh session is skipped and drops it once one exists", async () => {
+    const session = {
+      session_id: "s-2",
+      space_id: "space-1",
+      status: "chatting",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      latest_plan_id: null,
+      conversation: [],
+      latest_turn: null
+    };
+    const fetch = vi.fn(async () => session);
+    const service = new FlowAIBuilderService(
+      { client: { fetch, stream: vi.fn() } } as never,
+      "space-1",
+      "flow-1"
+    );
+    const scope = {
+      editContext: { kind: "saved_flow_step" as const, flow_step_id: "step-1" },
+      stepName: "Extract facts",
+      stepNumber: 2
+    };
+    service.setSavedFlowStepScope(scope);
+
+    service.seedState({ pendingOperation: { kind: "applying", planId: "p-1" } as never });
+    expect(await service.startFreshSession("edit")).toBe(false);
+    expect(service.savedFlowStepScope).toEqual(scope);
+    expect(fetch).not.toHaveBeenCalled();
+
+    service.seedState({ pendingOperation: null });
+    expect(await service.startFreshSession("edit")).toBe(true);
+    expect(service.savedFlowStepScope).toBeNull();
+  });
+
   it("keeps the saved-step scope while its plan is reviewed", () => {
     const service = makeService();
     const scope = {

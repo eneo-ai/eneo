@@ -629,11 +629,11 @@
     showReplaceEditSessionDialog = false;
     pendingSavedFlowStepScope = null;
     pendingReviewReplacement = false;
-    conversationRef?.resetComposerContext();
-    // The driver skips the replacement while a turn is in flight and rejects
-    // when the create fails (surfacing its own error). Either way the old
-    // session is still the one on screen, so the step or review must not open
-    // against it; the next launch asks the question again.
+    // The driver skips the replacement while work is in flight (the old
+    // session stays, and the next launch asks again) and rejects when the
+    // create fails (it has reset to no session and shows its own error, whose
+    // recovery it owns). Neither outcome may open the step or review, and the
+    // composer context is consumed only once the replacement is real.
     let replaced = false;
     try {
       replaced = await service.startFreshSession("edit");
@@ -641,6 +641,7 @@
       return;
     }
     if (!replaced) return;
+    conversationRef?.resetComposerContext();
     if (scope !== null) {
       await activateSavedFlowStep(scope);
     } else {
@@ -914,7 +915,7 @@
       </AlertDialog.Cancel>
       <AlertDialog.Action
         variant="destructive"
-        disabled={service.isStreaming}
+        disabled={service.isStreaming || service.isBusy}
         onclick={confirmSavedFlowStepReplacement}
       >
         {m.ai_builder_replace_edit_action()}
