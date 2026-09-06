@@ -149,7 +149,7 @@
       : 'border-default'}"
   >
     <Collapsible.Trigger
-      class="hover:bg-secondary focus-visible:ring-accent-default/40 flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      class="hover:bg-secondary focus-visible:ring-accent-stronger flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
       aria-label="{m.ai_builder_step_label({ step: stepNumber })}: {step.name}"
     >
       <span

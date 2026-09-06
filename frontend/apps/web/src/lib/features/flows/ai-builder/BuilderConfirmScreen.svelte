@@ -580,7 +580,7 @@
             {#if userRequestNeedsClamp}
               <button
                 type="button"
-                class="text-accent-stronger focus-visible:ring-accent-stronger/40 mt-1 -ml-2 inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none max-sm:min-h-[44px]"
+                class="text-accent-stronger focus-visible:ring-accent-stronger mt-1 -ml-2 inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none max-sm:min-h-[44px]"
                 aria-expanded={userRequestExpanded}
                 aria-controls={userRequestId}
                 onclick={() => (userRequestExpanded = !userRequestExpanded)}

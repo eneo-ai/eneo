@@ -111,7 +111,7 @@
     role="region"
     aria-label={m.ai_builder_conversation_aria()}
     tabindex="0"
-    class="focus-visible:ring-accent-default/40 min-h-0 flex-1 overflow-y-auto px-4 py-4 focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+    class="focus-visible:ring-accent-stronger min-h-0 flex-1 overflow-y-auto px-4 py-4 focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
   >
     {#if visibleMessages.length === 0}
       <p class="text-secondary py-6 text-center text-sm">{m.ai_builder_conversation_empty()}</p>

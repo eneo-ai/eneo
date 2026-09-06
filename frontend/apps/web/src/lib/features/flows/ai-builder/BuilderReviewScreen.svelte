@@ -677,7 +677,7 @@
   <div class="border-dimmer border-t">
     <button
       type="button"
-      class="hover:bg-secondary focus-visible:ring-accent-default/40 flex w-full items-center gap-2 px-[1.375rem] py-3 text-left text-[0.84375rem] font-bold transition-colors focus-visible:ring-2 focus-visible:outline-none max-sm:px-3.5"
+      class="hover:bg-secondary focus-visible:ring-accent-stronger flex w-full items-center gap-2 px-[1.375rem] py-3 text-left text-[0.84375rem] font-bold transition-colors focus-visible:ring-2 focus-visible:outline-none max-sm:px-3.5"
       aria-expanded={isOpen}
       onclick={toggle}
     >
@@ -1161,7 +1161,7 @@
                   {#each reviewCheckpointSteps as { step, index } (step.plan_step_ref)}
                     <button
                       type="button"
-                      class="bg-warning-default/20 text-warning-stronger focus-visible:ring-warning-default/50 rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold focus-visible:ring-2 focus-visible:outline-none"
+                      class="bg-warning-default/20 text-warning-stronger focus-visible:ring-warning-stronger rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold focus-visible:ring-2 focus-visible:outline-none"
                       onclick={() => revealStep(step)}
                     >
                       {m.ai_builder_step_label({ step: index + 1 })}

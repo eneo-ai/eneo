@@ -118,7 +118,7 @@
   {:else}
     <button
       type="button"
-      class="hover:bg-secondary focus-visible:ring-accent-default/40 flex w-full flex-wrap items-center gap-2.5 px-[1.125rem] py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      class="hover:bg-secondary focus-visible:ring-accent-stronger flex w-full flex-wrap items-center gap-2.5 px-[1.125rem] py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
       onclick={() => {
         if (onopen) onopen();
         else open = true;
