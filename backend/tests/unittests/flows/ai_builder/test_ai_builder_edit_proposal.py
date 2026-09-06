@@ -1205,9 +1205,14 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
         ("removed", "existing_step_3", "Archive result"),
     ]
     modified = edit.diff.step_changes[1]
-    assert modified.details is not None
-    assert "name" in modified.details
-    assert "instructions updated" in modified.details
+    assert [
+        (change.field, change.previous, change.current)
+        for change in modified.field_changes
+    ] == [
+        ("name", "Review case", "Review updated"),
+        ("instructions", "", "Review the extracted case."),
+    ]
+    assert edit.diff.step_changes[0].field_changes == []
     assert edit.diff.net_steps_added == 1
     assert edit.diff.net_steps_removed == 1
     assert edit.confidence == "ready"

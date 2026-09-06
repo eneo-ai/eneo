@@ -9,12 +9,37 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
 )
 from eneo.json_types import JsonValue
 
+StepChangeField = Literal[
+    "name",
+    "input_source",
+    "input_type",
+    "output_mode",
+    "output_type",
+    "instructions",
+    "model_ref",
+    "knowledge_refs",
+]
+
+
+class StepFieldChange(BaseModel):
+    """One field of a modified step, before and after, as the user reads it."""
+
+    field: StepChangeField
+    previous: str | None = None
+    current: str | None = None
+
+
+def _default_step_field_changes() -> list[StepFieldChange]:
+    return []
+
 
 class StepChange(BaseModel):
     kind: Literal["added", "modified", "removed", "unchanged"]
     step_name: str
     step_ref: str | None = None
-    details: str | None = None
+    field_changes: list[StepFieldChange] = Field(
+        default_factory=_default_step_field_changes
+    )
 
 
 class FormFieldChange(BaseModel):
@@ -69,4 +94,6 @@ __all__ = [
     "FormFieldChange",
     "MetadataChange",
     "StepChange",
+    "StepChangeField",
+    "StepFieldChange",
 ]

@@ -13,7 +13,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import BuilderApproveDialog, { type ApprovePhase } from "./BuilderApproveDialog.svelte";
   import BuilderChangeRequest from "./BuilderChangeRequest.svelte";
-  import BuilderStepDetails from "./BuilderStepDetails.svelte";
+  import BuilderStepDetails, { type StepFieldChangeDisplay } from "./BuilderStepDetails.svelte";
   import BuilderStepNode from "./BuilderStepNode.svelte";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
@@ -23,6 +23,7 @@
     AIBuilderStatus,
     EditAdvisory,
     FlowDraftSpecCore,
+    StepFieldChange,
     StepSpec
   } from "./protocol";
   import {
@@ -32,9 +33,10 @@
     buildAIBuilderDiagnosticReportSession
   } from "./aiBuilderDiagnosticReport";
   import {
-    getReviewFocusStepIndex,
     getRemovedStepChanges,
-    getStepChangeKind
+    getReviewFocusStepIndex,
+    getStepChangeKind,
+    getStepFieldChanges
   } from "./flowAIBuilderPlanDiff";
   import { getRevisedStepRefs } from "./flowAIBuilderPlanRevisionDiff";
   import {
@@ -203,9 +205,17 @@
     if (planId === openStepsPlanId) return;
     openStepsPlanId = planId;
     openStepRefs.clear();
-    if (!isScopedStepReview) return;
+    if (isScopedStepReview) {
+      for (const step of steps) {
+        if (isScopedTargetStep(step)) openStepRefs.add(step.plan_step_ref);
+      }
+      return;
+    }
+    // An edit's changed steps open on their own so the details view lands on
+    // what the proposal does; unchanged steps stay folded for context.
+    if (isCreateMode) return;
     for (const step of steps) {
-      if (isScopedTargetStep(step)) openStepRefs.add(step.plan_step_ref);
+      if (changeBadge(step) !== null) openStepRefs.add(step.plan_step_ref);
     }
   });
 
@@ -256,13 +266,75 @@
     if (!outputModeUsesCompletionModel(step.output_mode ?? "pass_through")) {
       return m.ai_builder_node_model_none();
     }
-    const ref = step.assistant_spec.model_ref;
+    return modelRefLabel(step.assistant_spec.model_ref);
+  }
+
+  function modelRefLabel(ref: string | null | undefined): string {
     if (!ref) return m.ai_builder_node_model_space_default();
     const known = service.availableModels.find((model) => model.id === ref);
     if (known) return known.name;
     // An unresolved plan-local reference still names the model; "model." is
     // protocol bookkeeping and reads as noise on the step chip.
     return ref.startsWith("model.") ? ref.slice("model.".length) : ref;
+  }
+
+  // What the proposal changes in a published step, in the words the rest of
+  // the plan uses for the same values. Instructions keep their full text: the
+  // details panel shows the previous wording behind a fold.
+  const FIELD_CHANGE_LABELS: Record<StepFieldChange["field"], () => string> = {
+    name: m.ai_builder_step_change_field_name,
+    input_source: m.ai_builder_step_change_field_input_source,
+    input_type: m.ai_builder_step_change_field_input_type,
+    output_mode: m.ai_builder_step_change_field_output_mode,
+    output_type: m.ai_builder_step_change_field_output_type,
+    instructions: m.ai_builder_step_instructions,
+    model_ref: m.ai_builder_step_change_field_model_ref,
+    knowledge_refs: m.ai_builder_step_change_field_knowledge_refs
+  };
+  const OUTPUT_MODE_LABELS: Record<string, () => string> = {
+    pass_through: m.flow_output_mode_pass_through,
+    compose_text: m.flow_output_mode_compose_text,
+    render_verbatim: m.flow_output_mode_render_verbatim,
+    template_fill: m.flow_output_mode_template_fill,
+    transcribe_only: m.flow_output_mode_transcribe_only,
+    speaker_mapping: m.flow_output_mode_speaker_mapping,
+    http_post: m.flow_output_mode_http_post
+  };
+  const INPUT_SOURCE_LABELS: Record<string, () => string> = {
+    flow_input: m.ai_builder_step_flow_input,
+    previous_step: m.ai_builder_step_previous_step,
+    all_previous_steps: m.ai_builder_step_all_previous
+  };
+  function fieldChangeValue(field: StepFieldChange["field"], value: string | null): string {
+    if (value === null || value === "") return m.ai_builder_step_change_none();
+    switch (field) {
+      case "input_type":
+      case "output_type":
+        return simpleTypeLabel(value);
+      case "output_mode":
+        return OUTPUT_MODE_LABELS[value]?.() ?? value;
+      case "input_source":
+        return INPUT_SOURCE_LABELS[value]?.() ?? value;
+      case "model_ref":
+        return modelRefLabel(value);
+      default:
+        return value;
+    }
+  }
+  function stepFieldChanges(step: StepSpec): StepFieldChangeDisplay[] {
+    if (isCreateMode) return [];
+    return getStepFieldChanges(step, plan?.proposal.edit?.diff ?? null).map((change) => ({
+      field: change.field,
+      label: FIELD_CHANGE_LABELS[change.field](),
+      previous:
+        change.field === "instructions"
+          ? (change.previous ?? "")
+          : fieldChangeValue(change.field, change.previous ?? null),
+      current:
+        change.field === "instructions"
+          ? (change.current ?? "")
+          : fieldChangeValue(change.field, change.current ?? null)
+    }));
   }
 
   /**
@@ -1148,6 +1220,7 @@
                       ioLabel={ioLabel(step)}
                       modelLabel={modelLabel(step)}
                       changeBadge={changeBadge(step)}
+                      fieldChanges={stepFieldChanges(step)}
                       pausesForReview={pausesForReview(step)}
                       perFile={perFileStepRefs.has(step.plan_step_ref)}
                       canRequestChange={plan.status === "proposed"}

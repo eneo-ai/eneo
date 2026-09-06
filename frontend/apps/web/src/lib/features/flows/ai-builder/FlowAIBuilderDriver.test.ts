@@ -107,7 +107,7 @@ function makeEditApproval(): NonNullable<ProposedPlan["proposal"]["edit"]> {
           kind: "modified",
           step_name: "Step A",
           step_ref: "existing_step_1",
-          details: "output_type -> pdf"
+          field_changes: [{ field: "output_type", previous: "text", current: "pdf" }]
         }
       ],
       net_steps_added: 0,

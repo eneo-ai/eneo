@@ -1,3 +1,15 @@
+<script module lang="ts">
+  import type { StepFieldChange } from "./protocol";
+
+  /** One changed field with both values already in the plan's vocabulary. */
+  export interface StepFieldChangeDisplay {
+    field: StepFieldChange["field"];
+    label: string;
+    previous: string;
+    current: string;
+  }
+</script>
+
 <script lang="ts">
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -22,6 +34,8 @@
     /** The model is a plan fact here; it is changed in the step editor. */
     modelIsFixedHere?: boolean;
     changeBadge?: "new" | "updated" | null;
+    /** What the proposal changes in this published step (edit mode). */
+    fieldChanges?: StepFieldChangeDisplay[];
     pausesForReview?: boolean;
     perFile?: boolean;
     canRequestChange?: boolean;
@@ -39,6 +53,7 @@
     modelLabel,
     modelIsFixedHere = true,
     changeBadge = null,
+    fieldChanges = [],
     pausesForReview = false,
     perFile = false,
     canRequestChange = false,
@@ -50,6 +65,12 @@
   const INSTRUCTION_CLAMP_CHARS = 300;
 
   let instructionsExpanded = $state(false);
+  let previousInstructionsOpen = $state(false);
+
+  const summaryChanges = $derived(fieldChanges.filter((change) => change.field !== "instructions"));
+  const instructionsChange = $derived(
+    fieldChanges.find((change) => change.field === "instructions") ?? null
+  );
 
   type SchemaProperty = { type?: string; title?: string; description?: string };
 
@@ -191,6 +212,47 @@
               {instructionsExpanded ? m.ai_builder_show_less() : m.ai_builder_show_more()}
             </Button>
           {/if}
+        {/if}
+
+        {#if fieldChanges.length > 0}
+          <section class="mt-3.5" data-testid="step-field-changes">
+            <h4 class="text-secondary mb-1 text-xs font-bold">
+              {m.ai_builder_step_changes_title()}
+            </h4>
+            <ul class="text-primary m-0 flex list-none flex-col gap-1 p-0 text-[0.8125rem]">
+              {#each summaryChanges as change (change.field)}
+                <li>
+                  {m.ai_builder_step_change_from_to({
+                    label: change.label,
+                    previous: change.previous,
+                    current: change.current
+                  })}
+                </li>
+              {/each}
+              {#if instructionsChange}
+                <li>
+                  {m.ai_builder_step_change_instructions()}
+                  <Collapsible.Root bind:open={previousInstructionsOpen}>
+                    <Collapsible.Trigger
+                      class="text-accent-stronger focus-visible:ring-accent-stronger ml-1 rounded-sm text-xs font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      {previousInstructionsOpen
+                        ? m.ai_builder_step_change_hide_previous_instructions()
+                        : m.ai_builder_step_change_show_previous_instructions()}
+                    </Collapsible.Trigger>
+                    <Collapsible.Content class="collapsible-animate">
+                      <p
+                        class="text-secondary decoration-stronger mt-1.5 max-w-[72ch] text-[0.8125rem] leading-relaxed break-words whitespace-pre-wrap line-through"
+                        aria-label={m.ai_builder_step_change_previous_instructions_label()}
+                      >
+                        {instructionsChange.previous || m.ai_builder_step_change_none()}
+                      </p>
+                    </Collapsible.Content>
+                  </Collapsible.Root>
+                </li>
+              {/if}
+            </ul>
+          </section>
         {/if}
 
         <div class="mt-3.5 flex flex-wrap gap-x-8 gap-y-3">

@@ -156,6 +156,7 @@ export type FlowBuilderProposalContent = components["schemas"]["FlowBuilderPropo
 export type FlowBuilderEditApproval = components["schemas"]["FlowBuilderEditApproval"];
 
 export type StepChange = components["schemas"]["StepChange"];
+export type StepFieldChange = z.infer<typeof stepFieldChangeSchema>;
 
 export type StepChangeKind = StepChange["kind"];
 
@@ -350,11 +351,26 @@ const editAdvisorySchema = z.object({
   field_provenance: fieldProvenanceSchema.nullable().optional()
 });
 
+const stepFieldChangeSchema = z.object({
+  field: z.enum([
+    "name",
+    "input_source",
+    "input_type",
+    "output_mode",
+    "output_type",
+    "instructions",
+    "model_ref",
+    "knowledge_refs"
+  ]),
+  previous: nullableStringSchema,
+  current: nullableStringSchema
+});
+
 const stepChangeSchema = z.object({
   kind: z.enum(["added", "modified", "removed", "unchanged"]),
   step_name: z.string(),
   step_ref: nullableStringSchema,
-  details: nullableStringSchema
+  field_changes: z.array(stepFieldChangeSchema).optional()
 });
 
 const formFieldChangeSchema = z.object({

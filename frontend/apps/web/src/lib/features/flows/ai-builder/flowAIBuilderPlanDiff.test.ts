@@ -51,12 +51,12 @@ describe("flowAIBuilderPlanDiff", () => {
       name: "Second"
     });
     const editDiff = makeEditDiff([
-      { kind: "unchanged", step_name: "First", step_ref: "existing_step_1", details: null },
+      { kind: "unchanged", step_name: "First", step_ref: "existing_step_1" },
       {
         kind: "modified",
         step_name: "Second",
         step_ref: "existing_step_2",
-        details: "output_type → pdf"
+        field_changes: [{ field: "output_type", previous: "text", current: "pdf" }]
       }
     ]);
 
@@ -68,12 +68,12 @@ describe("flowAIBuilderPlanDiff", () => {
   it("keeps added steps actionable and returns removed steps separately", () => {
     const added = makeStep({ plan_step_ref: "step_c", existing_step_ref: null, name: "New" });
     const editDiff = makeEditDiff([
-      { kind: "removed", step_name: "Old", step_ref: "existing_step_1", details: null }
+      { kind: "removed", step_name: "Old", step_ref: "existing_step_1" }
     ]);
 
     expect(getStepChangeKind(added, editDiff)).toBe("added");
     expect(getRemovedStepChanges(editDiff)).toEqual([
-      { kind: "removed", step_name: "Old", step_ref: "existing_step_1", details: null }
+      { kind: "removed", step_name: "Old", step_ref: "existing_step_1" }
     ]);
     expect(getReviewFocusStepIndex([added], editDiff)).toBe(0);
   });

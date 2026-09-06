@@ -437,6 +437,119 @@ describe("BuilderReviewScreen plan document", () => {
     ).toBeNull();
   });
 
+  it("shows what an edit changes in a published step and opens that step first", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            spec: {
+              flow_name: "Mötesrapport",
+              flow_description: "Skriver en rapport.",
+              form_fields: [],
+              steps: [
+                makeTranscribeStep({ existing_step_ref: "existing_step_1" }),
+                makeRenderStep({
+                  existing_step_ref: "existing_step_2",
+                  name: "Strukturera transkriberingen",
+                  output_mode: "pass_through",
+                  output_type: "json",
+                  assistant_spec: {
+                    instructions: "Strukturera texten källnära.",
+                    knowledge_refs: [],
+                    model_ref: null
+                  }
+                })
+              ]
+            },
+            edit: {
+              base_flow_revision: 3,
+              removed_existing_step_refs: [],
+              scoped_target_existing_step_ref: null,
+              diff: {
+                step_changes: [
+                  {
+                    kind: "unchanged",
+                    step_name: "Transkribera ljud",
+                    step_ref: "existing_step_1"
+                  },
+                  {
+                    kind: "modified",
+                    step_name: "Strukturera transkriberingen",
+                    step_ref: "existing_step_2",
+                    field_changes: [
+                      {
+                        field: "name",
+                        previous: "Strukturera",
+                        current: "Strukturera transkriberingen"
+                      },
+                      { field: "output_type", previous: "text", current: "json" },
+                      {
+                        field: "instructions",
+                        previous: "Skriv om texten fritt.",
+                        current: "Strukturera texten källnära."
+                      }
+                    ]
+                  }
+                ],
+                net_steps_added: 0,
+                net_steps_removed: 0,
+                flow_property_changes: {}
+              },
+              warnings: [],
+              advisories: [],
+              risk_flags: [],
+              confidence: "ready"
+            }
+          })
+        })
+      }
+    });
+
+    await fireEvent.click(screen.getByRole("tab", { name: m.ai_builder_canvas_tab_details() }));
+    // The changed step is open on its own; the untouched one stays folded.
+    const changedTrigger = screen.getByRole("button", {
+      name: `${m.ai_builder_step_label({ step: 2 })}: Strukturera transkriberingen`
+    });
+    await waitFor(() => expect(changedTrigger.getAttribute("aria-expanded")).toBe("true"));
+    expect(
+      screen
+        .getByRole("button", { name: `${m.ai_builder_step_label({ step: 1 })}: Transkribera ljud` })
+        .getAttribute("aria-expanded")
+    ).toBe("false");
+
+    const changes = await screen.findByTestId("step-field-changes");
+    expect(changes.textContent).toContain(
+      m.ai_builder_step_change_from_to({
+        label: m.ai_builder_step_change_field_name(),
+        previous: "Strukturera",
+        current: "Strukturera transkriberingen"
+      })
+    );
+    expect(changes.textContent).toContain(
+      m.ai_builder_step_change_from_to({
+        label: m.ai_builder_step_change_field_output_type(),
+        previous: m.flow_type_text(),
+        current: m.flow_output_type_simple_structured()
+      })
+    );
+    // The previous wording waits behind a fold; the current text is already on screen.
+    const fold = within(changes).getByRole("button", {
+      name: m.ai_builder_step_change_show_previous_instructions()
+    });
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    await fireEvent.click(fold);
+    await waitFor(() =>
+      expect(
+        within(changes)
+          .getByRole("button", { name: m.ai_builder_step_change_hide_previous_instructions() })
+          .getAttribute("aria-expanded")
+      ).toBe("true")
+    );
+    expect(await within(changes).findByText("Skriv om texten fritt.")).toBeTruthy();
+  });
+
   it("keeps an expanded step expanded across Diagram↔Detaljer switches", async () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),

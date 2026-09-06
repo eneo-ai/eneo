@@ -30891,8 +30891,8 @@ export interface components {
     Status: "in progress" | "queued" | "complete" | "failed" | "not found";
     /** StepChange */
     StepChange: {
-      /** Details */
-      details?: string | null;
+      /** Field Changes */
+      field_changes?: components["schemas"]["StepFieldChange"][];
       /**
        * Kind
        * @enum {string}
@@ -30902,6 +30902,29 @@ export interface components {
       step_name: string;
       /** Step Ref */
       step_ref?: string | null;
+    };
+    /**
+     * StepFieldChange
+     * @description One field of a modified step, before and after, as the user reads it.
+     */
+    StepFieldChange: {
+      /** Current */
+      current?: string | null;
+      /**
+       * Field
+       * @enum {string}
+       */
+      field:
+        | "name"
+        | "input_source"
+        | "input_type"
+        | "output_mode"
+        | "output_type"
+        | "instructions"
+        | "model_ref"
+        | "knowledge_refs";
+      /** Previous */
+      previous?: string | null;
     };
     /** StepRunInput */
     StepRunInput: {

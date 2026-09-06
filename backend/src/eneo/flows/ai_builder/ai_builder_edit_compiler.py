@@ -29,6 +29,8 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
     FormFieldChange,
     MetadataChange,
     StepChange,
+    StepChangeField,
+    StepFieldChange,
 )
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
 from eneo.flows.ai_builder.ai_builder_form_fields import (
@@ -634,7 +636,7 @@ def _build_step_changes(
                     kind="modified",
                     step_name=step.name,
                     step_ref=step.existing_step_ref,
-                    details=_describe_step_change(previous, step),
+                    field_changes=_step_field_changes(previous, step),
                 )
             )
             continue
@@ -706,28 +708,48 @@ def _comparable_step_payload(step: StepSpec) -> dict[str, Any]:
     return payload
 
 
-def _describe_step_change(previous: StepSpec | None, current: StepSpec) -> str | None:
-    if previous is None:
-        return None
+def _step_field_changes(
+    previous: StepSpec | None, current: StepSpec
+) -> list[StepFieldChange]:
+    """The fields that differ between the published step and the proposal.
 
-    details: list[str] = []
-    if previous.name != current.name:
-        details.append(f"name → '{current.name}'")
-    if previous.input_source != current.input_source:
-        details.append(f"input_source → {current.input_source.value}")
-    if previous.input_type != current.input_type:
-        details.append(f"input_type → {current.input_type.value}")
-    if previous.output_mode != current.output_mode:
-        details.append(f"output_mode → {current.output_mode.value}")
-    if previous.output_type != current.output_type:
-        details.append(f"output_type → {current.output_type.value}")
-    if previous.assistant_spec.instructions != current.assistant_spec.instructions:
-        details.append("instructions updated")
-    if previous.assistant_spec.model_ref != current.assistant_spec.model_ref:
-        details.append("model updated")
-    if previous.assistant_spec.knowledge_refs != current.assistant_spec.knowledge_refs:
-        details.append("knowledge updated")
-    return ", ".join(details) if details else None
+    The step-level equivalence check compares the whole payload; these are the
+    user-facing fields of that payload, so the plan can show what changed
+    rather than only that something did.
+    """
+    if previous is None:
+        return []
+
+    def refs(values: list[str]) -> str | None:
+        return ", ".join(values) if values else None
+
+    candidates: list[tuple[StepChangeField, str | None, str | None]] = [
+        ("name", previous.name, current.name),
+        ("input_source", previous.input_source.value, current.input_source.value),
+        ("input_type", previous.input_type.value, current.input_type.value),
+        ("output_mode", previous.output_mode.value, current.output_mode.value),
+        ("output_type", previous.output_type.value, current.output_type.value),
+        (
+            "instructions",
+            previous.assistant_spec.instructions,
+            current.assistant_spec.instructions,
+        ),
+        (
+            "model_ref",
+            previous.assistant_spec.model_ref,
+            current.assistant_spec.model_ref,
+        ),
+        (
+            "knowledge_refs",
+            refs(previous.assistant_spec.knowledge_refs),
+            refs(current.assistant_spec.knowledge_refs),
+        ),
+    ]
+    return [
+        StepFieldChange(field=field, previous=before, current=after)
+        for field, before, after in candidates
+        if before != after
+    ]
 
 
 def _compute_confidence(
