@@ -103,7 +103,48 @@ class _PreparedOrderedEditProposal:
 @dataclass(frozen=True, slots=True)
 class EditCompilationResult:
     spec: FlowDraftSpecCore
-    approval: FlowBuilderEditApproval
+    # The approval of what the model authored, read before session
+    # preparation: it bounds the authored effect. The user approves the one
+    # from approval_for_prepared_spec, never this one.
+    authored_approval: FlowBuilderEditApproval
+    # The published flow both approvals' diffs read against.
+    base_spec: FlowDraftSpecCore
+
+    def approval_for_prepared_spec(
+        self, prepared_spec: FlowDraftSpecCore
+    ) -> FlowBuilderEditApproval:
+        """The approval whose diff describes ``prepared_spec``.
+
+        Session preparation rewrites the compiled spec after this compiler
+        has run (duplicate step names, resource canonicalisation, terminal
+        output alignment), so the diff the user approves is read again from
+        the same baseline against the spec that is actually returned.
+        """
+
+        step_changes = _build_step_changes(
+            base_spec=self.base_spec,
+            compiled_steps=prepared_spec.steps,
+            removed_refs=self.authored_approval.removed_existing_step_refs,
+        )
+        diff = self.authored_approval.diff.model_copy(
+            update={
+                "step_changes": step_changes,
+                "net_steps_added": sum(1 for c in step_changes if c.kind == "added"),
+                "net_steps_removed": sum(
+                    1 for c in step_changes if c.kind == "removed"
+                ),
+            }
+        )
+        return self.authored_approval.model_copy(
+            update={
+                "diff": diff,
+                "confidence": _compute_confidence(
+                    step_changes=step_changes,
+                    form_changes=diff.form_changes,
+                    warnings=self.authored_approval.warnings,
+                ),
+            }
+        )
 
 
 def compile_edit_proposal(
@@ -275,7 +316,7 @@ def compile_edit_proposal(
 
     return EditCompilationResult(
         spec=compiled_spec,
-        approval=FlowBuilderEditApproval(
+        authored_approval=FlowBuilderEditApproval(
             base_flow_revision=base_flow_revision,
             removed_existing_step_refs=prepared.proposal.removed_existing_step_refs,
             diff=diff,
@@ -284,6 +325,7 @@ def compile_edit_proposal(
             risk_flags=risk_flags,
             confidence=confidence,
         ),
+        base_spec=base_spec,
     )
 
 

@@ -242,11 +242,11 @@ async def process_edit_arguments(
 
     if review_scope is not None:
         effect_feedback = validate_review_edit_effect(
-            scope=review_scope, diff=edit_result.approval.diff
+            scope=review_scope, diff=edit_result.authored_approval.diff
         )
         if effect_feedback is not None:
             return CorrectableFailure(feedback=effect_feedback, kind="validation")
-        if review_edit_changed_nothing(edit_result.approval.diff.step_changes):
+        if review_edit_changed_nothing(edit_result.authored_approval.diff.step_changes):
             # Finding nothing to change is a real answer to an investigation,
             # and the only honest one when the runs do not support the
             # suggestion. Asking the model to try again would loop: the repair
@@ -308,7 +308,7 @@ async def process_edit_arguments(
             kind="validation",
             codes=topology_policy.failure_codes,
         )
-    edit_approval = edit_result.approval.model_copy(
+    edit_approval = edit_result.approval_for_prepared_spec(compiled_spec).model_copy(
         update={
             "scoped_target_existing_step_ref": (
                 plan_edit_context.target_existing_step_ref
@@ -321,7 +321,7 @@ async def process_edit_arguments(
                 else None
             ),
             "advisories": [
-                *edit_result.approval.advisories,
+                *edit_result.authored_approval.advisories,
                 *topology_policy.advisories,
             ],
         }

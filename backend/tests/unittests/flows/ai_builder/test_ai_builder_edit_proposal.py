@@ -1537,6 +1537,82 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
 
 
 @pytest.mark.asyncio
+async def test_approval_diff_describes_the_prepared_spec_not_the_compiled_one() -> None:
+    # Session preparation renames the second of two same-named steps after the
+    # compiler has diffed; the approval must report the name the user gets.
+    flow = _flow(_flow_step(step_order=1, user_description="Sammanfatta ärendet"))
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Add a second summary pass.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "sammanfatta ärendet",
+                        "instructions": "Summarize the case again, shorter.",
+                        "output_type": "text",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    added_step = result.compiled.content.spec.steps[-1]
+    assert added_step.name == "sammanfatta ärendet (2)"
+    added_change = result.compiled.content.edit.diff.step_changes[-1]
+    assert (added_change.kind, added_change.step_name) == (
+        "added",
+        added_step.name,
+    )
+
+
+@pytest.mark.asyncio
+async def test_approval_diff_reports_an_existing_step_renamed_by_preparation() -> None:
+    # The added step comes first, so preparation suffixes the EXISTING step's
+    # name; that rename is a field change the user must see before approving.
+    flow = _flow(_flow_step(step_order=1, user_description="Sammanfatta ärendet"))
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Summarize first, then keep the existing pass.",
+            "steps": [
+                {
+                    "kind": "add",
+                    "step": {
+                        "name": "sammanfatta ärendet",
+                        "instructions": "Summarize the case briefly.",
+                        "output_type": "text",
+                    },
+                },
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "input_source": "previous_step",
+                },
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    existing_step = result.compiled.content.spec.steps[-1]
+    assert existing_step.name == "Sammanfatta ärendet (2)"
+    existing_change = result.compiled.content.edit.diff.step_changes[-1]
+    assert existing_change.kind == "modified"
+    assert existing_change.step_name == existing_step.name
+    assert ("name", "Sammanfatta ärendet", "Sammanfatta ärendet (2)") in [
+        (change.field, change.previous, change.current)
+        for change in existing_change.field_changes
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ordered_step_diff_preserves_literal_aliases_after_insertion() -> None:
     flow = _flow(
         _flow_step(step_order=1, user_description="Extract source"),

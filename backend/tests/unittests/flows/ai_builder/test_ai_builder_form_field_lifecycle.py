@@ -154,6 +154,6 @@ def test_edit_preserves_authored_bound_and_reports_tightened_policy_conflict() -
 
     runtime_input = result.spec.steps[0].input_config["runtime_input"]
     assert runtime_input["max_files"] == 5
-    assert [advisory.code for advisory in result.approval.advisories] == [
+    assert [advisory.code for advisory in result.authored_approval.advisories] == [
         "mapped_file_limit_exceeds_policy"
     ]
