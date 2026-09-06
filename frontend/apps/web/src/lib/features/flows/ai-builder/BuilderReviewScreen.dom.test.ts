@@ -520,20 +520,24 @@ describe("BuilderReviewScreen plan document", () => {
     ).toBe("false");
 
     const changes = await screen.findByTestId("step-field-changes");
-    expect(changes.textContent).toContain(
-      m.ai_builder_step_change_from_to({
-        label: m.ai_builder_step_change_field_name(),
-        previous: "Strukturera",
-        current: "Strukturera transkriberingen"
-      })
+    const rows = within(changes)
+      .getAllByRole("definition")
+      .map((dd) => dd.textContent?.replace(/\s+/g, " ").trim());
+    expect(rows[0]).toBe(
+      `${m.ai_builder_step_change_previous_label()}: Strukturera → ${m.ai_builder_step_change_current_label()}: Strukturera transkriberingen`
     );
-    expect(changes.textContent).toContain(
-      m.ai_builder_step_change_from_to({
-        label: m.ai_builder_step_change_field_output_type(),
-        previous: m.flow_type_text(),
-        current: m.flow_output_type_simple_structured()
-      })
+    expect(rows[1]).toBe(
+      `${m.ai_builder_step_change_previous_label()}: ${m.flow_type_text()} → ${m.ai_builder_step_change_current_label()}: ${m.flow_output_type_simple_structured()}`
     );
+    expect(
+      within(changes)
+        .getAllByRole("term")
+        .map((dt) => dt.textContent?.trim())
+    ).toEqual([
+      m.ai_builder_step_change_field_name(),
+      m.ai_builder_step_change_field_output_type(),
+      m.ai_builder_step_instructions()
+    ]);
     // The previous wording waits behind a fold; the current text is already on screen.
     const fold = within(changes).getByRole("button", {
       name: m.ai_builder_step_change_show_previous_instructions()

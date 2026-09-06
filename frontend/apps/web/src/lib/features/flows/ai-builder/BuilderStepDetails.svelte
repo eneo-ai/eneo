@@ -191,6 +191,59 @@
 
     <Collapsible.Content class="collapsible-animate">
       <div class="border-dimmer bg-secondary border-t px-3.5 py-3.5">
+        {#if fieldChanges.length > 0}
+          <!-- Why this step is open: what the proposal changes, in the same
+               label/value vocabulary as the facts below it. The previous
+               wording of the instructions waits behind a fold, quoted rather
+               than struck through, because it is read, not skimmed. -->
+          <section
+            class="bg-accent-dimmer/60 mb-3.5 rounded-md px-3 py-2.5"
+            data-testid="step-field-changes"
+          >
+            <h4 class="text-secondary mb-1.5 text-xs font-bold">
+              {m.ai_builder_step_changes_title()}
+            </h4>
+            <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[0.8125rem]">
+              {#each summaryChanges as change (change.field)}
+                <dt class="text-secondary">{change.label}</dt>
+                <dd class="m-0 min-w-0 break-words">
+                  <span class="sr-only">{m.ai_builder_step_change_previous_label()}: </span>
+                  <span class="text-secondary">{change.previous}</span>
+                  <span class="text-secondary mx-1" aria-hidden="true">→</span>
+                  <span class="sr-only">{m.ai_builder_step_change_current_label()}: </span>
+                  <span class="text-primary font-semibold">{change.current}</span>
+                </dd>
+              {/each}
+              {#if instructionsChange}
+                <dt class="text-secondary">{m.ai_builder_step_instructions()}</dt>
+                <dd class="m-0 min-w-0">
+                  <Collapsible.Root bind:open={previousInstructionsOpen}>
+                    <span class="text-primary font-semibold">
+                      {m.ai_builder_step_change_instructions()}
+                    </span>
+                    <span class="text-secondary mx-1" aria-hidden="true">·</span>
+                    <Collapsible.Trigger
+                      class="text-accent-stronger focus-visible:ring-accent-stronger rounded-sm text-xs font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      {previousInstructionsOpen
+                        ? m.ai_builder_step_change_hide_previous_instructions()
+                        : m.ai_builder_step_change_show_previous_instructions()}
+                    </Collapsible.Trigger>
+                    <Collapsible.Content class="collapsible-animate">
+                      <blockquote
+                        class="border-stronger text-secondary mt-2 mb-0.5 max-w-[72ch] border-l-2 pl-3 text-[0.8125rem] leading-relaxed break-words whitespace-pre-wrap"
+                        aria-label={m.ai_builder_step_change_previous_instructions_label()}
+                      >
+                        {instructionsChange.previous || m.ai_builder_step_change_none()}
+                      </blockquote>
+                    </Collapsible.Content>
+                  </Collapsible.Root>
+                </dd>
+              {/if}
+            </dl>
+          </section>
+        {/if}
+
         {#if instructions.trim()}
           <h4 class="text-secondary mb-1 text-xs font-bold">
             {m.ai_builder_step_instructions()}
@@ -212,47 +265,6 @@
               {instructionsExpanded ? m.ai_builder_show_less() : m.ai_builder_show_more()}
             </Button>
           {/if}
-        {/if}
-
-        {#if fieldChanges.length > 0}
-          <section class="mt-3.5" data-testid="step-field-changes">
-            <h4 class="text-secondary mb-1 text-xs font-bold">
-              {m.ai_builder_step_changes_title()}
-            </h4>
-            <ul class="text-primary m-0 flex list-none flex-col gap-1 p-0 text-[0.8125rem]">
-              {#each summaryChanges as change (change.field)}
-                <li>
-                  {m.ai_builder_step_change_from_to({
-                    label: change.label,
-                    previous: change.previous,
-                    current: change.current
-                  })}
-                </li>
-              {/each}
-              {#if instructionsChange}
-                <li>
-                  {m.ai_builder_step_change_instructions()}
-                  <Collapsible.Root bind:open={previousInstructionsOpen}>
-                    <Collapsible.Trigger
-                      class="text-accent-stronger focus-visible:ring-accent-stronger ml-1 rounded-sm text-xs font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                    >
-                      {previousInstructionsOpen
-                        ? m.ai_builder_step_change_hide_previous_instructions()
-                        : m.ai_builder_step_change_show_previous_instructions()}
-                    </Collapsible.Trigger>
-                    <Collapsible.Content class="collapsible-animate">
-                      <p
-                        class="text-secondary decoration-stronger mt-1.5 max-w-[72ch] text-[0.8125rem] leading-relaxed break-words whitespace-pre-wrap line-through"
-                        aria-label={m.ai_builder_step_change_previous_instructions_label()}
-                      >
-                        {instructionsChange.previous || m.ai_builder_step_change_none()}
-                      </p>
-                    </Collapsible.Content>
-                  </Collapsible.Root>
-                </li>
-              {/if}
-            </ul>
-          </section>
         {/if}
 
         <div class="mt-3.5 flex flex-wrap gap-x-8 gap-y-3">
