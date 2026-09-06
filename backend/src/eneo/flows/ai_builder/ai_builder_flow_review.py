@@ -23,7 +23,7 @@ import json
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime, timezone
-from typing import Annotated, Literal, Protocol, Sequence
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Sequence
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -61,8 +61,19 @@ from eneo.flows.infrastructure.flow_run_repo import (
     FlowStepResultMetrics,
 )
 from eneo.flows.published_definition import parse_published_runtime_steps
+from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
+        FlowEditDiff,
+        StepChange,
+    )
+    from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+        OrderedEditProposal,
+    )
+    from eneo.flows.flow_authoring_spec import StepSpec
 
 # Newest runs examined for the exact published version; a flow with a long
 # history at an older version still yields a bounded read.
@@ -478,6 +489,242 @@ def resolve_review_evidence(
         steps=list(packet.steps),
         facts=facts,
     )
+
+
+# What a suggestion of each kind may lead to. The kinds differ in what would
+# answer them: duplicated work can be merged away and a step whose output goes
+# unused can go, an instruction that drifted from its outcome is rewritten
+# where it stands, and a missing check is something to add. Nothing here lets
+# a review touch a step the user did not select.
+_REVIEW_EDIT_OPERATIONS: dict[str, frozenset[str]] = {
+    "duplicated_work": frozenset({"modify", "remove"}),
+    "step_not_useful": frozenset({"modify", "remove"}),
+    "instruction_outcome_drift": frozenset({"modify"}),
+    "missing_check": frozenset({"modify", "add"}),
+}
+
+
+class ReviewEditScope(BaseModel):
+    """What a turn that acts on review suggestions may change.
+
+    The user picked findings on a screen, not a free edit: the steps they
+    selected are the surface, and the kinds they selected decide whether
+    removing or adding is among the answers.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    step_refs: frozenset[str]
+    # Removal is granted by the finding that justifies it, never by the batch:
+    # investigating drift in one step beside duplicated work in another must
+    # not make the drifting step deletable.
+    removable_step_refs: frozenset[str]
+    may_add: bool
+
+
+def review_edit_scope(
+    context: AIBuilderReviewReference | None,
+) -> ReviewEditScope | None:
+    """The scope a suggestion reference implies, or nothing for other turns.
+
+    A review that names deterministic findings is a discussion, not a bounded
+    edit; only a suggestion handoff carries steps and kinds to bound one.
+    """
+
+    if not isinstance(context, AIBuilderSuggestionContext):
+        return None
+    step_refs: set[str] = set()
+    removable: set[str] = set()
+    may_add = False
+    for focus in context.suggestions:
+        operations = _REVIEW_EDIT_OPERATIONS[focus.suggestion_kind]
+        refs = {existing_step_ref_for_order(order) for order in focus.step_orders}
+        step_refs |= refs
+        if "remove" in operations:
+            removable |= refs
+        # An added step has no existing step to be granted against, so adding
+        # is the one permission the batch as a whole carries.
+        may_add = may_add or "add" in operations
+    return ReviewEditScope(
+        step_refs=frozenset(step_refs),
+        removable_step_refs=frozenset(removable),
+        may_add=may_add,
+    )
+
+
+def validate_review_edit_proposal(
+    *,
+    scope: ReviewEditScope | None,
+    proposal: "OrderedEditProposal",
+    flow_name: str | None,
+    flow_description: str | None,
+    current_step_refs: Sequence[str],
+) -> str | None:
+    """Reject a review proposal that reaches past what was selected.
+
+    The prompt asks the model to change nothing the evidence does not
+    justify; this is what holds it to that. It reads the model's own
+    proposal, before any server-owned field is filled in, so what it judges
+    is what the model actually asked for.
+    """
+
+    if scope is None:
+        return None
+
+    if proposal.flow_name is not None and proposal.flow_name != flow_name:
+        return (
+            "This turn investigates selected findings and must not rename the "
+            "flow. Say what you would change in plan_rationale instead."
+        )
+    if (
+        proposal.flow_description is not None
+        and proposal.flow_description != flow_description
+    ):
+        return (
+            "This turn investigates selected findings and must not rewrite the "
+            "flow description. Say what you would change in plan_rationale."
+        )
+    if "form_fields" in proposal.model_fields_set:
+        # Omission preserves the fields; a list replaces them and null clears
+        # them, so both of the latter are changes this turn may not make.
+        return (
+            "This turn investigates selected findings and must not change the "
+            "flow's form fields. Omit form_fields to leave them as they are."
+        )
+
+    for ref in sorted(proposal.removed_existing_step_refs):
+        if ref not in scope.removable_step_refs:
+            return (
+                f"Step `{ref}` may not be removed by this turn. Removal answers "
+                "duplicated work or a step whose output is unused; for anything "
+                "else, change the step or say in plan_rationale why it should "
+                "stay."
+            )
+
+    identity_fields = {"kind", "existing_step_ref"}
+    for step in proposal.steps:
+        if step.kind == "add":
+            if not scope.may_add:
+                return (
+                    "These findings are not answered by adding a step. Change "
+                    "the selected steps instead."
+                )
+            continue
+        authored = sorted(step.model_fields_set - identity_fields)
+        if authored and step.existing_step_ref not in scope.step_refs:
+            return (
+                f"Step `{step.existing_step_ref}` changed even though the "
+                "findings name other steps. Only the findings' steps may "
+                "change."
+            )
+
+    # The compiler builds the flow in the order the proposal lists, so a step
+    # this turn never mentions can still be moved by where it is repeated.
+    proposed_order = [
+        step.existing_step_ref for step in proposal.steps if step.kind == "modify"
+    ]
+    kept = [ref for ref in current_step_refs if ref in set(proposed_order)]
+    if proposed_order != kept:
+        return (
+            "This turn investigates selected findings and must not reorder the "
+            "flow's steps. List the existing steps in their current order."
+        )
+    return None
+
+
+def validate_review_edit_effect(
+    *,
+    scope: ReviewEditScope | None,
+    diff: "FlowEditDiff",
+) -> str | None:
+    """What the compiler made of the proposal, held to the same scope.
+
+    The authored proposal is checked before compilation so the model is told
+    what it did wrong in its own terms. This is the check that decides: the
+    compiler completes a proposal with steps of its own — a transcription
+    step ahead of an audio input, a rewiring of the step that follows — and
+    what the user is asked to approve is the compiled plan, not the request.
+    """
+
+    if scope is None:
+        return None
+    if diff.flow_property_changes:
+        changed = ", ".join(sorted(diff.flow_property_changes))
+        return (
+            f"This turn investigates selected findings and must not change the "
+            f"flow's {changed}."
+        )
+    if diff.form_changes:
+        return (
+            "This turn investigates selected findings and must not change the "
+            "flow's form fields."
+        )
+    for change in diff.step_changes:
+        if change.kind == "added" and not scope.may_add:
+            return (
+                f"The change would add the step `{change.step_name}`, which "
+                "these findings do not call for. Change the findings' steps "
+                "instead."
+            )
+        if (
+            change.kind == "removed"
+            and change.step_ref not in scope.removable_step_refs
+        ):
+            return (
+                f"The change would remove step `{change.step_ref}`, which this "
+                "turn may not remove."
+            )
+        if change.kind == "modified" and change.step_ref not in scope.step_refs:
+            return (
+                f"The change would alter step `{change.step_ref}`, which the "
+                "findings do not name. Only the findings' steps may change."
+            )
+    return None
+
+
+def review_edit_renamed_outside_the_scope(
+    *,
+    scope: ReviewEditScope | None,
+    compiled_steps: Sequence["StepSpec"],
+    prepared_steps: Sequence["StepSpec"],
+) -> str | None:
+    """Whether preparing the plan renamed a step the findings never named.
+
+    Preparation runs after the compiled change has been checked and gives
+    duplicate step names their distinguishing suffix. On an ordinary edit
+    that is housekeeping; on a review turn it can move a step the user never
+    selected, and the plan they are shown is the prepared one.
+    """
+
+    if scope is None:
+        return None
+    compiled_names = {
+        step.existing_step_ref: step.name
+        for step in compiled_steps
+        if step.existing_step_ref is not None
+    }
+    for step in prepared_steps:
+        ref = step.existing_step_ref
+        if ref is None or ref in scope.step_refs:
+            continue
+        if compiled_names.get(ref, step.name) != step.name:
+            return (
+                f"Step `{ref}` would be renamed, and the findings do not name "
+                "it. Give the step you change a name that does not collide "
+                "with another step's."
+            )
+    return None
+
+
+def review_edit_changed_nothing(step_changes: Sequence["StepChange"]) -> bool:
+    """Whether a compiled review edit leaves the flow exactly as it was.
+
+    Judged on what the compiler made of the proposal, not on which fields the
+    model happened to write: repeating a step's current wording is not a
+    change, and the turn exists to answer the suggestions.
+    """
+
+    return all(change.kind == "unchanged" for change in step_changes)
 
 
 def render_review_evidence(evidence: FlowReviewEvidence) -> str:

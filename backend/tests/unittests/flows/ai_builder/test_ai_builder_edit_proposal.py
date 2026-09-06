@@ -2349,3 +2349,111 @@ def _audio_document_flow(
             output_type="pdf",
         ),
     )
+
+
+def _review_command_conversation(*, then_the_user_typed: str | None = None):
+    """A suggestion handoff, optionally followed by the user's own message."""
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        metadata_for_user_message,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+        investigation_message,
+    )
+
+    context = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="sum",
+        sample_run_ids=[uuid4()],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="instruction_outcome_drift", step_orders=[1]
+            )
+        ],
+    )
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=investigation_message(context.suggestions),
+            metadata=metadata_for_user_message(
+                review_context=context, review_evidence_level=1
+            ),
+        )
+    ]
+    if then_the_user_typed is not None:
+        conversation.append(
+            ConversationMessage(role="user", content=then_the_user_typed)
+        )
+    return conversation
+
+
+@pytest.mark.asyncio
+async def test_a_review_turn_may_not_change_a_step_the_findings_do_not_name():
+    """The turn answers the findings the user picked, and nothing else.
+
+    The same proposal is accepted when the user typed the request
+    themselves: it is the handoff that bounds the edit, not the session.
+    """
+
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Sammanfatta"),
+        _flow_step(step_order=2, user_description="Föreslå beslut"),
+    )
+    arguments = {
+        "plan_rationale": "Steg 2 skrivs om.",
+        "steps": [
+            {"kind": "modify", "existing_step_ref": "existing_step_2", "name": "Nytt"},
+        ],
+    }
+
+    refused = await _process(
+        flow=flow,
+        arguments=arguments,
+        conversation=_review_command_conversation(),
+    )
+    assert isinstance(refused, CorrectableFailure)
+    assert "existing_step_2" in refused.feedback
+
+    # The user's own words are their own edit: the bound is gone.
+    theirs = await _process(
+        flow=flow,
+        arguments=arguments,
+        conversation=_review_command_conversation(
+            then_the_user_typed="skriv om steg 2 också"
+        ),
+    )
+    assert not isinstance(theirs, CorrectableFailure) or (
+        "existing_step_2" not in theirs.feedback
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_investigation_that_finds_nothing_to_change_ends_the_turn():
+    """Finding nothing is a real answer, and the only honest one sometimes.
+
+    Sending the model back to try again would loop: the repair call withdraws
+    the decline tool and demands a plan, so a model that correctly concludes
+    the runs do not support the suggestion could never finish.
+    """
+    from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import ProposalAnswer
+
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Sammanfatta"),
+        _flow_step(step_order=2, user_description="Föreslå beslut"),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Stegen gör olika saker; ingen ändring behövs.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+        conversation=_review_command_conversation(),
+    )
+
+    assert isinstance(result, ProposalAnswer)
+    assert "hittar inget" in result.answer

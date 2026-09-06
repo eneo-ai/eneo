@@ -12,6 +12,8 @@ from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    latest_turn_is_review_command,
+    latest_user_review_context,
     semantic_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
@@ -26,6 +28,13 @@ from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
+)
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    review_edit_changed_nothing,
+    review_edit_renamed_outside_the_scope,
+    review_edit_scope,
+    validate_review_edit_effect,
+    validate_review_edit_proposal,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
@@ -47,6 +56,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
     CorrectableFailure,
     PreparationOutcome,
+    ProposalAnswer,
     ProposalReady,
     TerminalFailure,
 )
@@ -59,6 +69,7 @@ from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
@@ -66,6 +77,20 @@ if TYPE_CHECKING:
     from eneo.flows.domain.flow import Flow
 
 logger = get_logger(__name__)
+# What the user is told when an investigation ends without a change. The turn
+# is complete: the suggestions were tested against the runs and nothing in
+# them justified touching the flow.
+_REVIEW_FOUND_NOTHING_TO_CHANGE = {
+    "sv": (
+        "Jag har gått igenom körningarna för de här förslagen och hittar inget "
+        "som motiverar en ändring. Flödet står kvar som det är."
+    ),
+    "en": (
+        "I went through the runs behind these suggestions and found nothing "
+        "that justifies a change. The flow stays as it is."
+    ),
+}
+
 PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT = (
     "Return one valid propose_flow tool call that keeps the flow coherent. "
     "Do not answer with prose."
@@ -87,6 +112,15 @@ async def process_edit_arguments(
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
 ) -> PreparationOutcome:
+    # The scope is read before the projection, because the projection removes
+    # the very message that carries the reference. Only the turn that IS the
+    # handoff is bounded by it: once the user has typed something of their
+    # own, the edit is theirs and takes the ordinary route.
+    review_scope = (
+        review_edit_scope(latest_user_review_context(conversation))
+        if latest_turn_is_review_command(conversation)
+        else None
+    )
     # Everything below reads the conversation to check the model's proposal
     # against what was asked, never to build a prompt, so it reads the
     # semantic projection: the server's own review command is not a request
@@ -116,10 +150,7 @@ async def process_edit_arguments(
                     else field
                 )
             model_arguments["form_fields"] = normalized_form_fields
-        proposal = _apply_server_owned_input_fields(
-            OrderedEditProposal.model_validate(model_arguments),
-            planning_state=planning_state,
-        )
+        authored_proposal = OrderedEditProposal.model_validate(model_arguments)
     except ValidationError as exc:
         logger.warning("Failed to parse propose_flow edit arguments: %s", exc)
         capture_rejected_proposal_arguments(
@@ -132,6 +163,25 @@ async def process_edit_arguments(
             kind="parse",
             codes=frozenset({PROPOSAL_PARSE_MODEL_FAILURE_CODE}),
         )
+    current_step_refs = [
+        existing_step_ref_for_order(step.step_order)
+        for step in sorted(flow.steps, key=lambda step: step.step_order)
+    ]
+    # Judged on what the model wrote, before the server fills in the fields it
+    # owns: an omitted form_fields that the server then preserves must not read
+    # as the model having changed them.
+    review_feedback = validate_review_edit_proposal(
+        scope=review_scope,
+        proposal=authored_proposal,
+        flow_name=flow.name,
+        flow_description=flow.description,
+        current_step_refs=current_step_refs,
+    )
+    if review_feedback is not None:
+        return CorrectableFailure(feedback=review_feedback, kind="quality")
+    proposal = _apply_server_owned_input_fields(
+        authored_proposal, planning_state=planning_state
+    )
     scoped_proposal_feedback = validate_scoped_edit_proposal(
         context=plan_edit_context,
         proposal=proposal,
@@ -190,6 +240,23 @@ async def process_edit_arguments(
             details={"resource_kind": str(exc.kind)},
         )
 
+    if review_scope is not None:
+        effect_feedback = validate_review_edit_effect(
+            scope=review_scope, diff=edit_result.approval.diff
+        )
+        if effect_feedback is not None:
+            return CorrectableFailure(feedback=effect_feedback, kind="validation")
+        if review_edit_changed_nothing(edit_result.approval.diff.step_changes):
+            # Finding nothing to change is a real answer to an investigation,
+            # and the only honest one when the runs do not support the
+            # suggestion. Asking the model to try again would loop: the repair
+            # call withdraws the decline tool and demands a plan.
+            return ProposalAnswer(
+                answer=_REVIEW_FOUND_NOTHING_TO_CHANGE[
+                    "sv" if (ui_language or "sv") == "sv" else "en"
+                ]
+            )
+
     compiled_spec = edit_result.spec
     prepared = prepare_compiled_spec_for_session(
         spec=compiled_spec,
@@ -207,6 +274,13 @@ async def process_edit_arguments(
     if prepared.failure_feedback is not None:
         return CorrectableFailure(feedback=prepared.failure_feedback, kind="validation")
     assert prepared.spec is not None
+    rename_feedback = review_edit_renamed_outside_the_scope(
+        scope=review_scope,
+        compiled_steps=compiled_spec.steps,
+        prepared_steps=prepared.spec.steps,
+    )
+    if rename_feedback is not None:
+        return CorrectableFailure(feedback=rename_feedback, kind="validation")
     assert prepared.validation is not None
     compiled_spec = prepared.spec
     validation = prepared.validation
