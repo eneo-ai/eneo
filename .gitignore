@@ -134,3 +134,5 @@ docs/refactor/execution/batch-*/*transcript*.md
 docs/refactor/execution/batch-*/raw-*
 docs/refactor/execution/batch-*/manual-eval-results/raw-*
 docs/refactor/execution/batch-*/manual-eval-results/*.local.json
+# br doctor per-run artifacts
+.doctor/
