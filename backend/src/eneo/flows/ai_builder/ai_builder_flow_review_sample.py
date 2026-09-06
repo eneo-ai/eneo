@@ -16,9 +16,9 @@ the request that carries them, against that model's window: see
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,6 +38,8 @@ if TYPE_CHECKING:
 SAMPLE_COMPLETED_RUNS = 2
 SAMPLE_FAILED_RUNS = 1
 READ_DEADLINE_SECONDS = 20.0
+
+T = TypeVar("T")
 
 ExcerptField = Literal["prompt", "input", "output"]
 ExcerptAvailability = Literal[
@@ -181,8 +183,8 @@ def excerpts_for_run(
     recorded is "not_recorded"; a result the reader left unread under its
     own limits is "omitted_by_reader". "truncated" and "omitted_by_budget"
     are set later by `fit_sample_excerpts`, against a real request.
-    ``step_orders`` keeps only the named steps, so a turn about two steps
-    never spends its budget on the others.
+    ``step_orders`` keeps only the named steps' excerpts: the bundle is still
+    read and audited whole, the prompt allocation is what stays bounded.
     """
 
     records_by_order = {
@@ -256,36 +258,38 @@ def _excerpt(
 # ---- fitting and quoting -------------------------------------------------------
 
 
-def fit_sample_excerpts(
-    sample: FlowReviewSample,
+def fit_excerpts(
+    excerpts: Sequence[ReviewSampleExcerpt],
     *,
-    fits: Callable[[FlowReviewSample], bool],
-) -> FlowReviewSample:
-    """The sample with as much excerpt text as the request can carry.
+    render: Callable[[list[ReviewSampleExcerpt]], T],
+    fits: Callable[[T], bool],
+) -> T:
+    """The carrier with as much excerpt text as ``fits`` allows.
 
-    ``fits`` measures a candidate the way the provider call will be measured.
-    Included excerpts share the room fairly; one cut short is "truncated" and
-    one left without room is "omitted_by_budget", so the model and the reader
-    of its answer are told what was not read.
+    ``render`` rebuilds the carrier (a sample, an evidence packet) around a
+    candidate excerpt list; ``fits`` measures it the way the request will be
+    measured. Included excerpts share the room fairly; one cut short is
+    "truncated" and one left without room is "omitted_by_budget", so the model
+    and the reader of its answer are told what was not read.
     """
 
     readable = [
         (index, excerpt.text)
-        for index, excerpt in enumerate(sample.excerpts)
+        for index, excerpt in enumerate(excerpts)
         if excerpt.availability == "included" and excerpt.text
     ]
 
-    def render(allocations: Mapping[int, int]) -> FlowReviewSample:
-        excerpts: list[ReviewSampleExcerpt] = []
-        for index, excerpt in enumerate(sample.excerpts):
+    def render_allocations(allocations: Mapping[int, int]) -> T:
+        fitted: list[ReviewSampleExcerpt] = []
+        for index, excerpt in enumerate(excerpts):
             if excerpt.availability != "included" or not excerpt.text:
-                excerpts.append(excerpt)
+                fitted.append(excerpt)
                 continue
             allowed = min(allocations.get(index, 0), len(excerpt.text))
             if allowed == len(excerpt.text):
-                excerpts.append(excerpt)
+                fitted.append(excerpt)
             elif allowed > 0:
-                excerpts.append(
+                fitted.append(
                     excerpt.model_copy(
                         update={
                             "availability": "truncated",
@@ -294,14 +298,28 @@ def fit_sample_excerpts(
                     )
                 )
             else:
-                excerpts.append(
+                fitted.append(
                     excerpt.model_copy(
                         update={"availability": "omitted_by_budget", "text": None}
                     )
                 )
-        return sample.model_copy(update={"excerpts": excerpts})
+        return render(fitted)
 
-    return fit_text_allocations(readable, render=render, fits=fits)
+    return fit_text_allocations(readable, render=render_allocations, fits=fits)
+
+
+def fit_sample_excerpts(
+    sample: FlowReviewSample,
+    *,
+    fits: Callable[[FlowReviewSample], bool],
+) -> FlowReviewSample:
+    """The sample with as much excerpt text as the request can carry."""
+
+    return fit_excerpts(
+        sample.excerpts,
+        render=lambda excerpts: sample.model_copy(update={"excerpts": excerpts}),
+        fits=fits,
+    )
 
 
 PROMPT_LINE_BREAKERS = ("\u2028", "\u2029", "\u0085")

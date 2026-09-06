@@ -144,7 +144,11 @@ from eneo.flows.domain.mapped_execution_policy import (
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 from eneo.observability.failure_events import stable_hash
-from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
+from eneo.tokens.token_utils import (
+    count_message_tokens,
+    count_tool_tokens,
+    measure_provider_input_reserve,
+)
 
 if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
@@ -726,12 +730,22 @@ def build_proposal_prepared(
     )
     # Run excerpts were read whole; the model's window decides how much of
     # them this prompt carries, after the facts and the replayed requirements
-    # and before attachments, which are fitted into what remains.
-    fitted_review_evidence = (
-        fit_review_evidence(
-            review_evidence,
-            fits=lambda evidence: prompt_fits(None, replayed_requirements, evidence),
+    # and before attachments, which are fitted into what remains. The tenant's
+    # review-evidence cap governs this request too, and the measurement is
+    # the reserving one because it decides admission.
+    evidence_token_limit = review_evidence_token_limit(
+        system_prompt_token_limit, budget_policy
+    )
+
+    def evidence_fits(evidence: FlowReviewEvidence) -> bool:
+        prompt = build_proposal_prompt(None, replayed_requirements, evidence)
+        reserve = measure_provider_input_reserve(
+            [{"role": "system", "content": prompt}], [], litellm_model
         )
+        return reserve.tokens <= evidence_token_limit
+
+    fitted_review_evidence = (
+        fit_review_evidence(review_evidence, fits=evidence_fits)
         if review_evidence is not None
         else None
     )
@@ -848,6 +862,19 @@ def _committed_change_is_still_unbuilt(
     if prior_spec is None or not prior_spec.steps:
         return False
     return prior_spec.steps[-1].output_type is not compile_context.final_output_type
+
+
+def review_evidence_token_limit(
+    system_prompt_token_limit: int, budget_policy: AIBuilderBudgetPolicy
+) -> int:
+    """What a review-backed proposal prompt may hold: the prompt limit, capped
+    by the tenant's review-evidence cap so one setting governs every request
+    that carries run excerpts."""
+
+    cap = budget_policy.review_evidence_max_input_tokens
+    if cap is None:
+        return system_prompt_token_limit
+    return max(0, min(system_prompt_token_limit, cap))
 
 
 def _proposal_system_prompt_token_limit(

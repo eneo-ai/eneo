@@ -165,3 +165,20 @@ def test_budget_settings_validation_delegates_field_bounds(
     with pytest.raises(ValueError) as exc_info:
         validate_ai_builder_budget_settings_object({field_name: value})
     assert str(exc_info.value) == expected_message
+
+
+def test_review_evidence_cap_is_validated_as_a_nullable_token_count() -> None:
+    assert validate_ai_builder_budget_settings_object(
+        {"review_evidence_max_input_tokens": None}
+    ) == {"review_evidence_max_input_tokens": None}
+    assert validate_ai_builder_budget_settings_object(
+        {"review_evidence_max_input_tokens": 32_000}
+    ) == {"review_evidence_max_input_tokens": 32_000}
+    with pytest.raises(ValueError):
+        validate_ai_builder_budget_settings_object(
+            {"review_evidence_max_input_tokens": "many"}
+        )
+    with pytest.raises(ValueError):
+        validate_ai_builder_budget_settings_object(
+            {"review_evidence_max_input_tokens": 10_000_001}
+        )

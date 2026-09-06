@@ -529,8 +529,10 @@ def _parse_source(
     # The model reads the excerpt as a JSON string, so a quote copied with its
     # escapes still counts once unescaped.
     readable = _collapse_whitespace(excerpt.text)
-    if quote not in readable and _unescaped_quote(quote) not in readable:
-        return "quote_not_in_excerpt"
+    if quote not in readable:
+        quote = _unescaped_quote(quote)
+        if quote not in readable:
+            return "quote_not_in_excerpt"
     return (
         FlowReviewSuggestionSource(
             run_id=excerpt.run_id,
@@ -603,22 +605,29 @@ async def generate_review_suggestions(
             + response_format_tokens
         )
 
-    # The answer keeps the size it would have with no evidence at all: the
-    # input may fill the window only up to where it starts eroding the output.
-    preferred_output_tokens = request_budget.preferred_output_tokens(input_tokens=0)
+    # The answer keeps its target size (or the model's ceiling when that is
+    # lower): the evidence may fill the window only up to where it would
+    # start eroding the answer, and a scaffold that already does is refused.
+    answer_tokens = min(
+        request_budget.target_output_tokens, request_budget.model_output_ceiling_tokens
+    )
 
     def fits(candidate: FlowReviewSample) -> bool:
         resolved = request_budget.resolve(input_tokens=request_tokens_for(candidate))
         return (
-            resolved is not None
-            and resolved.effective_output_tokens >= preferred_output_tokens
+            resolved is not None and resolved.effective_output_tokens >= answer_tokens
         )
 
+    fit_started = time.monotonic()
     sample = fit_sample_excerpts(sample, fits=fits)
+    fit_ms = int((time.monotonic() - fit_started) * 1000)
     messages = build_review_suggestions_messages(sample, ui_language=ui_language)
     request_tokens = request_tokens_for(sample)
     resolved_budget = request_budget.resolve(input_tokens=request_tokens)
-    if resolved_budget is None:
+    if (
+        resolved_budget is None
+        or resolved_budget.effective_output_tokens < answer_tokens
+    ):
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
@@ -681,6 +690,7 @@ async def generate_review_suggestions(
             "excerpts_included": summary.excerpts_included,
             "excerpts_truncated": summary.excerpts_truncated,
             "excerpts_omitted_by_budget": summary.excerpts_omitted_by_budget,
+            "fit_ms": fit_ms,
             "duration_ms": int((time.monotonic() - started) * 1000),
             "provider_prompt_tokens": getattr(usage, "prompt_tokens", None),
             "provider_completion_tokens": getattr(usage, "completion_tokens", None),

@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     ReviewSampleExcerpt,
     ReviewSampleRun,
     excerpts_for_run,
+    fit_excerpts,
     quoted_excerpt,
     reader_omitted_step_results,
     select_sample_run_ids,
@@ -47,7 +48,6 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     MAX_SUGGESTIONS,
     FlowReviewSuggestionKind,
 )
-from eneo.flows.ai_builder.ai_builder_text_fitting import fit_text_allocations
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
 from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunStatusSnapshot, FlowVersion
@@ -302,9 +302,6 @@ class FlowReviewEvidence(BaseModel):
     excerpts: list[ReviewSampleExcerpt] = []
 
 
-# JSON escapes the ASCII newline but, with non-ASCII text left readable, not
-# these three - and each of them ends a line for anything that reads the
-# prompt by lines. Recorded text may contain them, so they are escaped by name.
 _EXCERPT_FIELD_LABELS_SV: dict[str, str] = {
     "prompt": "instruktion",
     "input": "indata",
@@ -747,44 +744,15 @@ def fit_review_evidence(
 ) -> FlowReviewEvidence:
     """The evidence with as much excerpt text as the prompt can carry.
 
-    The facts and the suggestions always travel; the excerpts share the room
-    fairly and are marked truncated or omitted when they do not fit, so the
-    planner is told what it did not read.
+    The facts and the suggestions always travel; the excerpts are fitted the
+    way the sample's are, and marked when they did not fit.
     """
 
-    readable = [
-        (index, excerpt.text)
-        for index, excerpt in enumerate(evidence.excerpts)
-        if excerpt.availability == "included" and excerpt.text
-    ]
-
-    def render(allocations: Mapping[int, int]) -> FlowReviewEvidence:
-        excerpts: list[ReviewSampleExcerpt] = []
-        for index, excerpt in enumerate(evidence.excerpts):
-            if excerpt.availability != "included" or not excerpt.text:
-                excerpts.append(excerpt)
-                continue
-            allowed = min(allocations.get(index, 0), len(excerpt.text))
-            if allowed == len(excerpt.text):
-                excerpts.append(excerpt)
-            elif allowed > 0:
-                excerpts.append(
-                    excerpt.model_copy(
-                        update={
-                            "availability": "truncated",
-                            "text": excerpt.text[:allowed],
-                        }
-                    )
-                )
-            else:
-                excerpts.append(
-                    excerpt.model_copy(
-                        update={"availability": "omitted_by_budget", "text": None}
-                    )
-                )
-        return evidence.model_copy(update={"excerpts": excerpts})
-
-    return fit_text_allocations(readable, render=render, fits=fits)
+    return fit_excerpts(
+        evidence.excerpts,
+        render=lambda excerpts: evidence.model_copy(update={"excerpts": excerpts}),
+        fits=fits,
+    )
 
 
 def render_review_evidence(evidence: FlowReviewEvidence) -> str:

@@ -114,6 +114,12 @@ def validate_ai_builder_budget_settings_object(
                 value_dict[field_name],
                 f"flow_settings.ai_builder.{field_name}",
             )
+    if "review_evidence_max_input_tokens" in value_dict:
+        validated["review_evidence_max_input_tokens"] = parse_ai_builder_budget_token(
+            value_dict["review_evidence_max_input_tokens"],
+            "flow_settings.ai_builder.review_evidence_max_input_tokens",
+            allow_none=True,
+        )
     return validated
 
 

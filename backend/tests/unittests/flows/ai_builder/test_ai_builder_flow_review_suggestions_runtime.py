@@ -293,3 +293,13 @@ async def test_a_tenant_cap_bounds_the_evidence_below_the_models_window():
         ui_language="sv",
     )
     assert result.sample.excerpts_truncated == 1
+
+
+@pytest.mark.asyncio
+async def test_a_scaffold_that_leaves_less_than_the_answer_is_refused_before_the_call():
+    """The window resolves (more than the minimum output stays) but the target
+    answer would be eroded by the scaffold alone: refused, no provider call."""
+    client = _Client(content=json.dumps({"suggestions": []}))
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        await _generate(client, max_input_tokens=6_000)
+    assert client.calls == []

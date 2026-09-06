@@ -588,6 +588,9 @@ def test_a_quote_copied_with_json_escapes_still_resolves_in_the_excerpt() -> Non
     )
     assert parsed.outcome != "invalid"
     assert [item.kind for item in parsed.suggestions] == ["step_not_useful"]
+    # The quote the user sees is the text as it reads, not the escaped copy.
+    (source,) = parsed.suggestions[0].sources
+    assert source.quote == 'Rad ett Rad "två"'
 
 
 def test_excerpts_render_as_one_quoted_line_after_their_source_id() -> None:
