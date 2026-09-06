@@ -224,6 +224,7 @@ export class FlowAIBuilderDriver {
   #abortController: AbortController | null = null;
   #state: FlowAIBuilderState = createInitialFlowAIBuilderState();
   #initGeneration = 0;
+  #forcedCreateRefusal: { targetKind: TargetKind; error: AIBuilderError } | null = null;
   #sessionGeneration = 0;
   #pendingResumeOwner: Pick<SessionOperationOwner, "sessionId" | "sessionGeneration"> | null = null;
   #draftLoadSequence = 0;
@@ -280,6 +281,21 @@ export class FlowAIBuilderDriver {
 
   get authoritativeRefreshFailed(): boolean {
     return this.#authoritativeRefreshError;
+  }
+
+  /** Whether the error on screen is a refused forced new session of this kind.
+   *
+   *  The surface that asked for it keeps its offer while that error stands:
+   *  the refusal replaces the typed error the offer was attached to, and in
+   *  create mode that offer is the only way out. Binding it to the error
+   *  keeps the offer with the failure it belongs to - any other path that
+   *  supersedes or clears the error takes the offer with it - and it outlives
+   *  the screen the reset takes down, which component state would not. */
+  forcedCreateRefusedFor(targetKind: TargetKind): boolean {
+    const refusal = this.#forcedCreateRefusal;
+    return (
+      refusal !== null && refusal.targetKind === targetKind && refusal.error === this.#state.error
+    );
   }
 
   get isRecoveringLatestTurn(): boolean {
@@ -429,6 +445,15 @@ export class FlowAIBuilderDriver {
     if (this.isStreaming || this.#state.pendingOperation) return false;
     ++this.#initGeneration;
     this.abort();
+    // Starting over clears the screen while the new session is on its way,
+    // but a refused create must not take the session the user still has:
+    // without this the host fell back to the no-session skeleton and only a
+    // page reload brought the work back. The fence over an uncertain turn
+    // outcome is part of what comes back, or the kept session would accept a
+    // new send that the server still refuses.
+    const replacedState = this.#state;
+    const replacedRefreshRequired = this.#requiresAuthoritativeRefresh;
+    const replacedRefreshError = this.#authoritativeRefreshError;
     this.#resetFlowState();
     const sessionGeneration = this.#sessionGeneration;
     this.#state.error = null;
@@ -464,13 +489,20 @@ export class FlowAIBuilderDriver {
       return true;
     } catch (e) {
       if (sessionGeneration !== this.#sessionGeneration) return false;
-      this.#state.error = this.#parseAndReportError({
+      this.#state = replacedState;
+      this.#requiresAuthoritativeRefresh = replacedRefreshRequired;
+      this.#authoritativeRefreshError = replacedRefreshError;
+      const createError = this.#parseAndReportError({
         transport: "apply",
         payload: e,
         fallbackMessage: m.ai_builder_error_fallback_create_session()
       });
-      await this.loadDraftSessions();
+      this.#state.error = createError;
+      this.#forcedCreateRefusal = options?.forceNew ? { targetKind, error: createError } : null;
+      // The session is back on screen before the draft list is asked for:
+      // that request is not what the user is waiting for.
       this.#notify();
+      await this.loadDraftSessions();
       throw e;
     }
   }

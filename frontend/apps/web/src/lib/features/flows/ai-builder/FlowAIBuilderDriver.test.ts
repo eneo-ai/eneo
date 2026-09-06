@@ -813,6 +813,54 @@ describe("FlowAIBuilderDriver", () => {
     expect(createCall?.[1]?.requestBody["application/json"].force_new).toBe(true);
   });
 
+  it("keeps the session it has when a forced new one is refused, and retries onto it", async () => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("create refused"))
+      .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-old" })] })
+      .mockResolvedValueOnce(makeSession({ session_id: "session-fresh", latest_plan_id: null }))
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(makeSession({ session_id: "session-fresh", latest_plan_id: null }))
+      .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-fresh" })] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession({ session_id: "session-old", latest_plan_id: "plan-old" }),
+      messages: [{ role: "assistant", content: "Old conversation", timestamp: 1 }],
+      currentPlan: makePlan({ plan_id: "plan-old" })
+    });
+
+    await expect(driver.startFreshSession("edit")).rejects.toThrow();
+
+    expect(driver.state.session?.session_id).toBe("session-old");
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-old");
+    expect(driver.state.messages).toHaveLength(1);
+    expect(driver.state.error).not.toBeNull();
+
+    await driver.startFreshSession("edit");
+
+    expect(driver.state.session?.session_id).toBe("session-fresh");
+    expect(driver.state.messages).toEqual([]);
+    expect(driver.state.error).toBeNull();
+  });
+
+  it("keeps the refused start-over offer only while its own error stands", async () => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("create refused"))
+      .mockResolvedValueOnce({ sessions: [] });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({ session: makeSession() });
+
+    await expect(driver.startFreshSession("create")).rejects.toThrow();
+
+    expect(driver.forcedCreateRefusedFor("create")).toBe(true);
+    expect(driver.forcedCreateRefusedFor("edit")).toBe(false);
+
+    // Any later error is a different failure and owns the alert alone.
+    driver.seedState({ error: makeAIBuilderError({ message: "Something else broke" }) });
+    expect(driver.forcedCreateRefusedFor("create")).toBe(false);
+  });
+
   it("clears stale local chat and plan state when starting a fresh edit session", async () => {
     const fetch = vi
       .fn()
@@ -1693,6 +1741,27 @@ describe("FlowAIBuilderDriver", () => {
     fetch.mockResolvedValueOnce(makeSession());
     expect(await driver.refreshSession()).toBe(true);
     expect(driver.canStartNewTurn).toBe(true);
+  });
+
+  it("keeps the uncertain turn fence when the fresh session is refused", async () => {
+    const fetch = vi.fn().mockRejectedValueOnce(new Error("refresh unavailable"));
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onClose();
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("Build a flow");
+    expect(driver.canStartNewTurn).toBe(false);
+
+    fetch.mockRejectedValueOnce(new Error("create refused"));
+    fetch.mockResolvedValueOnce({ sessions: [] });
+    await expect(driver.startFreshSession("create")).rejects.toThrow();
+
+    // The session comes back, and so does the fence: its turn outcome is
+    // still unresolved, and the server would refuse the next send anyway.
+    expect(driver.state.session).not.toBeNull();
+    expect(driver.canStartNewTurn).toBe(false);
   });
 
   it("does not carry an uncertain turn fence into a fresh authoritative session", async () => {

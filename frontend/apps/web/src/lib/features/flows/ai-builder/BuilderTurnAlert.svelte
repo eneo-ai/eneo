@@ -15,11 +15,11 @@
     targetKind: "create" | "edit";
     /** Another surface (the build screen) already shows this stream error. */
     suppressStreamError?: boolean;
-    /** Runs before a fresh session replaces an unsupported-architecture one. */
-    onbeforestartfresh?: () => void;
+    /** Runs once a fresh session has replaced an unsupported-architecture one. */
+    onstartedfresh?: () => void;
   }
 
-  let { targetKind, suppressStreamError = false, onbeforestartfresh }: Props = $props();
+  let { targetKind, suppressStreamError = false, onstartedfresh }: Props = $props();
 
   const service = getAIBuilderService();
 
@@ -122,12 +122,15 @@
     }
   }
 
+  // A refused start-over replaces the unsupported-architecture error with its
+  // own, which would take this button away with it. In create mode it is the
+  // only way out, so the offer stays while the driver's refusal error stands.
   async function handleUnsupportedArchitectureStartFresh() {
-    onbeforestartfresh?.();
     try {
-      await service.startFreshSession(targetKind);
+      if (await service.startFreshSession(targetKind)) onstartedfresh?.();
     } catch {
-      // The driver retains the typed create-session error for this alert.
+      // The driver keeps the session it was replacing, its typed error and
+      // the standing offer to try again.
     }
   }
 
@@ -177,7 +180,7 @@
           class="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
           aria-busy={service.isStreaming || service.isRecoveringLatestTurn}
         >
-          {#if isUnsupportedArchitectureError && targetKind === "create"}
+          {#if (isUnsupportedArchitectureError || service.forcedCreateRefusedFor(targetKind)) && targetKind === "create"}
             <Button
               variant="default"
               size="sm"

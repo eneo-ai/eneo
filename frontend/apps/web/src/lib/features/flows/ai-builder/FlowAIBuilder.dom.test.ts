@@ -2685,6 +2685,61 @@ describe("FlowAIBuilder edit host contract", () => {
     expect(await screen.findByRole("heading", { name: m.ai_builder_review_title() })).toBeTruthy();
   });
 
+  it("keeps the edit and its step scope when the header start over is refused", async () => {
+    const ongoing = makeSession({
+      session_id: "e-ongoing",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      conversation: [userMessage("u1", "Byt rubrik på rapporten")]
+    });
+    let releaseDrafts!: () => void;
+    const heldDrafts = new Promise<void>((resolve) => {
+      releaseDrafts = resolve;
+    });
+    let posts = 0;
+    const { fetch } = makeFetch({ sessions: [ongoing] });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        if (posts === 1) return ongoing;
+        throw new Error("create refused");
+      }
+      if (path === SESSIONS_ROUTE && init?.method !== "post" && posts > 1) {
+        await heldDrafts;
+      }
+      return baseFetch(path, init);
+    });
+    const { service } = renderShell({
+      fetch,
+      stream: makeStream().stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    // The conversation screen owns the composer context the header clears, so
+    // it has to be the screen in view for that rule to be under test.
+    await fireEvent.click(button(new RegExp(escape(m.ai_builder_conversation_button()))));
+    await screen.findByRole("heading", { name: m.ai_builder_conversation_title() });
+    service().setSavedFlowStepScope(SAVED_STEP_SCOPE);
+
+    await fireEvent.click(button(m.ai_builder_start_fresh()));
+    await fireEvent.click(button(m.ai_builder_discard_change_action()));
+    await waitFor(() => expect(posts).toBe(2));
+
+    // The edit is back before the draft list answers - that request is not
+    // what the user is waiting for - and the step it was scoped to survives a
+    // replacement that never happened.
+    await waitFor(() => expect(service().error).not.toBeNull());
+    expect(service().hasSession).toBe(true);
+    expect(service().session?.session_id).toBe("e-ongoing");
+    expect(service().savedFlowStepScope).not.toBeNull();
+
+    releaseDrafts();
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    expect(service().savedFlowStepScope).not.toBeNull();
+  });
+
   it("does not open the review when the replacement session cannot be created", async () => {
     const ongoing = makeSession({
       session_id: "e-ongoing",
@@ -2722,6 +2777,14 @@ describe("FlowAIBuilder edit host contract", () => {
     expect(screen.queryByRole("heading", { name: m.ai_builder_review_title() })).toBeNull();
     await waitFor(() => expect(service().error).not.toBeNull());
     expect(calls).toHaveLength(0);
+    // The edit the user had is still there. It used to be gone: the driver
+    // reset before the create, so a refusal left the no-session skeleton and
+    // only a page reload brought the conversation back.
+    expect(service().hasSession).toBe(true);
+    expect(service().session?.session_id).toBe("e-ongoing");
+    expect(service().messages.map((message) => message.content)).toContain(
+      "Byt rubrik på rapporten"
+    );
   });
 
   it("waits for edit bootstrap before deciding whether a cold launch replaces an ongoing edit", async () => {
@@ -2952,6 +3015,54 @@ describe("FlowAIBuilder turn recovery", () => {
 
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toMatchObject({ target_kind: "create", force_new: true });
+    expect(await screen.findByRole("heading", { name: m.ai_builder_task_title() })).toBeTruthy();
+  });
+
+  it("keeps offering the fresh session when the first attempt is refused", async () => {
+    const { fetch } = makeFetch({
+      sessions: [questionSession()],
+      created: makeSession({ session_id: "s-fresh" })
+    });
+    const baseFetch = fetch.getMockImplementation()!;
+    let creates = 0;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        creates += 1;
+        if (creates === 1) throw new Error("create refused");
+      }
+      return baseFetch(path, init);
+    });
+    const { service } = renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+    await screen.findByRole("heading", { name: FORMAT_QUESTION.question });
+
+    service().seedState({
+      streamState: "idle",
+      error: {
+        schema_version: 2,
+        code: "unsupported_architecture",
+        category: "bad_request",
+        message: "Server fallback message",
+        phase: "planner",
+        eneo_error_code: 9007,
+        request_id: "request-unsupported-architecture",
+        diagnostic_context: null,
+        details: {}
+      }
+    });
+
+    await screen.findByText(m.ai_builder_unsupported_architecture_title());
+    await fireEvent.click(button(m.ai_builder_start_fresh()));
+    await waitFor(() => expect(creates).toBe(1));
+
+    // The refusal replaced the typed error with its own, which used to take
+    // the only way out with it: in create mode there is no header start over.
+    await waitFor(() => expect(service().error?.code).not.toBe("unsupported_architecture"));
+    expect(service().hasSession).toBe(true);
+    await screen.findByRole("heading", { name: FORMAT_QUESTION.question });
+
+    await fireEvent.click(button(m.ai_builder_start_fresh()));
+
+    await waitFor(() => expect(creates).toBe(2));
     expect(await screen.findByRole("heading", { name: m.ai_builder_task_title() })).toBeTruthy();
   });
 });

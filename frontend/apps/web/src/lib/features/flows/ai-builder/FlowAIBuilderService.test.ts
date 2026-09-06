@@ -186,6 +186,39 @@ describe("FlowAIBuilderService", () => {
     expect(service.savedFlowStepScope).toBeNull();
   });
 
+  it("does not lend the saved-step scope to the session that replaced it", () => {
+    const service = makeService();
+    const scope = {
+      editContext: { kind: "saved_flow_step" as const, flow_step_id: "step-1" },
+      stepName: "Extract facts",
+      stepNumber: 2
+    };
+    const session = (sessionId: string) => ({
+      session_id: sessionId,
+      space_id: "space-1",
+      status: "chatting",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      latest_plan_id: null,
+      conversation: [],
+      latest_turn: null
+    });
+
+    service.seedState({ session: session("s-ongoing") as never });
+    service.setSavedFlowStepScope(scope);
+    expect(service.activeStepTransportContext).toEqual(scope.editContext);
+
+    // A replacement is published before its bootstrap finishes, and can be
+    // sent to in that window: the step it must not inherit is this one.
+    service.seedState({ session: session("s-fresh") as never });
+    expect(service.savedFlowStepScope).toBeNull();
+    expect(service.activeStepTransportContext).toBeNull();
+
+    // A refused replacement puts the session back, and its step with it.
+    service.seedState({ session: session("s-ongoing") as never });
+    expect(service.activeStepTransportContext).toEqual(scope.editContext);
+  });
+
   it("keeps the saved-step scope while its plan is reviewed", () => {
     const service = makeService();
     const scope = {

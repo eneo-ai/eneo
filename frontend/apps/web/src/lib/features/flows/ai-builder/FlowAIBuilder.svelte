@@ -631,9 +631,10 @@
     pendingReviewReplacement = false;
     // The driver skips the replacement while work is in flight (the old
     // session stays, and the next launch asks again) and rejects when the
-    // create fails (it has reset to no session and shows its own error, whose
-    // recovery it owns). Neither outcome may open the step or review, and the
-    // composer context is consumed only once the replacement is real.
+    // create fails (the session it had is kept, carrying the driver's own
+    // error, so the launch can simply be asked for again). Neither outcome
+    // may open the step or review, and the composer context is consumed only
+    // once the replacement is real.
     let replaced = false;
     try {
       replaced = await service.startFreshSession("edit");
@@ -662,10 +663,18 @@
     showDiscardChangeDialog = true;
   }
 
-  function discardChangeAndStartOver() {
+  // The scoped composer context belongs to the session being replaced, so it
+  // is cleared only once the replacement is real - and a refused create is the
+  // driver's own error to show, not an unhandled rejection.
+  async function discardChangeAndStartOver() {
     showDiscardChangeDialog = false;
-    conversationRef?.resetComposerContext();
-    void service.startFreshSession("edit");
+    let replaced = false;
+    try {
+      replaced = await service.startFreshSession("edit");
+    } catch {
+      return;
+    }
+    if (replaced) conversationRef?.resetComposerContext();
   }
 </script>
 
@@ -753,7 +762,7 @@
       <BuilderTurnAlert
         {targetKind}
         suppressStreamError={generationFailedWithoutPlan}
-        onbeforestartfresh={() => conversationRef?.resetComposerContext()}
+        onstartedfresh={() => conversationRef?.resetComposerContext()}
       />
 
       {#if screen === "conversation"}

@@ -44,7 +44,10 @@ export class FlowAIBuilderService {
   #driver: FlowAIBuilderDriver;
   #stateVersion = $state(0);
   #hasSeenPlanInSession = $state(false);
-  #savedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
+  #savedFlowStepScope = $state<{
+    sessionId: string | null;
+    scope: AIBuilderSavedFlowStepScope;
+  } | null>(null);
   #suppressedPlanStepScope = $state<{ sessionId: string; planId: string } | null>(null);
 
   hasSession = $derived(this.#state.session !== null);
@@ -140,8 +143,19 @@ export class FlowAIBuilderService {
     return this.#state.currentPlan;
   }
 
+  /** The launch scope, and only while the session it was opened from is the
+   *  one on screen.
+   *
+   *  A replacement session is published before its bootstrap finishes, so a
+   *  scope that outlived its own session would be sent with the first message
+   *  of the session that replaced it. Binding it to the session also means a
+   *  replacement that was refused gets its scope back with the session it
+   *  never left. */
   get savedFlowStepScope(): AIBuilderSavedFlowStepScope | null {
-    return this.#savedFlowStepScope;
+    const owned = this.#savedFlowStepScope;
+    if (owned === null) return null;
+    const sessionId = this.#state.session?.session_id ?? null;
+    return owned.sessionId === sessionId ? owned.scope : null;
   }
 
   get activeStepScope(): AIBuilderStepScopePresentation | null {
@@ -156,11 +170,11 @@ export class FlowAIBuilderService {
         stepNumber: context.target_step_number
       };
     }
-    return this.#savedFlowStepScope;
+    return this.savedFlowStepScope;
   }
 
   get activeStepTransportContext(): AIBuilderEditContext | null {
-    const scope = this.#savedFlowStepScope;
+    const scope = this.savedFlowStepScope;
     const plan = this.#state.currentPlan;
     if (plan === null) return scope?.editContext ?? null;
     const suppressedScope = this.#suppressedPlanStepScope;
@@ -200,7 +214,10 @@ export class FlowAIBuilderService {
 
   setSavedFlowStepScope(scope: AIBuilderSavedFlowStepScope): void {
     this.#suppressedPlanStepScope = null;
-    this.#savedFlowStepScope = scope;
+    this.#savedFlowStepScope = {
+      sessionId: this.#state.session?.session_id ?? null,
+      scope
+    };
   }
 
   clearSavedFlowStepScope(): void {
@@ -320,6 +337,11 @@ export class FlowAIBuilderService {
   get latestTurnState(): AIBuilderTurnState | null {
     void this.#state;
     return this.#driver.latestTurnState;
+  }
+
+  forcedCreateRefusedFor(targetKind: TargetKind): boolean {
+    void this.#state;
+    return this.#driver.forcedCreateRefusedFor(targetKind);
   }
 
   get authoritativeRefreshFailed(): boolean {
