@@ -889,6 +889,57 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
     assert unknown.value.context == {"unknown_step_orders": [-7, 999]}
 
 
+def test_the_investigation_text_follows_the_request_language():
+    """The screen composes the same sentence the server retains, in the
+    language the request names; the parts are fixed, never the model's."""
+    from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+        investigation_message,
+    )
+
+    foci = [
+        FlowReviewSuggestionFocus(suggestion_kind="missing_check", step_orders=[3]),
+        FlowReviewSuggestionFocus(
+            suggestion_kind="duplicated_work", step_orders=[1, 2]
+        ),
+    ]
+    assert (
+        investigation_message(foci[1:], "sv")
+        == "Undersök möjligt dubbelarbete i steg 1 och 2 utifrån körningarna."
+    )
+    assert (
+        investigation_message(foci[1:], "en")
+        == "Investigate possible duplicated work in step 1 and 2 based on the runs."
+    )
+    assert investigation_message(foci, "en") == (
+        "Investigate the following based on the runs: a check that may be missing "
+        "in step 3; possible duplicated work in step 1 and 2."
+    )
+    context = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="sum",
+        sample_run_ids=[uuid4()],
+        suggestions=foci,
+    )
+    # The reference is canonical (sorted by kind, then steps) before the text is written.
+    english = SendMessageRequest(
+        client_turn_id=uuid4(), message="x", review_context=context, ui_language="en-GB"
+    ).canonical()
+    assert english.message == (
+        "Investigate the following based on the runs: possible duplicated work "
+        "in step 1 and 2; a check that may be missing in step 3."
+    )
+    swedish = SendMessageRequest(
+        client_turn_id=uuid4(), message="x", review_context=context
+    ).canonical()
+    assert swedish.message == (
+        "Undersök följande utifrån körningarna: möjligt dubbelarbete i steg 1 och 2; "
+        "en kontroll som kan saknas i steg 3."
+    )
+
+
 def test_a_suggestion_turn_is_canonical_before_fingerprint_and_snapshot():
     """Whatever the client typed, every retained representation of a turn
     acting on a suggestion carries the fixed investigation text."""

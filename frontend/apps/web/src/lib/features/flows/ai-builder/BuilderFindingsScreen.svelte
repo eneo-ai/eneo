@@ -22,8 +22,8 @@
     rememberDismissedFinding
   } from "./flowReviewFindings";
   import {
+    canonicalFoci,
     investigationMessage,
-    suggestionFocus,
     suggestionKindLabel,
     suggestionSourceLabel,
     suggestionStepsLabel,
@@ -101,17 +101,18 @@
 
   function investigate(selected: AIBuilderFlowReviewSuggestion[]) {
     if (!packet || suggestions.status !== "ready" || selected.length === 0) return;
-    // One turn however many were selected. Fixed text from kinds and steps;
-    // the server writes the same text itself and never sees the rationale
-    // or the quotes.
+    // One turn however many were selected. The set is canonical before the
+    // sentence and the payload are built from it, so they agree with what
+    // the server retains; the rationale and quotes never travel.
+    const foci = canonicalFoci(selected);
     onprepare({
-      message: investigationMessage(selected),
+      message: investigationMessage(foci),
       reviewContext: {
         kind: "flow_review_suggestion",
         flow_version: suggestions.suggestions.flow_version,
         definition_checksum: suggestions.suggestions.definition_checksum,
         sample_run_ids: suggestions.suggestions.sample.run_ids,
-        suggestions: selected.map(suggestionFocus)
+        suggestions: foci
       }
     });
   }
@@ -413,7 +414,7 @@
                       })}
                     </Button>
                     <span class="text-secondary text-xs">
-                      {m.ai_builder_review_suggestion_investigate_hint()}
+                      {m.ai_builder_review_suggestion_investigate_all_hint()}
                     </span>
                   </div>
                 {/if}
@@ -466,6 +467,10 @@
                             size="sm"
                             class="h-8"
                             {disabled}
+                            aria-label={m.ai_builder_review_suggestion_investigate_this_label({
+                              kind: suggestionKindLabel(suggestion.kind),
+                              steps: suggestionStepsLabel(suggestion.step_orders)
+                            })}
                             onclick={() => investigate([suggestion])}
                           >
                             {m.ai_builder_review_suggestion_investigate_this()}

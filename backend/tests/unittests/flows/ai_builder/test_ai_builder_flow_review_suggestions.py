@@ -343,6 +343,24 @@ def test_a_drift_claim_is_one_step_in_one_run_with_its_instruction_and_complete_
     ) == ["suggestion_1:drift_claim_cites_incomplete_output"]
 
 
+def test_the_same_kind_on_the_same_steps_is_one_suggestion():
+    sample = _sample()
+    twice = {
+        "kind": "duplicated_work",
+        "step_orders": [1, 2],
+        "rationale": "x",
+        "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
+    }
+    parsed = parse_review_suggestions(
+        _answer(twice, {**twice, "step_orders": [2, 1], "rationale": "y"}),
+        sample=sample,
+    )
+    assert [(item.kind, item.step_orders) for item in parsed.suggestions] == [
+        ("duplicated_work", [1, 2])
+    ]
+    assert parsed.problems == ()
+
+
 def test_a_verified_suggestion_survives_an_unverifiable_one_beside_it():
     """One absence claim on a truncated excerpt must not discard the
     duplicated-work claim whose quotes resolve; the refused one is counted."""
