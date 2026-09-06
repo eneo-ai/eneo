@@ -214,7 +214,7 @@
             {m.ai_builder_review_no_runs()}
           </p>
           {#if omittedCount > 0}
-            <p class="text-secondary mt-1.5 text-xs">
+            <p class="text-secondary mt-1.5 text-[0.8125rem]">
               {m.ai_builder_review_omitted({ count: String(omittedCount) })}
             </p>
           {/if}
@@ -280,7 +280,7 @@
             </h3>
             {#if suggestions.status === "closed"}
               <div class="mt-2 flex flex-col gap-2">
-                <p class="text-secondary text-xs text-pretty">
+                <p class="text-secondary text-[0.8125rem] text-pretty">
                   {m.ai_builder_review_suggestions_hint()}
                 </p>
                 <Button
@@ -347,7 +347,7 @@
                 .filter(Boolean)
                 .join(" ")}
               <p
-                class="text-secondary mt-0.5 flex items-center gap-1 text-xs"
+                class="text-secondary mt-0.5 flex items-center gap-1 text-[0.8125rem]"
                 data-testid="suggestions-lead"
               >
                 <span>
@@ -403,8 +403,6 @@
                 {#if judged.suggestions.length > 1}
                   <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <Button
-                      size="sm"
-                      class="h-8"
                       {disabled}
                       data-testid="investigate-all"
                       onclick={() => investigate(judged.suggestions)}
@@ -413,7 +411,7 @@
                         count: String(judged.suggestions.length)
                       })}
                     </Button>
-                    <span class="text-secondary text-xs">
+                    <span class="text-secondary text-[0.8125rem]">
                       {m.ai_builder_review_suggestion_investigate_all_hint()}
                     </span>
                   </div>
@@ -425,7 +423,7 @@
                         <p class="text-primary text-[0.9rem] font-semibold">
                           {suggestionKindLabel(suggestion.kind)}
                         </p>
-                        <span class="text-secondary text-xs">
+                        <span class="text-secondary text-[0.8125rem]">
                           {suggestionStepsLabel(suggestion.step_orders)}
                         </span>
                       </div>
@@ -437,7 +435,7 @@
                         onOpenChange={(open) => (openSources[index] = open)}
                       >
                         <Collapsible.Trigger
-                          class="text-secondary hover:text-primary mt-1.5 text-xs font-semibold underline-offset-2 hover:underline"
+                          class="text-secondary hover:text-primary focus-visible:ring-accent-default/40 mt-1.5 rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
                         >
                           {openSources[index]
                             ? m.ai_builder_review_suggestion_sources_hide()
@@ -450,7 +448,7 @@
                         <Collapsible.Content>
                           <ul class="mt-2 flex flex-col gap-1.5">
                             {#each suggestion.sources as source, sourceIndex (sourceIndex)}
-                              <li class="text-xs">
+                              <li class="text-[0.8125rem]">
                                 <span class="text-secondary">
                                   {suggestionSourceLabel(source, judged.sample.run_ids)}:
                                 </span>
@@ -477,15 +475,10 @@
                             {m.ai_builder_review_suggestion_investigate_this()}
                           </Button>
                         {:else}
-                          <Button
-                            size="sm"
-                            class="h-8"
-                            {disabled}
-                            onclick={() => investigate([suggestion])}
-                          >
+                          <Button {disabled} onclick={() => investigate([suggestion])}>
                             {m.ai_builder_review_suggestion_investigate()}
                           </Button>
-                          <span class="text-secondary text-xs">
+                          <span class="text-secondary text-[0.8125rem]">
                             {m.ai_builder_review_suggestion_investigate_hint()}
                           </span>
                         {/if}
@@ -495,7 +488,7 @@
                 </ul>
                 {#if judged.unverified_count > 0}
                   <p
-                    class="text-secondary mt-2 text-xs text-pretty"
+                    class="text-secondary mt-2 text-[0.8125rem] text-pretty"
                     data-testid="suggestions-some-unverified"
                   >
                     {judged.unverified_count === 1
@@ -514,7 +507,7 @@
               ? completeness.runs_missing_step_results
               : 0}
           {#if incompleteCount > 0 || omittedCount > 0 || hiddenCount > 0}
-            <footer class="border-default mt-4 border-t pt-3 text-xs">
+            <footer class="border-default mt-4 border-t pt-3 text-[0.8125rem]">
               <p class="text-secondary text-pretty">
                 {#if incompleteCount === 1}
                   {m.ai_builder_review_completeness_one()}
