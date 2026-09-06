@@ -251,9 +251,13 @@ def test_the_field_tree_lowers_the_same_way_for_create_and_edit() -> None:
     )["function"]["parameters"]["properties"]["steps"]["items"]["properties"][
         "output_fields"
     ]["items"]
-    edit_items = _edit_schema(1)["function"]["parameters"]["properties"]["steps"][
-        "items"
-    ]["anyOf"][0]["properties"]["output_fields"]["items"]
+    edit_items = next(
+        branch
+        for branch in _edit_schema(1)["function"]["parameters"]["properties"]["steps"][
+            "items"
+        ]["anyOf"]
+        if branch["properties"]["kind"]["enum"] == ["modify"]
+    )["properties"]["output_fields"]["items"]
     assert create_items == edit_items
 
 

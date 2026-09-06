@@ -101,16 +101,26 @@ def build_edit_flow_tool_schema(
         properties["steps"] = {
             "type": "array",
             "description": (
-                "Complete ordered step list after the edit. Preserve an "
-                "existing step with kind=modify and its existing_step_ref; "
-                "include only fields that change on that step. Add new "
-                "steps with kind=add and a typed step payload."
+                "Complete ordered step list after the edit. Change an existing "
+                "step with kind=modify and its existing_step_ref, giving only "
+                "the fields that change; list a step that stays as it is with "
+                "kind=keep; add new steps with kind=add and a typed step "
+                "payload."
             ),
-            "items": {"anyOf": [modify_step_schema, add_step_schema]},
+            "items": {
+                "anyOf": [
+                    modify_step_schema,
+                    _build_keep_step_schema(valid_refs=valid_refs),
+                    add_step_schema,
+                ]
+            },
         }
     else:
+        # A findings' step the flow no longer has leaves nothing to modify
+        # (the stale-review guard refuses that turn earlier); an empty enum is
+        # not a schema, so the branch is offered only when it can be used.
         step_branches: list[dict[str, Any]] = [
-            modify_step_schema,
+            *([modify_step_schema] if modifiable_refs else []),
             _build_keep_step_schema(valid_refs=valid_refs),
         ]
         if review_scope.may_add:
@@ -128,7 +138,10 @@ def build_edit_flow_tool_schema(
                     else ""
                 )
             ),
-            "items": {"anyOf": step_branches},
+            # A union needs two branches to be one; a lone branch is the item.
+            "items": (
+                {"anyOf": step_branches} if len(step_branches) > 1 else step_branches[0]
+            ),
         }
     if removable_refs:
         properties["removed_existing_step_refs"] = {
@@ -158,8 +171,9 @@ def build_edit_flow_tool_schema(
 
     description = (
         "Edit an existing flow by returning the complete ordered step list. "
-        "Every existing step must appear once in steps unless its ref appears "
-        "in removed_existing_step_refs. Null keeps a current value: flow "
+        "Every existing step must appear once in steps, as kind=modify or "
+        "kind=keep, unless its ref appears in removed_existing_step_refs. "
+        "Null keeps a current value: flow "
         "fields, form_fields and every step field. Set form_fields to the "
         "complete desired list, or an empty list to clear all flow-level "
         "inmatningsfält/form fields."

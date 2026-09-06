@@ -361,7 +361,7 @@ class TestBuildEditFlowToolSchema:
         model_ref = add_payload["properties"]["model_ref"]
         assert "enum" not in model_ref
 
-    def test_step_kind_variants_are_add_and_modify(self):
+    def test_step_kind_variants_are_modify_keep_and_add(self):
         schema = build_edit_flow_tool_schema(
             [_make_step(1)],
             resource_catalog=_empty_catalog(),
@@ -372,6 +372,7 @@ class TestBuildEditFlowToolSchema:
         ]
         assert [variant["properties"]["kind"]["enum"][0] for variant in variants] == [
             "modify",
+            "keep",
             "add",
         ]
 
@@ -558,6 +559,14 @@ class TestReviewScopedEditSchema:
             "existing_step_3",
         ]
         assert set(by_kind["keep"]["properties"]) == {"kind", "existing_step_ref"}
+
+    def test_a_findings_step_the_flow_no_longer_has_leaves_only_keep(self) -> None:
+        # The stale-review guard refuses such a turn earlier; the schema must
+        # still be a schema (no empty enum) if it is ever built.
+        params = self._scoped(step_refs={"existing_step_9"})
+        items = params["properties"]["steps"]["items"]
+        assert "anyOf" not in items
+        assert items["properties"]["kind"]["enum"] == ["keep"]
 
     def test_adding_is_offered_only_when_the_findings_call_for_it(self) -> None:
         kinds = lambda params: {  # noqa: E731

@@ -729,9 +729,13 @@ class TestBuildToolSchema:
         schema = build_propose_flow_tool_schema(
             resource_catalog=_empty_catalog(), current_steps=[]
         )
-        add_step_schema = schema["function"]["parameters"]["properties"]["steps"][
-            "items"
-        ]["anyOf"][1]["properties"]["step"]
+        add_step_schema = next(
+            branch
+            for branch in schema["function"]["parameters"]["properties"]["steps"][
+                "items"
+            ]["anyOf"]
+            if branch["properties"]["kind"]["enum"] == ["add"]
+        )["properties"]["step"]
         field_schema = add_step_schema["properties"]["output_fields"]["items"]
         create_field_schema = build_propose_flow_tool_schema(
             resource_catalog=_empty_catalog()
