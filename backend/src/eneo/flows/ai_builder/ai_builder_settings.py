@@ -9,9 +9,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS,
-    AI_BUILDER_DEFAULT_REVIEW_INVESTIGATION_EVIDENCE_TOKENS,
     AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
+    AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS,
     AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
     extract_ai_builder_budget_settings,
     parse_ai_builder_budget_token,
@@ -123,10 +123,11 @@ class AIBuilderBudgetPolicy:
     # (the suggestions call and a review-backed proposal alike). None is the
     # model's own window: the capability decides, the tenant may cap it.
     review_evidence_max_input_tokens: int | None = None
-    # The share of a review-backed proposal prompt the run excerpts may take,
-    # bounded by what the planner reliably answers over, not by the window.
-    review_investigation_evidence_max_tokens: int | None = (
-        AI_BUILDER_DEFAULT_REVIEW_INVESTIGATION_EVIDENCE_TOKENS
+    # The share of a review-backed proposal prompt the review evidence block
+    # may take: a conservative system bound based on limited testing, which a
+    # tenant may lower, never raise.
+    review_investigation_evidence_max_tokens: int = (
+        AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS
     )
 
     def classification_request_budget(
@@ -290,11 +291,16 @@ def resolve_ai_builder_budget_policy(
         resolved_defaults.review_investigation_evidence_max_tokens
     )
     if "review_investigation_evidence_max_tokens" in raw:
-        investigation_evidence_cap = _parse_token_int(
-            raw["review_investigation_evidence_max_tokens"],
-            "review_investigation_evidence_max_tokens",
-            allow_none=True,
-        )
+        try:
+            investigation_evidence_cap = parse_ai_builder_operating_limit(
+                raw["review_investigation_evidence_max_tokens"],
+                "review_investigation_evidence_max_tokens",
+            )
+        except ValueError as error:
+            raise AIBuilderBadRequestException(
+                str(error),
+                code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
+            ) from error
 
     operating_limits = {
         "max_attachments": resolved_defaults.max_attachments,
@@ -371,10 +377,22 @@ def apply_ai_builder_budget_policy_patch(
             "review_evidence_max_input_tokens",
         )
     if review_investigation_evidence_max_tokens is not None:
-        next_settings["review_investigation_evidence_max_tokens"] = _parse_token_int(
-            review_investigation_evidence_max_tokens,
-            "review_investigation_evidence_max_tokens",
-        )
+        try:
+            lowered_to = parse_ai_builder_operating_limit(
+                review_investigation_evidence_max_tokens,
+                "review_investigation_evidence_max_tokens",
+            )
+        except ValueError as error:
+            raise AIBuilderBadRequestException(
+                str(error),
+                code=AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS,
+            ) from error
+        # The bound itself is no override: the tenant follows the system
+        # bound, including a later change of it, instead of pinning today's.
+        if lowered_to == AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS:
+            next_settings.pop("review_investigation_evidence_max_tokens", None)
+        else:
+            next_settings["review_investigation_evidence_max_tokens"] = lowered_to
     operating_updates = {
         "max_attachments": max_attachments,
         "max_message_chars": max_message_chars,

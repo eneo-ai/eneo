@@ -3,6 +3,7 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const updateMappedExecutionPolicy = vi.hoisted(() => vi.fn());
+const updateAIBuilderBudgetSettings = vi.hoisted(() => vi.fn());
 const getFlowRetentionPolicy = vi.hoisted(() => vi.fn());
 const replaceOrganizationFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
 const replaceSpaceFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
@@ -19,6 +20,7 @@ vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     settings: {
       updateMappedExecutionPolicy,
+      updateAIBuilderBudgetSettings,
       getFlowRetentionPolicy,
       replaceOrganizationFlowRunRetentionPolicy,
       replaceSpaceFlowRunRetentionPolicy,
@@ -114,11 +116,27 @@ type PageProps = { data: never };
 
 // The page's data prop type includes the whole layout payload (user, tenant,
 // eneo client, ...); the page itself only reads the settings payload below.
-function pageProps(mappedOverrides: Record<string, unknown> = {}): PageProps {
-  return { data: pageData(mappedOverrides) as never };
+function pageProps(
+  mappedOverrides: Record<string, unknown> = {},
+  builderOverrides: Record<string, unknown> = {}
+): PageProps {
+  return { data: pageData(mappedOverrides, builderOverrides) as never };
 }
 
-function pageData(mappedOverrides: Record<string, unknown> = {}) {
+const BUILDER_BUDGET = {
+  max_attachments: 100,
+  max_message_chars: 50_000,
+  review_evidence_max_input_tokens: null,
+  review_investigation_evidence_max_tokens: 16_000,
+  review_investigation_evidence_ceiling_tokens: 16_000,
+  max_attachments_hard_limit: 100,
+  max_message_chars_hard_limit: 50_000
+};
+
+function pageData(
+  mappedOverrides: Record<string, unknown> = {},
+  builderOverrides: Record<string, unknown> = {}
+) {
   return {
     flowRetentionPolicy: {
       run_debug_evidence_days: null,
@@ -172,14 +190,7 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
       deployment_default_max_provider_calls: 100,
       ...mappedOverrides
     },
-    aiBuilderBudgetSettings: {
-      max_attachments: 100,
-      max_message_chars: 50_000,
-      review_evidence_max_input_tokens: null,
-      review_investigation_evidence_max_tokens: 16_000,
-      max_attachments_hard_limit: 100,
-      max_message_chars_hard_limit: 50_000
-    },
+    aiBuilderBudgetSettings: { ...BUILDER_BUDGET, ...builderOverrides },
     ragEvidencePolicy: {
       max_sources_with_recorded_passages: 25,
       max_recorded_passages_per_source: 5,
@@ -587,6 +598,43 @@ describe("flow settings page — mapped restore lifecycle", () => {
 
     await expect.element(normalLimit).toBeVisible();
     await expect.element(page.getByText(/Ange ett värde mellan/)).toBeVisible();
+  });
+
+  test("the investigation evidence row is bounded by the ceiling the server reports", async () => {
+    render(FlowSettingsPage, pageProps());
+    await page.getByRole("tab", { name: "AI-byggaren" }).click();
+
+    const row = page.getByRole("textbox", { name: "Underlag när ett förslag undersöks" });
+    await expect.element(row).toHaveValue("16000");
+    await expect.element(page.getByText("Systemets högsta tillåtna värde: 16000")).toBeVisible();
+
+    // Above the ceiling stays visible as an error; the server would refuse it.
+    await row.fill("16001");
+    await expect.element(row).toHaveAttribute("aria-invalid", "true");
+    await expect.element(page.getByText(/Ange ett värde mellan/)).toBeVisible();
+
+    await row.fill("12000");
+    expect(row.query()?.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  test("entering the system bound saves it and the row re-baselines to the bound", async () => {
+    // The server stores the bound as no override; the page only has to send
+    // the bound and adopt the response.
+    updateAIBuilderBudgetSettings.mockResolvedValue({ ...BUILDER_BUDGET });
+    render(FlowSettingsPage, pageProps({}, { review_investigation_evidence_max_tokens: 12_000 }));
+    await page.getByRole("tab", { name: "AI-byggaren" }).click();
+
+    const row = page.getByRole("textbox", { name: "Underlag när ett förslag undersöks" });
+    await expect.element(row).toHaveValue("12000");
+    await row.fill("16000");
+    await expect.element(page.getByText("1 osparad ändring")).toBeVisible();
+    await page.getByRole("button", { name: "Spara ändringar" }).click();
+
+    expect(updateAIBuilderBudgetSettings).toHaveBeenCalledExactlyOnceWith({
+      review_investigation_evidence_max_tokens: 16_000
+    });
+    await expect.element(row).toHaveValue("16000");
+    expect(page.getByText("1 osparad ändring").query()).toBeNull();
   });
 
   test("inherited state shows the hint and offers no restore action", async () => {

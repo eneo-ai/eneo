@@ -119,10 +119,25 @@ def test_budget_settings_validation_accepts_every_supported_field() -> None:
         "max_template_inspection_uncompressed_bytes": 6,
         "max_template_placeholders": 7,
         "review_evidence_max_input_tokens": 8,
-        "review_investigation_evidence_max_tokens": 9,
+        "review_investigation_evidence_max_tokens": 9_000,
     }
 
     assert validate_ai_builder_budget_settings_object(value) == value
+
+
+def test_investigation_evidence_bound_rejects_above_the_ceiling_and_null() -> None:
+    field = "flow_settings.ai_builder.review_investigation_evidence_max_tokens"
+    assert validate_ai_builder_budget_settings_object(
+        {"review_investigation_evidence_max_tokens": 16_000}
+    ) == {"review_investigation_evidence_max_tokens": 16_000}
+    with pytest.raises(ValueError, match=rf"^{field} must be between 1 and 16000\.$"):
+        validate_ai_builder_budget_settings_object(
+            {"review_investigation_evidence_max_tokens": 16_001}
+        )
+    with pytest.raises(ValueError, match=rf"^{field} must be an integer\.$"):
+        validate_ai_builder_budget_settings_object(
+            {"review_investigation_evidence_max_tokens": None}
+        )
 
 
 def test_budget_settings_validation_rejects_non_objects_and_sorted_unknowns() -> None:

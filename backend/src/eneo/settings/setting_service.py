@@ -38,6 +38,7 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
     AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
+    AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS,
     AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
 from eneo.flows.flow_document_limits import (
@@ -912,6 +913,9 @@ class SettingService:
             ),
             max_template_placeholders_hard_limit=(
                 AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT
+            ),
+            review_investigation_evidence_ceiling_tokens=(
+                AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS
             ),
             max_template_archive_entries_per_file_hard_limit=(
                 MAX_TEMPLATE_ARCHIVE_ENTRIES

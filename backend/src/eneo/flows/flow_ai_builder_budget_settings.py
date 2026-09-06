@@ -17,13 +17,19 @@ AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT = 10_000
 # This effective default remains admin-changeable and deliberately below the
 # parser ceiling so normal sessions cannot consume the full safety envelope.
 AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS = 1_000
-# Measured operating default for the run evidence a review-backed proposal
-# carries (2026-09-06, gpt-5.6-luna on a five-step flow): investigations with
-# 12k-16k evidence tokens produced plans every time, those with 28k-37k
-# failed every time (schema rejections after repair) whatever the window. The
-# suggestions call is not bounded by this; it reads up to the model's window.
-# Admins change it; null removes the bound.
-AI_BUILDER_DEFAULT_REVIEW_INVESTIGATION_EVIDENCE_TOKENS = 16_000
+# Conservative bound on the review evidence block (facts, scopes, run and
+# step metadata, excerpts) a review-backed proposal prompt carries, measured
+# on one sample (2026-09-06, gpt-5.6-luna, one five-step flow): 12k-16k
+# evidence tokens produced a plan 2/2, 28k-37k failed 4/4 with schema
+# rejections after repair, whatever the window; suggestion count varied with
+# size, and the edit tool transport is non-strict (bead eneo-5wn owns both).
+# It applies to every planner route until measured per route. The suggestions
+# call is not bounded by it. Tenants may lower the value, never raise it; a
+# value equal to the bound is stored as no override, so a later change of this
+# constant reaches every tenant without an override. Lowering it below stored
+# overrides needs those rows normalised first: tenant validation rejects an
+# override above the bound. Re-measure before changing this number.
+AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS = 16_000
 AI_BUILDER_BUDGET_FIELDS = frozenset(
     {
         "conversation_safety_buffer_tokens",
@@ -77,6 +83,9 @@ def parse_ai_builder_operating_limit(value: object, field_name: str) -> int:
             AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
         ),
         "max_template_placeholders": (AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT),
+        "review_investigation_evidence_max_tokens": (
+            AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS
+        ),
     }
     setting_name = field_name.rsplit(".", 1)[-1]
     hard_limit = hard_limits[setting_name]
@@ -122,16 +131,19 @@ def validate_ai_builder_budget_settings_object(
                 value_dict[field_name],
                 f"flow_settings.ai_builder.{field_name}",
             )
-    for field_name in (
-        "review_evidence_max_input_tokens",
-        "review_investigation_evidence_max_tokens",
-    ):
-        if field_name in value_dict:
-            validated[field_name] = parse_ai_builder_budget_token(
-                value_dict[field_name],
-                f"flow_settings.ai_builder.{field_name}",
-                allow_none=True,
+    if "review_evidence_max_input_tokens" in value_dict:
+        validated["review_evidence_max_input_tokens"] = parse_ai_builder_budget_token(
+            value_dict["review_evidence_max_input_tokens"],
+            "flow_settings.ai_builder.review_evidence_max_input_tokens",
+            allow_none=True,
+        )
+    if "review_investigation_evidence_max_tokens" in value_dict:
+        validated["review_investigation_evidence_max_tokens"] = (
+            parse_ai_builder_operating_limit(
+                value_dict["review_investigation_evidence_max_tokens"],
+                "flow_settings.ai_builder.review_investigation_evidence_max_tokens",
             )
+        )
     return validated
 
 

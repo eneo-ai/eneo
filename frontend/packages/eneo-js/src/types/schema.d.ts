@@ -10106,8 +10106,10 @@ export interface components {
       minimum_conversation_budget_tokens: number;
       /** Review Evidence Max Input Tokens */
       review_evidence_max_input_tokens: number | null;
+      /** Review Investigation Evidence Ceiling Tokens */
+      review_investigation_evidence_ceiling_tokens: number;
       /** Review Investigation Evidence Max Tokens */
-      review_investigation_evidence_max_tokens: number | null;
+      review_investigation_evidence_max_tokens: number;
     };
     /** AIBuilderBudgetSettingsUpdate */
     AIBuilderBudgetSettingsUpdate: {
@@ -10130,7 +10132,7 @@ export interface components {
       review_evidence_max_input_tokens?: number | null;
       /**
        * Review Investigation Evidence Max Tokens
-       * @description Tokens of run evidence a review-backed proposal prompt may carry, the planner's measured reliable share; send null to remove the bound.
+       * @description Tokens of review evidence (facts, scopes, run and step metadata, excerpts) a review-backed proposal prompt may carry, at most the conservative system bound in review_investigation_evidence_ceiling_tokens. Null, or the bound itself, removes the tenant override so the tenant follows the bound.
        */
       review_investigation_evidence_max_tokens?: number | null;
     };

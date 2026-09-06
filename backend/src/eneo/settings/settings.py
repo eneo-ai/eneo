@@ -26,6 +26,7 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
     AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
     AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
+    AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS,
     AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
 from eneo.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
@@ -603,8 +604,9 @@ class AIBuilderBudgetSettingsPublic(BaseModel):
     # review's suggestions call and a review-backed proposal). None: the
     # model's own window.
     review_evidence_max_input_tokens: int | None
-    # Evidence share of a review-backed proposal prompt; None: no separate bound.
-    review_investigation_evidence_max_tokens: int | None
+    # Evidence share of a review-backed proposal prompt: the system bound or
+    # a tenant's lower value.
+    review_investigation_evidence_max_tokens: int
     max_attachments: int
     max_message_chars: int
     max_template_inspection_uncompressed_bytes: int
@@ -613,6 +615,7 @@ class AIBuilderBudgetSettingsPublic(BaseModel):
     max_message_chars_hard_limit: int
     max_template_inspection_uncompressed_bytes_hard_limit: int
     max_template_placeholders_hard_limit: int
+    review_investigation_evidence_ceiling_tokens: int
     max_template_archive_entries_per_file_hard_limit: int
     max_template_uncompressed_bytes_per_file_hard_limit: int
     max_planning_state_payload_bytes_hard_limit: int
@@ -665,10 +668,13 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
     review_investigation_evidence_max_tokens: int | None = Field(
         default=None,
         ge=1,
-        le=AI_BUILDER_BUDGET_MAX_TOKENS,
+        le=AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS,
         description=(
-            "Tokens of run evidence a review-backed proposal prompt may carry, the "
-            "planner's measured reliable share; send null to remove the bound."
+            "Tokens of review evidence (facts, scopes, run and step metadata, "
+            "excerpts) a review-backed proposal prompt may carry, at most the "
+            "conservative system bound in "
+            "review_investigation_evidence_ceiling_tokens. Null, or the bound "
+            "itself, removes the tenant override so the tenant follows the bound."
         ),
     )
 

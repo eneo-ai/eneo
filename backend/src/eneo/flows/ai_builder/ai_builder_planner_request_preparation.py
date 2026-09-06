@@ -734,20 +734,20 @@ def build_proposal_prepared(
         fits=lambda requirements: prompt_fits(None, requirements),
     )
 
-    # Run excerpts were read whole; the (capped) window decides how much of
-    # them this prompt carries, after the facts and the replayed requirements
-    # and before attachments, which are fitted into what remains. The
-    # measurement is the reserving one because it decides admission, and a
-    # prompt that does not fit even without excerpts is refused here, before
-    # any provider work.
+    # Run excerpts were read whole; the (capped) window and the evidence bound
+    # decide how much of them this prompt carries, after the facts and the
+    # replayed requirements and before attachments, which are fitted into
+    # what remains. The measurement is the reserving one because it decides
+    # admission, and a prompt that does not fit even without excerpts is
+    # refused here, before any provider work.
     def prompt_reserve(evidence: FlowReviewEvidence | None) -> int:
         prompt = build_proposal_prompt(None, replayed_requirements, evidence)
         return measure_provider_input_reserve(
             [{"role": "system", "content": prompt}], [], litellm_model
         ).tokens
 
-    # The excerpts' own share is bounded by what the planner reliably answers
-    # over (policy, measured), the whole prompt by the (capped) window.
+    # The evidence block's own share is bounded by the system bound (policy),
+    # the whole prompt by the (capped) window.
     evidence_share_limit = budget_policy.review_investigation_evidence_max_tokens
     scaffold_reserve = prompt_reserve(None) if review_evidence is not None else 0
 
@@ -755,10 +755,7 @@ def build_proposal_prepared(
         reserve = prompt_reserve(evidence)
         if reserve > system_prompt_token_limit:
             return False
-        return (
-            evidence_share_limit is None
-            or reserve - scaffold_reserve <= evidence_share_limit
-        )
+        return reserve - scaffold_reserve <= evidence_share_limit
 
     review_evidence_fit_ms: int | None = None
     fitted_review_evidence: FlowReviewEvidence | None = None

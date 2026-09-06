@@ -1116,6 +1116,72 @@ async def test_get_ai_builder_budget_settings_reads_tenant_override(monkeypatch)
     )
 
 
+async def test_investigation_evidence_bound_restores_inheritance_through_the_service(
+    monkeypatch,
+):
+    # Entering the system bound, or sending null, removes the stored override:
+    # the tenant follows the bound, including a later change of it.
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+
+    async def _capture(*args, **kwargs):
+        return None
+
+    audit_service.log_async = _capture
+    monkeypatch.setattr(
+        ai_builder_settings,
+        "get_settings",
+        lambda: SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2000,
+            ai_builder_minimum_conversation_budget_tokens=4000,
+            ai_builder_classification_timeout_seconds=30,
+            ai_builder_proposal_timeout_seconds=120,
+        ),
+    )
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    lowered = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(review_investigation_evidence_max_tokens=12_000)
+    )
+    assert lowered.review_investigation_evidence_max_tokens == 12_000
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["ai_builder"] == {
+        "review_investigation_evidence_max_tokens": 12_000
+    }
+
+    at_bound = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(review_investigation_evidence_max_tokens=16_000)
+    )
+    assert at_bound.review_investigation_evidence_max_tokens == 16_000
+    assert at_bound.review_investigation_evidence_ceiling_tokens == 16_000
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "review_investigation_evidence_max_tokens" not in (
+        tenant.flow_settings.get("ai_builder") or {}
+    )
+
+    await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(review_investigation_evidence_max_tokens=12_000)
+    )
+    restored = await service.update_ai_builder_budget_settings(
+        AIBuilderBudgetSettingsUpdate(review_investigation_evidence_max_tokens=None)
+    )
+    assert restored.review_investigation_evidence_max_tokens == 16_000
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "review_investigation_evidence_max_tokens" not in (
+        tenant.flow_settings.get("ai_builder") or {}
+    )
+
+
 async def test_update_ai_builder_budget_settings_persists_and_audits(monkeypatch):
     repo = MockRepo()
     tenant_repo = MockTenantRepo()

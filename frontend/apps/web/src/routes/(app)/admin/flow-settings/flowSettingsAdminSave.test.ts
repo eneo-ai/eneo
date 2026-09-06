@@ -18,6 +18,7 @@ const BUILDER_BUDGET: AIBuilderBudgetSettings = {
   max_message_chars: 50_000,
   review_evidence_max_input_tokens: null,
   review_investigation_evidence_max_tokens: 16_000,
+  review_investigation_evidence_ceiling_tokens: 16_000,
   max_template_inspection_uncompressed_bytes: 200 * 1024 * 1024,
   max_template_placeholders: 1_000,
   max_attachments_hard_limit: 100,

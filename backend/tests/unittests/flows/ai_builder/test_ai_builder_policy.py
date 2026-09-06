@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
+    apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
 )
 from eneo.flows.flow_ai_builder_budget_settings import (
@@ -150,16 +151,39 @@ def test_the_review_evidence_cap_bounds_every_request_that_carries_run_evidence(
     assert ordinary.context_window_tokens == 1_000_000
 
 
-def test_the_investigation_evidence_share_has_a_measured_default_admins_can_remove() -> (
-    None
-):
+def test_the_investigation_evidence_share_is_a_ceiling_tenants_can_only_lower() -> None:
     policy = resolve_ai_builder_budget_policy(None)
     assert policy.review_investigation_evidence_max_tokens == 16_000
-    removed = resolve_ai_builder_budget_policy(
-        {"ai_builder": {"review_investigation_evidence_max_tokens": None}}
+    lowered = resolve_ai_builder_budget_policy(
+        {"ai_builder": {"review_investigation_evidence_max_tokens": 12_000}}
     )
-    assert removed.review_investigation_evidence_max_tokens is None
-    raised = resolve_ai_builder_budget_policy(
-        {"ai_builder": {"review_investigation_evidence_max_tokens": 40_000}}
+    assert lowered.review_investigation_evidence_max_tokens == 12_000
+    with pytest.raises(AIBuilderBadRequestException):
+        resolve_ai_builder_budget_policy(
+            {"ai_builder": {"review_investigation_evidence_max_tokens": 40_000}}
+        )
+
+
+def test_the_investigation_evidence_bound_itself_is_stored_as_no_override() -> None:
+    lowered = apply_ai_builder_budget_policy_patch(
+        None, review_investigation_evidence_max_tokens=12_000
     )
-    assert raised.review_investigation_evidence_max_tokens == 40_000
+    assert lowered["ai_builder"]["review_investigation_evidence_max_tokens"] == 12_000
+    # Sending the bound restores inheritance instead of pinning today's value.
+    at_bound = apply_ai_builder_budget_policy_patch(
+        lowered, review_investigation_evidence_max_tokens=16_000
+    )
+    assert "review_investigation_evidence_max_tokens" not in at_bound.get(
+        "ai_builder", {}
+    )
+    # So does an explicit null (the PATCH service maps it to remove_keys).
+    removed = apply_ai_builder_budget_policy_patch(
+        lowered, remove_keys={"review_investigation_evidence_max_tokens"}
+    )
+    assert "review_investigation_evidence_max_tokens" not in removed.get(
+        "ai_builder", {}
+    )
+    with pytest.raises(AIBuilderBadRequestException):
+        apply_ai_builder_budget_policy_patch(
+            None, review_investigation_evidence_max_tokens=16_001
+        )

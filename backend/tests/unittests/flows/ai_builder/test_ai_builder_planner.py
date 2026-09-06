@@ -5365,7 +5365,8 @@ def _build_review_backed_proposal(
     *,
     review_evidence_max_input_tokens: int | None,
     window: int = 60_000,
-    review_investigation_evidence_max_tokens: int | None = None,
+    review_investigation_evidence_max_tokens: int = 16_000,
+    excerpt_chars: int = 200_000,
 ) -> ProposalPrepared:
     policy = AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=128,
@@ -5383,7 +5384,7 @@ def _build_review_backed_proposal(
         planning_state=_document_architecture_state(),
         attachment_context=None,
         flow_context=None,
-        review_evidence=_review_evidence(200_000),
+        review_evidence=_review_evidence(excerpt_chars),
         is_edit_mode=False,
         resource_catalog=build_ai_builder_resource_catalog(
             available_models=[], available_kbs=[], prior_bindings=()
@@ -5438,16 +5439,21 @@ def test_a_review_backed_proposal_reports_its_evidence_fit_in_the_prompt_metrics
     assert metrics["review_excerpts_omitted_by_budget"] == 0
 
 
-def test_the_investigation_evidence_share_is_bounded_by_the_measured_policy() -> None:
+def test_the_investigation_evidence_share_is_bounded_by_the_system_bound() -> None:
     # A window that could hold the whole excerpt still truncates it to the
-    # planner's reliable share; without the bound the excerpt travels whole.
+    # system bound, at the bound itself as at a lower tenant value.
     bounded = _build_review_backed_proposal(
         review_evidence_max_input_tokens=None,
         window=1_000_000,
         review_investigation_evidence_max_tokens=2_000,
     )
     assert "avklippt efter" in bounded.message_groups[0].messages[0]["content"]
-    unbounded = _build_review_backed_proposal(
+    at_ceiling = _build_review_backed_proposal(
         review_evidence_max_input_tokens=None, window=1_000_000
     )
-    assert "avklippt efter" not in unbounded.message_groups[0].messages[0]["content"]
+    assert "avklippt efter" in at_ceiling.message_groups[0].messages[0]["content"]
+    # A short excerpt (well under the ceiling) travels whole.
+    short = _build_review_backed_proposal(
+        review_evidence_max_input_tokens=None, window=1_000_000, excerpt_chars=2_000
+    )
+    assert "avklippt efter" not in short.message_groups[0].messages[0]["content"]
