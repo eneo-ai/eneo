@@ -18,9 +18,12 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationMetadata,
+    latest_turn_is_review_command,
     named_content_fields_edit_from_metadata,
     provider_safe_tool_call_id,
     question_answer_from_metadata,
+    review_command_is_the_only_user_intent,
+    semantic_conversation,
     tool_calls_from_message,
     ui_language_from_metadata,
     unconsumed_reopen_question,
@@ -240,6 +243,18 @@ async def prepare_planner_request(
     requirements_state = resolve_requirements_state(request.conversation)
     ui_language = _resolve_ui_language(request.conversation)
     reopen = unconsumed_reopen_question(request.conversation)
+    # The user picked findings on the review screen; the server wrote the
+    # message. Nothing was said about what the flow should do, so the turn
+    # neither reads the text for new intent nor asks the user to confirm the
+    # whole contract again — it goes to the proposal with the requirements the
+    # flow already has.
+    review_command_turn = latest_turn_is_review_command(request.conversation)
+    # Skipping the requirements card is only honest when nothing the user
+    # typed themselves is still waiting to be confirmed.
+    review_command_opens_the_session = (
+        review_command_turn
+        and review_command_is_the_only_user_intent(request.conversation)
+    )
     if request.prepared_schema_candidates is not None:
         attachment_context_result = request.prepared_attachment_context
         schema_candidates = request.prepared_schema_candidates
@@ -322,7 +337,8 @@ async def prepare_planner_request(
             allow_classification=not _turn_edits_named_content_fields(
                 request.conversation
             )
-            and reopen is None,
+            and reopen is None
+            and not review_command_turn,
             attachment_context=attachment_context_result,
             usage_tracker=request.usage_tracker,
             before_provider_call=request.before_provider_call,
@@ -367,7 +383,7 @@ async def prepare_planner_request(
             output_evidence=None,
             example_inference=None,
         )
-    requirements_confirmation_required = (
+    requirements_confirmation_required = not review_command_opens_the_session and (
         request.plan_edit_context is None or request.plan_edit_context.scope != "step"
     )
     turn_control = (
@@ -569,9 +585,13 @@ def build_proposal_prepared(
     # Only the user's own wording names an output topology. The disclosure
     # renders evidence back to the user — including headings observed in an
     # attached example — and reading it here turned that example's layout into
-    # sections the plan had to reproduce.
+    # sections the plan had to reproduce. A review command is the server's
+    # wording, so it is read from the semantic projection too; the prompt
+    # below still gets the whole conversation.
     requested_output_sections = extract_requested_output_sections(
-        aggregate_unprompted_user_text_preserving_case(conversation),
+        aggregate_unprompted_user_text_preserving_case(
+            semantic_conversation(conversation)
+        ),
         model_form_intake_signals=form_intake_signal_values_from_planning_state(
             planning_state
         ),

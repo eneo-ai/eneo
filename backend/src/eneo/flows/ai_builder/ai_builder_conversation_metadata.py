@@ -11,7 +11,16 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast, get_args
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    Protocol,
+    TypeAlias,
+    TypeVar,
+    cast,
+    get_args,
+)
 from uuid import UUID
 
 from pydantic import (
@@ -117,6 +126,7 @@ UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
 REVIEW_CONTEXT_METADATA_KEY = "review_context"
+_REVIEW_REFERENCE_KINDS = ("flow_review", "flow_review_suggestion")
 EVIDENCE_FLOOR_METADATA_KEY = "evidence_floor"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
@@ -2274,6 +2284,9 @@ class _ConversationMetadataMessage(Protocol):
     def metadata(self) -> FlowPersistedJsonObject | None: ...
 
 
+_MessageT = TypeVar("_MessageT", bound=_ConversationMetadataMessage)
+
+
 def latest_user_edit_context(
     conversation: Sequence[_ConversationMetadataMessage],
 ) -> AIBuilderEditContext | None:
@@ -2285,6 +2298,119 @@ def latest_user_edit_context(
     return None
 
 
+def review_reference_kind(metadata: object) -> str | None:
+    """Which kind of review a message names, read without its payload.
+
+    Who wrote a message and whether a turn acts on a review are facts that
+    must survive the payload's evolution: a reference this build can no
+    longer parse in full is still a reference. Only the evidence behind it
+    degrades — `review_context_from_metadata` returns nothing and the turn
+    proceeds without facts — while authorship and the review permission
+    keep holding.
+    """
+
+    metadata_map = _metadata_mapping(metadata)
+    if metadata_map is None:
+        return None
+    raw_context = metadata_map.get(REVIEW_CONTEXT_METADATA_KEY)
+    if not isinstance(raw_context, Mapping):
+        return None
+    kind = cast(Mapping[str, Any], raw_context).get("kind")
+    return kind if kind in _REVIEW_REFERENCE_KINDS else None
+
+
+def names_a_review(metadata: object) -> bool:
+    """Whether this message acts on a flow review, of either kind."""
+
+    return review_reference_kind(metadata) is not None
+
+
+def is_server_authored_review_command(metadata: object) -> bool:
+    """Whether the server, not the user, wrote this user message.
+
+    A suggestion handoff is a command the review screen issued: the server
+    writes its text from the typed reference. It states no new intent about
+    what the flow should do, so every path that reads the conversation for
+    meaning — free-form aggregation, slot classification — leaves it out.
+    The user's own later messages are ordinary intent again.
+    """
+
+    return review_reference_kind(metadata) == "flow_review_suggestion"
+
+
+def conversation_acts_on_a_review(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> bool:
+    """Whether any user turn of this session named a flow review.
+
+    The review permission is decided from this, not from a parsed reference:
+    a session that read run evidence stays the review feature even when the
+    reference itself was written by an older build.
+    """
+
+    return any(
+        message.role == "user" and names_a_review(message.metadata)
+        for message in conversation
+    )
+
+
+def semantic_conversation(
+    conversation: Sequence[_MessageT],
+) -> list[_MessageT]:
+    """The conversation as everything that reads it for meaning must see it.
+
+    A suggestion handoff is a command the review screen issued and the server
+    wrote; it states nothing about what the flow should do. Discovery, the
+    planning state, the free-text heuristics, the classifier and the
+    deterministic proposal checks all work from this projection. Only the
+    planner's own prompt gets the whole conversation, because there the
+    message is the turn's request.
+    """
+
+    return [
+        message
+        for message in conversation
+        if not (
+            message.role == "user"
+            and is_server_authored_review_command(message.metadata)
+        )
+    ]
+
+
+def review_command_is_the_only_user_intent(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> bool:
+    """Whether this turn is a review command and nothing the user typed
+    themselves is waiting in the session.
+
+    Skipping the requirements card is only honest when there is no earlier
+    intent of the user's own still unconfirmed; otherwise the command would
+    push past something they were asked and have not answered.
+    """
+
+    user_messages = [message for message in conversation if message.role == "user"]
+    if not user_messages:
+        return False
+    return all(
+        is_server_authored_review_command(message.metadata) for message in user_messages
+    )
+
+
+def latest_turn_is_review_command(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> bool:
+    """Whether the turn now being answered is a suggestion handoff.
+
+    Only the newest user message counts: once the user has typed something
+    of their own, the turn is theirs and takes the ordinary route.
+    """
+
+    for message in reversed(conversation):
+        if message.role == "user":
+            return is_server_authored_review_command(message.metadata)
+    return False
+
+
 def latest_user_review_context(
     conversation: Sequence[_ConversationMetadataMessage],
 ) -> PersistedReviewReference | None:
@@ -2293,13 +2419,15 @@ def latest_user_review_context(
     Unlike edit scope, a review outlives the turn that opened it — the user
     discusses the findings over several messages — so any earlier user turn
     counts, not only the latest.
+
+    The newest marker owns the answer even when this build cannot parse it:
+    a reference it cannot read yields no facts, never the facts of an older
+    review the user has already moved on from.
     """
 
     for message in reversed(conversation):
-        if message.role == "user":
-            context = review_context_from_metadata(message.metadata)
-            if context is not None:
-                return context
+        if message.role == "user" and names_a_review(message.metadata):
+            return review_context_from_metadata(message.metadata)
     return None
 
 

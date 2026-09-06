@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     StructuredQuestionAnswerMetadata,
     question_answer_from_metadata,
     question_response_from_metadata,
+    semantic_conversation,
     slot_classification_from_metadata,
     slot_classification_metadata_from_attempt,
 )
@@ -531,6 +532,9 @@ async def build_runtime_discovery_context(
     attached_file_ids: Collection[UUID] = (),
 ) -> RuntimeDiscoveryContext:
     budget_policy = budget_policy or resolve_ai_builder_budget_policy(None)
+    # Discovery reads the conversation for meaning, so it reads the semantic
+    # projection: the server's own review commands are not in it.
+    conversation = semantic_conversation(conversation)
     schema_candidates = (
         prepared_schema_candidates
         if prepared_schema_candidates is not None

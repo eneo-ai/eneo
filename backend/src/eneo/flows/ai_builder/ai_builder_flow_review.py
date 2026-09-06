@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal, Protocol, Sequence
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
@@ -47,6 +47,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     MAX_SUGGESTION_STEPS,
+    MAX_SUGGESTIONS,
     FlowReviewSuggestionKind,
 )
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
@@ -199,11 +200,39 @@ class PersistedReviewContext(AIBuilderReviewContext):
 MAX_SUGGESTION_SAMPLE_RUNS = 3
 
 
+class FlowReviewSuggestionFocus(BaseModel):
+    """One suggestion a turn investigates: kind and steps, never its prose.
+
+    The value is canonical: steps are sorted and deduplicated, so the same
+    suggestion picked twice, or listed in another order, is the same value
+    and a retry of the same investigation hashes the same request.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    suggestion_kind: FlowReviewSuggestionKind
+    step_orders: list[int] = Field(min_length=1, max_length=MAX_SUGGESTION_STEPS)
+
+    @field_validator("step_orders")
+    @classmethod
+    def _canonical_step_orders(cls, value: list[int]) -> list[int]:
+        return sorted(dict.fromkeys(value))
+
+    @property
+    def canonical_key(self) -> tuple[str, tuple[int, ...]]:
+        return (self.suggestion_kind, tuple(self.step_orders))
+
+
 class AIBuilderSuggestionContext(BaseModel):
-    """What a turn says when it acts on a model suggestion: the reviewed
-    version, the runs the suggestion was judged on, and the suggestion's
-    kind and steps. No model prose; the runs decide the floor, so a cohort
-    that has since turned over cannot lower it."""
+    """What a turn says when it acts on model suggestions: the reviewed
+    version, the runs they were judged on, and each suggestion's kind and
+    steps. No model prose; the runs decide the floor, so a cohort that has
+    since turned over cannot lower it.
+
+    One turn may carry several suggestions. The list is canonical, so the
+    same set picked in another order is the same request: one packet, one
+    evidence read and one proposal call however many were selected.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -213,8 +242,17 @@ class AIBuilderSuggestionContext(BaseModel):
     sample_run_ids: list[UUID] = Field(
         min_length=1, max_length=MAX_SUGGESTION_SAMPLE_RUNS
     )
-    suggestion_kind: FlowReviewSuggestionKind
-    step_orders: list[int] = Field(min_length=1, max_length=MAX_SUGGESTION_STEPS)
+    suggestions: list[FlowReviewSuggestionFocus] = Field(
+        min_length=1, max_length=MAX_SUGGESTIONS
+    )
+
+    @field_validator("suggestions")
+    @classmethod
+    def _canonical_suggestions(
+        cls, value: list[FlowReviewSuggestionFocus]
+    ) -> list[FlowReviewSuggestionFocus]:
+        by_key = {focus.canonical_key: focus for focus in value}
+        return [by_key[key] for key in sorted(by_key)]
 
     def to_metadata(self) -> dict[str, object]:
         return self.model_dump(mode="json")
@@ -234,15 +272,6 @@ PersistedReviewReference = Annotated[
 ]
 
 
-class FlowReviewSuggestionFocus(BaseModel):
-    """The suggestion a turn investigates: kind and steps, never its prose."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    suggestion_kind: FlowReviewSuggestionKind
-    step_orders: list[int]
-
-
 class FlowReviewEvidence(BaseModel):
     """The named findings of one review, resolved for one turn."""
 
@@ -255,7 +284,7 @@ class FlowReviewEvidence(BaseModel):
     failed_run_count: int
     steps: list[FlowReviewStep]
     facts: list[FlowReviewFact]
-    suggestion: FlowReviewSuggestionFocus | None = None
+    suggestions: list[FlowReviewSuggestionFocus] = []
 
 
 _SUGGESTION_KIND_LABELS_SV: dict[str, str] = {
@@ -273,19 +302,22 @@ def _step_list_sv(step_orders: Sequence[int]) -> str:
     return "steg " + ", ".join(steps[:-1]) + " och " + steps[-1]
 
 
-def investigation_message(
-    suggestion_kind: FlowReviewSuggestionKind, step_orders: Sequence[int]
-) -> str:
+def investigation_message(suggestions: Sequence[FlowReviewSuggestionFocus]) -> str:
     """The user message the server writes for a suggestion handoff.
 
-    Fixed text from kind and steps: the model's rationale and quotes stay on
-    the screen that showed them and never enter the conversation.
+    Fixed text from kinds and steps: the model's rationale and quotes stay on
+    the screen that showed them and never enter the conversation. Several
+    suggestions become one sentence, because they become one turn.
     """
 
-    return (
-        f"Undersök {_SUGGESTION_KIND_LABELS_SV[suggestion_kind]} i "
-        f"{_step_list_sv(step_orders)} utifrån körningarna."
-    )
+    named = [
+        f"{_SUGGESTION_KIND_LABELS_SV[focus.suggestion_kind]} i "
+        f"{_step_list_sv(focus.step_orders)}"
+        for focus in suggestions
+    ]
+    if len(named) == 1:
+        return f"Undersök {named[0]} utifrån körningarna."
+    return "Undersök följande utifrån körningarna: " + "; ".join(named) + "."
 
 
 def resolve_suggestion_evidence(
@@ -322,7 +354,9 @@ def resolve_suggestion_evidence(
             code=AIBuilderErrorCode.REVIEW_STALE,
             context={"missing_run_count": len(missing)},
         )
-    steps = set(context.step_orders)
+    steps = {
+        step_order for focus in context.suggestions for step_order in focus.step_orders
+    }
     unknown = sorted(steps - {step.step_order for step in packet.steps})
     if unknown:
         raise AIBuilderBadRequestException(
@@ -347,10 +381,7 @@ def resolve_suggestion_evidence(
         failed_run_count=len(packet.cohort.failed_run_ids),
         steps=list(packet.steps),
         facts=facts,
-        suggestion=FlowReviewSuggestionFocus(
-            suggestion_kind=context.suggestion_kind,
-            step_orders=sorted(steps),
-        ),
+        suggestions=list(context.suggestions),
     )
 
 
@@ -414,14 +445,17 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
         f"{evidence.completed_run_count} lyckade och "
         f"{evidence.failed_run_count} misslyckade körningar lästes.",
     ]
-    if evidence.suggestion is not None:
+    if evidence.suggestions:
         lines.append(
-            "Ett modellförslag pekar på "
-            f"{_SUGGESTION_KIND_LABELS_SV[evidence.suggestion.suggestion_kind]} i "
-            f"{_step_list_sv(evidence.suggestion.step_orders)}. Det är en "
-            "hypotes, inte ett konstaterat fel: utred den mot punkterna nedan "
-            "och flödets steg, och fråga hellre än att ändra på lösa grunder."
+            "Modellförslag att utreda. Varje punkt är en hypotes, inte ett "
+            "konstaterat fel: pröva den mot underlaget nedan och flödets steg, "
+            "och fråga hellre än att ändra på lösa grunder."
         )
+        for focus in evidence.suggestions:
+            lines.append(
+                f"- {_SUGGESTION_KIND_LABELS_SV[focus.suggestion_kind]} i "
+                f"{_step_list_sv(focus.step_orders)}."
+            )
     for fact in evidence.facts:
         if isinstance(fact, OutputNotObservedConsumedFact):
             lines.append(

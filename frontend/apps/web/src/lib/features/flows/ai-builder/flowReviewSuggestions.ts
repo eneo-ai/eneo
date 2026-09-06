@@ -31,6 +31,19 @@ function formatSteps(stepOrders: number[]): string {
   return `${steps.slice(0, -1).join(", ")} och ${steps[steps.length - 1]}`;
 }
 
+/** The typed reference one suggestion travels as: kind and steps, canonical
+ *  the same way the server canonicalises them, so a retry of the same
+ *  investigation is the same request. */
+export function suggestionFocus(suggestion: AIBuilderFlowReviewSuggestion): {
+  suggestion_kind: AIBuilderFlowReviewSuggestion["kind"];
+  step_orders: number[];
+} {
+  return {
+    suggestion_kind: suggestion.kind,
+    step_orders: [...new Set(suggestion.step_orders)].sort((a, b) => a - b)
+  };
+}
+
 /** The fixed handoff text. The server writes the same text from the typed
  *  reference and ignores what the client sends, so this only shows the user
  *  what the turn will say. */

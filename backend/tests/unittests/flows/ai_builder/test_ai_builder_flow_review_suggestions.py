@@ -375,6 +375,7 @@ def test_a_suggestion_names_at_most_the_steps_a_request_can_carry():
     refused whole rather than truncated."""
     from eneo.flows.ai_builder.ai_builder_flow_review import (
         AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
     )
 
     base = _sample()
@@ -403,8 +404,12 @@ def test_a_suggestion_names_at_most_the_steps_a_request_can_carry():
         flow_version=wide.packet.flow_version,
         definition_checksum=wide.packet.definition_checksum,
         sample_run_ids=[run.run_id for run in wide.runs],
-        suggestion_kind=admitted.suggestions[0].kind,
-        step_orders=admitted.suggestions[0].step_orders,
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind=admitted.suggestions[0].kind,
+                step_orders=admitted.suggestions[0].step_orders,
+            )
+        ],
     )
 
     refused = parse_review_suggestions(

@@ -507,8 +507,8 @@ class SendMessageRequest(BaseModel):
         default=None,
         description=(
             "The flow review this turn acts on: either the reviewed published "
-            "version with the finding ids it names, or a model suggestion by "
-            "kind and steps with the runs it was judged on. The facts are "
+            "version with the finding ids it names, or the model suggestions "
+            "by kind and steps with the runs they were judged on. The facts are "
             "rebuilt from the runs on the server; a republished flow is refused "
             "as review_stale. For a suggestion the server writes the message "
             "text itself; the client's message is not used."
@@ -526,18 +526,17 @@ class SendMessageRequest(BaseModel):
     def canonical(self) -> "SendMessageRequest":
         """The request as the server retains it.
 
-        A turn acting on a model suggestion carries the fixed investigation
+        A turn acting on model suggestions carries the fixed investigation
         text whatever the client sent, so the fingerprint, the retry snapshot
         and the conversation all hold the same message and none of them
-        holds the model's prose.
+        holds the model's prose. The reference is canonical before it is
+        hashed, so the same suggestions picked in another order retry as the
+        same request rather than as a second provider call.
         """
         if isinstance(self.review_context, AIBuilderSuggestionContext):
             return self.model_copy(
                 update={
-                    "message": investigation_message(
-                        self.review_context.suggestion_kind,
-                        self.review_context.step_orders,
-                    )
+                    "message": investigation_message(self.review_context.suggestions)
                 }
             )
         return self
@@ -598,7 +597,15 @@ class AIBuilderTurnLifecycleResponse(BaseModel):
     user_message_id: UUID
     error: AIBuilderPublicError | None = None
     requires_duplicate_provider_spend_acknowledgement: bool
-    retry_request: SendMessageRequest
+    retry_request: SendMessageRequest | None = Field(
+        default=None,
+        description=(
+            "The exact request to replay for this turn, or null when the "
+            "retained request no longer describes a request this build "
+            "accepts. A null is not an error: the turn is shown, and that "
+            "request simply cannot be replayed."
+        ),
+    )
 
 
 class SessionResponse(BaseModel):

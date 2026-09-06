@@ -23,6 +23,7 @@
   } from "./flowReviewFindings";
   import {
     investigationMessage,
+    suggestionFocus,
     suggestionKindLabel,
     suggestionSourceLabel,
     suggestionStepsLabel,
@@ -109,8 +110,7 @@
         flow_version: suggestions.suggestions.flow_version,
         definition_checksum: suggestions.suggestions.definition_checksum,
         sample_run_ids: suggestions.suggestions.sample.run_ids,
-        suggestion_kind: suggestion.kind,
-        step_orders: suggestion.step_orders
+        suggestions: [suggestionFocus(suggestion)]
       }
     });
   }

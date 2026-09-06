@@ -11,6 +11,9 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    semantic_conversation,
+)
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     CreateCompileContext,
 )
@@ -84,6 +87,11 @@ async def process_edit_arguments(
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
 ) -> PreparationOutcome:
+    # Everything below reads the conversation to check the model's proposal
+    # against what was asked, never to build a prompt, so it reads the
+    # semantic projection: the server's own review command is not a request
+    # for an output type or a topology.
+    conversation = semantic_conversation(conversation)
     if flow is None:
         # A precondition of the edit session, not something the model wrote.
         return TerminalFailure(

@@ -349,8 +349,7 @@ describe("BuilderFindingsScreen suggestions", () => {
       flow_version: 4,
       definition_checksum: "sum-4",
       sample_run_ids: [RUN_1, RUN_2],
-      suggestion_kind: "duplicated_work",
-      step_orders: [2, 1]
+      suggestions: [{ suggestion_kind: "duplicated_work", step_orders: [1, 2] }]
     });
     // The handoff never carries the rationale or a quote.
     expect(detail.message).not.toContain("tre punkter");

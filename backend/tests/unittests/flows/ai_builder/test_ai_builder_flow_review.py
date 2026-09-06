@@ -750,23 +750,83 @@ async def test_a_retained_floor_refuses_a_lower_named_model_before_any_provider_
 # ---- suggestion references ---------------------------------------------------
 
 
-def test_investigation_message_names_kind_and_steps_in_swedish():
-    from eneo.flows.ai_builder.ai_builder_flow_review import investigation_message
+def test_investigation_message_names_every_selected_kind_and_its_steps():
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        FlowReviewSuggestionFocus,
+        investigation_message,
+    )
+
+    def _focus(kind, steps):
+        return FlowReviewSuggestionFocus(suggestion_kind=kind, step_orders=steps)
 
     assert (
-        investigation_message("duplicated_work", [3, 2])
+        investigation_message([_focus("duplicated_work", [3, 2])])
         == "Undersök möjligt dubbelarbete i steg 2 och 3 utifrån körningarna."
     )
     assert (
-        investigation_message("missing_check", [1])
+        investigation_message([_focus("missing_check", [1])])
         == "Undersök en kontroll som kan saknas i steg 1 utifrån körningarna."
     )
-    assert "steg 1, 2 och 3" in investigation_message("step_not_useful", [1, 2, 3, 3])
+    assert "steg 1, 2 och 3" in investigation_message(
+        [_focus("step_not_useful", [1, 2, 3, 3])]
+    )
+    # Several suggestions are one turn, so they are one sentence.
+    assert investigation_message(
+        [_focus("duplicated_work", [1, 2]), _focus("missing_check", [3])]
+    ) == (
+        "Undersök följande utifrån körningarna: möjligt dubbelarbete i "
+        "steg 1 och 2; en kontroll som kan saknas i steg 3."
+    )
+
+
+def test_a_selection_is_canonical_whatever_order_the_screen_listed_it_in():
+    from pydantic import ValidationError as PydanticValidationError
+
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+    )
+
+    run_id = uuid4()
+
+    def _context(foci):
+        return AIBuilderSuggestionContext(
+            flow_version=2,
+            definition_checksum="sum",
+            sample_run_ids=[run_id],
+            suggestions=foci,
+        )
+
+    first = _context(
+        [
+            FlowReviewSuggestionFocus(suggestion_kind="missing_check", step_orders=[3]),
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[2, 1]
+            ),
+        ]
+    )
+    second = _context(
+        [
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[1, 2, 2]
+            ),
+            FlowReviewSuggestionFocus(suggestion_kind="missing_check", step_orders=[3]),
+            FlowReviewSuggestionFocus(suggestion_kind="missing_check", step_orders=[3]),
+        ]
+    )
+    assert first == second
+    assert [focus.suggestion_kind for focus in first.suggestions] == [
+        "duplicated_work",
+        "missing_check",
+    ]
+    with pytest.raises(PydanticValidationError):
+        _context([])
 
 
 def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
     from eneo.flows.ai_builder.ai_builder_flow_review import (
         AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
         render_review_evidence,
         resolve_suggestion_evidence,
     )
@@ -777,20 +837,22 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
         flow_version=2,
         definition_checksum="sum",
         sample_run_ids=[run_a, run_b],
-        suggestion_kind="duplicated_work",
-        step_orders=[2],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[2]
+            )
+        ],
     )
     evidence = resolve_suggestion_evidence(
         packet, context, sample_run_levels={run_a: 1, run_b: 3}
     )
     # The sampled runs decide the floor, above the packet's own level.
     assert evidence.evidence_classification_level == 3
-    assert evidence.suggestion is not None
-    assert evidence.suggestion.step_orders == [2]
+    assert [focus.step_orders for focus in evidence.suggestions] == [[2]]
     # Only facts about the named steps, never the completeness footnote.
     assert all(getattr(fact, "step_order", None) == 2 for fact in evidence.facts)
     rendered = render_review_evidence(evidence)
-    assert "Ett modellförslag pekar på möjligt dubbelarbete i steg 2" in rendered
+    assert "- möjligt dubbelarbete i steg 2." in rendered
     assert "hypotes" in rendered
 
     # A republished flow or a run that is no longer readable is stale.
@@ -811,7 +873,16 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
     with pytest.raises(AIBuilderBadRequestException) as unknown:
         resolve_suggestion_evidence(
             packet,
-            context.model_copy(update={"step_orders": [2, -7, 999]}),
+            context.model_copy(
+                update={
+                    "suggestions": [
+                        FlowReviewSuggestionFocus(
+                            suggestion_kind="duplicated_work",
+                            step_orders=[2, -7, 999],
+                        )
+                    ]
+                }
+            ),
             sample_run_levels={run_a: 1, run_b: 3},
         )
     assert unknown.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
@@ -824,6 +895,7 @@ def test_a_suggestion_turn_is_canonical_before_fingerprint_and_snapshot():
     from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
     from eneo.flows.ai_builder.ai_builder_flow_review import (
         AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
         investigation_message,
     )
 
@@ -831,8 +903,11 @@ def test_a_suggestion_turn_is_canonical_before_fingerprint_and_snapshot():
         flow_version=2,
         definition_checksum="sum",
         sample_run_ids=[uuid4()],
-        suggestion_kind="instruction_outcome_drift",
-        step_orders=[3, 1],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="instruction_outcome_drift", step_orders=[3, 1]
+            )
+        ],
     )
     first = SendMessageRequest(
         client_turn_id=uuid4(), message="citat ett", review_context=context
@@ -840,7 +915,7 @@ def test_a_suggestion_turn_is_canonical_before_fingerprint_and_snapshot():
     second = SendMessageRequest(
         client_turn_id=uuid4(), message="citat två", review_context=context
     ).canonical()
-    expected = investigation_message("instruction_outcome_drift", [3, 1])
+    expected = investigation_message(context.suggestions)
     assert first.message == second.message == expected
     assert first.retry_snapshot()["message"] == expected
     assert "citat" not in json.dumps(first.retry_snapshot())
@@ -853,6 +928,7 @@ def test_a_suggestion_turn_is_canonical_before_fingerprint_and_snapshot():
 def test_suggestion_references_persist_with_the_resolved_level_and_parse_back():
     from eneo.flows.ai_builder.ai_builder_flow_review import (
         AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
         PersistedSuggestionContext,
     )
 
@@ -860,8 +936,11 @@ def test_suggestion_references_persist_with_the_resolved_level_and_parse_back():
         flow_version=2,
         definition_checksum="sum",
         sample_run_ids=[uuid4()],
-        suggestion_kind="missing_check",
-        step_orders=[1, 2],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="missing_check", step_orders=[1, 2]
+            )
+        ],
     )
     metadata = metadata_for_user_message(
         review_context=context, review_evidence_level=3, evidence_floor=3
@@ -870,7 +949,9 @@ def test_suggestion_references_persist_with_the_resolved_level_and_parse_back():
     persisted = review_context_from_metadata(metadata)
     assert isinstance(persisted, PersistedSuggestionContext)
     assert persisted.evidence_classification_level == 3
-    assert persisted.suggestion_kind == "missing_check"
+    assert [focus.suggestion_kind for focus in persisted.suggestions] == [
+        "missing_check"
+    ]
     conversation = [
         ConversationMessage(role="user", content="Undersök …", metadata=metadata)
     ]
@@ -916,7 +997,10 @@ async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
 async def test_an_explicit_suggestion_reference_is_refused_when_stale_but_an_inherited_one_is_dropped(
     user,
 ):
-    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderSuggestionContext
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+    )
 
     packet = _packet(version=3, checksum="new")
     service, review = _builder_service(user, packet)
@@ -926,8 +1010,11 @@ async def test_an_explicit_suggestion_reference_is_refused_when_stale_but_an_inh
         flow_version=3,
         definition_checksum="new",
         sample_run_ids=[run_id],
-        suggestion_kind="duplicated_work",
-        step_orders=[1],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[1]
+            )
+        ],
     )
     with pytest.raises(AIBuilderBadRequestException) as refused:
         await service._resolve_review_evidence(
@@ -945,5 +1032,243 @@ async def test_an_explicit_suggestion_reference_is_refused_when_stale_but_an_inh
     evidence = await service._resolve_review_evidence(
         session=_edit_session(user, review_metadata=None), review_context=stale
     )
-    assert evidence is not None and evidence.suggestion is not None
+    assert evidence is not None and len(evidence.suggestions) == 1
     assert evidence.evidence_classification_level == 2
+
+
+def test_a_turn_stored_in_an_older_shape_loads_without_an_offer_to_retry_it():
+    """Reading a session must never fail over what an older build wrote.
+
+    The retained request is the exact payload a retry would replay. When it
+    no longer describes a request this build accepts, the turn still loads
+    and simply carries no retry: that request cannot be replayed, and saying
+    so is better than a session that will not open at all.
+    """
+    from eneo.flows.ai_builder.ai_builder_domain_models import (
+        BuilderTurnLifecycle,
+        BuilderTurnState,
+    )
+    from eneo.flows.ai_builder.ai_builder_router import _to_session_response
+
+    def _session(request: dict[str, object]) -> BuilderSession:
+        return BuilderSession(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            flow_id=uuid4(),
+            target_kind=TargetKind.EDIT,
+            latest_turn=BuilderTurnLifecycle(
+                client_turn_id=uuid4(),
+                request_fingerprint="f" * 64,
+                request=request,
+                state=BuilderTurnState.FAILED_BEFORE_PROVIDER,
+                user_message_id=uuid4(),
+            ),
+        )
+
+    older_shape: dict[str, object] = {
+        "client_turn_id": str(uuid4()),
+        "message": "Undersök möjligt dubbelarbete i steg 1 och 2 utifrån körningarna.",
+        "review_context": {
+            "kind": "flow_review_suggestion",
+            "flow_version": 2,
+            "definition_checksum": "sum",
+            "sample_run_ids": [str(uuid4())],
+            "suggestion_kind": "duplicated_work",
+            "step_orders": [1, 2],
+        },
+    }
+    response = _to_session_response(_session(older_shape))
+    assert response.latest_turn is not None
+    assert response.latest_turn.retry_request is None
+    assert response.latest_turn.state is BuilderTurnState.FAILED_BEFORE_PROVIDER
+
+    current_shape = {
+        **older_shape,
+        "review_context": {
+            **{
+                key: value
+                for key, value in older_shape["review_context"].items()
+                if key not in {"suggestion_kind", "step_orders"}
+            },
+            "suggestions": [
+                {"suggestion_kind": "duplicated_work", "step_orders": [1, 2]}
+            ],
+        },
+    }
+    replayable = _to_session_response(_session(current_shape))
+    assert replayable.latest_turn is not None
+    assert replayable.latest_turn.retry_request is not None
+
+
+def test_a_turn_that_cannot_be_replayed_asks_for_no_spend_acknowledgement():
+    """There is nothing to accept when there is nothing to retry."""
+    from eneo.flows.ai_builder.ai_builder_domain_models import (
+        BuilderTurnLifecycle,
+        BuilderTurnState,
+    )
+    from eneo.flows.ai_builder.ai_builder_router import _to_session_response
+
+    response = _to_session_response(
+        BuilderSession(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            flow_id=uuid4(),
+            target_kind=TargetKind.EDIT,
+            latest_turn=BuilderTurnLifecycle(
+                client_turn_id=uuid4(),
+                request_fingerprint="f" * 64,
+                request={"written_by": "an older build"},
+                state=BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN,
+                user_message_id=uuid4(),
+            ),
+        )
+    )
+    assert response.latest_turn is not None
+    assert response.latest_turn.retry_request is None
+    assert not response.latest_turn.requires_duplicate_provider_spend_acknowledgement
+
+
+def test_a_reference_this_build_cannot_parse_is_still_a_review_this_build_gates():
+    """Authorship and the review permission are not the payload's to lose.
+
+    The evidence behind an older reference does degrade — nothing is
+    rebuilt from it — but the message is still the server's own text, and
+    the session is still the review feature, so it stays out of the
+    semantic view and keeps requiring the review permission.
+    """
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        conversation_acts_on_a_review,
+        is_server_authored_review_command,
+        semantic_conversation,
+    )
+
+    older_metadata = {
+        "review_context": {
+            "kind": "flow_review_suggestion",
+            "flow_version": 2,
+            "definition_checksum": "sum",
+            "sample_run_ids": [str(uuid4())],
+            "suggestion_kind": "duplicated_work",
+            "step_orders": [1, 2],
+        }
+    }
+    # The full reference no longer validates, so no evidence is rebuilt.
+    assert review_context_from_metadata(older_metadata) is None
+    # What it is, and what it obliges, still hold.
+    assert is_server_authored_review_command(older_metadata)
+    conversation = [
+        ConversationMessage(role="user", content="Undersök …", metadata=older_metadata)
+    ]
+    assert conversation_acts_on_a_review(conversation)
+    assert semantic_conversation(conversation) == []
+
+
+def test_the_semantic_fold_a_turn_commits_leaves_out_the_review_command():
+    """The fold `commit_turn` persists, run over the same two calls.
+
+    What a turn commits is what later turns read as settled intent. This
+    exercises the semantic fold itself — rebuild plus completion from free
+    text — not the repository boundary, so a future `commit_turn` that
+    stopped projecting would need its own test at that boundary. The text
+    is deliberately signal-rich: the guard is the metadata, not the
+    wording of today's copy.
+    """
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        metadata_for_user_message,
+        semantic_conversation,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+    )
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
+        aggregate_unprompted_user_text,
+    )
+    from eneo.flows.ai_builder.planning_state_builder import (
+        build_planning_state_from_conversation,
+        complete_planning_state,
+    )
+
+    context = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="sum",
+        sample_run_ids=[uuid4()],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[1, 2]
+            )
+        ],
+    )
+    loud = "Sammanfatta alla dokumenten och jämför dem med varandra i en PDF."
+    settled = [
+        ConversationMessage(role="user", content="Bygg ett beslutsunderlag."),
+    ]
+    with_the_command = [
+        *settled,
+        ConversationMessage(
+            role="user",
+            content=loud,
+            metadata=metadata_for_user_message(
+                review_context=context, review_evidence_level=1
+            ),
+        ),
+    ]
+
+    def _committed(conversation: list[ConversationMessage]):
+        semantic = semantic_conversation(conversation)
+        state = build_planning_state_from_conversation(semantic)
+        complete_planning_state(
+            state, freeform_text=aggregate_unprompted_user_text(semantic)
+        )
+        return state.model_dump(mode="json")
+
+    assert _committed(with_the_command) == _committed(settled)
+    # The same words typed by the user do move the state; the metadata is
+    # what makes the difference.
+    typed = [*settled, ConversationMessage(role="user", content=loud)]
+    assert _committed(typed) != _committed(settled)
+
+
+def _suggestion_metadata(*, checksum: str, legacy: bool = False) -> dict[str, object]:
+    reference: dict[str, object] = {
+        "kind": "flow_review_suggestion",
+        "flow_version": 2,
+        "definition_checksum": checksum,
+        "sample_run_ids": [str(uuid4())],
+        "evidence_classification_level": 1,
+    }
+    if legacy:
+        reference["suggestion_kind"] = "duplicated_work"
+        reference["step_orders"] = [1, 2]
+    else:
+        reference["suggestions"] = [
+            {"suggestion_kind": "duplicated_work", "step_orders": [1, 2]}
+        ]
+    return {"review_context": reference}
+
+
+def test_a_reference_this_build_cannot_read_yields_no_facts_not_an_older_review_s():
+    """The newest marker owns the answer, whether or not it parses.
+
+    Falling back to the previous review would hand a turn facts about a
+    review the user has moved on from, under the newer one's name.
+    """
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="Undersök …",
+            metadata=_suggestion_metadata(checksum="older"),
+        ),
+        ConversationMessage(
+            role="user",
+            content="Undersök …",
+            metadata=_suggestion_metadata(checksum="newer", legacy=True),
+        ),
+    ]
+
+    assert latest_user_review_context(conversation) is None
+    # The older reference is still readable on its own; it is the newest
+    # marker that decides.
+    assert latest_user_review_context(conversation[:1]) is not None

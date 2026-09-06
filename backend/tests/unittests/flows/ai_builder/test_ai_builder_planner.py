@@ -4928,6 +4928,195 @@ def _named_fields_state() -> PlanningState:
     return state
 
 
+def _review_command_message(
+    *, server_authored: bool, content: str | None = None
+) -> ConversationMessage:
+    """The turn a suggestion handoff opens, with and without its metadata."""
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        metadata_for_user_message,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+        investigation_message,
+    )
+
+    context = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="sum",
+        sample_run_ids=[uuid4()],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[1, 2]
+            )
+        ],
+    )
+    return ConversationMessage(
+        role="user",
+        content=content or investigation_message(context.suggestions),
+        metadata=(
+            metadata_for_user_message(review_context=context, review_evidence_level=1)
+            if server_authored
+            else None
+        ),
+    )
+
+
+def _reviewed_flow() -> Any:
+    return cast(
+        Any,
+        SimpleNamespace(
+            id=uuid4(),
+            name="Beslutsunderlag",
+            description="",
+            steps=[],
+            metadata_json={},
+            draft_revision=1,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_review_command_goes_to_the_proposal_without_reading_it_as_intent() -> (
+    None
+):
+    """The user picked findings on a screen; the server wrote the sentence.
+
+    Read as ordinary intent it flips the purpose slot and then asks the user
+    to confirm the whole contract again. The planner still sees the message
+    as the turn's request — it is what the proposal answers.
+    """
+
+    planner = _make_planner()
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=[_review_command_message(server_authored=True)],
+        completion_model_route=_route(),
+        persisted_planning_state=_document_architecture_state(),
+        flow=_reviewed_flow(),
+    )
+
+    planner.litellm_client.assert_not_awaited()
+    assert isinstance(prepared, ProposalPrepared)
+    # Nothing was classified, so no slot moved on the server's own sentence.
+    assert prepared.slot_classification_metadata is None
+    prompt = json.dumps(prepared.llm_messages, ensure_ascii=False)
+    assert "Undersök möjligt dubbelarbete i steg 1 och 2" in prompt
+
+
+@pytest.mark.asyncio
+async def test_a_review_command_still_confirms_when_the_user_asked_for_something() -> (
+    None
+):
+    """Skipping the card is only honest on a session the review opened.
+
+    The supported client starts a fresh edit session for a review, but the
+    endpoint accepts a review reference on any session, and intent the user
+    typed and has not confirmed must not be pushed past.
+    """
+
+    planner = _make_planner()
+    conversation = [
+        *_named_fields_interview(),
+        _review_command_message(server_authored=True),
+    ]
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+        persisted_planning_state=_named_fields_state(),
+    )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert prepared.requirements_confirmation_required
+
+
+@pytest.mark.asyncio
+async def test_the_user_typing_after_a_review_command_is_read_as_intent_again() -> None:
+    """The exclusion is for the server's own sentence, not for the session."""
+
+    planner = _make_planner()
+    conversation = [
+        *_named_fields_interview(),
+        _review_command_message(server_authored=True),
+        ConversationMessage(role="user", content="lägg till ett steg som jämför"),
+    ]
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=conversation,
+        completion_model_route=_route(),
+        persisted_planning_state=_named_fields_state(),
+    )
+
+    assert isinstance(prepared, ServerOutputPrepared)
+    assert prepared.requirements_confirmation_required
+
+
+@pytest.mark.asyncio
+async def test_a_review_command_is_not_read_for_an_output_topology() -> None:
+    """The metadata decides what is server-written, never the wording.
+
+    The handoff sentence is fixed today, so no heuristic happens to fire on
+    it. That is a property of the copy, not a guard: the same text without
+    the metadata is read as the user asking for those sections.
+    """
+
+    sections_request = (
+        "Skriv rapporten med rubrikerna:\n"
+        "## Sammanfattning\n## Nuläge\n## Rekommendation\n## Risker\n"
+    )
+
+    async def _prepared(*, server_authored: bool):
+        return await _prepare_planner_request_for_test(
+            _make_planner(),
+            conversation=[
+                _review_command_message(
+                    server_authored=server_authored, content=sections_request
+                )
+            ],
+            completion_model_route=_route(),
+            persisted_planning_state=_document_architecture_state(),
+            flow=_reviewed_flow(),
+        )
+
+    from_review = await _prepared(server_authored=True)
+    from_the_user = await _prepared(server_authored=False)
+
+    # End to end: the review turn proposes and names no sections.
+    assert isinstance(from_review, ProposalPrepared)
+    assert from_review.compile_context is not None
+    assert from_review.compile_context.requested_output_sections.sections == ()
+    # The same words the user typed are their intent, and take the ordinary
+    # route: read for meaning, and the contract confirmed before a proposal.
+    assert isinstance(from_the_user, ServerOutputPrepared)
+
+    # The projection is what makes the difference, at every reader of it.
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        semantic_conversation,
+    )
+    from eneo.flows.ai_builder.ai_builder_framework_policy import (
+        aggregate_unprompted_user_text_preserving_case,
+    )
+    from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
+        extract_requested_output_sections,
+    )
+
+    written_by_the_server = [
+        _review_command_message(server_authored=True, content=sections_request)
+    ]
+    typed_by_the_user = [
+        _review_command_message(server_authored=False, content=sections_request)
+    ]
+    assert semantic_conversation(written_by_the_server) == []
+    assert semantic_conversation(typed_by_the_user) == typed_by_the_user
+    assert extract_requested_output_sections(
+        aggregate_unprompted_user_text_preserving_case(typed_by_the_user)
+    ).sections == ("Sammanfattning", "Nuläge", "Rekommendation", "Risker")
+
+
 @pytest.mark.asyncio
 async def test_editing_the_field_list_makes_no_understanding_call() -> None:
     """The edit states the whole set, so there is nothing left to read.

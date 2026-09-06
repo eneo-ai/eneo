@@ -57,7 +57,7 @@ from eneo.flows.ai_builder.ai_builder_context import (
     eligible_planner_models,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    latest_user_review_context,
+    conversation_acts_on_a_review,
     named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
     requirements_confirmation_from_metadata,
@@ -69,6 +69,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
+    BuilderTurnLifecycle,
     BuilderTurnState,
     ConversationMessage,
     TargetKind,
@@ -647,6 +648,47 @@ def _requirements_summary_for_assistant_message(
     return requirements_summary_from_metadata(message.metadata)
 
 
+def _turn_lifecycle_response(
+    turn: BuilderTurnLifecycle,
+) -> AIBuilderTurnLifecycleResponse:
+    """The turn as the client sees it, with one answer about replaying it.
+
+    The acknowledgement asks the user to accept that a retry may repeat
+    provider work. There is nothing to accept when there is nothing to
+    retry, so both fields come from the same parsed request.
+    """
+
+    replayable = _replayable_request(turn.request)
+    return AIBuilderTurnLifecycleResponse(
+        client_turn_id=turn.client_turn_id,
+        state=turn.state,
+        user_message_id=turn.user_message_id,
+        error=turn.error,
+        requires_duplicate_provider_spend_acknowledgement=(
+            replayable is not None
+            and turn.state is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
+        ),
+        retry_request=replayable,
+    )
+
+
+def _replayable_request(
+    request: Mapping[str, Any],
+) -> SendMessageRequest | None:
+    """The retained request, or nothing when this build cannot replay it.
+
+    A snapshot written by an earlier build can describe a shape this one no
+    longer accepts. Reading the session must not fail over it: the turn is
+    still shown, without an offer to retry a request that no longer exists.
+    """
+
+    try:
+        return SendMessageRequest.model_validate(request)
+    except ValidationError:
+        logger.info("ai_builder.retry_request_not_replayable")
+        return None
+
+
 def _to_session_response(
     session: BuilderSession,
     *,
@@ -661,19 +703,7 @@ def _to_session_response(
         flow_id=session.flow_id,
         latest_plan_id=session.latest_plan_id,
         latest_turn=(
-            AIBuilderTurnLifecycleResponse(
-                client_turn_id=session.latest_turn.client_turn_id,
-                state=session.latest_turn.state,
-                user_message_id=session.latest_turn.user_message_id,
-                error=session.latest_turn.error,
-                requires_duplicate_provider_spend_acknowledgement=(
-                    session.latest_turn.state
-                    is BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN
-                ),
-                retry_request=SendMessageRequest.model_validate(
-                    session.latest_turn.request
-                ),
-            )
+            _turn_lifecycle_response(session.latest_turn)
             if session.latest_turn is not None
             else None
         ),
@@ -1199,9 +1229,8 @@ async def send_message(
         # A turn that names a review, or continues one this session opened
         # earlier, is the review feature: it is held to that permission
         # before any preflight, evidence read or provider work.
-        acts_on_review = (
-            body.review_context is not None
-            or latest_user_review_context(session.conversation) is not None
+        acts_on_review = body.review_context is not None or (
+            conversation_acts_on_a_review(session.conversation)
         )
         authorization = await _authorize_ai_builder_request(
             request,
@@ -1230,8 +1259,8 @@ async def send_message(
         # lock. A review turn that committed in between must not slip past the
         # review permission, so the decision is repeated on the snapshot the
         # evidence preparation will use.
-        if not acts_on_review and (
-            latest_user_review_context(turn_preflight.session.conversation) is not None
+        if not acts_on_review and conversation_acts_on_a_review(
+            turn_preflight.session.conversation
         ):
             require_flow_action(container.user(), FlowApiAction.BUILDER_REVIEW)
 

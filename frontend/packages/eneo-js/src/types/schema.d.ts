@@ -10470,10 +10470,14 @@ export interface components {
     };
     /**
      * AIBuilderSuggestionContext
-     * @description What a turn says when it acts on a model suggestion: the reviewed
-     *     version, the runs the suggestion was judged on, and the suggestion's
-     *     kind and steps. No model prose; the runs decide the floor, so a cohort
-     *     that has since turned over cannot lower it.
+     * @description What a turn says when it acts on model suggestions: the reviewed
+     *     version, the runs they were judged on, and each suggestion's kind and
+     *     steps. No model prose; the runs decide the floor, so a cohort that has
+     *     since turned over cannot lower it.
+     *
+     *     One turn may carry several suggestions. The list is canonical, so the
+     *     same set picked in another order is the same request: one packet, one
+     *     evidence read and one proposal call however many were selected.
      */
     AIBuilderSuggestionContext: {
       /** Definition Checksum */
@@ -10487,14 +10491,8 @@ export interface components {
       kind: "flow_review_suggestion";
       /** Sample Run Ids */
       sample_run_ids: string[];
-      /** Step Orders */
-      step_orders: number[];
-      /**
-       * Suggestion Kind
-       * @enum {string}
-       */
-      suggestion_kind:
-        "duplicated_work" | "instruction_outcome_drift" | "step_not_useful" | "missing_check";
+      /** Suggestions */
+      suggestions: components["schemas"]["FlowReviewSuggestionFocus"][];
     };
     /** AIBuilderTextEvent */
     AIBuilderTextEvent: {
@@ -10520,7 +10518,8 @@ export interface components {
       error?: components["schemas"]["AIBuilderPublicError"] | null;
       /** Requires Duplicate Provider Spend Acknowledgement */
       requires_duplicate_provider_spend_acknowledgement: boolean;
-      retry_request: components["schemas"]["SendMessageRequest"];
+      /** @description The exact request to replay for this turn, or null when the retained request no longer describes a request this build accepts. A null is not an error: the turn is shown, and that request simply cannot be replayed. */
+      retry_request?: components["schemas"]["SendMessageRequest"] | null;
       state: components["schemas"]["BuilderTurnState"];
       /**
        * User Message Id
@@ -17958,6 +17957,24 @@ export interface components {
       sources: components["schemas"]["FlowReviewSuggestionSource"][];
       /** Step Orders */
       step_orders: number[];
+    };
+    /**
+     * FlowReviewSuggestionFocus
+     * @description One suggestion a turn investigates: kind and steps, never its prose.
+     *
+     *     The value is canonical: steps are sorted and deduplicated, so the same
+     *     suggestion picked twice, or listed in another order, is the same value
+     *     and a retry of the same investigation hashes the same request.
+     */
+    FlowReviewSuggestionFocus: {
+      /** Step Orders */
+      step_orders: number[];
+      /**
+       * Suggestion Kind
+       * @enum {string}
+       */
+      suggestion_kind:
+        "duplicated_work" | "instruction_outcome_drift" | "step_not_useful" | "missing_check";
     };
     /** FlowReviewSuggestionSampleSummary */
     FlowReviewSuggestionSampleSummary: {
@@ -29116,7 +29133,7 @@ export interface components {
       reasoning_effort?: string | null;
       /**
        * Review Context
-       * @description The flow review this turn acts on: either the reviewed published version with the finding ids it names, or a model suggestion by kind and steps with the runs it was judged on. The facts are rebuilt from the runs on the server; a republished flow is refused as review_stale. For a suggestion the server writes the message text itself; the client's message is not used.
+       * @description The flow review this turn acts on: either the reviewed published version with the finding ids it names, or the model suggestions by kind and steps with the runs they were judged on. The facts are rebuilt from the runs on the server; a republished flow is refused as review_stale. For a suggestion the server writes the message text itself; the client's message is not used.
        */
       review_context?:
         | (

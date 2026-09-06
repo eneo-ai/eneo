@@ -38,6 +38,9 @@ from eneo.flows.ai_builder.ai_builder_commit_invariance import (
 from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
     compact_ai_builder_conversation,
 )
+from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    semantic_conversation,
+)
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
@@ -1815,7 +1818,11 @@ class AIBuilderRepository:
                 session_id=turn.session_id,
                 tenant_id=turn.tenant_id,
             )
-            state = build_planning_state_from_conversation(persisted, flow=flow)
+            # What the turn persists is what later turns will read as the
+            # user's settled intent, so it is rebuilt from the semantic view.
+            # The whole conversation is still what gets stored and carried.
+            semantic = semantic_conversation(persisted)
+            state = build_planning_state_from_conversation(semantic, flow=flow)
             if architecture_commit is not None:
                 state.architecture_commit = architecture_commit
             # The current turn must run before prior state: carry-forward only
@@ -1832,7 +1839,7 @@ class AIBuilderRepository:
                 attached_file_ids=attached_file_ids,
             )
             complete_planning_state(
-                state, freeform_text=aggregate_unprompted_user_text(persisted)
+                state, freeform_text=aggregate_unprompted_user_text(semantic)
             )
             pinned_commit = architecture_commit or (
                 prior_state.architecture_commit if prior_state else None

@@ -249,6 +249,10 @@ export class FlowAIBuilderDriver {
 
   get turnRecoveryState(): AIBuilderTurnRecoveryState | null {
     const state = this.latestTurnState;
+    // Recovery replays the retained request. When the server cannot hand one
+    // back — a turn stored by an older build — there is nothing to retry, so
+    // no surface offers it.
+    if (!this.#state.session?.latest_turn?.retry_request) return null;
     return state === "failed_before_provider" || state === "provider_outcome_unknown"
       ? state
       : null;
@@ -260,10 +264,17 @@ export class FlowAIBuilderDriver {
 
   get canStartNewTurn(): boolean {
     const state = this.latestTurnState;
+    // A turn that failed before the provider holds no lease and, without a
+    // retained request, offers no retry either — so the session moves on with
+    // a new message instead of sitting on a dead end. Every other state is
+    // still fenced by the server: an open or processing turn holds a lease,
+    // and an unknown outcome refuses a different turn until it is resolved.
+    const unresumable =
+      state === "failed_before_provider" && !this.#state.session?.latest_turn?.retry_request;
     return (
       !this.#requiresAuthoritativeRefresh &&
       !this.#isRecoveringLatestTurn &&
-      (state === null || state === "committed")
+      (state === null || state === "committed" || unresumable)
     );
   }
 
@@ -752,7 +763,7 @@ export class FlowAIBuilderDriver {
       if (this.#requiresAuthoritativeRefresh && !(await this.refreshSession())) return;
 
       const latestTurn = this.#state.session?.latest_turn;
-      if (latestTurn?.state !== expectedState) return;
+      if (latestTurn?.state !== expectedState || !latestTurn.retry_request) return;
 
       await this.#streamMessageRequest(
         {

@@ -2511,6 +2511,7 @@ class TestSendMessageEndpoint:
         or the fingerprint: the route canonicalises the request first."""
         from eneo.flows.ai_builder.ai_builder_flow_review import (
             AIBuilderSuggestionContext,
+            FlowReviewSuggestionFocus,
             investigation_message,
         )
 
@@ -2530,8 +2531,11 @@ class TestSendMessageEndpoint:
             flow_version=3,
             definition_checksum="sum-3",
             sample_run_ids=[uuid4()],
-            suggestion_kind="duplicated_work",
-            step_orders=[2, 3],
+            suggestions=[
+                FlowReviewSuggestionFocus(
+                    suggestion_kind="duplicated_work", step_orders=[2, 3]
+                )
+            ],
         )
         body = SendMessageRequest(
             client_turn_id=uuid4(),
@@ -2546,7 +2550,7 @@ class TestSendMessageEndpoint:
         )
         await _read_sse_events(response)
 
-        expected = investigation_message("duplicated_work", [2, 3])
+        expected = investigation_message(context.suggestions)
         sent = service.send_message.call_args.kwargs
         assert sent["message"] == expected
         assert sent["request_snapshot"]["message"] == expected
