@@ -422,8 +422,11 @@ export class FlowAIBuilderDriver {
     this.#notify();
   }
 
-  async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
-    if (this.isStreaming || this.#state.pendingOperation) return;
+  /** Resolves true once the new session is on screen; false when a turn in
+   *  flight or a newer bootstrap kept the current one. Rejects when the
+   *  create fails, after the error is surfaced. */
+  async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<boolean> {
+    if (this.isStreaming || this.#state.pendingOperation) return false;
     ++this.#initGeneration;
     this.abort();
     this.#resetFlowState();
@@ -443,7 +446,7 @@ export class FlowAIBuilderDriver {
           }
         }
       })) as AIBuilderSession;
-      if (sessionGeneration !== this.#sessionGeneration) return;
+      if (sessionGeneration !== this.#sessionGeneration) return false;
       this.#state.session = result;
       this.#applyCommittedTurnOutcome(result);
       this.#hydrateMessagesFromConversation(result.conversation ?? []);
@@ -458,8 +461,9 @@ export class FlowAIBuilderDriver {
       if (this.#ownsSession(owner)) {
         await this.loadDraftSessions();
       }
+      return true;
     } catch (e) {
-      if (sessionGeneration !== this.#sessionGeneration) return;
+      if (sessionGeneration !== this.#sessionGeneration) return false;
       this.#state.error = this.#parseAndReportError({
         transport: "apply",
         payload: e,
@@ -471,9 +475,9 @@ export class FlowAIBuilderDriver {
     }
   }
 
-  async startFreshSession(targetKind: TargetKind): Promise<void> {
-    if (this.#state.pendingOperation) return;
-    await this.createSession(targetKind, { forceNew: true });
+  async startFreshSession(targetKind: TargetKind): Promise<boolean> {
+    if (this.#state.pendingOperation) return false;
+    return this.createSession(targetKind, { forceNew: true });
   }
 
   async loadDraftSessions(expectedGeneration = this.#sessionGeneration): Promise<void> {

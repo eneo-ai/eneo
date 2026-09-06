@@ -357,13 +357,13 @@ export class FlowAIBuilderService {
     await this.#driver.initialize(targetKind);
   }
 
-  async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<void> {
-    await this.#driver.createSession(targetKind, options);
+  async createSession(targetKind: TargetKind, options?: { forceNew?: boolean }): Promise<boolean> {
+    return this.#driver.createSession(targetKind, options);
   }
 
-  async startFreshSession(targetKind: TargetKind): Promise<void> {
+  async startFreshSession(targetKind: TargetKind): Promise<boolean> {
     this.clearSavedFlowStepScope();
-    await this.#driver.startFreshSession(targetKind);
+    return this.#driver.startFreshSession(targetKind);
   }
 
   async loadDraftSessions(): Promise<void> {

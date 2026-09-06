@@ -2640,6 +2640,90 @@ describe("FlowAIBuilder edit host contract", () => {
     ).toBeNull();
   });
 
+  it("closes the replace question at once and opens the review only after the fresh session exists", async () => {
+    const ongoing = makeSession({
+      session_id: "e-ongoing",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      conversation: [userMessage("u1", "Byt rubrik på rapporten")]
+    });
+    const fresh = editSession();
+    let releaseCreate!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    let posts = 0;
+    const { fetch } = makeFetch({ sessions: [ongoing, fresh] });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        if (posts === 1) return ongoing;
+        await held;
+        return fresh;
+      }
+      return baseFetch(path, init);
+    });
+    const { stream } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    await builder().openReview();
+    await screen.findByText(m.ai_builder_replace_edit_description_review());
+    await fireEvent.click(button(m.ai_builder_replace_edit_action()));
+    // The question is gone while the create is still pending, and the review
+    // has not opened against the session being replaced.
+    await waitFor(() => expect(screen.queryByText(m.ai_builder_replace_edit_title())).toBeNull());
+    expect(screen.queryByRole("heading", { name: m.ai_builder_review_title() })).toBeNull();
+    expect(posts).toBe(2);
+    releaseCreate();
+    expect(await screen.findByRole("heading", { name: m.ai_builder_review_title() })).toBeTruthy();
+  });
+
+  it("does not open the review when the replacement session cannot be created", async () => {
+    const ongoing = makeSession({
+      session_id: "e-ongoing",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      conversation: [userMessage("u1", "Byt rubrik på rapporten")]
+    });
+    let posts = 0;
+    const { fetch } = makeFetch({ sessions: [ongoing] });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        if (posts === 1) return ongoing;
+        throw new Error("create failed");
+      }
+      return baseFetch(path, init);
+    });
+    const { stream, calls } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    await builder().openReview();
+    await screen.findByText(m.ai_builder_replace_edit_description_review());
+    await fireEvent.click(button(m.ai_builder_replace_edit_action()));
+    await waitFor(() => expect(posts).toBe(2));
+    await waitFor(() => expect(screen.queryByText(m.ai_builder_replace_edit_title())).toBeNull());
+    // Nothing was replaced: the review never opens, the driver's own create
+    // error is what the user sees, and no review turn was sent.
+    expect(screen.queryByRole("heading", { name: m.ai_builder_review_title() })).toBeNull();
+    await waitFor(() => expect(service().error).not.toBeNull());
+    expect(calls).toHaveLength(0);
+  });
+
   it("waits for edit bootstrap before deciding whether a cold launch replaces an ongoing edit", async () => {
     // Edit bootstrap resumes an ongoing session; a launch that arrives before
     // it settles must still get the replacement question, not silently join.

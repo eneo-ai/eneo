@@ -244,9 +244,9 @@
                 >
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                      <p class="text-primary text-[0.9rem] font-semibold first-letter:uppercase">
+                      <h4 class="text-primary text-[0.9rem] font-semibold first-letter:uppercase">
                         {described.title}
-                      </p>
+                      </h4>
                       <p class="text-secondary mt-0.5 text-[0.8125rem] text-pretty">
                         {described.evidence}
                       </p>
@@ -420,9 +420,9 @@
                   {#each judged.suggestions as suggestion, index (index)}
                     <li class="border-default bg-secondary rounded-lg border px-3.5 py-3">
                       <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <p class="text-primary text-[0.9rem] font-semibold">
+                        <h4 class="text-primary text-[0.9rem] font-semibold">
                           {suggestionKindLabel(suggestion.kind)}
-                        </p>
+                        </h4>
                         <span class="text-secondary text-[0.8125rem]">
                           {suggestionStepsLabel(suggestion.step_orders)}
                         </span>
@@ -435,7 +435,7 @@
                         onOpenChange={(open) => (openSources[index] = open)}
                       >
                         <Collapsible.Trigger
-                          class="text-secondary hover:text-primary focus-visible:ring-accent-default/40 mt-1.5 rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-1.5 rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
                         >
                           {openSources[index]
                             ? m.ai_builder_review_suggestion_sources_hide()
