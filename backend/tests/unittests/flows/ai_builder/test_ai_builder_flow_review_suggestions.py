@@ -343,21 +343,22 @@ def test_a_drift_claim_is_one_step_in_one_run_with_its_instruction_and_complete_
     ) == ["suggestion_1:drift_claim_cites_incomplete_output"]
 
 
-def test_the_same_kind_on_the_same_steps_is_one_suggestion():
+def test_two_suggestions_on_the_same_scope_are_both_kept():
+    """Identity is the whole suggestion: the same kind on the same steps with
+    another rationale (or from another run) is another thing to read. Only
+    the handoff reference collapses to the scopes it names."""
     sample = _sample()
-    twice = {
+    claim = {
         "kind": "duplicated_work",
         "step_orders": [1, 2],
         "rationale": "x",
         "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
     }
     parsed = parse_review_suggestions(
-        _answer(twice, {**twice, "step_orders": [2, 1], "rationale": "y"}),
+        _answer(claim, {**claim, "step_orders": [2, 1], "rationale": "y"}),
         sample=sample,
     )
-    assert [(item.kind, item.step_orders) for item in parsed.suggestions] == [
-        ("duplicated_work", [1, 2])
-    ]
+    assert [item.rationale for item in parsed.suggestions] == ["x", "y"]
     assert parsed.problems == ()
 
 

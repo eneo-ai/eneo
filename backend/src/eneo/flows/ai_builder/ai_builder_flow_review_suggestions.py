@@ -351,19 +351,15 @@ def parse_review_suggestions(
     context = _SampleIndex.build(sample)
     suggestions: list[FlowReviewSuggestion] = []
     problems: list[str] = []
-    seen: set[tuple[str, tuple[int, ...]]] = set()
     for position, item in enumerate(items):
         parsed = _parse_suggestion(item, index=context)
         if isinstance(parsed, str):
             problems.append(f"suggestion_{position + 1}:{parsed}")
             continue
-        # The same kind on the same steps said twice is one suggestion: the
-        # response is the set a turn can be built on, and the reference it
-        # becomes is canonical.
-        key = (parsed.kind, tuple(parsed.step_orders))
-        if key in seen:
-            continue
-        seen.add(key)
+        # A suggestion is identified by everything it says (kind, steps,
+        # rationale, sources): two drift findings on one step from two runs
+        # are two suggestions the user reads. Only the handoff reference
+        # collapses them, to the set of edit scopes (kind + steps) it names.
         suggestions.append(parsed)
     return ParsedReviewSuggestions(
         "valid", suggestions=tuple(suggestions), problems=tuple(problems)

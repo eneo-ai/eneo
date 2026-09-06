@@ -365,8 +365,8 @@ describe("BuilderFindingsScreen suggestions", () => {
     },
     {
       locale: "en" as const,
-      all: "Investigate the following based on the runs: possible duplicated work in step 1 and 2; a check that may be missing in step 3.",
-      one: "Investigate possible duplicated work in step 1 and 2 based on the runs."
+      all: "Investigate the following based on the runs: possible duplicated work in steps 1 and 2; a check that may be missing in step 3.",
+      one: "Investigate possible duplicated work in steps 1 and 2 based on the runs."
     }
   ])(
     "investigates every suggestion in one canonical turn, or just one, in $locale",
@@ -399,7 +399,7 @@ describe("BuilderFindingsScreen suggestions", () => {
           onretry: vi.fn()
         });
         const note = screen.getByTestId("review-suggestions").textContent ?? "";
-        expect(note).toMatch(/förslagens|suggestions'/i);
+        expect(note).toMatch(/förslagens typer|suggestions' kinds/i);
 
         await fireEvent.click(screen.getByTestId("investigate-all"));
         expect(onprepare).toHaveBeenCalledTimes(1);

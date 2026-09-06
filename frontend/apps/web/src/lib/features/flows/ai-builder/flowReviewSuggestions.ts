@@ -2,7 +2,8 @@ import { m } from "$lib/paraglide/messages";
 import type {
   AIBuilderError,
   AIBuilderFlowReviewSuggestion,
-  AIBuilderFlowReviewSuggestions
+  AIBuilderFlowReviewSuggestions,
+  AIBuilderSuggestionContext
 } from "./protocol";
 
 type SuggestionSource = AIBuilderFlowReviewSuggestion["sources"][number];
@@ -32,14 +33,14 @@ function formatSteps(stepOrders: number[]): string {
   return `${steps.slice(0, -1).join(", ")} ${conjunction} ${steps[steps.length - 1]}`;
 }
 
-export type SuggestionFocus = {
-  suggestion_kind: AIBuilderFlowReviewSuggestion["kind"];
-  step_orders: number[];
-};
+/** One entry of the generated request contract: an edit scope, kind + steps. */
+export type SuggestionFocus = AIBuilderSuggestionContext["suggestions"][number];
 
-/** The selected suggestions as the server canonicalises them: one focus per
- *  distinct kind and step set, ordered by kind then steps, so the payload,
- *  the fingerprint and the sentence agree however the cards were picked. */
+/** The selected suggestions as the edit scopes the server canonicalises them
+ *  to: one focus per distinct kind and step set, ordered by kind then steps,
+ *  so the payload, the fingerprint and the sentence agree however the cards
+ *  were picked. Two suggestions on one scope stay two cards to read; they
+ *  become one scope to investigate. */
 export function canonicalFoci(suggestions: AIBuilderFlowReviewSuggestion[]): SuggestionFocus[] {
   const byKey = new Map<string, SuggestionFocus>();
   for (const suggestion of suggestions) {
@@ -88,7 +89,10 @@ export function investigationMessage(foci: SuggestionFocus[]): string {
   const items = foci.map((focus) =>
     m.ai_builder_review_suggestion_investigate_item({
       kind: messageKindLabel(focus.suggestion_kind),
-      steps: m.ai_builder_review_suggestion_message_step({ steps: formatSteps(focus.step_orders) })
+      steps:
+        new Set(focus.step_orders).size === 1
+          ? m.ai_builder_review_suggestion_message_step({ steps: formatSteps(focus.step_orders) })
+          : m.ai_builder_review_suggestion_message_steps({ steps: formatSteps(focus.step_orders) })
     })
   );
   if (items.length === 1) {

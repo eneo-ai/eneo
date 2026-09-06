@@ -360,9 +360,10 @@ def _step_list_sv(step_orders: Sequence[int]) -> str:
 
 def _step_list(step_orders: Sequence[int], language: Literal["sv", "en"]) -> str:
     steps = [str(order) for order in dict.fromkeys(sorted(step_orders))]
-    noun, conjunction = ("steg", "och") if language == "sv" else ("step", "and")
     if len(steps) == 1:
+        noun = "steg" if language == "sv" else "step"
         return f"{noun} {steps[0]}"
+    noun, conjunction = ("steg", "och") if language == "sv" else ("steps", "and")
     return f"{noun} " + ", ".join(steps[:-1]) + f" {conjunction} " + steps[-1]
 
 

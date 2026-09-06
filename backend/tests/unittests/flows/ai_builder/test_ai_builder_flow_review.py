@@ -911,11 +911,11 @@ def test_the_investigation_text_follows_the_request_language():
     )
     assert (
         investigation_message(foci[1:], "en")
-        == "Investigate possible duplicated work in step 1 and 2 based on the runs."
+        == "Investigate possible duplicated work in steps 1 and 2 based on the runs."
     )
     assert investigation_message(foci, "en") == (
         "Investigate the following based on the runs: a check that may be missing "
-        "in step 3; possible duplicated work in step 1 and 2."
+        "in step 3; possible duplicated work in steps 1 and 2."
     )
     context = AIBuilderSuggestionContext(
         flow_version=2,
@@ -929,7 +929,7 @@ def test_the_investigation_text_follows_the_request_language():
     ).canonical()
     assert english.message == (
         "Investigate the following based on the runs: possible duplicated work "
-        "in step 1 and 2; a check that may be missing in step 3."
+        "in steps 1 and 2; a check that may be missing in step 3."
     )
     swedish = SendMessageRequest(
         client_turn_id=uuid4(), message="x", review_context=context
