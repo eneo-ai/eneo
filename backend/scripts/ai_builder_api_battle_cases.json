@@ -5398,10 +5398,16 @@
           "type": "object",
           "properties": {
             "service_reference": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "submission_reference": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "applicant_channels": {
               "type": "array"
