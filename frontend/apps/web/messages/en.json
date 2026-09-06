@@ -6797,7 +6797,7 @@
   "ai_builder_review_suggestion_message_step": "step {steps}",
   "ai_builder_review_suggestion_message_steps": "steps {steps}",
   "ai_builder_review_suggestion_steps_join": "and",
-  "ai_builder_review_suggestion_investigate_this_label": "Only this one: {kind}, {steps}",
+  "ai_builder_review_suggestion_investigate_this_label": "Only this one, suggestion {index}: {kind}, {steps}",
   "ai_builder_review_suggestion_investigate_all_hint": "Opens a change proposal that you approve. Only the suggestions' kinds, the steps and which runs were read are passed on, not the reasoning or the quotes.",
   "ai_builder_review_suggestion_investigate_all": "Investigate all ({count}) with Eneo",
   "ai_builder_review_suggestion_investigate_this": "Only this one",

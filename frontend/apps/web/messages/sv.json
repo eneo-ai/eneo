@@ -6797,7 +6797,7 @@
   "ai_builder_review_suggestion_message_step": "steg {steps}",
   "ai_builder_review_suggestion_message_steps": "steg {steps}",
   "ai_builder_review_suggestion_steps_join": "och",
-  "ai_builder_review_suggestion_investigate_this_label": "Bara denna: {kind}, {steps}",
+  "ai_builder_review_suggestion_investigate_this_label": "Bara denna, förslag {index}: {kind}, {steps}",
   "ai_builder_review_suggestion_investigate_all_hint": "Öppnar ett ändringsförslag som du godkänner. Vidare skickas bara förslagens typer, stegen och vilka körningar som lästes, inte motiveringarna eller citaten.",
   "ai_builder_review_suggestion_investigate_all": "Undersök alla ({count}) med Eneo",
   "ai_builder_review_suggestion_investigate_this": "Bara denna",

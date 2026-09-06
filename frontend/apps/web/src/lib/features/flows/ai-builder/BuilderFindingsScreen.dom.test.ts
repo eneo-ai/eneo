@@ -383,14 +383,18 @@ describe("BuilderFindingsScreen suggestions", () => {
           rationale: "Ingen kontroll av tomma svar.",
           sources: [judged.suggestions[0].sources[0]]
         };
-        // Reversed order and a duplicate on the screen; one canonical set leaves it.
+        // Reversed order and two findings on one scope; one canonical set of scopes leaves it.
         render(BuilderFindingsScreen, {
           review: { status: "ready", packet: makePacket() },
           suggestions: {
             status: "ready",
             suggestions: {
               ...judged,
-              suggestions: [second, judged.suggestions[0], { ...judged.suggestions[0] }]
+              suggestions: [
+                second,
+                judged.suggestions[0],
+                { ...judged.suggestions[0], rationale: "Samma steg, annan läsning." }
+              ]
             }
           },
           onprepare,
@@ -413,26 +417,28 @@ describe("BuilderFindingsScreen suggestions", () => {
         expect(batch.message).not.toContain("tre punkter");
         expect(batch.message).not.toContain("tomma svar");
 
-        // Each per-card action carries its own accessible name (the two
-        // duplicated cards share theirs, being the same suggestion twice).
-        const duplicatedWork = screen.getAllByRole("button", {
+        // Each per-card action carries its own accessible name, including
+        // its ordinal, so two findings on one scope are two choices.
+        const stepsOneTwo = m.ai_builder_review_suggestion_steps({
+          steps: `1 ${m.ai_builder_review_suggestion_steps_join()} 2`
+        });
+        const kindDuplicated = m.ai_builder_review_suggestion_kind_duplicated_work();
+        const secondCard = screen.getByRole("button", {
           name: m.ai_builder_review_suggestion_investigate_this_label({
-            kind: m.ai_builder_review_suggestion_kind_duplicated_work(),
-            steps: m.ai_builder_review_suggestion_steps({
-              steps: `1 ${m.ai_builder_review_suggestion_steps_join()} 2`
-            })
+            index: "2",
+            kind: kindDuplicated,
+            steps: stepsOneTwo
           })
         });
-        expect(duplicatedWork).toHaveLength(2);
-        expect(
-          screen.getAllByRole("button", {
-            name: m.ai_builder_review_suggestion_investigate_this_label({
-              kind: m.ai_builder_review_suggestion_kind_missing_check(),
-              steps: m.ai_builder_review_suggestion_steps({ steps: "3" })
-            })
+        const thirdCard = screen.getByRole("button", {
+          name: m.ai_builder_review_suggestion_investigate_this_label({
+            index: "3",
+            kind: kindDuplicated,
+            steps: stepsOneTwo
           })
-        ).toHaveLength(1);
-        await fireEvent.click(duplicatedWork[0]);
+        });
+        expect(secondCard).not.toBe(thirdCard);
+        await fireEvent.click(thirdCard);
         const single = onprepare.mock.calls[1][0];
         expect(single.reviewContext.suggestions).toEqual([
           { suggestion_kind: "duplicated_work", step_orders: [1, 2] }

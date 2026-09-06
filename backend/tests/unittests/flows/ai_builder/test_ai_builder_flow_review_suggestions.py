@@ -355,9 +355,10 @@ def test_two_suggestions_on_the_same_scope_are_both_kept():
         "sources": [{"source_id": "run1.step1.output", "quote": "tre punkter"}],
     }
     parsed = parse_review_suggestions(
-        _answer(claim, {**claim, "step_orders": [2, 1], "rationale": "y"}),
+        _answer(claim, {**claim, "step_orders": [2, 1], "rationale": "y"}, claim),
         sample=sample,
     )
+    # Two findings on one scope stay two; the literal repeat of the first is one.
     assert [item.rationale for item in parsed.suggestions] == ["x", "y"]
     assert parsed.problems == ()
 

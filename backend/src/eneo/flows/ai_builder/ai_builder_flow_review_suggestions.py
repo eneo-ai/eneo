@@ -357,9 +357,12 @@ def parse_review_suggestions(
             problems.append(f"suggestion_{position + 1}:{parsed}")
             continue
         # A suggestion is identified by everything it says (kind, steps,
-        # rationale, sources): two drift findings on one step from two runs
-        # are two suggestions the user reads. Only the handoff reference
+        # rationale, sources, facts): two drift findings on one step from two
+        # runs are two suggestions the user reads. Only the handoff reference
         # collapses them, to the set of edit scopes (kind + steps) it names.
+        # An answer that says the very same thing twice said it once.
+        if parsed in suggestions:
+            continue
         suggestions.append(parsed)
     return ParsedReviewSuggestions(
         "valid", suggestions=tuple(suggestions), problems=tuple(problems)

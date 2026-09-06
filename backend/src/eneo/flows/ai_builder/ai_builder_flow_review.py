@@ -213,11 +213,15 @@ MAX_SUGGESTION_SAMPLE_RUNS = 3
 
 
 class FlowReviewSuggestionFocus(BaseModel):
-    """One suggestion a turn investigates: kind and steps, never its prose.
+    """An edit scope a turn investigates: kind and steps, projected from one
+    or more findings, never their prose.
 
-    The value is canonical: steps are sorted and deduplicated, so the same
-    suggestion picked twice, or listed in another order, is the same value
-    and a retry of the same investigation hashes the same request.
+    Several findings can share a scope (the same kind on the same steps,
+    read from different runs or argued differently); they stay separate on
+    the screen and become one scope here. The value is canonical: steps are
+    sorted and deduplicated, so the same scope picked twice, or listed in
+    another order, is the same value and a retry of the same investigation
+    hashes the same request.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

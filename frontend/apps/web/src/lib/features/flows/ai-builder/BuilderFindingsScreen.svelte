@@ -468,6 +468,7 @@
                             class="h-8"
                             {disabled}
                             aria-label={m.ai_builder_review_suggestion_investigate_this_label({
+                              index: String(index + 1),
                               kind: suggestionKindLabel(suggestion.kind),
                               steps: suggestionStepsLabel(suggestion.step_orders)
                             })}
