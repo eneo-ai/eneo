@@ -28,6 +28,8 @@
   import HelpTooltip from "../../components/HelpTooltip.svelte";
   import {
     MAX_COST_INPUT,
+    declareStrictToolSchema,
+    isStrictToolSchemaDeclared,
     perMillionFromTokenCost,
     type ModelDraftState,
     type ModelType
@@ -239,6 +241,19 @@
         <Field.Label for="cap-tools" class="flex items-center gap-1">
           {m.tool_calling_support()}
           <HelpTooltip text={m.tool_calling_help()} />
+        </Field.Label>
+      </Field.Field>
+      <Field.Field orientation="horizontal" class="w-fit">
+        <Checkbox
+          id="cap-strict-tools"
+          bind:checked={
+            () => isStrictToolSchemaDeclared(draft),
+            (declared) => declareStrictToolSchema(draft, declared)
+          }
+        />
+        <Field.Label for="cap-strict-tools" class="flex items-center gap-1">
+          {m.strict_tool_schema_support()}
+          <HelpTooltip text={m.strict_tool_schema_help()} />
         </Field.Label>
       </Field.Field>
     </div>

@@ -46,7 +46,11 @@
     type WizardStepId,
     type WizardModelDraft
   } from "./wizardState";
-  import { isCostValueOverflow, MAX_COST_INPUT } from "./models/draft";
+  import {
+    MAX_COST_INPUT,
+    completionCreateCapabilities,
+    isCostValueOverflow
+  } from "./models/draft";
 
   type ModelType = "completion" | "embedding" | "transcription";
 
@@ -385,9 +389,7 @@
         family: model.family ?? "openai",
         max_input_tokens: model.maxInputTokens,
         max_output_tokens: model.maxOutputTokens,
-        vision: model.vision ?? false,
-        reasoning: model.reasoning ?? false,
-        supports_tool_calling: model.supportsToolCalling ?? false,
+        ...completionCreateCapabilities(model),
         hosting: model.hosting ?? "swe",
         is_active: true,
         description: model.description ?? null,

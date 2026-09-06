@@ -17,6 +17,7 @@ export interface WizardModelDraft {
   vision?: boolean;
   reasoning?: boolean;
   supportsToolCalling?: boolean;
+  supportsStrictToolSchema?: boolean;
   family?: string;
   dimensions?: number;
   maxInput?: number;

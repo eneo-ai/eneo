@@ -25,6 +25,16 @@ export interface ModelDraftState {
   vision: boolean;
   reasoning: boolean;
   supportsToolCalling: boolean;
+  /** The model identifier the strict tool-schema declaration was made for,
+   *  or null when undeclared. A declaration belongs to one provider route:
+   *  the moment the identifier differs, the declaration is ineffective until
+   *  the admin declares it again for the new route (the server withdraws it
+   *  the same way when a route moves). Effective only with tool calling. */
+  strictToolSchemaRoute: string | null;
+  /** Whether the admin changed the declaration during this edit. An update
+   *  carries the flag only then; an untouched declaration is not fresh intent
+   *  and must not resurrect what the server withdrew meanwhile. */
+  strictToolSchemaTouched: boolean;
   family: string;
   dimensionsStr: string;
   maxInputStr: string;
@@ -48,6 +58,8 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     vision: false,
     reasoning: false,
     supportsToolCalling: false,
+    strictToolSchemaRoute: null,
+    strictToolSchemaTouched: false,
     family: modelType === "embedding" ? "openai" : providerType || "openai",
     dimensionsStr: "",
     maxInputStr: "",
@@ -161,6 +173,54 @@ export function perMillionFromTokenCost(value: number | string | null | undefine
   return Number((n * TOKENS_PER_MILLION).toPrecision(10)).toString();
 }
 
+/** Whether the strict tool-schema declaration applies to the draft's current
+ *  route. Changing the identifier (typing, or picking a catalog model) makes
+ *  a declaration ineffective; declaring again binds it to the new route. */
+export function isStrictToolSchemaDeclared(draft: ModelDraftState): boolean {
+  return draft.strictToolSchemaRoute !== null && draft.strictToolSchemaRoute === draft.name;
+}
+
+export function declareStrictToolSchema(draft: ModelDraftState, declared: boolean): void {
+  draft.strictToolSchemaRoute = declared ? draft.name : null;
+  draft.strictToolSchemaTouched = true;
+}
+
+/** The capability fields of a create request: a total projection, there is
+ *  no server state to preserve. */
+export function completionCreateCapabilities(model: WizardModelDraft): {
+  vision: boolean;
+  reasoning: boolean;
+  supports_tool_calling: boolean;
+  supports_strict_tool_schema: boolean;
+} {
+  return {
+    vision: model.vision ?? false,
+    reasoning: model.reasoning ?? false,
+    supports_tool_calling: model.supportsToolCalling ?? false,
+    supports_strict_tool_schema: model.supportsStrictToolSchema ?? false
+  };
+}
+
+/** The capability fields of an update request: a patch. The strict
+ *  declaration travels only when the admin changed it in this edit; left
+ *  untouched it is omitted, so the server's own withdrawal on a route move
+ *  stands and a stale form cannot declare a route nobody assessed. */
+export function completionUpdateCapabilities(draft: ModelDraftState): {
+  vision: boolean;
+  reasoning: boolean;
+  supports_tool_calling: boolean;
+  supports_strict_tool_schema?: boolean;
+} {
+  return {
+    vision: draft.vision,
+    reasoning: draft.reasoning,
+    supports_tool_calling: draft.supportsToolCalling,
+    ...(draft.strictToolSchemaTouched
+      ? { supports_strict_tool_schema: isStrictToolSchemaDeclared(draft) }
+      : {})
+  };
+}
+
 export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
   return {
     name: draft.name,
@@ -170,6 +230,7 @@ export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
     vision: draft.vision,
     reasoning: draft.reasoning,
     supportsToolCalling: draft.supportsToolCalling,
+    supportsStrictToolSchema: isStrictToolSchemaDeclared(draft),
     family: draft.family,
     dimensions: draft.dimensionsStr ? parseInt(draft.dimensionsStr, 10) : undefined,
     maxInput: draft.maxInputStr ? parseInt(draft.maxInputStr, 10) : undefined,
@@ -224,6 +285,8 @@ export function modelToDraft(
     vision: false,
     reasoning: false,
     supportsToolCalling: false,
+    strictToolSchemaRoute: null,
+    strictToolSchemaTouched: false,
     family: ("family" in model && model.family) || "openai",
     dimensionsStr: "",
     maxInputStr: "",
@@ -241,6 +304,10 @@ export function modelToDraft(
     base.vision = model.vision ?? false;
     base.reasoning = model.reasoning ?? false;
     base.supportsToolCalling = model.supports_tool_calling ?? false;
+    base.strictToolSchemaRoute =
+      "supports_strict_tool_schema" in model && model.supports_strict_tool_schema
+        ? model.name
+        : null;
     base.inputCostPerTokenStr = perMillionFromTokenCost(model.input_cost_per_token);
     base.outputCostPerTokenStr = perMillionFromTokenCost(model.output_cost_per_token);
   } else if (modelType === "embedding" && "dimensions" in model) {

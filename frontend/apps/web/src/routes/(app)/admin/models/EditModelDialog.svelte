@@ -35,10 +35,11 @@
 
   import ModelDraftForm from "./AddWizard/models/ModelDraftForm.svelte";
   import {
+    MAX_COST_INPUT,
+    completionUpdateCapabilities,
     createEmptyDraft,
     findDraftCostOverflow,
     hasValidCompletionTokenBudgets,
-    MAX_COST_INPUT,
     modelToDraft,
     rawCostToNumber,
     tokenCostFromPerMillion,
@@ -127,9 +128,7 @@
       open_source: openSource,
       max_input_tokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : null,
       max_output_tokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : null,
-      vision: draft.vision,
-      reasoning: draft.reasoning,
-      supports_tool_calling: draft.supportsToolCalling,
+      ...completionUpdateCapabilities(draft),
       input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
       output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),

@@ -220,6 +220,26 @@
             </td>
           </tr>
         {/if}
+        {#if "supports_strict_tool_schema" in model}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.capability_strict_tools()}</td
+            >
+            <td class="py-2.5">
+              {#if model.supports_strict_tool_schema}
+                <span class="text-positive-default text-lg" aria-hidden="true">✓</span>
+                <span class="sr-only">{m.yes()}</span>
+                {#if !model.supports_tool_calling}
+                  <span class="text-muted ml-2 text-xs"
+                    >{m.capability_strict_tools_needs_tools()}</span
+                  >
+                {/if}
+              {:else}
+                <span class="text-muted/30">–</span>
+              {/if}
+            </td>
+          </tr>
+        {/if}
 
         <tr>
           <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
