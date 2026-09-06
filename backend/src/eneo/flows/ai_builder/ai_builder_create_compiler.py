@@ -344,9 +344,14 @@ def _canonicalize_attested_output_fields(
                 else:
                     updates["item_fields"] = normalized_children
             if path in attested_paths:
+                # Presence is the server's guarantee: an attested key always
+                # exists. Nullability is not — the server has no cited fact
+                # about it, so forcing every attested primitive nullable
+                # overrode contracts the user dictated. The proposal's own
+                # declaration is preserved here, exactly as its field_type
+                # already is; carrying a cited nullability fact through the
+                # evidence, admission and this postcondition is a follow-up.
                 updates["required"] = True
-                if field.field_type not in ("object", "array"):
-                    updates["nullable"] = True
             normalized.append(field.model_copy(update=updates) if updates else field)
 
         attested_names = ordered_names_by_parent.get(parent_path, [])

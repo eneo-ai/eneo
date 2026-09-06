@@ -125,7 +125,9 @@ def build_plan_proposal_system_prompt(
             "exactly once anywhere in the final step; (3) spelling is exactly "
             "as written above; (4) each result is declared exactly once at its "
             "location, with an accurate description; (5) attested results of "
-            "type object or array are declared with nullable false. Missing, "
+            "type object or array are declared with nullable false, and a "
+            "primitive result is declared nullable only when the user's own "
+            "words say that value may be missing or be null. Missing, "
             "renamed, duplicated, ambiguously placed or wrongly typed results "
             "are rejected."
         )

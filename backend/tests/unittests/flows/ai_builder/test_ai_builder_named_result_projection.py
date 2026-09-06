@@ -512,7 +512,7 @@ def test_unplaced_result_resolves_at_its_single_occurrence() -> None:
     contract = _terminal_output_contract(spec)
     assert contract is not None
     timestamp = contract["properties"]["events"]["items"]["properties"]["timestamp"]
-    assert timestamp["type"] == ["string", "null"]
+    assert timestamp["type"] == "string"
     assert "timestamp" in contract["properties"]["events"]["items"]["required"]
 
 
@@ -812,10 +812,7 @@ def test_nested_canonicalization_moves_complete_attested_groups_in_place() -> No
         "page_or_section",
         "excerpt_reference",
     }
-    assert passages["items"]["properties"]["page_or_section"]["type"] == [
-        "string",
-        "null",
-    ]
+    assert passages["items"]["properties"]["page_or_section"]["type"] == "string"
     unrelated = contract["properties"]["unrelated_group"]
     assert list(unrelated["properties"]) == ["untouched_b", "untouched_a"]
     assert "required" not in unrelated
@@ -901,9 +898,10 @@ def test_violations_shape_compiles_three_roots_and_four_nested_children_once() -
 
 def test_an_exact_model_declaration_compiles_verified_and_canonicalized() -> None:
     # The model declares every attested name itself; verification passes and
-    # the compiled contract carries exact spelling, declared shape, required
-    # (nullable for primitives), with the attested roots FIRST in projection
-    # order and the model's other fields after, in their declared order.
+    # the compiled contract carries exact spelling, declared shape, required,
+    # and the nullability the proposal declared, with the attested roots FIRST
+    # in projection order and the model's other fields after, in their
+    # declared order.
     state = _state(PUBLIC_RECORD_OBLIGATIONS)
     projection = named_result_projection(state)
     assert projection is not None
@@ -944,9 +942,9 @@ def test_an_exact_model_declaration_compiles_verified_and_canonicalized() -> Non
     assert names.index("reading_notes") < names.index("handlaggare_kommentar")
     assert properties["documents"]["type"] == "array"
     assert properties["candidate_passages"]["type"] == "array"
-    # Required-but-nullable: a primitive attested root serializes exactly as
-    # ["<type>", "null"].
-    assert properties["source_reference"]["type"] == ["string", "null"]
+    # The user dictated the contract: a primitive attested root the model
+    # declared non-nullable serializes exactly as the user wrote it.
+    assert properties["source_reference"]["type"] == "string"
 
 
 def test_a_missing_attested_root_is_rejected_with_the_exact_path() -> None:
@@ -1102,30 +1100,32 @@ def test_an_unshaped_key_accepts_any_legal_structured_type() -> None:
 
     contract = _terminal_output_contract(spec)
     assert contract is not None
-    assert contract["properties"]["source_reference"]["type"] == [
-        "number",
-        "null",
-    ]
+    assert contract["properties"]["source_reference"]["type"] == "number"
 
 
-def test_attested_primitive_roots_compile_required_and_nullable() -> None:
-    # Owner ruling 2026-08-24: required-but-nullable — the field always
-    # exists; a source that lacks it yields an explicit empty value. The type
-    # system allows nullable on primitives only, so declared array/object
-    # shapes express absence through the empty value convention instead.
+def test_attested_primitive_roots_compile_required_with_declared_nullability() -> None:
+    # Owner ruling 2026-09-04 (eneo-bwi): a contract the user dictated is
+    # reproduced as written. Presence stays the server's guarantee — every
+    # attested key is required — and the compiler no longer overrides
+    # nullability, which it has no cited fact about: the proposal's own
+    # declaration survives in both directions, the way its field_type does.
+    # Verifying that declaration against cited user evidence is a follow-up.
     state = _state(PUBLIC_RECORD_OBLIGATIONS)
     projection = named_result_projection(state)
     assert projection is not None
 
-    spec = _compile_through_the_whole_path(
-        state,
-        model_output_fields=_attested_model_fields(projection),
-    )
+    fields = _attested_model_fields(projection)
+    for field in fields:
+        if field["name"] == "stated_rule_reference":
+            field["nullable"] = True
+
+    spec = _compile_through_the_whole_path(state, model_output_fields=fields)
 
     contract = _terminal_output_contract(spec)
     assert contract is not None
     assert set(contract["required"]) >= {key.name for key in projection.keys}
-    assert contract["properties"]["source_reference"]["type"] == [
+    assert contract["properties"]["source_reference"]["type"] == "string"
+    assert contract["properties"]["stated_rule_reference"]["type"] == [
         "string",
         "null",
     ]
@@ -1776,7 +1776,9 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
         "exactly once anywhere in the final step; (3) spelling is exactly "
         "as written above; (4) each result is declared exactly once at its "
         "location, with an accurate description; (5) attested results of "
-        "type object or array are declared with nullable false. Missing, "
+        "type object or array are declared with nullable false, and a "
+        "primitive result is declared nullable only when the user's own "
+        "words say that value may be missing or be null. Missing, "
         "renamed, duplicated, ambiguously placed or wrongly typed results "
         "are rejected."
     )
