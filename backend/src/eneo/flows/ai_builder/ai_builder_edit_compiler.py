@@ -80,7 +80,8 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
-    describe_input_bindings,
+    question_binding,
+    source_ref_bindings,
 )
 from eneo.flows.step_lineage import (
     existing_step_order_from_ref,
@@ -755,14 +756,15 @@ def _step_field_changes(
 
     This is the one comparison that decides whether a step is modified: the
     step is unchanged exactly when this list is empty, so an "updated" badge
-    always has something to show.
+    always has something to show, and every row shows two different values.
     """
 
     before = _comparable_step_payload(previous)
     after = _comparable_step_payload(current)
     before_spec = cast(dict[str, Any], before.pop("assistant_spec"))
     after_spec = cast(dict[str, Any], after.pop("assistant_spec"))
-    unaccounted = set(before) - set(_STEP_CHANGE_FIELDS)
+    unaccounted = (set(before) | set(after)) - set(_STEP_CHANGE_FIELDS)
+    unaccounted |= (set(before_spec) | set(after_spec)) - set(_ASSISTANT_SPEC_FIELDS)
     if unaccounted:
         raise AIBuilderArchitectureError(
             public_code="architecture_materialization_failed",
@@ -784,11 +786,16 @@ def _step_field_changes(
         value_after = source_after.get(field)
         if value_before == value_after:
             continue
+        readable_before = _readable_field_value(field, value_before, step_label)
+        readable_after = _readable_field_value(field, value_after, step_label)
+        if readable_before == readable_after:
+            # The short reading hides the difference (a field's type, a
+            # source's output kind, a review's expiry): show the whole value.
+            readable_before = _lossless_field_value(value_before)
+            readable_after = _lossless_field_value(value_after)
         changes.append(
             StepFieldChange(
-                field=field,
-                previous=_readable_field_value(field, value_before, step_label),
-                current=_readable_field_value(field, value_after, step_label),
+                field=field, previous=readable_before, current=readable_after
             )
         )
     return changes
@@ -797,7 +804,11 @@ def _step_field_changes(
 def _readable_field_value(
     field: StepChangeField, value: Any, step_label: Callable[[str], str]
 ) -> str | None:
-    """The value as the plan can show it; None reads as "none" on screen."""
+    """The value as the plan can show it; None reads as "none" on screen.
+
+    Values are data, not prose: names, field paths, the question a step asks,
+    a mode. The screen owns the words around them.
+    """
 
     if value is None:
         return None
@@ -811,14 +822,25 @@ def _readable_field_value(
         if field in ("input_contract", "output_contract"):
             return ", ".join(schema_leaf_property_names(payload)) or None
         if field == "input_bindings":
-            return describe_input_bindings(payload, step_label=step_label)
+            refs = source_ref_bindings(payload)
+            if refs:
+                return ", ".join(
+                    step_label(ref.step_ref)
+                    + ("." + ".".join(ref.field_path) if ref.field_path else "")
+                    for ref in refs
+                )
+            return question_binding(payload)
         if field == "review_policy":
             mode = payload.get("mode")
             return str(mode) if mode is not None else None
-        return json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
+        return _lossless_field_value(payload)
     return str(value)
+
+
+def _lossless_field_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _compute_confidence(

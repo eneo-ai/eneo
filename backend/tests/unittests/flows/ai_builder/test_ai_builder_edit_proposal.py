@@ -1233,7 +1233,7 @@ async def test_binding_only_edit_names_the_input_sources() -> None:
     changes = result.compiled.content.edit.diff.step_changes
     assert changes[1].kind == "modified"
     fields = {c.field: (c.previous, c.current) for c in changes[1].field_changes}
-    assert fields["input_bindings"] == (None, "source_refs: Extract case.summary")
+    assert fields["input_bindings"] == (None, "Extract case.summary")
     # Every modified step explains itself: no change without a field behind it.
     assert all(change.field_changes for change in changes if change.kind == "modified")
 
@@ -1261,6 +1261,94 @@ def _diff_fixture_flow() -> SimpleNamespace:
             input_source="previous_step",
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_same_leaf_schema_change_shows_two_different_values() -> None:
+    # The short reading of a contract is its leaf names; when only a leaf's
+    # type changes the row must still show a difference, not "summary → summary".
+    result = await _process(
+        flow=_source_reader_flow(),
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            post_processing_goal="summarize_or_overview",
+        ),
+        arguments={
+            "plan_rationale": "Make the summary a list of points.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_contract": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "summary": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    (change,) = result.compiled.content.edit.diff.step_changes[0].field_changes
+    assert change.field == "output_contract"
+    assert change.previous != change.current
+    assert (
+        change.previous is not None and '"summary":{"type":"string"}' in change.previous
+    )
+    assert change.current is not None and '"type":"array"' in change.current
+
+
+@pytest.mark.asyncio
+async def test_binding_change_between_question_and_sources_names_both() -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extract case",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Review case",
+            input_source="previous_step",
+            input_type="json",
+            input_bindings={"question": "Bedöm ärendet: {{ step_1.output.text }}"},
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Feed the review only the summary.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
+                },
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    fields = {
+        c.field: (c.previous, c.current)
+        for c in result.compiled.content.edit.diff.step_changes[1].field_changes
+    }
+    previous, current = fields["input_bindings"]
+    assert previous is not None and previous.startswith("Bedöm ärendet:")
+    assert current == "Extract case.summary"
+    assert "source_refs" not in current and "question template" not in previous
 
 
 @pytest.mark.asyncio
