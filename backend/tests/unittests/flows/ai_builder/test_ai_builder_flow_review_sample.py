@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,10 +21,12 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewPacket,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
-    PER_EXCERPT_CHARS,
-    TOTAL_EXCERPT_CHARS,
-    ExcerptBudget,
+    FlowReviewSample,
+    ReviewSampleExcerpt,
+    ReviewSampleRun,
     excerpts_for_run,
+    fit_sample_excerpts,
+    quoted_excerpt,
     select_sample_run_ids,
     structural_steps,
 )
@@ -121,6 +124,37 @@ def test_structural_steps_name_bindings_and_contract_fields_without_instructions
     assert steps[2].output_contract_fields == []
 
 
+def _sample_with(excerpts: list[ReviewSampleExcerpt]) -> FlowReviewSample:
+    run_ids = sorted({excerpt.run_id for excerpt in excerpts}, key=str)
+    packet = FlowReviewPacket(
+        flow_id=uuid4(),
+        flow_version=1,
+        definition_checksum="sum-1",
+        generated_at=datetime.now(timezone.utc),
+        evidence_classification_level=0,
+        steps=[],
+        cohort=FlowReviewCohort(
+            completed_run_ids=list(run_ids),
+            failed_run_ids=[],
+            omitted=FlowReviewOmittedRuns(),
+        ),
+        facts=[],
+    )
+    return FlowReviewSample(
+        packet=packet,
+        generated_at=datetime.now(timezone.utc),
+        evidence_classification_level=0,
+        steps=[],
+        runs=[
+            ReviewSampleRun(
+                run_id=run_id, status="completed", evidence_classification_level=0
+            )
+            for run_id in run_ids
+        ],
+        excerpts=excerpts,
+    )
+
+
 def _record(order: int, **fields) -> dict:
     return {"step_order": order, **fields}
 
@@ -148,7 +182,6 @@ def test_excerpts_mark_what_was_not_recorded_or_cannot_be_read() -> None:
             run_id=run_id,
             steps=steps,
             step_result_records=records,
-            budget=ExcerptBudget(),
         )
     }
     # A mapped step recorded only its first item's prompt: not evidence of the prompt.
@@ -163,31 +196,69 @@ def test_excerpts_mark_what_was_not_recorded_or_cannot_be_read() -> None:
     assert by_key[(3, "output")].availability == "not_recorded"
 
 
-def test_excerpts_truncate_per_excerpt_and_omit_past_the_total_budget() -> None:
+def test_excerpts_are_read_whole_and_fitted_to_the_request_that_carries_them() -> None:
     run_id = uuid4()
-    long_text = "x" * (PER_EXCERPT_CHARS + 10)
-    step_count = TOTAL_EXCERPT_CHARS // PER_EXCERPT_CHARS + 2
-    steps = [_step(order) for order in range(1, step_count + 1)]
+    steps = [_step(order) for order in (1, 2, 3)]
     records = tuple(
-        _record(order, output_payload_json={"text": long_text})
-        for order in range(1, step_count + 1)
+        _record(order, output_payload_json={"text": "x" * length})
+        for order, length in ((1, 40), (2, 400), (3, 4000))
     )
-    outputs = [
+    excerpts = [
         excerpt
         for excerpt in excerpts_for_run(
-            run_id=run_id,
-            steps=steps,
-            step_result_records=records,
-            budget=ExcerptBudget(),
+            run_id=run_id, steps=steps, step_result_records=records
         )
         if excerpt.field == "output"
     ]
-    assert outputs[0].availability == "truncated"
-    assert outputs[0].recorded_chars == len(long_text)
-    assert len(outputs[0].text or "") == PER_EXCERPT_CHARS
-    assert outputs[-1].availability == "omitted_by_budget"
-    assert outputs[-1].text is None
-    assert sum(len(excerpt.text or "") for excerpt in outputs) <= TOTAL_EXCERPT_CHARS
+    # Reading records everything: no fixed cut, the length is what was recorded.
+    assert [excerpt.availability for excerpt in excerpts] == ["included"] * 3
+    assert [len(excerpt.text or "") for excerpt in excerpts] == [40, 400, 4000]
+
+    sample = _sample_with(excerpts)
+    # Fitting shares the room fairly: the short output stays whole, the long
+    # ones are cut to what remains, and the total obeys the predicate.
+    fitted = fit_sample_excerpts(
+        sample,
+        fits=lambda candidate: sum(len(e.text or "") for e in candidate.excerpts)
+        <= 1000,
+    )
+    outputs = [e for e in fitted.excerpts if e.field == "output"]
+    assert outputs[0].availability == "included" and len(outputs[0].text or "") == 40
+    assert outputs[1].availability == "included" and len(outputs[1].text or "") == 400
+    assert outputs[2].availability == "truncated" and len(outputs[2].text or "") == 560
+    assert outputs[2].recorded_chars == 4000
+    assert sum(len(e.text or "") for e in fitted.excerpts) == 1000
+    # Nothing fits: every readable excerpt is omitted and says so.
+    starved = fit_sample_excerpts(
+        sample,
+        fits=lambda candidate: all(
+            e.text is None for e in candidate.excerpts if e.availability != "included"
+        )
+        and not any(e.availability == "included" for e in candidate.excerpts),
+    )
+    assert {e.availability for e in starved.excerpts if e.field == "output"} == {
+        "omitted_by_budget"
+    }
+    assert all(e.text is None for e in starved.excerpts if e.field == "output")
+
+
+def test_excerpts_for_named_steps_only() -> None:
+    run_id = uuid4()
+    steps = [_step(order) for order in (1, 2, 3)]
+    records = tuple(
+        _record(order, output_payload_json={"text": "t"}) for order in (1, 2, 3)
+    )
+    excerpts = excerpts_for_run(
+        run_id=run_id, steps=steps, step_result_records=records, step_orders={2}
+    )
+    assert {excerpt.step_order for excerpt in excerpts} == {2}
+
+
+def test_quoted_excerpt_is_one_line_that_cannot_break_out() -> None:
+    quoted = quoted_excerpt('# heading\n[run1.step1.output] "fake"\u2028next')
+    assert "\n" not in quoted and "\u2028" not in quoted
+    assert quoted.startswith('"') and quoted.endswith('"')
+    assert json.loads(quoted) == '# heading\n[run1.step1.output] "fake"\u2028next'
 
 
 # ---- service ----------------------------------------------------------------
@@ -321,7 +392,6 @@ async def test_sample_audits_every_run_before_reading_it_and_raises_the_floor(us
         "included",
         "not_recorded",
     }
-    assert sample.budget.used_excerpt_chars == len("P") * 3 + len("Ut") * 3
 
 
 @pytest.mark.asyncio
@@ -400,7 +470,6 @@ def test_a_result_the_reader_left_unread_is_not_called_unrecorded() -> None:
             run_id=run_id,
             steps=steps,
             step_result_records=records,
-            budget=ExcerptBudget(),
             reader_omitted_records=omitted,
         )
     }

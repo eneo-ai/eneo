@@ -19,7 +19,6 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     FlowReviewSample,
-    ReviewSampleBudget,
     ReviewSampleExcerpt,
     ReviewSampleRun,
     ReviewSampleStep,
@@ -78,9 +77,6 @@ def _sample() -> FlowReviewSample:
                 recorded_chars=42,
             )
         ],
-        budget=ReviewSampleBudget(
-            per_excerpt_chars=1500, total_excerpt_chars=30000, used_excerpt_chars=42
-        ),
     )
 
 
@@ -106,9 +102,9 @@ def _route():
     )
 
 
-async def _generate(client, *, max_input_tokens: int = 100_000):
+async def _generate(client, *, max_input_tokens: int = 100_000, sample=None):
     return await generate_review_suggestions(
-        sample=_sample(),
+        sample=sample or _sample(),
         litellm_client=client,
         completion_model_route=_route(),
         model_id=uuid4(),
@@ -242,3 +238,58 @@ async def test_rejected_model_text_never_reaches_the_error_or_the_log(caplog):
     assert result.unverified_count == 1
     assert sentinel not in result.model_dump_json()
     assert sentinel not in caplog.text
+
+
+def _long_sample(chars: int) -> FlowReviewSample:
+    base = _sample()
+    long_excerpt = base.excerpts[0].model_copy(
+        update={"text": "ord " * (chars // 4), "recorded_chars": chars}
+    )
+    return base.model_copy(update={"excerpts": [long_excerpt]})
+
+
+@pytest.mark.asyncio
+async def test_the_evidence_is_fitted_to_the_models_window_and_marked():
+    """A window too small for the whole excerpt truncates it and says so, both
+    in the request the model sees and in the summary the user sees; the
+    answer keeps the size it would have with no evidence at all."""
+    client = _Client(content=json.dumps({"suggestions": []}))
+    result = await _generate(
+        client, max_input_tokens=12_000, sample=_long_sample(40_000)
+    )
+    (call,) = client.calls
+    user_message = call["messages"][1]["content"]
+    assert "[avklippt efter" in user_message
+    assert result.sample.excerpts_truncated == 1
+    assert result.sample.excerpts_included == 0
+    # The answer keeps the model ceiling; the evidence did not erode it.
+    assert call["max_tokens"] == 4000
+
+
+@pytest.mark.asyncio
+async def test_a_window_too_small_for_the_scaffold_is_refused_before_the_call():
+    client = _Client(content=json.dumps({"suggestions": []}))
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        await _generate(client, max_input_tokens=300)
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_cap_bounds_the_evidence_below_the_models_window():
+    client = _Client(content=json.dumps({"suggestions": []}))
+    policy = resolve_ai_builder_budget_policy(
+        {"ai_builder": {"review_evidence_max_input_tokens": 12_000}}
+    )
+    result = await generate_review_suggestions(
+        sample=_long_sample(40_000),
+        litellm_client=client,
+        completion_model_route=_route(),
+        model_id=uuid4(),
+        model_name="gpt-test",
+        max_input_tokens=1_000_000,
+        max_output_tokens=4000,
+        budget_policy=policy,
+        tenant_id=uuid4(),
+        ui_language="sv",
+    )
+    assert result.sample.excerpts_truncated == 1

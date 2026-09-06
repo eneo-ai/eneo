@@ -1025,18 +1025,26 @@ async def post_flow_review_suggestions(
         space = _authorized_space(authorization)
         tenant = await _get_tenant_repo(container).get(user.tenant_id)
         active_provider_ids = await _active_provider_ids(container)
-        sample: FlowReviewSample = (
-            await container.ai_builder_flow_review_service().build_review_sample(
-                flow_id=flow_id, space_id=space_id, audit=audit
-            )
-        )
-        # Route resolution reads provider credentials: inside the snapshot.
+        review_service = container.ai_builder_flow_review_service()
+        packet = await review_service.build_packet(flow_id=flow_id, space_id=space_id)
+        # The model first, from the packet's floor, so its window bounds what
+        # is read; route resolution reads provider credentials: inside the
+        # snapshot. A model that cannot be resolved stops before any run
+        # content is read.
         prepared = await service.prepare_review_judgement(
-            sample=sample,
+            evidence_classification_level=packet.evidence_classification_level,
             space=space,
             active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant.flow_settings if tenant else None,
         )
+        sample: FlowReviewSample = await review_service.build_review_sample(
+            flow_id=flow_id, space_id=space_id, audit=audit, packet=packet
+        )
+        if sample.evidence_classification_level > packet.evidence_classification_level:
+            raise AIBuilderBadRequestException(
+                "A sampled run carries a higher evidence level than the review.",
+                code=AIBuilderErrorCode.REVIEW_STALE,
+            )
 
     return await service.judge_review_sample(
         prepared=prepared, sample=sample, ui_language=ui_language

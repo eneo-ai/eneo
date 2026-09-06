@@ -590,6 +590,11 @@ class AIBuilderService:
                 space_id=session.space_id,
                 audit=audit,
                 run_ids=review_context.sample_run_ids,
+                step_orders={
+                    step_order
+                    for focus in review_context.suggestions
+                    for step_order in focus.step_orders
+                },
             )
             packet = sample.packet
         else:
@@ -768,17 +773,20 @@ class AIBuilderService:
     async def prepare_review_judgement(
         self,
         *,
-        sample: FlowReviewSample,
+        evidence_classification_level: int,
         space: "Space",
         active_provider_ids: AbstractSet[UUID],
         tenant_flow_settings: dict[str, Any] | None,
     ) -> PreparedReviewJudgement:
         """Everything the judgement needs from the database, before any call.
 
-        The planner model must clear the sample's evidence floor, the same
-        rule a turn that reads run evidence is held to. Route resolution reads
-        provider credentials, so it belongs inside the caller's transaction;
-        the provider call itself must not.
+        The planner model must clear the evidence floor, the same rule a turn
+        that reads run evidence is held to. The floor is the packet's: every
+        run the sample may read is one of the packet's admitted runs, so the
+        model is known before any run content is read and its window can
+        bound what is read. Route resolution reads provider credentials, so
+        it belongs inside the caller's transaction; the provider call itself
+        must not.
         """
 
         planner_context = build_planner_context(
@@ -786,7 +794,7 @@ class AIBuilderService:
             model_id=None,
             active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant_flow_settings,
-            minimum_level=sample.evidence_classification_level,
+            minimum_level=evidence_classification_level,
         )
         route = await self.completion_service.resolve_model_route(planner_context.model)
         route = replace(

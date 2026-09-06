@@ -7,11 +7,16 @@ and outputs from a few admitted runs, and the packet's facts. Every excerpt
 carries an availability marker so a model, and the reader of its suggestions,
 can tell "not recorded" from "cut by budget": missing or truncated content
 never supports a claim that a check or a useful output is absent.
+
+Excerpts are read whole. How much of them a model gets is decided later, by
+the request that carries them, against that model's window: see
+`fit_sample_excerpts`.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
@@ -21,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
+from eneo.flows.ai_builder.ai_builder_text_fitting import fit_text_allocations
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.input_binding_contract_rules import describe_input_bindings
 
@@ -29,8 +35,6 @@ if TYPE_CHECKING:
     # review module rebuilds `FlowReviewSample` once the packet class exists.
     from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewPacket
 
-PER_EXCERPT_CHARS = 1500
-TOTAL_EXCERPT_CHARS = 30_000
 SAMPLE_COMPLETED_RUNS = 2
 SAMPLE_FAILED_RUNS = 1
 READ_DEADLINE_SECONDS = 20.0
@@ -82,14 +86,6 @@ class ReviewSampleExcerpt(BaseModel):
     recorded_chars: int | None = None
 
 
-class ReviewSampleBudget(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    per_excerpt_chars: int
-    total_excerpt_chars: int
-    used_excerpt_chars: int
-
-
 class FlowReviewSample(BaseModel):
     """What one model call may read; not persisted."""
 
@@ -101,7 +97,6 @@ class FlowReviewSample(BaseModel):
     steps: list[ReviewSampleStep]
     runs: list[ReviewSampleRun]
     excerpts: list[ReviewSampleExcerpt]
-    budget: ReviewSampleBudget
 
     @property
     def run_ids(self) -> list[UUID]:
@@ -148,23 +143,6 @@ def structural_steps(steps: list[RuntimeStep]) -> list[ReviewSampleStep]:
     ]
 
 
-class ExcerptBudget:
-    """Allocates the total excerpt budget in read order."""
-
-    def __init__(self) -> None:
-        self.used = 0
-
-    def take(self, text: str) -> tuple[str, ExcerptAvailability]:
-        if self.used >= TOTAL_EXCERPT_CHARS:
-            return "", "omitted_by_budget"
-        allowed = min(PER_EXCERPT_CHARS, TOTAL_EXCERPT_CHARS - self.used)
-        if len(text) <= allowed:
-            self.used += len(text)
-            return text, "included"
-        self.used += allowed
-        return text[:allowed], "truncated"
-
-
 def reader_omitted_step_results(debug_export: dict[str, Any]) -> bool:
     """Whether the evidence reader left step results unread under its own limits.
 
@@ -193,15 +171,18 @@ def excerpts_for_run(
     run_id: UUID,
     steps: list[RuntimeStep],
     step_result_records: tuple[dict[str, Any], ...],
-    budget: ExcerptBudget,
     reader_omitted_records: bool = False,
+    step_orders: Collection[int] | None = None,
 ) -> list[ReviewSampleExcerpt]:
-    """Prompt, input and output excerpts per step, in step order.
+    """Prompt, input and output excerpts per step, in step order, read whole.
 
-    Availability is decided before budget: a mapped step records only its
-    first item's prompt and a template fill records none; a field a run
-    never recorded is "not_recorded"; a result the reader left unread under
-    its own limits is "omitted_by_reader". Neither is "omitted_by_budget".
+    Availability is decided here: a mapped step records only its first
+    item's prompt and a template fill records none; a field a run never
+    recorded is "not_recorded"; a result the reader left unread under its
+    own limits is "omitted_by_reader". "truncated" and "omitted_by_budget"
+    are set later by `fit_sample_excerpts`, against a real request.
+    ``step_orders`` keeps only the named steps, so a turn about two steps
+    never spends its budget on the others.
     """
 
     records_by_order = {
@@ -211,6 +192,8 @@ def excerpts_for_run(
     }
     excerpts: list[ReviewSampleExcerpt] = []
     for step in steps:
+        if step_orders is not None and step.step_order not in step_orders:
+            continue
         record = records_by_order.get(step.step_order)
         mapped = record is not None and _is_mapped_output(
             record.get("output_payload_json")
@@ -223,7 +206,6 @@ def excerpts_for_run(
                     field=field,
                     record=record,
                     mapped=mapped,
-                    budget=budget,
                     missing_record_availability=(
                         "omitted_by_reader"
                         if reader_omitted_records
@@ -241,7 +223,6 @@ def _excerpt(
     field: ExcerptField,
     record: dict[str, Any] | None,
     mapped: bool,
-    budget: ExcerptBudget,
     missing_record_availability: ExcerptAvailability,
 ) -> ReviewSampleExcerpt:
     def unavailable(availability: ExcerptAvailability) -> ReviewSampleExcerpt:
@@ -262,15 +243,82 @@ def _excerpt(
     text = _recorded_text(record, field)
     if text is None:
         return unavailable("not_recorded")
-    taken, availability = budget.take(text)
     return ReviewSampleExcerpt(
         run_id=run_id,
         step_order=step.step_order,
         field=field,
-        availability=availability,
-        text=taken if availability != "omitted_by_budget" else None,
+        availability="included",
+        text=text,
         recorded_chars=len(text),
     )
+
+
+# ---- fitting and quoting -------------------------------------------------------
+
+
+def fit_sample_excerpts(
+    sample: FlowReviewSample,
+    *,
+    fits: Callable[[FlowReviewSample], bool],
+) -> FlowReviewSample:
+    """The sample with as much excerpt text as the request can carry.
+
+    ``fits`` measures a candidate the way the provider call will be measured.
+    Included excerpts share the room fairly; one cut short is "truncated" and
+    one left without room is "omitted_by_budget", so the model and the reader
+    of its answer are told what was not read.
+    """
+
+    readable = [
+        (index, excerpt.text)
+        for index, excerpt in enumerate(sample.excerpts)
+        if excerpt.availability == "included" and excerpt.text
+    ]
+
+    def render(allocations: Mapping[int, int]) -> FlowReviewSample:
+        excerpts: list[ReviewSampleExcerpt] = []
+        for index, excerpt in enumerate(sample.excerpts):
+            if excerpt.availability != "included" or not excerpt.text:
+                excerpts.append(excerpt)
+                continue
+            allowed = min(allocations.get(index, 0), len(excerpt.text))
+            if allowed == len(excerpt.text):
+                excerpts.append(excerpt)
+            elif allowed > 0:
+                excerpts.append(
+                    excerpt.model_copy(
+                        update={
+                            "availability": "truncated",
+                            "text": excerpt.text[:allowed],
+                        }
+                    )
+                )
+            else:
+                excerpts.append(
+                    excerpt.model_copy(
+                        update={"availability": "omitted_by_budget", "text": None}
+                    )
+                )
+        return sample.model_copy(update={"excerpts": excerpts})
+
+    return fit_text_allocations(readable, render=render, fits=fits)
+
+
+PROMPT_LINE_BREAKERS = ("\u2028", "\u2029", "\u0085")
+
+
+def quoted_excerpt(text: str | None) -> str:
+    """Recorded text as one quoted line that cannot become several.
+
+    An excerpt is evidence to weigh, and it reaches a model's prompt. Written
+    as a quoted, escaped string on a single line, it cannot open a heading,
+    close the block it sits in, or pose as the instructions around it.
+    """
+
+    quoted = json.dumps(text or "", ensure_ascii=False)
+    for breaker in PROMPT_LINE_BREAKERS:
+        quoted = quoted.replace(breaker, f"\\u{ord(breaker):04x}")
+    return quoted
 
 
 def _is_mapped_output(payload: object) -> bool:

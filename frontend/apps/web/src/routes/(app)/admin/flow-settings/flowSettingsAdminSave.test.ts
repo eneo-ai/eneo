@@ -16,6 +16,7 @@ const BUILDER_BUDGET: AIBuilderBudgetSettings = {
   minimum_conversation_budget_tokens: 4_000,
   max_attachments: 50,
   max_message_chars: 50_000,
+  review_evidence_max_input_tokens: null,
   max_template_inspection_uncompressed_bytes: 200 * 1024 * 1024,
   max_template_placeholders: 1_000,
   max_attachments_hard_limit: 100,

@@ -175,6 +175,7 @@ function pageData(mappedOverrides: Record<string, unknown> = {}) {
     aiBuilderBudgetSettings: {
       max_attachments: 100,
       max_message_chars: 50_000,
+      review_evidence_max_input_tokens: null,
       max_attachments_hard_limit: 100,
       max_message_chars_hard_limit: 50_000
     },

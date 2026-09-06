@@ -19,9 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 from collections import defaultdict
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Sequence
 from uuid import UUID
@@ -33,15 +32,12 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
-    PER_EXCERPT_CHARS,
     READ_DEADLINE_SECONDS,
-    TOTAL_EXCERPT_CHARS,
-    ExcerptBudget,
     FlowReviewSample,
-    ReviewSampleBudget,
     ReviewSampleExcerpt,
     ReviewSampleRun,
     excerpts_for_run,
+    quoted_excerpt,
     reader_omitted_step_results,
     select_sample_run_ids,
     structural_steps,
@@ -51,6 +47,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     MAX_SUGGESTIONS,
     FlowReviewSuggestionKind,
 )
+from eneo.flows.ai_builder.ai_builder_text_fitting import fit_text_allocations
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
 from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunStatusSnapshot, FlowVersion
@@ -308,24 +305,6 @@ class FlowReviewEvidence(BaseModel):
 # JSON escapes the ASCII newline but, with non-ASCII text left readable, not
 # these three - and each of them ends a line for anything that reads the
 # prompt by lines. Recorded text may contain them, so they are escaped by name.
-_PROMPT_LINE_BREAKERS = ("\u2028", "\u2029", "\u0085")
-
-
-def _quoted_excerpt(text: str | None) -> str:
-    """Recorded text as one quoted line that cannot become several.
-
-    An excerpt is evidence to weigh, and it reaches the planner's system
-    prompt. Written as a quoted, escaped string on a single line, it cannot
-    open a heading, close the block it sits in, or pose as the instructions
-    around it.
-    """
-
-    quoted = json.dumps(text or "", ensure_ascii=False)
-    for breaker in _PROMPT_LINE_BREAKERS:
-        quoted = quoted.replace(breaker, f"\\u{ord(breaker):04x}")
-    return quoted
-
-
 _EXCERPT_FIELD_LABELS_SV: dict[str, str] = {
     "prompt": "instruktion",
     "input": "indata",
@@ -761,6 +740,53 @@ def review_edit_changed_nothing(step_changes: Sequence["StepChange"]) -> bool:
     return all(change.kind == "unchanged" for change in step_changes)
 
 
+def fit_review_evidence(
+    evidence: FlowReviewEvidence,
+    *,
+    fits: Callable[[FlowReviewEvidence], bool],
+) -> FlowReviewEvidence:
+    """The evidence with as much excerpt text as the prompt can carry.
+
+    The facts and the suggestions always travel; the excerpts share the room
+    fairly and are marked truncated or omitted when they do not fit, so the
+    planner is told what it did not read.
+    """
+
+    readable = [
+        (index, excerpt.text)
+        for index, excerpt in enumerate(evidence.excerpts)
+        if excerpt.availability == "included" and excerpt.text
+    ]
+
+    def render(allocations: Mapping[int, int]) -> FlowReviewEvidence:
+        excerpts: list[ReviewSampleExcerpt] = []
+        for index, excerpt in enumerate(evidence.excerpts):
+            if excerpt.availability != "included" or not excerpt.text:
+                excerpts.append(excerpt)
+                continue
+            allowed = min(allocations.get(index, 0), len(excerpt.text))
+            if allowed == len(excerpt.text):
+                excerpts.append(excerpt)
+            elif allowed > 0:
+                excerpts.append(
+                    excerpt.model_copy(
+                        update={
+                            "availability": "truncated",
+                            "text": excerpt.text[:allowed],
+                        }
+                    )
+                )
+            else:
+                excerpts.append(
+                    excerpt.model_copy(
+                        update={"availability": "omitted_by_budget", "text": None}
+                    )
+                )
+        return evidence.model_copy(update={"excerpts": excerpts})
+
+    return fit_text_allocations(readable, render=render, fits=fits)
+
+
 def render_review_evidence(evidence: FlowReviewEvidence) -> str:
     """The findings as prompt lines for the planner, in the product's language."""
     labels = {
@@ -836,7 +862,7 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
                     if excerpt.availability == "truncated"
                     else ""
                 )
-                lines.append(f"- {source}{cut}: {_quoted_excerpt(excerpt.text)}")
+                lines.append(f"- {source}{cut}: {quoted_excerpt(excerpt.text)}")
             else:
                 lines.append(
                     f"- {source}: {_EXCERPT_AVAILABILITY_SV[excerpt.availability]}."
@@ -1117,6 +1143,8 @@ class AIBuilderFlowReviewService:
         space_id: UUID,
         audit: ReviewSampleAudit,
         run_ids: Sequence[UUID] | None = None,
+        step_orders: Collection[int] | None = None,
+        packet: FlowReviewPacket | None = None,
     ) -> FlowReviewSample:
         """The packet plus bounded run content one model call may read.
 
@@ -1131,9 +1159,14 @@ class AIBuilderFlowReviewService:
         the cohort may since have turned over. A run that is gone or no
         longer viewable is left out and never named, exactly as the packet
         leaves one out; the caller decides what its absence means.
+        ``step_orders`` reads only the named steps' content.
+
+        Excerpts are read whole here; the request that carries them fits them
+        to its model's window (`fit_sample_excerpts`).
         """
 
-        packet = await self.build_packet(flow_id=flow_id, space_id=space_id)
+        if packet is None:
+            packet = await self.build_packet(flow_id=flow_id, space_id=space_id)
         _, version = await self._published(flow_id=flow_id, space_id=space_id)
         steps = parse_published_runtime_steps(
             version.definition_json, flow_version=packet.flow_version
@@ -1141,7 +1174,6 @@ class AIBuilderFlowReviewService:
         level = packet.evidence_classification_level
         runs: list[ReviewSampleRun] = []
         excerpts: list[ReviewSampleExcerpt] = []
-        budget = ExcerptBudget()
         try:
             async with asyncio.timeout(READ_DEADLINE_SECONDS):
                 selected = (
@@ -1180,10 +1212,10 @@ class AIBuilderFlowReviewService:
                             run_id=run.id,
                             steps=steps,
                             step_result_records=bundle.step_results,
-                            budget=budget,
                             reader_omitted_records=reader_omitted_step_results(
                                 bundle.debug_export
                             ),
+                            step_orders=step_orders,
                         )
                     )
         except TimeoutError as exc:
@@ -1198,11 +1230,6 @@ class AIBuilderFlowReviewService:
             steps=structural_steps(steps),
             runs=runs,
             excerpts=excerpts,
-            budget=ReviewSampleBudget(
-                per_excerpt_chars=PER_EXCERPT_CHARS,
-                total_excerpt_chars=TOTAL_EXCERPT_CHARS,
-                used_excerpt_chars=budget.used,
-            ),
         )
 
     async def resolve_sample_run_levels(

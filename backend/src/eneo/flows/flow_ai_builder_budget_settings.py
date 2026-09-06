@@ -25,6 +25,7 @@ AI_BUILDER_BUDGET_FIELDS = frozenset(
         "max_message_chars",
         "max_template_inspection_uncompressed_bytes",
         "max_template_placeholders",
+        "review_evidence_max_input_tokens",
     }
 )
 

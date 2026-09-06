@@ -118,6 +118,9 @@ class AIBuilderBudgetPolicy:
         AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
     )
     max_template_placeholders: int = AI_BUILDER_DEFAULT_MAX_TEMPLATE_PLACEHOLDERS
+    # How much of a review model's window the run evidence may fill. None is
+    # the model's own window: the capability decides, the tenant may cap it.
+    review_evidence_max_input_tokens: int | None = None
 
     def classification_request_budget(
         self,
@@ -133,6 +136,33 @@ class AIBuilderBudgetPolicy:
             minimum_output_tokens=AI_BUILDER_CLASSIFICATION_MINIMUM_OUTPUT_TOKENS,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             timeout_seconds=self.classification_timeout_seconds,
+            request_id=request_id,
+        )
+
+    def review_request_budget(
+        self,
+        *,
+        context_window_tokens: int,
+        model_output_ceiling_tokens: int,
+        request_id: str | None = None,
+    ) -> AIBuilderRequestBudget:
+        """The review call: a short structured answer over a large evidence input.
+
+        The window is the model's, capped by tenant policy when one is set;
+        the answer is classification-sized; the deadline is the proposal's,
+        because the input can be as large as the window allows.
+        """
+
+        window = context_window_tokens
+        if self.review_evidence_max_input_tokens is not None:
+            window = min(window, self.review_evidence_max_input_tokens)
+        return AIBuilderRequestBudget(
+            context_window_tokens=window,
+            model_output_ceiling_tokens=model_output_ceiling_tokens,
+            target_output_tokens=AI_BUILDER_CLASSIFICATION_OUTPUT_TARGET_TOKENS,
+            minimum_output_tokens=AI_BUILDER_CLASSIFICATION_MINIMUM_OUTPUT_TOKENS,
+            safety_buffer_tokens=self.conversation_safety_buffer_tokens,
+            timeout_seconds=self.proposal_timeout_seconds,
             request_id=request_id,
         )
 
@@ -230,6 +260,14 @@ def resolve_ai_builder_budget_policy(
         if parsed_minimum_budget is not None:
             minimum_budget = parsed_minimum_budget
 
+    review_evidence_cap = resolved_defaults.review_evidence_max_input_tokens
+    if "review_evidence_max_input_tokens" in raw:
+        review_evidence_cap = _parse_token_int(
+            raw["review_evidence_max_input_tokens"],
+            "review_evidence_max_input_tokens",
+            allow_none=True,
+        )
+
     operating_limits = {
         "max_attachments": resolved_defaults.max_attachments,
         "max_message_chars": resolved_defaults.max_message_chars,
@@ -265,6 +303,7 @@ def resolve_ai_builder_budget_policy(
             "max_template_inspection_uncompressed_bytes"
         ],
         max_template_placeholders=operating_limits["max_template_placeholders"],
+        review_evidence_max_input_tokens=review_evidence_cap,
     )
 
 
@@ -277,6 +316,7 @@ def apply_ai_builder_budget_policy_patch(
     max_message_chars: int | None = None,
     max_template_inspection_uncompressed_bytes: int | None = None,
     max_template_placeholders: int | None = None,
+    review_evidence_max_input_tokens: int | None = None,
     remove_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     result = (
@@ -294,6 +334,11 @@ def apply_ai_builder_budget_policy_patch(
         next_settings["minimum_conversation_budget_tokens"] = _parse_token_int(
             minimum_conversation_budget_tokens,
             "minimum_conversation_budget_tokens",
+        )
+    if review_evidence_max_input_tokens is not None:
+        next_settings["review_evidence_max_input_tokens"] = _parse_token_int(
+            review_evidence_max_input_tokens,
+            "review_evidence_max_input_tokens",
         )
     operating_updates = {
         "max_attachments": max_attachments,

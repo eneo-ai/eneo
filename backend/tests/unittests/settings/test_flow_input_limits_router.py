@@ -246,6 +246,7 @@ async def test_get_ai_builder_budget_settings_delegates_to_service() -> None:
     service.get_ai_builder_budget_settings.return_value = AIBuilderBudgetSettingsPublic(
         conversation_safety_buffer_tokens=1500,
         minimum_conversation_budget_tokens=6000,
+        review_evidence_max_input_tokens=None,
         max_attachments=37,
         max_message_chars=12000,
         max_template_inspection_uncompressed_bytes=67108864,
@@ -279,6 +280,7 @@ async def test_patch_ai_builder_budget_settings_delegates_to_service() -> None:
         AIBuilderBudgetSettingsPublic(
             conversation_safety_buffer_tokens=1800,
             minimum_conversation_budget_tokens=5000,
+            review_evidence_max_input_tokens=None,
             max_attachments=42,
             max_message_chars=15000,
             max_template_inspection_uncompressed_bytes=67108864,

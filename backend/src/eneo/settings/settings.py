@@ -599,6 +599,8 @@ class FlowRagEvidencePolicyUpdate(BaseModel):
 class AIBuilderBudgetSettingsPublic(BaseModel):
     conversation_safety_buffer_tokens: int
     minimum_conversation_budget_tokens: int
+    # None: the review model's own context window bounds the run evidence.
+    review_evidence_max_input_tokens: int | None
     max_attachments: int
     max_message_chars: int
     max_template_inspection_uncompressed_bytes: int
@@ -645,6 +647,15 @@ class AIBuilderBudgetSettingsUpdate(BaseModel):
         default=None,
         ge=1,
         le=AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
+    )
+    review_evidence_max_input_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        le=AI_BUILDER_BUDGET_MAX_TOKENS,
+        description=(
+            "Cap on the review model's input for run evidence; send null to let "
+            "the model's context window decide."
+        ),
     )
 
 

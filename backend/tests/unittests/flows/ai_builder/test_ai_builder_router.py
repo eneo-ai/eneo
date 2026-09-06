@@ -3409,6 +3409,9 @@ def _review_container(*, session: _SnapshotSession, flow_settings=None, provider
         return_value=[SimpleNamespace(id=provider_id) for provider_id in providers]
     )
     container.audit_service.return_value.log = AsyncMock()
+    container.ai_builder_flow_review_service.return_value.build_packet = AsyncMock(
+        return_value=SimpleNamespace(evidence_classification_level=1)
+    )
     return container
 
 
@@ -3452,7 +3455,7 @@ class TestReviewSuggestionsEndpoint:
         run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
         bundle_reads: list[object] = []
 
-        async def _build_review_sample(*, flow_id, space_id, audit):
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
             await audit(run)
             bundle_reads.append(run.id)
             raise AssertionError("evidence must not be read after a failed audit")
@@ -3470,7 +3473,9 @@ class TestReviewSuggestionsEndpoint:
             )
 
         assert bundle_reads == []
-        service.prepare_review_judgement.assert_not_called()
+        # The model is resolved before any run content is read; the failed
+        # audit still stops everything after it.
+        service.prepare_review_judgement.assert_awaited_once()
         service.judge_review_sample.assert_not_called()
 
     @pytest.mark.anyio
@@ -3480,9 +3485,9 @@ class TestReviewSuggestionsEndpoint:
         container = _review_container(session=_SnapshotSession(fail_commit=True))
         run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
 
-        async def _build_review_sample(*, flow_id, space_id, audit):
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
             await audit(run)
-            return object()
+            return SimpleNamespace(evidence_classification_level=1)
 
         container.ai_builder_flow_review_service.return_value.build_review_sample = (
             _build_review_sample
@@ -3504,7 +3509,7 @@ class TestReviewSuggestionsEndpoint:
         container = _review_container(session=_SnapshotSession())
         run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
 
-        async def _build_review_sample(*, flow_id, space_id, audit):
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
             await audit(run)
             raise AIBuilderBadRequestException(
                 "too slow", code=AIBuilderErrorCode.REVIEW_SAMPLE_TIMEOUT
@@ -3531,9 +3536,9 @@ class TestReviewSuggestionsEndpoint:
         container = _review_container(session=_SnapshotSession())
         run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
 
-        async def _build_review_sample(*, flow_id, space_id, audit):
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
             await audit(run)
-            return object()
+            return SimpleNamespace(evidence_classification_level=1)
 
         container.ai_builder_flow_review_service.return_value.build_review_sample = (
             _build_review_sample
@@ -3554,7 +3559,36 @@ class TestReviewSuggestionsEndpoint:
                 space_id=uuid4(),
                 container=container,
             )
-        container.audit_service.return_value.log.assert_awaited_once()
+        # A model that cannot be resolved stops before any run content is
+        # read: nothing was audited because nothing was disclosed.
+        container.audit_service.return_value.log.assert_not_awaited()
+        service.judge_review_sample.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_a_sampled_run_above_the_packets_floor_is_refused_before_the_call(
+        self,
+    ):
+        container = _review_container(session=_SnapshotSession())
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
+            await audit(run)
+            return SimpleNamespace(evidence_classification_level=3)
+
+        container.ai_builder_flow_review_service.return_value.build_review_sample = (
+            _build_review_sample
+        )
+        service = container.ai_builder_service.return_value
+        service.prepare_review_judgement = AsyncMock(return_value=object())
+
+        with pytest.raises(AIBuilderBadRequestException) as excinfo:
+            await post_flow_review_suggestions(
+                request=_make_request(),
+                flow_id=run.flow_id,
+                space_id=uuid4(),
+                container=container,
+            )
+        assert excinfo.value.code == AIBuilderErrorCode.REVIEW_STALE
         service.judge_review_sample.assert_not_called()
 
     @pytest.mark.anyio
@@ -3565,11 +3599,11 @@ class TestReviewSuggestionsEndpoint:
             session=session, flow_settings={"x": 1}, providers=(provider_id,)
         )
         run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
-        sample = object()
+        sample = SimpleNamespace(evidence_classification_level=1)
         prepared = object()
         seen: dict[str, bool] = {}
 
-        async def _build_review_sample(*, flow_id, space_id, audit):
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
             await audit(run)
             return sample
 
@@ -3600,7 +3634,7 @@ class TestReviewSuggestionsEndpoint:
         assert seen == {"prepare_in_transaction": True, "judge_in_transaction": False}
         container.audit_service.return_value.log.assert_awaited_once()
         prepare_kwargs = service.prepare_review_judgement.await_args.kwargs
-        assert prepare_kwargs["sample"] is sample
+        assert prepare_kwargs["evidence_classification_level"] == 1
         assert prepare_kwargs["active_provider_ids"] == {provider_id}
         assert prepare_kwargs["tenant_flow_settings"] == {"x": 1}
         judge_kwargs = service.judge_review_sample.await_args.kwargs

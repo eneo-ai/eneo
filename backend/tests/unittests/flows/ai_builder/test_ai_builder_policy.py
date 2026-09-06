@@ -98,3 +98,35 @@ def test_proposal_budget_clamps_capabilities_without_model_specific_rules() -> N
     assert resolved_outputs == [6_144, 6_144]
     assert smaller_budget is not None
     assert smaller_budget.resolved_output_tokens == 4_096
+
+
+def test_review_evidence_cap_is_the_models_window_unless_the_tenant_caps_it() -> None:
+    policy = resolve_ai_builder_budget_policy(None)
+    assert policy.review_evidence_max_input_tokens is None
+    budget = policy.review_request_budget(
+        context_window_tokens=1_000_000, model_output_ceiling_tokens=8_000
+    )
+    assert budget.context_window_tokens == 1_000_000
+    assert budget.timeout_seconds == policy.proposal_timeout_seconds
+
+    capped = resolve_ai_builder_budget_policy(
+        {"ai_builder": {"review_evidence_max_input_tokens": 32_000}}
+    )
+    assert capped.review_evidence_max_input_tokens == 32_000
+    assert (
+        capped.review_request_budget(
+            context_window_tokens=1_000_000, model_output_ceiling_tokens=8_000
+        ).context_window_tokens
+        == 32_000
+    )
+    # A cap above the model's window never widens it.
+    assert (
+        capped.review_request_budget(
+            context_window_tokens=16_000, model_output_ceiling_tokens=8_000
+        ).context_window_tokens
+        == 16_000
+    )
+    with pytest.raises(AIBuilderBadRequestException):
+        resolve_ai_builder_budget_policy(
+            {"ai_builder": {"review_evidence_max_input_tokens": "many"}}
+        )

@@ -10104,6 +10104,8 @@ export interface components {
       max_template_uncompressed_bytes_per_file_hard_limit: number;
       /** Minimum Conversation Budget Tokens */
       minimum_conversation_budget_tokens: number;
+      /** Review Evidence Max Input Tokens */
+      review_evidence_max_input_tokens: number | null;
     };
     /** AIBuilderBudgetSettingsUpdate */
     AIBuilderBudgetSettingsUpdate: {
@@ -10119,6 +10121,11 @@ export interface components {
       max_template_placeholders?: number | null;
       /** Minimum Conversation Budget Tokens */
       minimum_conversation_budget_tokens?: number | null;
+      /**
+       * Review Evidence Max Input Tokens
+       * @description Cap on the review model's input for run evidence; send null to let the model's context window decide.
+       */
+      review_evidence_max_input_tokens?: number | null;
     };
     /** AIBuilderConversationMessage */
     AIBuilderConversationMessage: {

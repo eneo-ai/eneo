@@ -58,6 +58,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_flow_context import build_flow_context
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewEvidence,
+    fit_review_evidence,
     render_review_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_form_fields import (
@@ -365,7 +366,6 @@ async def prepare_planner_request(
         conversation=request.conversation,
         flow=request.flow,
         assistant_snapshots=request.assistant_snapshots,
-        review_evidence=request.review_evidence,
     )
     prior_resource_bindings = (
         request.prior_plan_for_revision.resource_bindings
@@ -434,6 +434,7 @@ async def prepare_planner_request(
         planning_state=rebuilt_planning_state,
         attachment_context=attachment_context_result,
         flow_context=flow_context,
+        review_evidence=request.review_evidence,
         is_edit_mode=request.flow is not None,
         resource_catalog=resource_catalog,
         flow=request.flow,
@@ -567,6 +568,7 @@ def build_proposal_prepared(
     planning_state: PlanningState,
     attachment_context: AIBuilderAttachmentContext | None,
     flow_context: str | None,
+    review_evidence: FlowReviewEvidence | None = None,
     is_edit_mode: bool,
     resource_catalog: AIBuilderResourceCatalog,
     flow: "Flow | None",
@@ -669,12 +671,13 @@ def build_proposal_prepared(
     def build_proposal_prompt(
         attachment_text: str | None,
         replayed_requirements: RequirementsSummaryPayload | None,
+        review_evidence: FlowReviewEvidence | None = None,
     ) -> str:
         return build_plan_proposal_system_prompt(
             planning_state=planning_state,
             confirmed_requirements=replayed_requirements,
             attachment_context=attachment_text,
-            flow_context=flow_context,
+            flow_context=_flow_context_with_evidence(flow_context, review_evidence),
             is_edit_mode=is_edit_mode,
             is_pure_audio_transcription=is_pure_audio_transcription,
             resource_catalog=resource_catalog,
@@ -700,6 +703,7 @@ def build_proposal_prepared(
     def prompt_fits(
         attachment_text: str | None,
         replayed_requirements: RequirementsSummaryPayload | None,
+        review_evidence: FlowReviewEvidence | None = None,
     ) -> bool:
         return (
             count_message_tokens(
@@ -707,7 +711,7 @@ def build_proposal_prepared(
                     {
                         "role": "system",
                         "content": build_proposal_prompt(
-                            attachment_text, replayed_requirements
+                            attachment_text, replayed_requirements, review_evidence
                         ),
                     }
                 ],
@@ -720,10 +724,23 @@ def build_proposal_prepared(
         confirmed_requirements,
         fits=lambda requirements: prompt_fits(None, requirements),
     )
+    # Run excerpts were read whole; the model's window decides how much of
+    # them this prompt carries, after the facts and the replayed requirements
+    # and before attachments, which are fitted into what remains.
+    fitted_review_evidence = (
+        fit_review_evidence(
+            review_evidence,
+            fits=lambda evidence: prompt_fits(None, replayed_requirements, evidence),
+        )
+        if review_evidence is not None
+        else None
+    )
     fitted_attachment_context = (
         fit_ai_builder_attachment_context(
             attachment_context,
-            fits_context=lambda context: prompt_fits(context, replayed_requirements),
+            fits_context=lambda context: prompt_fits(
+                context, replayed_requirements, fitted_review_evidence
+            ),
         )
         if attachment_context is not None
         else None
@@ -735,6 +752,7 @@ def build_proposal_prepared(
             else None
         ),
         replayed_requirements,
+        fitted_review_evidence,
     )
     prepared_prompt = _prepare_prompt_messages(
         conversation=conversation,
@@ -973,21 +991,26 @@ def _build_flow_context_if_needed(
     conversation: list[ConversationMessage],
     flow: Flow | None,
     assistant_snapshots: AssistantAuthoringSnapshots | None,
-    review_evidence: FlowReviewEvidence | None = None,
 ) -> str | None:
     if flow is None:
         return None
     discovery_profile = build_discovery_profile(conversation, flow=flow)
-    context = build_flow_context(
+    return build_flow_context(
         flow,
         assistant_snapshots=assistant_snapshots,
         is_edit_mode=True,
         capabilities=discovery_profile.capabilities,
         edit_scope=discovery_profile.edit_scope,
     )
+
+
+def _flow_context_with_evidence(
+    flow_context: str | None, review_evidence: FlowReviewEvidence | None
+) -> str | None:
     if review_evidence is None:
-        return context
-    return f"{context}\n\n{render_review_evidence(review_evidence)}"
+        return flow_context
+    rendered = render_review_evidence(review_evidence)
+    return rendered if flow_context is None else f"{flow_context}\n\n{rendered}"
 
 
 def _prepare_prompt_messages(

@@ -21,6 +21,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
     parse_schema_candidate,
 )
+from eneo.flows.ai_builder.ai_builder_text_fitting import fit_text_allocations
 from eneo.flows.ai_builder.planning_state import (
     ATTACHMENT_JSON_SCHEMA_EVIDENCE_SUFFIX,
     TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX,
@@ -542,69 +543,14 @@ def fit_ai_builder_attachment_context(
             truncated=attachment_context.truncated
             or attachment_context.context is not None,
         )
-    empty_context = _render_attachment_context_with_allocations(
-        attachment_context,
-        allocations={},
-    )
-    if not fits(empty_context):
-        return empty_context
-
-    total_available_chars = sum(len(text) for _, text in readable_items)
-    if total_available_chars == 0:
-        return empty_context
-
-    def render(char_budget: int) -> AIBuilderAttachmentContext:
-        bounded_budget = min(max(char_budget, 0), total_available_chars)
-        allocations = _fair_text_allocations(readable_items, bounded_budget)
-        return _render_attachment_context_with_allocations(
+    return fit_text_allocations(
+        readable_items,
+        render=lambda allocations: _render_attachment_context_with_allocations(
             attachment_context,
             allocations=allocations,
-        )
-
-    lower = 0
-    upper = 1
-    while upper < total_available_chars and fits(render(upper)):
-        lower = upper
-        upper = min(total_available_chars, upper * 2)
-
-    if fits(render(upper)):
-        return render(upper)
-
-    while lower + 1 < upper:
-        midpoint = (lower + upper) // 2
-        if fits(render(midpoint)):
-            lower = midpoint
-        else:
-            upper = midpoint
-    return render(lower)
-
-
-def _fair_text_allocations(
-    readable_items: list[tuple[UUID, str]],
-    char_budget: int,
-) -> dict[UUID, int]:
-    allocations = {file_id: 0 for file_id, _ in readable_items}
-    remaining = min(char_budget, sum(len(text) for _, text in readable_items))
-    while remaining > 0:
-        active = [
-            (file_id, text)
-            for file_id, text in readable_items
-            if allocations[file_id] < len(text)
-        ]
-        if not active:
-            break
-        fair_share = max(1, remaining // len(active))
-        for file_id, text in active:
-            allocation = min(
-                fair_share,
-                len(text) - allocations[file_id],
-                remaining,
-            )
-            allocations[file_id] += allocation
-            remaining -= allocation
-            if remaining == 0:
-                break
-    return allocations
+        ),
+        fits=fits,
+    )
 
 
 def _render_attachment_context_with_allocations(

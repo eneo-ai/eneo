@@ -895,6 +895,7 @@ class SettingService:
         return AIBuilderBudgetSettingsPublic(
             conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
             minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
+            review_evidence_max_input_tokens=policy.review_evidence_max_input_tokens,
             max_attachments=policy.max_attachments,
             max_message_chars=policy.max_message_chars,
             max_template_inspection_uncompressed_bytes=(

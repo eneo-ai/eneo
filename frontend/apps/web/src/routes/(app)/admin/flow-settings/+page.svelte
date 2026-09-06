@@ -102,6 +102,13 @@
     max: initial.aiBuilderBudgetSettings.max_message_chars_hard_limit,
     required: true
   });
+  // Off: the review model's own context window bounds the run evidence.
+  const builderReviewEvidenceCap = new ToggleNumberField({
+    initial: initial.aiBuilderBudgetSettings.review_evidence_max_input_tokens ?? null,
+    min: 1,
+    max: initial.aiBuilderBudgetSettings.budget_token_hard_limit,
+    suggestion: 128_000
+  });
   const mappedCalls = new ToggleNumberField({
     initial: initial.mappedExecutionPolicy.max_provider_calls_per_mapped_step ?? null,
     min: 2,
@@ -145,6 +152,7 @@
     maxStepTimeout,
     builderMaxAttachments,
     builderMaxMessageChars,
+    builderReviewEvidenceCap,
     mappedCalls,
     evidenceSources,
     evidencePassages,
@@ -270,6 +278,9 @@
     if (builderMaxMessageChars.dirty) {
       builderBudget.max_message_chars = builderMaxMessageChars.value ?? undefined;
     }
+    if (builderReviewEvidenceCap.dirty) {
+      builderBudget.review_evidence_max_input_tokens = builderReviewEvidenceCap.value;
+    }
 
     const ragEvidence: FlowAdminSettingsUpdates["ragEvidence"] = {};
     if (evidenceSources.dirty) {
@@ -323,6 +334,9 @@
     if (updated.builderBudget) {
       builderMaxAttachments.commit(updated.builderBudget.max_attachments);
       builderMaxMessageChars.commit(updated.builderBudget.max_message_chars);
+      builderReviewEvidenceCap.commit(
+        updated.builderBudget.review_evidence_max_input_tokens ?? null
+      );
     }
     if (updated.ragEvidence) {
       evidenceSources.commit(updated.ragEvidence.max_sources_with_recorded_passages);
@@ -562,6 +576,19 @@
               pages: builderMessagePages
             })}
             field={builderMaxMessageChars}
+          />
+          <Settings.ToggleNumberRow
+            title={m.ai_builder_limits_review_evidence_title()}
+            description={m.ai_builder_limits_review_evidence_description()}
+            toggleLabel={m.ai_builder_limits_review_evidence_label()}
+            valueLabel={m.flow_settings_value_max_label()}
+            unit={m.flow_settings_unit_tokens()}
+            offStatus={m.ai_builder_limits_review_evidence_off_status()}
+            info={m.ai_builder_limits_review_evidence_info()}
+            hint={m.ai_builder_limits_ceiling_hint({
+              value: String(data.aiBuilderBudgetSettings.budget_token_hard_limit)
+            })}
+            field={builderReviewEvidenceCap}
           />
         </Settings.Group>
 
