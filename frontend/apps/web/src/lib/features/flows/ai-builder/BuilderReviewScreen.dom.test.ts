@@ -485,6 +485,7 @@ describe("BuilderReviewScreen plan document", () => {
                         current: "Strukturera transkriberingen"
                       },
                       { field: "output_type", previous: "text", current: "json" },
+                      { field: "review_policy", previous: null, current: "view" },
                       {
                         field: "instructions",
                         previous: "Skriv om texten fritt.",
@@ -529,6 +530,9 @@ describe("BuilderReviewScreen plan document", () => {
     expect(rows[1]).toBe(
       `${m.ai_builder_step_change_previous_label()}: ${m.flow_type_text()} → ${m.ai_builder_step_change_current_label()}: ${m.flow_output_type_simple_structured()}`
     );
+    expect(rows[2]).toBe(
+      `${m.ai_builder_step_change_previous_label()}: ${m.flow_step_review_policy_none()} → ${m.ai_builder_step_change_current_label()}: ${m.flow_step_review_policy_view()}`
+    );
     expect(
       within(changes)
         .getAllByRole("term")
@@ -536,6 +540,7 @@ describe("BuilderReviewScreen plan document", () => {
     ).toEqual([
       m.ai_builder_step_change_field_name(),
       m.ai_builder_step_change_field_output_type(),
+      m.flow_step_review_policy(),
       m.ai_builder_step_instructions()
     ]);
     // The previous wording waits behind a fold; the current text is already on screen.

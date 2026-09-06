@@ -1143,6 +1143,127 @@ async def test_ordered_form_fields_diff_complete_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_review_only_edit_is_modified_and_names_the_review_policy() -> None:
+    flow = _diff_fixture_flow()
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Pause for a human after the review step.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "review_mode": "view",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    changes = result.compiled.content.edit.diff.step_changes
+    assert [change.kind for change in changes] == ["unchanged", "modified", "unchanged"]
+    assert [(c.field, c.previous, c.current) for c in changes[1].field_changes] == [
+        ("review_policy", None, "view")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_output_contract_only_edit_names_the_fields() -> None:
+    result = await _process(
+        flow=_source_reader_flow(),
+        planning_state=_planning_state_with_slots(
+            primary_runtime_input="documents",
+            post_processing_goal="summarize_or_overview",
+        ),
+        arguments={
+            "plan_rationale": "Capture the author as well.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_contract": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "summary": {"type": "string"},
+                            "author": {"type": "string"},
+                        },
+                    },
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    changes = result.compiled.content.edit.diff.step_changes
+    assert changes[0].kind == "modified"
+    assert [(c.field, c.previous, c.current) for c in changes[0].field_changes] == [
+        ("output_contract", "title, summary", "title, summary, author")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_binding_only_edit_names_the_input_sources() -> None:
+    flow = _diff_fixture_flow()
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Feed the review only the summary.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "uses_previous_fields": [{"from_step": 1, "field_path": "summary"}],
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady)
+    assert result.compiled.content.edit is not None
+    changes = result.compiled.content.edit.diff.step_changes
+    assert changes[1].kind == "modified"
+    fields = {c.field: (c.previous, c.current) for c in changes[1].field_changes}
+    assert fields["input_bindings"] == (None, "source_refs: Extract case.summary")
+    # Every modified step explains itself: no change without a field behind it.
+    assert all(change.field_changes for change in changes if change.kind == "modified")
+
+
+def _diff_fixture_flow() -> SimpleNamespace:
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extract case",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Review case",
+            input_source="previous_step",
+            input_type="json",
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Archive result",
+            input_source="previous_step",
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> None:
     flow = _flow(
         _flow_step(
@@ -1210,7 +1331,7 @@ async def test_ordered_step_diff_covers_unchanged_modified_added_removed() -> No
         for change in modified.field_changes
     ] == [
         ("name", "Review case", "Review updated"),
-        ("instructions", "", "Review the extracted case."),
+        ("instructions", None, "Review the extracted case."),
     ]
     assert edit.diff.step_changes[0].field_changes == []
     assert edit.diff.net_steps_added == 1

@@ -289,7 +289,17 @@
     output_type: m.ai_builder_step_change_field_output_type,
     instructions: m.ai_builder_step_instructions,
     model_ref: m.ai_builder_step_change_field_model_ref,
-    knowledge_refs: m.ai_builder_step_change_field_knowledge_refs
+    knowledge_refs: m.ai_builder_step_change_field_knowledge_refs,
+    input_bindings: m.ai_builder_step_change_field_input_bindings,
+    input_contract: m.ai_builder_step_change_field_input_contract,
+    input_config: m.ai_builder_step_change_field_input_config,
+    output_contract: m.ai_builder_step_change_field_output_contract,
+    output_config: m.ai_builder_step_change_field_output_config,
+    review_policy: m.flow_step_review_policy
+  };
+  const REVIEW_POLICY_LABELS: Record<string, () => string> = {
+    view: m.flow_step_review_policy_view,
+    edit: m.flow_step_review_policy_edit
   };
   const OUTPUT_MODE_LABELS: Record<string, () => string> = {
     pass_through: m.flow_output_mode_pass_through,
@@ -306,6 +316,11 @@
     all_previous_steps: m.ai_builder_step_all_previous
   };
   function fieldChangeValue(field: StepFieldChange["field"], value: string | null): string {
+    if (field === "review_policy") {
+      return value === null
+        ? m.flow_step_review_policy_none()
+        : (REVIEW_POLICY_LABELS[value]?.() ?? value);
+    }
     if (value === null || value === "") return m.ai_builder_step_change_none();
     switch (field) {
       case "input_type":

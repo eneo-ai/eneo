@@ -7,7 +7,9 @@ that every existing step is either represented in order or explicitly removed.
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -35,6 +37,9 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import FlowInputFieldProvenance
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
+)
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    schema_leaf_property_names,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
@@ -73,7 +78,10 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.input_binding_contract_rules import SOURCE_REFS_BINDING_KEY
+from eneo.flows.input_binding_contract_rules import (
+    SOURCE_REFS_BINDING_KEY,
+    describe_input_bindings,
+)
 from eneo.flows.step_lineage import (
     existing_step_order_from_ref,
     existing_step_ref_for_order,
@@ -617,6 +625,12 @@ def _build_step_changes(
         removed_names[step.existing_step_ref] = step.name
     baseline_specs = _normalize_baseline_specs_for_diff(baseline_steps)
 
+    # Binding refs are plan-local bookkeeping; the change list names the step.
+    step_names = {step.plan_step_ref: step.name for step in compiled_steps}
+
+    def step_label(ref: str) -> str:
+        return step_names.get(ref, ref)
+
     step_changes: list[StepChange] = []
     for step in compiled_steps:
         if step.existing_step_ref is None:
@@ -630,22 +644,26 @@ def _build_step_changes(
             continue
 
         previous = baseline_specs.get(step.existing_step_ref)
-        if previous is None or not _step_specs_equivalent(previous, step):
-            step_changes.append(
-                StepChange(
-                    kind="modified",
-                    step_name=step.name,
-                    step_ref=step.existing_step_ref,
-                    field_changes=_step_field_changes(previous, step),
-                )
+        if previous is None:
+            # Existing steps are compiled from the published baseline and their
+            # coverage is validated before this point; a missing one here is
+            # compiler corruption, and a diff that hid it would approve it.
+            raise AIBuilderArchitectureError(
+                public_code="architecture_materialization_failed",
+                repair_disposition="server_defect",
+                detail=(
+                    "Compiled existing step has no published baseline to diff "
+                    f"against: {step.existing_step_ref}"
+                ),
+                log_context={"failure_code": "step_diff_missing_baseline"},
             )
-            continue
-
+        field_changes = _step_field_changes(previous, step, step_label=step_label)
         step_changes.append(
             StepChange(
-                kind="unchanged",
+                kind="modified" if field_changes else "unchanged",
                 step_name=step.name,
                 step_ref=step.existing_step_ref,
+                field_changes=field_changes,
             )
         )
 
@@ -661,10 +679,6 @@ def _build_step_changes(
             )
         )
     return step_changes
-
-
-def _step_specs_equivalent(previous: StepSpec, current: StepSpec) -> bool:
-    return _comparable_step_payload(previous) == _comparable_step_payload(current)
 
 
 def _canonicalize_step_for_diff(
@@ -708,48 +722,103 @@ def _comparable_step_payload(step: StepSpec) -> dict[str, Any]:
     return payload
 
 
+# Every comparable field of a step, in reading order. The assistant spec is
+# read as its three parts. A StepSpec field missing here fails loudly below,
+# so a new field can never change a step without being explained.
+_STEP_CHANGE_FIELDS: tuple[StepChangeField, ...] = (
+    "name",
+    "instructions",
+    "model_ref",
+    "knowledge_refs",
+    "input_source",
+    "input_type",
+    "input_bindings",
+    "input_contract",
+    "input_config",
+    "output_mode",
+    "output_type",
+    "output_contract",
+    "output_config",
+    "review_policy",
+)
+_ASSISTANT_SPEC_FIELDS: tuple[StepChangeField, ...] = (
+    "instructions",
+    "model_ref",
+    "knowledge_refs",
+)
+
+
 def _step_field_changes(
-    previous: StepSpec | None, current: StepSpec
+    previous: StepSpec, current: StepSpec, *, step_label: Callable[[str], str]
 ) -> list[StepFieldChange]:
-    """The fields that differ between the published step and the proposal.
+    """What differs between the published step and the proposal, field by field.
 
-    The step-level equivalence check compares the whole payload; these are the
-    user-facing fields of that payload, so the plan can show what changed
-    rather than only that something did.
+    This is the one comparison that decides whether a step is modified: the
+    step is unchanged exactly when this list is empty, so an "updated" badge
+    always has something to show.
     """
-    if previous is None:
-        return []
 
-    def refs(values: list[str]) -> str | None:
-        return ", ".join(values) if values else None
+    before = _comparable_step_payload(previous)
+    after = _comparable_step_payload(current)
+    before_spec = cast(dict[str, Any], before.pop("assistant_spec"))
+    after_spec = cast(dict[str, Any], after.pop("assistant_spec"))
+    unaccounted = set(before) - set(_STEP_CHANGE_FIELDS)
+    if unaccounted:
+        raise AIBuilderArchitectureError(
+            public_code="architecture_materialization_failed",
+            repair_disposition="server_defect",
+            detail=(
+                "StepSpec fields without a change explanation: "
+                + ", ".join(sorted(unaccounted))
+            ),
+            log_context={"failure_code": "step_diff_unexplained_field"},
+        )
+    changes: list[StepFieldChange] = []
+    for field in _STEP_CHANGE_FIELDS:
+        source_before, source_after = (
+            (before_spec, after_spec)
+            if field in _ASSISTANT_SPEC_FIELDS
+            else (before, after)
+        )
+        value_before = source_before.get(field)
+        value_after = source_after.get(field)
+        if value_before == value_after:
+            continue
+        changes.append(
+            StepFieldChange(
+                field=field,
+                previous=_readable_field_value(field, value_before, step_label),
+                current=_readable_field_value(field, value_after, step_label),
+            )
+        )
+    return changes
 
-    candidates: list[tuple[StepChangeField, str | None, str | None]] = [
-        ("name", previous.name, current.name),
-        ("input_source", previous.input_source.value, current.input_source.value),
-        ("input_type", previous.input_type.value, current.input_type.value),
-        ("output_mode", previous.output_mode.value, current.output_mode.value),
-        ("output_type", previous.output_type.value, current.output_type.value),
-        (
-            "instructions",
-            previous.assistant_spec.instructions,
-            current.assistant_spec.instructions,
-        ),
-        (
-            "model_ref",
-            previous.assistant_spec.model_ref,
-            current.assistant_spec.model_ref,
-        ),
-        (
-            "knowledge_refs",
-            refs(previous.assistant_spec.knowledge_refs),
-            refs(current.assistant_spec.knowledge_refs),
-        ),
-    ]
-    return [
-        StepFieldChange(field=field, previous=before, current=after)
-        for field, before, after in candidates
-        if before != after
-    ]
+
+def _readable_field_value(
+    field: StepChangeField, value: Any, step_label: Callable[[str], str]
+) -> str | None:
+    """The value as the plan can show it; None reads as "none" on screen."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, list):
+        items = cast(list[Any], value)
+        return ", ".join(str(item) for item in items) or None
+    if isinstance(value, dict):
+        payload = cast(dict[str, Any], value)
+        if field in ("input_contract", "output_contract"):
+            return ", ".join(schema_leaf_property_names(payload)) or None
+        if field == "input_bindings":
+            return describe_input_bindings(payload, step_label=step_label)
+        if field == "review_policy":
+            mode = payload.get("mode")
+            return str(mode) if mode is not None else None
+        return json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    return str(value)
 
 
 def _compute_confidence(

@@ -11,13 +11,19 @@ from eneo.json_types import JsonValue
 
 StepChangeField = Literal[
     "name",
-    "input_source",
-    "input_type",
-    "output_mode",
-    "output_type",
     "instructions",
     "model_ref",
     "knowledge_refs",
+    "input_source",
+    "input_type",
+    "input_bindings",
+    "input_contract",
+    "input_config",
+    "output_mode",
+    "output_type",
+    "output_contract",
+    "output_config",
+    "review_policy",
 ]
 
 

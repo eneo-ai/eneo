@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, cast
@@ -334,6 +334,35 @@ def _insert_projected_schema(
     current_required = cast(list[str], current.setdefault("required", []))
     if leaf not in current_required:
         current_required.append(leaf)
+
+
+def describe_input_bindings(
+    input_bindings: object,
+    *,
+    step_label: Callable[[str], str] | None = None,
+) -> str | None:
+    """One readable line for a binding: its source refs, or the question it asks.
+
+    ``step_label`` turns a step ref into what the reader calls that step; without
+    it the ref itself is shown.
+    """
+
+    if not input_bindings:
+        return None
+    refs = source_ref_bindings(input_bindings)
+    if refs:
+
+        def label(ref: str) -> str:
+            return step_label(ref) if step_label is not None else ref
+
+        return "source_refs: " + ", ".join(
+            label(ref.step_ref)
+            + ("." + ".".join(ref.field_path) if ref.field_path else "")
+            for ref in refs
+        )
+    if question_binding(input_bindings) is not None:
+        return "question template"
+    return None
 
 
 def source_ref_bindings(input_bindings: object) -> tuple[SourceRefBinding, ...]:

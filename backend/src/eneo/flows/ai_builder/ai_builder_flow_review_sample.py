@@ -22,10 +22,7 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
 from eneo.flows.domain.runtime import RuntimeStep
-from eneo.flows.input_binding_contract_rules import (
-    question_binding,
-    source_ref_bindings,
-)
+from eneo.flows.input_binding_contract_rules import describe_input_bindings
 
 if TYPE_CHECKING:
     # The packet lives in the review module, which imports this one; the
@@ -135,7 +132,7 @@ def structural_steps(steps: list[RuntimeStep]) -> list[ReviewSampleStep]:
             input_type=step.input_type,
             output_type=step.output_type,
             output_mode=step.output_mode,
-            binding_summary=_binding_summary(step.input_bindings),
+            binding_summary=describe_input_bindings(step.input_bindings),
             output_contract_fields=(
                 schema_leaf_property_names(step.output_contract)
                 if step.output_contract is not None
@@ -149,20 +146,6 @@ def structural_steps(steps: list[RuntimeStep]) -> list[ReviewSampleStep]:
         )
         for step in steps
     ]
-
-
-def _binding_summary(input_bindings: dict[str, Any] | None) -> str | None:
-    if not input_bindings:
-        return None
-    refs = source_ref_bindings(input_bindings)
-    if refs:
-        return "source_refs: " + ", ".join(
-            ref.step_ref + ("." + ".".join(ref.field_path) if ref.field_path else "")
-            for ref in refs
-        )
-    if question_binding(input_bindings) is not None:
-        return "question template"
-    return None
 
 
 class ExcerptBudget:
