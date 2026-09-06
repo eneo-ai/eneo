@@ -285,6 +285,11 @@ describe("BuilderFindingsScreen suggestions", () => {
           screen.getByText(m.ai_builder_review_suggestion_investigate_hint()).textContent ?? "";
         expect(note).toMatch(/motivering|reasoning/i);
         expect(note).toMatch(/citat|quotes/i);
+        // The investigation rereads the named runs and takes bounded excerpts
+        // of them to the planner, so the note has to say so: it is the only
+        // place the user is told what leaves this screen.
+        expect(note).toMatch(/läser om|rereads/i);
+        expect(note).toMatch(/utdrag|excerpts/i);
       } finally {
         setLocale(previous, { reload: false });
       }
