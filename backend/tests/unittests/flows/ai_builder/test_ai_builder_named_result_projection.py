@@ -942,8 +942,10 @@ def test_an_exact_model_declaration_compiles_verified_and_canonicalized() -> Non
     assert names.index("reading_notes") < names.index("handlaggare_kommentar")
     assert properties["documents"]["type"] == "array"
     assert properties["candidate_passages"]["type"] == "array"
-    # The user dictated the contract: a primitive attested root the model
-    # declared non-nullable serializes exactly as the user wrote it.
+    # The proposal declared this primitive attested root non-nullable and the
+    # compiler no longer overrides that. The evidence here carries names and
+    # container shapes only, so this is passthrough, not proof that the user
+    # forbade null.
     assert properties["source_reference"]["type"] == "string"
 
 
@@ -1803,9 +1805,7 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
             available_models=[], available_kbs=[]
         ),
     )
-    assert "The backend already declares these user-named result fields" not in (
-        empty_prompt
-    )
+    assert "The user attested to these named results" not in empty_prompt
 
 
 def test_the_prompt_names_exact_paths_and_marks_unplaced_results() -> None:
