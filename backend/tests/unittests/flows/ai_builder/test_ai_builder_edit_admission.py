@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import jsonschema
 import pytest
 from pydantic import ValidationError
 
 from eneo.flows.ai_builder.ai_builder_edit_admission import lower_edit_tool_arguments
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
+)
+from eneo.flows.ai_builder.ai_builder_flow_review import (
+    ReviewEditScope,
+    validate_review_edit_proposal,
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
@@ -264,3 +269,63 @@ def test_a_malformed_field_tree_is_a_validation_error_not_a_silent_drop() -> Non
                 )
             )
         )
+
+
+def test_a_scoped_strict_payload_lowers_to_what_the_findings_allow() -> None:
+    # The scoped schema lists untouched steps as keep and offers no flow-level
+    # fields; the lowered proposal must read as touching only the findings'
+    # step, so the scope check has nothing to refuse.
+    scope = ReviewEditScope(
+        step_refs=frozenset({"existing_step_2"}),
+        removable_step_refs=frozenset(),
+        may_add=False,
+    )
+    schema = build_edit_flow_tool_schema(
+        [_step(1), _step(2), _step(3)],
+        resource_catalog=_catalog(),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        review_scope=scope,
+    )
+    arguments: dict[str, object] = {
+        "plan_rationale": "Tighten step 2's instructions.",
+        "assumptions": [],
+        "steps": [
+            {"kind": "keep", "existing_step_ref": "existing_step_1"},
+            _strict_modify(
+                "existing_step_2",
+                assistant_spec={
+                    "instructions": "Read the source and cite it.",
+                    "knowledge_refs": None,
+                },
+            ),
+            {"kind": "keep", "existing_step_ref": "existing_step_3"},
+        ],
+    }
+    validate_propose_flow_tool_arguments(
+        arguments=arguments,  # type: ignore[arg-type]
+        tool_schema=schema,  # type: ignore[arg-type]
+    )
+    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
+    jsonschema.validate(arguments, strict["function"]["parameters"])
+
+    proposal = OrderedEditProposal.model_validate(lower_edit_tool_arguments(arguments))
+
+    kept = [step for step in proposal.steps if isinstance(step, ModifyExistingStep)]
+    assert [step.existing_step_ref for step in kept] == [
+        "existing_step_1",
+        "existing_step_2",
+        "existing_step_3",
+    ]
+    assert kept[0].model_fields_set == {"kind", "existing_step_ref"}
+    assert kept[2].model_fields_set == {"kind", "existing_step_ref"}
+    assert kept[1].assistant_spec is not None
+    assert (
+        validate_review_edit_proposal(
+            scope=scope,
+            proposal=proposal,
+            flow_name="Flow",
+            flow_description="Current description",
+            current_step_refs=["existing_step_1", "existing_step_2", "existing_step_3"],
+        )
+        is None
+    )

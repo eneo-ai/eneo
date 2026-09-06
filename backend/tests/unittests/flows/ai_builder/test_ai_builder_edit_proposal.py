@@ -2885,6 +2885,21 @@ def _audio_document_flow(
     )
 
 
+def test_the_turn_scope_is_read_from_the_handoff_and_not_after_the_user_typed() -> None:
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        review_edit_scope_for_turn,
+    )
+
+    scope = review_edit_scope_for_turn(_review_command_conversation())
+    assert scope is not None and scope.step_refs == frozenset({"existing_step_1"})
+    assert (
+        review_edit_scope_for_turn(
+            _review_command_conversation(then_the_user_typed="Byt namn på flödet")
+        )
+        is None
+    )
+
+
 def _review_command_conversation(*, then_the_user_typed: str | None = None):
     """A suggestion handoff, optionally followed by the user's own message."""
     from eneo.flows.ai_builder.ai_builder_conversation_metadata import (

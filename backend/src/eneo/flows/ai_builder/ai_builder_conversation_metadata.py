@@ -50,6 +50,8 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     PersistedReviewContext,
     PersistedReviewReference,
     PersistedSuggestionContext,
+    ReviewEditScope,
+    review_edit_scope,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
@@ -2429,6 +2431,24 @@ def latest_user_review_context(
         if message.role == "user" and names_a_review(message.metadata):
             return review_context_from_metadata(message.metadata)
     return None
+
+
+def review_edit_scope_for_turn(
+    conversation: Sequence[_ConversationMetadataMessage],
+) -> ReviewEditScope | None:
+    """The edit scope bounding the turn now being answered, if it is a handoff.
+
+    Read before any projection, because the projection removes the very
+    message that carries the reference. Only the turn that IS the handoff is
+    bounded: once the user has typed something of their own, the edit is
+    theirs and takes the ordinary route. The tool schema and the admission
+    checks read the same scope, so the model is offered exactly what it may
+    change and refused nothing it was invited to write.
+    """
+
+    if not latest_turn_is_review_command(conversation):
+        return None
+    return review_edit_scope(latest_user_review_context(conversation))
 
 
 def conversation_evidence_floor(

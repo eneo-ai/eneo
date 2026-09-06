@@ -66,6 +66,10 @@ def _lower_step(step: Any) -> Any:
     if not isinstance(step, dict):
         return step
     typed = cast(dict[str, Any], step)
+    if typed.get("kind") == "keep":
+        # A step the turn leaves as it is: the canonical proposal lists it as
+        # a modify that changes nothing.
+        return {"kind": "modify", "existing_step_ref": typed.get("existing_step_ref")}
     if typed.get("kind") == "modify":
         return _lower_modify_step(typed)
     if typed.get("kind") == "add" and isinstance(typed.get("step"), dict):

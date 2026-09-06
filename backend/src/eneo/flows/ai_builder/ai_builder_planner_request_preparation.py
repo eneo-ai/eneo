@@ -24,6 +24,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     provider_safe_tool_call_id,
     question_answer_from_metadata,
     review_command_is_the_only_user_intent,
+    review_edit_scope_for_turn,
     semantic_conversation,
     tool_calls_from_message,
     ui_language_from_metadata,
@@ -648,6 +649,7 @@ def build_proposal_prepared(
         current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
         is_pure_audio_transcription=is_pure_audio_transcription,
+        review_scope=review_edit_scope_for_turn(conversation),
         confirmed_runtime_inputs=(
             compile_context.confirmed_runtime_input_requirements
             if compile_context is not None and not is_edit_mode

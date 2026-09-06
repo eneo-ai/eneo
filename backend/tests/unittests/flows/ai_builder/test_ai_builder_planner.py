@@ -5361,6 +5361,42 @@ def _review_evidence(excerpt_chars: int):
     )
 
 
+def test_a_handoff_turn_is_offered_the_review_scoped_edit_tool() -> None:
+    # The same scope that the admission checks read shapes the tool: a strict
+    # provider cannot write what the schema does not offer.
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=128,
+        minimum_conversation_budget_tokens=256,
+    )
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="sv",
+        slot_classification_metadata=None,
+        conversation=[_review_command_message(server_authored=True)],
+        planning_state=_document_architecture_state(),
+        attachment_context=None,
+        flow_context=None,
+        review_evidence=_review_evidence(2_000),
+        is_edit_mode=True,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=_reviewed_flow(),
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=60_000,
+        max_output_tokens=1024,
+        budget_policy=policy,
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+    parameters = prepared.proposal_tool_schema["function"]["parameters"]
+    assert "flow_description" not in parameters["properties"]
+    assert "form_fields" not in parameters["properties"]
+
+
 def _build_review_backed_proposal(
     *,
     review_evidence_max_input_tokens: int | None,

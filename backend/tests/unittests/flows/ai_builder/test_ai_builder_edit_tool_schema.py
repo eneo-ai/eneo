@@ -503,3 +503,66 @@ class TestBuildEditFlowToolSchema:
             None,
         ]
         assert props["review_mode"]["enum"] == ["view", "edit", "none", None]
+
+
+class TestReviewScopedEditSchema:
+    """A handoff turn is offered exactly what its findings allow."""
+
+    def _scoped(self, **scope: object):
+        from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
+        from eneo.flows.ai_builder.ai_builder_tools import (
+            build_native_strict_tool_schema,
+            validate_native_strict_schema,
+        )
+
+        review_scope = ReviewEditScope(
+            step_refs=frozenset(scope.get("step_refs", {"existing_step_2"})),
+            removable_step_refs=frozenset(scope.get("removable", ())),
+            may_add=bool(scope.get("may_add", False)),
+        )
+        schema = build_edit_flow_tool_schema(
+            [_make_step(1), _make_step(2), _make_step(3)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            review_scope=review_scope,
+        )
+        strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
+        validate_native_strict_schema(strict["function"]["parameters"])
+        return schema["function"]["parameters"]
+
+    def test_flow_level_fields_and_removal_are_absent_unless_the_findings_allow(
+        self,
+    ) -> None:
+        params = self._scoped()
+        assert set(params["properties"]) == {"plan_rationale", "steps", "assumptions"}
+
+        with_removal = self._scoped(removable={"existing_step_2"})
+        assert with_removal["properties"]["removed_existing_step_refs"]["items"][
+            "enum"
+        ] == ["existing_step_2"]
+
+    def test_only_the_findings_steps_can_be_modified_and_the_rest_are_kept(
+        self,
+    ) -> None:
+        branches = self._scoped()["properties"]["steps"]["items"]["anyOf"]
+        by_kind = {
+            branch["properties"]["kind"]["enum"][0]: branch for branch in branches
+        }
+        assert set(by_kind) == {"modify", "keep"}
+        assert by_kind["modify"]["properties"]["existing_step_ref"]["enum"] == [
+            "existing_step_2"
+        ]
+        assert by_kind["keep"]["properties"]["existing_step_ref"]["enum"] == [
+            "existing_step_1",
+            "existing_step_2",
+            "existing_step_3",
+        ]
+        assert set(by_kind["keep"]["properties"]) == {"kind", "existing_step_ref"}
+
+    def test_adding_is_offered_only_when_the_findings_call_for_it(self) -> None:
+        kinds = lambda params: {  # noqa: E731
+            branch["properties"]["kind"]["enum"][0]
+            for branch in params["properties"]["steps"]["items"]["anyOf"]
+        }
+        assert "add" not in kinds(self._scoped())
+        assert "add" in kinds(self._scoped(may_add=True))

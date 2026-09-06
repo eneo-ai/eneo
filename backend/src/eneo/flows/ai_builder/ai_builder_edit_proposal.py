@@ -12,8 +12,7 @@ from eneo.flows.ai_builder.ai_builder_compiled_spec_preparation import (
     prepare_compiled_spec_for_session,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
-    latest_turn_is_review_command,
-    latest_user_review_context,
+    review_edit_scope_for_turn,
     semantic_conversation,
 )
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
@@ -35,7 +34,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     review_edit_changed_nothing,
     review_edit_renamed_outside_the_scope,
-    review_edit_scope,
     validate_review_edit_effect,
     validate_review_edit_proposal,
 )
@@ -115,15 +113,7 @@ async def process_edit_arguments(
     prior_spec_for_revision: FlowDraftSpecCore | None = None,
     compile_context: CreateCompileContext | None = None,
 ) -> PreparationOutcome:
-    # The scope is read before the projection, because the projection removes
-    # the very message that carries the reference. Only the turn that IS the
-    # handoff is bounded by it: once the user has typed something of their
-    # own, the edit is theirs and takes the ordinary route.
-    review_scope = (
-        review_edit_scope(latest_user_review_context(conversation))
-        if latest_turn_is_review_command(conversation)
-        else None
-    )
+    review_scope = review_edit_scope_for_turn(conversation)
     # Everything below reads the conversation to check the model's proposal
     # against what was asked, never to build a prompt, so it reads the
     # semantic projection: the server's own review command is not a request

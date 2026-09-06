@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, NotRequired, TypedDict
 import jsonschema
 from jsonschema.validators import validator_for
 
+if TYPE_CHECKING:
+    from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
+
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
@@ -62,6 +65,7 @@ def build_propose_flow_tool_schema(
     current_steps: list["FlowStep"] | None = None,
     is_pure_audio_transcription: bool = False,
     confirmed_runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = (),
+    review_scope: "ReviewEditScope | None" = None,
 ) -> ProposalToolSchema:
     if current_steps is None:
         return cast(
@@ -79,6 +83,7 @@ def build_propose_flow_tool_schema(
             current_steps,
             resource_catalog=resource_catalog,
             tool_name=PROPOSE_FLOW_TOOL_NAME,
+            review_scope=review_scope,
         ),
     )
 
