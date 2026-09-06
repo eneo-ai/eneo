@@ -99,18 +99,20 @@
     });
   }
 
-  function investigate(suggestion: AIBuilderFlowReviewSuggestion) {
-    if (!packet || suggestions.status !== "ready") return;
-    // Fixed text from kind and steps; the server writes the same text itself
-    // and never sees the rationale or the quotes.
+  function investigate(chosen: AIBuilderFlowReviewSuggestion[]) {
+    if (!packet || suggestions.status !== "ready" || chosen.length === 0) return;
+    // Fixed text from kinds and steps: the server builds the authoritative
+    // message from the same typed reference and never sees the rationale or
+    // the quotes. However many are chosen,
+    // it is one turn: one packet, one reading of the runs, one proposal.
     onprepare({
-      message: investigationMessage(suggestion),
+      message: investigationMessage(chosen),
       reviewContext: {
         kind: "flow_review_suggestion",
         flow_version: suggestions.suggestions.flow_version,
         definition_checksum: suggestions.suggestions.definition_checksum,
         sample_run_ids: suggestions.suggestions.sample.run_ids,
-        suggestions: [suggestionFocus(suggestion)]
+        suggestions: chosen.map(suggestionFocus)
       }
     });
   }
@@ -443,19 +445,55 @@
                       <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                         <Button
                           size="sm"
+                          variant={judged.suggestions.length > 1 ? "outline" : "default"}
                           class="h-8"
                           {disabled}
-                          onclick={() => investigate(suggestion)}
+                          aria-label={judged.suggestions.length > 1
+                            ? m.ai_builder_review_suggestion_investigate_only_action({
+                                kind: suggestionKindLabel(suggestion.kind).toLocaleLowerCase(),
+                                steps: suggestionStepsLabel(
+                                  suggestion.step_orders
+                                ).toLocaleLowerCase()
+                              })
+                            : undefined}
+                          aria-describedby="ai-builder-review-handoff-note"
+                          onclick={() => investigate([suggestion])}
                         >
-                          {m.ai_builder_review_suggestion_investigate()}
+                          {judged.suggestions.length > 1
+                            ? m.ai_builder_review_suggestion_investigate_only()
+                            : m.ai_builder_review_suggestion_investigate()}
                         </Button>
-                        <span class="text-secondary text-xs">
-                          {m.ai_builder_review_suggestion_investigate_hint()}
-                        </span>
+                        {#if judged.suggestions.length === 1}
+                          <span id="ai-builder-review-handoff-note" class="text-secondary text-xs">
+                            {m.ai_builder_review_suggestion_investigate_hint()}
+                          </span>
+                        {/if}
                       </div>
                     </li>
                   {/each}
                 </ul>
+                {#if judged.suggestions.length > 1}
+                  <!-- One turn for all of them: the same reading of the same
+                       runs, and one proposal to approve. Said once here rather
+                       than on every card. -->
+                  <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <Button
+                      size="sm"
+                      class="h-8"
+                      {disabled}
+                      data-testid="suggestions-investigate-all"
+                      aria-describedby="ai-builder-review-handoff-note"
+                      onclick={() => investigate(judged.suggestions)}
+                    >
+                      {m.ai_builder_review_suggestions_investigate_all({
+                        count: String(judged.suggestions.length)
+                      })}
+                    </Button>
+                    <span id="ai-builder-review-handoff-note" class="text-secondary text-xs">
+                      {m.ai_builder_review_suggestion_investigate_hint()}
+                    </span>
+                  </div>
+                {/if}
                 {#if judged.unverified_count > 0}
                   <p
                     class="text-secondary mt-2 text-xs text-pretty"

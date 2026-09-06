@@ -44,14 +44,25 @@ export function suggestionFocus(suggestion: AIBuilderFlowReviewSuggestion): {
   };
 }
 
-/** The fixed handoff text. The server writes the same text from the typed
- *  reference and ignores what the client sends, so this only shows the user
- *  what the turn will say. */
-export function investigationMessage(suggestion: AIBuilderFlowReviewSuggestion): string {
-  return m.ai_builder_review_suggestion_investigate_message({
-    kind: suggestionKindLabel(suggestion.kind).toLocaleLowerCase(),
-    steps: suggestionStepsLabel(suggestion.step_orders).toLocaleLowerCase()
-  });
+/** What the turn will say, shown before it is sent. The server builds the
+ *  authoritative message from the same typed reference and ignores what the
+ *  client sends, so this preview can differ from it in wording order and
+ *  language (eneo-y9m). Several suggestions are one turn, so they are one
+ *  sentence. */
+export function investigationMessage(suggestions: AIBuilderFlowReviewSuggestion[]): string {
+  const named = suggestions.map((suggestion) =>
+    m.ai_builder_review_suggestion_investigate_item({
+      kind: suggestionKindLabel(suggestion.kind).toLocaleLowerCase(),
+      steps: suggestionStepsLabel(suggestion.step_orders).toLocaleLowerCase()
+    })
+  );
+  if (named.length === 1) {
+    return m.ai_builder_review_suggestion_investigate_message({
+      kind: suggestionKindLabel(suggestions[0].kind).toLocaleLowerCase(),
+      steps: suggestionStepsLabel(suggestions[0].step_orders).toLocaleLowerCase()
+    });
+  }
+  return m.ai_builder_review_suggestions_investigate_message({ items: named.join("; ") });
 }
 
 export function suggestionSourceLabel(

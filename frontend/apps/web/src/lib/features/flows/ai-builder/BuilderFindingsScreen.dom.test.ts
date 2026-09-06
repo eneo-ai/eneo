@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import { getLocale, setLocale } from "$lib/paraglide/runtime";
-import type { AIBuilderFlowReviewPacket } from "./protocol";
+import type { AIBuilderFlowReviewPacket, AIBuilderFlowReviewSuggestion } from "./protocol";
 import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
 
 const STEP_1 = "11111111-1111-4111-8111-111111111111";
@@ -355,6 +355,131 @@ describe("BuilderFindingsScreen suggestions", () => {
     expect(detail.message).not.toContain("tre punkter");
     expect(detail.message).not.toContain("sammanfattar");
     expect(detail.message).toContain("1 och 2");
+  });
+
+  it("investigates every suggestion in one turn, or just the one", async () => {
+    const base = makeSuggestions();
+    const judged = {
+      ...base,
+      suggestions: [
+        base.suggestions[0],
+        {
+          kind: "missing_check",
+          step_orders: [3],
+          rationale: "Ingen kontroll av beloppet.",
+          sources: [{ run_id: RUN_1, step_order: 3, field: "output", quote: "belopp saknas" }],
+          fact_ids: []
+        }
+      ] as AIBuilderFlowReviewSuggestion[]
+    };
+    const onprepare = vi.fn();
+    render(BuilderFindingsScreen, {
+      props: {
+        review: { status: "ready", packet: makePacket() },
+        suggestions: { status: "ready", suggestions: judged },
+        onprepare,
+        onsuggest: vi.fn(),
+        onretry: vi.fn(),
+        onclose: vi.fn()
+      }
+    });
+
+    // One button for all of them, and each card offers only itself.
+    await fireEvent.click(screen.getByTestId("suggestions-investigate-all"));
+    expect(onprepare).toHaveBeenCalledTimes(1);
+    const all = onprepare.mock.calls[0][0];
+    expect(all.reviewContext.suggestions).toEqual([
+      { suggestion_kind: "duplicated_work", step_orders: [1, 2] },
+      { suggestion_kind: "missing_check", step_orders: [3] }
+    ]);
+    // Both are named, in one sentence, and no rationale travels.
+    expect(all.message).toContain("1 och 2");
+    expect(all.message).toContain("3");
+    expect(all.message).not.toContain("beloppet");
+
+    onprepare.mockClear();
+    // Each card's action says which suggestion it investigates, so the six a
+    // review may show are not six buttons with one name.
+    const onlyThisDuplicate = screen.getByRole("button", {
+      name: m.ai_builder_review_suggestion_investigate_only_action({
+        kind: m.ai_builder_review_suggestion_kind_duplicated_work().toLocaleLowerCase(),
+        steps: m.ai_builder_review_suggestion_steps({ steps: "1 och 2" }).toLocaleLowerCase()
+      })
+    });
+    const onlyThisCheck = screen.getByRole("button", {
+      name: m.ai_builder_review_suggestion_investigate_only_action({
+        kind: m.ai_builder_review_suggestion_kind_missing_check().toLocaleLowerCase(),
+        steps: m.ai_builder_review_suggestion_steps({ steps: "3" }).toLocaleLowerCase()
+      })
+    });
+    expect(onlyThisDuplicate).not.toBe(onlyThisCheck);
+    // The name a speech-input user would say is the label they can see, so the
+    // accessible name starts with it rather than replacing it.
+    for (const button of [onlyThisDuplicate, onlyThisCheck]) {
+      expect(button.textContent).toContain(m.ai_builder_review_suggestion_investigate_only());
+      expect(button.getAttribute("aria-label")).toContain(
+        m.ai_builder_review_suggestion_investigate_only()
+      );
+    }
+
+    await fireEvent.click(onlyThisCheck);
+    expect(onprepare.mock.calls[0][0].reviewContext.suggestions).toEqual([
+      { suggestion_kind: "missing_check", step_orders: [3] }
+    ]);
+
+    // The note is what every action is described by, said once.
+    const note = document.getElementById("ai-builder-review-handoff-note");
+    expect(note?.textContent).toBe(m.ai_builder_review_suggestion_investigate_hint());
+    expect(onlyThisCheck.getAttribute("aria-describedby")).toBe("ai-builder-review-handoff-note");
+    expect(screen.getByTestId("suggestions-investigate-all").getAttribute("aria-describedby")).toBe(
+      "ai-builder-review-handoff-note"
+    );
+  });
+
+  it("says that the runs are read again, because they are", async () => {
+    // The investigation rereads the named runs and sends bounded excerpts of
+    // them to the planner. The note has to say so: it is the only place the
+    // user is told what leaves this screen.
+    render(BuilderFindingsScreen, {
+      props: {
+        review: { status: "ready", packet: makePacket() },
+        suggestions: { status: "ready", suggestions: makeSuggestions() },
+        onprepare: vi.fn(),
+        onsuggest: vi.fn(),
+        onretry: vi.fn(),
+        onclose: vi.fn()
+      }
+    });
+
+    const note = document.getElementById("ai-builder-review-handoff-note");
+    // What clicking does, before what it sends.
+    expect(note?.textContent).toContain("ändringsförslag som du godkänner");
+    expect(note?.textContent).toContain("läser om");
+    expect(note?.textContent).toContain("utdrag");
+    expect(note?.textContent).toContain("Motiveringen och citaten här följer inte med");
+  });
+
+  it("offers a single suggestion without asking which", async () => {
+    render(BuilderFindingsScreen, {
+      props: {
+        review: { status: "ready", packet: makePacket() },
+        suggestions: { status: "ready", suggestions: makeSuggestions() },
+        onprepare: vi.fn(),
+        onsuggest: vi.fn(),
+        onretry: vi.fn(),
+        onclose: vi.fn()
+      }
+    });
+
+    expect(screen.queryByTestId("suggestions-investigate-all")).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: m.ai_builder_review_suggestion_investigate_only()
+      })
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: m.ai_builder_review_suggestion_investigate() })
+    ).toBeTruthy();
   });
 
   it("distinguishes an empty judgement from a failed one", async () => {
