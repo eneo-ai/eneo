@@ -357,6 +357,52 @@ describe("BuilderFindingsScreen suggestions", () => {
     expect(detail.message).toContain("1 och 2");
   });
 
+  it("investigates every suggestion in one turn, or just one, with the same reference shape", async () => {
+    const onprepare = vi.fn();
+    const judged = makeSuggestions();
+    const second = {
+      ...judged.suggestions[0],
+      kind: "missing_check" as const,
+      step_orders: [3],
+      rationale: "Ingen kontroll av tomma svar.",
+      sources: [judged.suggestions[0].sources[0]]
+    };
+    render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: {
+        status: "ready",
+        suggestions: { ...judged, suggestions: [second, judged.suggestions[0]] }
+      },
+      onprepare,
+      onsuggest: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+
+    await fireEvent.click(screen.getByTestId("investigate-all"));
+    expect(onprepare).toHaveBeenCalledTimes(1);
+    const all = onprepare.mock.calls[0][0];
+    expect(all.reviewContext.suggestions).toEqual([
+      { suggestion_kind: "missing_check", step_orders: [3] },
+      { suggestion_kind: "duplicated_work", step_orders: [1, 2] }
+    ]);
+    // One sentence names both; still no rationale, no quote.
+    expect(all.message).toContain("1 och 2");
+    expect(all.message).toContain("3");
+    expect(all.message).not.toContain("tre punkter");
+    expect(all.message).not.toContain("tomma svar");
+
+    const only = screen.getAllByRole("button", {
+      name: m.ai_builder_review_suggestion_investigate_this()
+    });
+    expect(only).toHaveLength(2);
+    await fireEvent.click(only[1]);
+    const one = onprepare.mock.calls[1][0];
+    expect(one.reviewContext.suggestions).toEqual([
+      { suggestion_kind: "duplicated_work", step_orders: [1, 2] }
+    ]);
+  });
+
   it("distinguishes an empty judgement from a failed one", async () => {
     const { unmount } = render(BuilderFindingsScreen, {
       review: { status: "ready", packet: makePacket() },
