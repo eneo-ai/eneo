@@ -1305,6 +1305,11 @@ def test_edit_overlay_rejects_previous_field_missing_from_output_contract() -> N
         "missing_path": "missing",
         "source_step_ref": "step_a",
     }
+    # The model reads the message: it names the step, the field and what the
+    # step does declare, so one repair can fix it.
+    message = str(exc_info.value)
+    assert "Step 1 does not declare the field `missing`" in message
+    assert "Its declared fields are: answer" in message
     assert base.steps[1].assistant_spec.instructions == "Original prompt"
 
 

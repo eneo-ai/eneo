@@ -855,8 +855,28 @@ def _require_resolvable_previous_refs(
             continue
         missing_path = missing_structured_output_path(output_contract, ref.field_path)
         if missing_path is not None:
+            # The model reads the message, not the context: name the
+            # reference, where it breaks, and what the step declares, so one
+            # repair can either point at a declared field or declare the one
+            # it meant.
+            declared = sorted(
+                str(name)
+                for name in cast(
+                    dict[str, object], output_contract.get("properties") or {}
+                )
+            )
             raise AIBuilderBadRequestException(
-                "A previous-field reference is not declared by the source step output contract.",
+                f"Step {ref.from_step} does not declare the field "
+                f"`{ref.field_path}` that a previous-field reference reads"
+                + (
+                    f" (nothing at `{missing_path}`)"
+                    if missing_path != ref.field_path
+                    else ""
+                )
+                + ". Its declared fields are: "
+                + (", ".join(declared) if declared else "none")
+                + ". Reference one of those in uses_previous_fields, or add the "
+                "field to that step's output_fields.",
                 code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
                 context={
                     "ref_kind": ref_kind,

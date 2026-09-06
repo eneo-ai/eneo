@@ -1398,15 +1398,17 @@ def _final_text_step_must_reference_relevant_structured_outputs_remediation(
             "terminala textsteget sammanställa resultaten efter flera JSON-steg; "
             "i create-läget härleder kompilatorn de typade bindningarna."
         )
+    # Names only what the edit tool can set: the bindings are compiled from
+    # uses_previous_fields, so asking for input_bindings.question sent the
+    # model after a field it has no way to write.
     return (
         'Det sista komponerande textsteget läser `input_source="previous_step"` '
         "fastän flera tidigare steg producerar strukturerad JSON. Behåll "
-        '`input_source="previous_step"` men deklarera `uses_previous_fields` för '
-        "de fält som steget faktiskt behöver från varje relevant tidigare steg "
-        "och referera dem i `input_bindings.question` via "
-        "`{{ step_<ref>.output.structured.<fält> }}`. Eventuella DOCX/PDF-"
-        "renderingar i slutet förblir orörda — regeln gäller bara det "
-        "komponerande textsteget."
+        '`input_source="previous_step"` och deklarera `uses_previous_fields` på '
+        "det steget för de fält det faktiskt behöver från minst två av JSON-"
+        "stegen (from_step och field_path per fält); kompilatorn bygger "
+        "bindningarna. Eventuella DOCX/PDF-renderingar i slutet förblir orörda "
+        "— regeln gäller bara det komponerande textsteget."
     )
 
 
