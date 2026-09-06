@@ -717,7 +717,6 @@
             <Button
               variant="outline"
               size="sm"
-              class="ml-auto"
               onclick={handleStartOver}
               disabled={service.isCreating}
             >
