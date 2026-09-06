@@ -99,18 +99,19 @@
     });
   }
 
-  function investigate(suggestion: AIBuilderFlowReviewSuggestion) {
-    if (!packet || suggestions.status !== "ready") return;
-    // Fixed text from kind and steps; the server writes the same text itself
-    // and never sees the rationale or the quotes.
+  function investigate(selected: AIBuilderFlowReviewSuggestion[]) {
+    if (!packet || suggestions.status !== "ready" || selected.length === 0) return;
+    // One turn however many were selected. Fixed text from kinds and steps;
+    // the server writes the same text itself and never sees the rationale
+    // or the quotes.
     onprepare({
-      message: investigationMessage(suggestion),
+      message: investigationMessage(selected),
       reviewContext: {
         kind: "flow_review_suggestion",
         flow_version: suggestions.suggestions.flow_version,
         definition_checksum: suggestions.suggestions.definition_checksum,
         sample_run_ids: suggestions.suggestions.sample.run_ids,
-        suggestions: [suggestionFocus(suggestion)]
+        suggestions: selected.map(suggestionFocus)
       }
     });
   }
@@ -398,6 +399,24 @@
                   {m.ai_builder_review_suggestions_none()}
                 </p>
               {:else}
+                {#if judged.suggestions.length > 1}
+                  <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <Button
+                      size="sm"
+                      class="h-8"
+                      {disabled}
+                      data-testid="investigate-all"
+                      onclick={() => investigate(judged.suggestions)}
+                    >
+                      {m.ai_builder_review_suggestion_investigate_all({
+                        count: String(judged.suggestions.length)
+                      })}
+                    </Button>
+                    <span class="text-secondary text-xs">
+                      {m.ai_builder_review_suggestion_investigate_hint()}
+                    </span>
+                  </div>
+                {/if}
                 <ul class="mt-3 flex flex-col gap-2.5" data-testid="suggestions-list">
                   {#each judged.suggestions as suggestion, index (index)}
                     <li class="border-default bg-secondary rounded-lg border px-3.5 py-3">
@@ -441,17 +460,29 @@
                         </Collapsible.Content>
                       </Collapsible.Root>
                       <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <Button
-                          size="sm"
-                          class="h-8"
-                          {disabled}
-                          onclick={() => investigate(suggestion)}
-                        >
-                          {m.ai_builder_review_suggestion_investigate()}
-                        </Button>
-                        <span class="text-secondary text-xs">
-                          {m.ai_builder_review_suggestion_investigate_hint()}
-                        </span>
+                        {#if judged.suggestions.length > 1}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            class="h-8"
+                            {disabled}
+                            onclick={() => investigate([suggestion])}
+                          >
+                            {m.ai_builder_review_suggestion_investigate_this()}
+                          </Button>
+                        {:else}
+                          <Button
+                            size="sm"
+                            class="h-8"
+                            {disabled}
+                            onclick={() => investigate([suggestion])}
+                          >
+                            {m.ai_builder_review_suggestion_investigate()}
+                          </Button>
+                          <span class="text-secondary text-xs">
+                            {m.ai_builder_review_suggestion_investigate_hint()}
+                          </span>
+                        {/if}
                       </div>
                     </li>
                   {/each}

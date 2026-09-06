@@ -47,10 +47,17 @@ export function suggestionFocus(suggestion: AIBuilderFlowReviewSuggestion): {
 /** The fixed handoff text. The server writes the same text from the typed
  *  reference and ignores what the client sends, so this only shows the user
  *  what the turn will say. */
-export function investigationMessage(suggestion: AIBuilderFlowReviewSuggestion): string {
-  return m.ai_builder_review_suggestion_investigate_message({
+export function investigationMessage(suggestions: AIBuilderFlowReviewSuggestion[]): string {
+  const named = suggestions.map((suggestion) => ({
     kind: suggestionKindLabel(suggestion.kind).toLocaleLowerCase(),
     steps: suggestionStepsLabel(suggestion.step_orders).toLocaleLowerCase()
+  }));
+  if (named.length === 1) {
+    return m.ai_builder_review_suggestion_investigate_message(named[0]);
+  }
+  // Several suggestions become one turn and one sentence, as on the server.
+  return m.ai_builder_review_suggestion_investigate_message_many({
+    items: named.map((item) => `${item.kind} i ${item.steps}`).join("; ")
   });
 }
 
