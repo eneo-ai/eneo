@@ -357,51 +357,92 @@ describe("BuilderFindingsScreen suggestions", () => {
     expect(detail.message).toContain("1 och 2");
   });
 
-  it("investigates every suggestion in one turn, or just one, with the same reference shape", async () => {
-    const onprepare = vi.fn();
-    const judged = makeSuggestions();
-    const second = {
-      ...judged.suggestions[0],
-      kind: "missing_check" as const,
-      step_orders: [3],
-      rationale: "Ingen kontroll av tomma svar.",
-      sources: [judged.suggestions[0].sources[0]]
-    };
-    render(BuilderFindingsScreen, {
-      review: { status: "ready", packet: makePacket() },
-      suggestions: {
-        status: "ready",
-        suggestions: { ...judged, suggestions: [second, judged.suggestions[0]] }
-      },
-      onprepare,
-      onsuggest: vi.fn(),
-      onclose: vi.fn(),
-      onretry: vi.fn()
-    });
+  it.each([
+    {
+      locale: "sv" as const,
+      all: "Undersök följande utifrån körningarna: möjligt dubbelarbete i steg 1 och 2; en kontroll som kan saknas i steg 3.",
+      one: "Undersök möjligt dubbelarbete i steg 1 och 2 utifrån körningarna."
+    },
+    {
+      locale: "en" as const,
+      all: "Investigate the following based on the runs: possible duplicated work in step 1 and 2; a check that may be missing in step 3.",
+      one: "Investigate possible duplicated work in step 1 and 2 based on the runs."
+    }
+  ])(
+    "investigates every suggestion in one canonical turn, or just one, in $locale",
+    async ({ locale, all, one }) => {
+      const previous = getLocale();
+      try {
+        setLocale(locale, { reload: false });
+        const onprepare = vi.fn();
+        const judged = makeSuggestions();
+        const second = {
+          ...judged.suggestions[0],
+          kind: "missing_check" as const,
+          step_orders: [3],
+          rationale: "Ingen kontroll av tomma svar.",
+          sources: [judged.suggestions[0].sources[0]]
+        };
+        // Reversed order and a duplicate on the screen; one canonical set leaves it.
+        render(BuilderFindingsScreen, {
+          review: { status: "ready", packet: makePacket() },
+          suggestions: {
+            status: "ready",
+            suggestions: {
+              ...judged,
+              suggestions: [second, judged.suggestions[0], { ...judged.suggestions[0] }]
+            }
+          },
+          onprepare,
+          onsuggest: vi.fn(),
+          onclose: vi.fn(),
+          onretry: vi.fn()
+        });
+        const note = screen.getByTestId("review-suggestions").textContent ?? "";
+        expect(note).toMatch(/förslagens|suggestions'/i);
 
-    await fireEvent.click(screen.getByTestId("investigate-all"));
-    expect(onprepare).toHaveBeenCalledTimes(1);
-    const all = onprepare.mock.calls[0][0];
-    expect(all.reviewContext.suggestions).toEqual([
-      { suggestion_kind: "missing_check", step_orders: [3] },
-      { suggestion_kind: "duplicated_work", step_orders: [1, 2] }
-    ]);
-    // One sentence names both; still no rationale, no quote.
-    expect(all.message).toContain("1 och 2");
-    expect(all.message).toContain("3");
-    expect(all.message).not.toContain("tre punkter");
-    expect(all.message).not.toContain("tomma svar");
+        await fireEvent.click(screen.getByTestId("investigate-all"));
+        expect(onprepare).toHaveBeenCalledTimes(1);
+        const batch = onprepare.mock.calls[0][0];
+        expect(batch.reviewContext.suggestions).toEqual([
+          { suggestion_kind: "duplicated_work", step_orders: [1, 2] },
+          { suggestion_kind: "missing_check", step_orders: [3] }
+        ]);
+        // The exact sentence the server retains, in the screen's language.
+        expect(batch.message).toBe(all);
+        expect(batch.message).not.toContain("tre punkter");
+        expect(batch.message).not.toContain("tomma svar");
 
-    const only = screen.getAllByRole("button", {
-      name: m.ai_builder_review_suggestion_investigate_this()
-    });
-    expect(only).toHaveLength(2);
-    await fireEvent.click(only[1]);
-    const one = onprepare.mock.calls[1][0];
-    expect(one.reviewContext.suggestions).toEqual([
-      { suggestion_kind: "duplicated_work", step_orders: [1, 2] }
-    ]);
-  });
+        // Each per-card action carries its own accessible name (the two
+        // duplicated cards share theirs, being the same suggestion twice).
+        const duplicatedWork = screen.getAllByRole("button", {
+          name: m.ai_builder_review_suggestion_investigate_this_label({
+            kind: m.ai_builder_review_suggestion_kind_duplicated_work(),
+            steps: m.ai_builder_review_suggestion_steps({
+              steps: `1 ${m.ai_builder_review_suggestion_steps_join()} 2`
+            })
+          })
+        });
+        expect(duplicatedWork).toHaveLength(2);
+        expect(
+          screen.getAllByRole("button", {
+            name: m.ai_builder_review_suggestion_investigate_this_label({
+              kind: m.ai_builder_review_suggestion_kind_missing_check(),
+              steps: m.ai_builder_review_suggestion_steps({ steps: "3" })
+            })
+          })
+        ).toHaveLength(1);
+        await fireEvent.click(duplicatedWork[0]);
+        const single = onprepare.mock.calls[1][0];
+        expect(single.reviewContext.suggestions).toEqual([
+          { suggestion_kind: "duplicated_work", step_orders: [1, 2] }
+        ]);
+        expect(single.message).toBe(one);
+      } finally {
+        setLocale(previous, { reload: false });
+      }
+    }
+  );
 
   it("distinguishes an empty judgement from a failed one", async () => {
     const { unmount } = render(BuilderFindingsScreen, {

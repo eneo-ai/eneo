@@ -329,31 +329,60 @@ _SUGGESTION_KIND_LABELS_SV: dict[str, str] = {
     "step_not_useful": "att ett stegs utdata kanske inte används",
     "missing_check": "en kontroll som kan saknas",
 }
+_SUGGESTION_KIND_LABELS_EN: dict[str, str] = {
+    "duplicated_work": "possible duplicated work",
+    "instruction_outcome_drift": "output that may drift from the instruction",
+    "step_not_useful": "a step's output that may go unused",
+    "missing_check": "a check that may be missing",
+}
+
+
+def investigation_language(ui_language: str | None) -> Literal["sv", "en"]:
+    """The language the retained investigation text is written in: English
+    when the request says so, Swedish otherwise, exactly as the screen."""
+    return "en" if (ui_language or "").lower().startswith("en") else "sv"
 
 
 def _step_list_sv(step_orders: Sequence[int]) -> str:
+    return _step_list(step_orders, "sv")
+
+
+def _step_list(step_orders: Sequence[int], language: Literal["sv", "en"]) -> str:
     steps = [str(order) for order in dict.fromkeys(sorted(step_orders))]
+    noun, conjunction = ("steg", "och") if language == "sv" else ("step", "and")
     if len(steps) == 1:
-        return f"steg {steps[0]}"
-    return "steg " + ", ".join(steps[:-1]) + " och " + steps[-1]
+        return f"{noun} {steps[0]}"
+    return f"{noun} " + ", ".join(steps[:-1]) + f" {conjunction} " + steps[-1]
 
 
-def investigation_message(suggestions: Sequence[FlowReviewSuggestionFocus]) -> str:
+def investigation_message(
+    suggestions: Sequence[FlowReviewSuggestionFocus],
+    language: Literal["sv", "en"] = "sv",
+) -> str:
     """The user message the server writes for a suggestion handoff.
 
-    Fixed text from kinds and steps: the model's rationale and quotes stay on
-    the screen that showed them and never enter the conversation. Several
-    suggestions become one sentence, because they become one turn.
+    Fixed text from kinds and steps in the request's language: the model's
+    rationale and quotes stay on the screen that showed them and never enter
+    the conversation. Several suggestions become one sentence, because they
+    become one turn. The screen composes the same sentence from the same
+    parts, so what the user saw sent is what the conversation retains.
     """
 
+    labels = (
+        _SUGGESTION_KIND_LABELS_SV if language == "sv" else _SUGGESTION_KIND_LABELS_EN
+    )
+    joiner = " i " if language == "sv" else " in "
     named = [
-        f"{_SUGGESTION_KIND_LABELS_SV[focus.suggestion_kind]} i "
-        f"{_step_list_sv(focus.step_orders)}"
+        f"{labels[focus.suggestion_kind]}{joiner}{_step_list(focus.step_orders, language)}"
         for focus in suggestions
     ]
+    if language == "sv":
+        if len(named) == 1:
+            return f"Undersök {named[0]} utifrån körningarna."
+        return "Undersök följande utifrån körningarna: " + "; ".join(named) + "."
     if len(named) == 1:
-        return f"Undersök {named[0]} utifrån körningarna."
-    return "Undersök följande utifrån körningarna: " + "; ".join(named) + "."
+        return f"Investigate {named[0]} based on the runs."
+    return "Investigate the following based on the runs: " + "; ".join(named) + "."
 
 
 def resolve_suggestion_evidence(

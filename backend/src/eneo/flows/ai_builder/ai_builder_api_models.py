@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderReviewReference,
     AIBuilderSuggestionContext,
+    investigation_language,
     investigation_message,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
@@ -536,7 +537,10 @@ class SendMessageRequest(BaseModel):
         if isinstance(self.review_context, AIBuilderSuggestionContext):
             return self.model_copy(
                 update={
-                    "message": investigation_message(self.review_context.suggestions)
+                    "message": investigation_message(
+                        self.review_context.suggestions,
+                        investigation_language(self.ui_language),
+                    )
                 }
             )
         return self
