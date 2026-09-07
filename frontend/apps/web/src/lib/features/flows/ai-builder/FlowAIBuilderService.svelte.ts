@@ -146,9 +146,8 @@ export class FlowAIBuilderService {
   /** The launch scope, and only while the session it was opened from is the
    *  one on screen.
    *
-   *  A replacement session is published before its bootstrap finishes, so a
-   *  scope that outlived its own session would be sent with the first message
-   *  of the session that replaced it. Binding it to the session also means a
+   *  A scope that outlived its own session would otherwise be sent with the
+   *  first message of the session that replaced it. Binding it to the session also means a
    *  replacement that was refused gets its scope back with the session it
    *  never left. */
   get savedFlowStepScope(): AIBuilderSavedFlowStepScope | null {

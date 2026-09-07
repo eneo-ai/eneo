@@ -541,8 +541,8 @@
   });
 
   async function launchSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
-    // A resumed session can carry a plan before the plan itself has loaded;
-    // its latest_plan_id already says the edit is ongoing.
+    // The session fact (latest_plan_id) says the edit is ongoing; the decision
+    // reads it rather than the hydrated plan.
     if (
       service.messages.length > 0 ||
       service.currentPlan !== null ||

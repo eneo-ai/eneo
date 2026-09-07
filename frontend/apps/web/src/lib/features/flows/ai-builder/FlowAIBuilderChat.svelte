@@ -60,7 +60,6 @@
     } else {
       service.clearActiveStepScope();
     }
-    inputRef?.clearActivePlaceholder();
   }
 
   $effect(() => {

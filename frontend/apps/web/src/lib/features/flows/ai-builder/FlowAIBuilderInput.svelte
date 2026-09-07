@@ -228,8 +228,11 @@
     });
   }
 
-  export function clearActivePlaceholder() {
+  // Dismissing the edit context clears the placeholder that came with it; the
+  // input owns both, the parent only learns the context is gone.
+  function clearEditContext() {
     activePlaceholder = null;
+    oncleareditcontext?.();
   }
 
   async function handleSubmit() {
@@ -530,7 +533,7 @@
           type="button"
           class="composer-edit-context-clear"
           aria-label={m.ai_builder_edit_context_clear()}
-          onclick={oncleareditcontext}
+          onclick={clearEditContext}
         >
           {m.ai_builder_edit_context_clear_short()}
         </button>

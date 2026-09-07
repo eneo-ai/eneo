@@ -545,12 +545,15 @@ export class FlowAIBuilderDriver {
     this.#state.error = null;
     this.#notify();
 
-    let result: AIBuilderSession;
     try {
-      result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
         method: "get",
         params: { path: { session_id: sessionId } }
       })) as AIBuilderSession;
+      // Still inside the guarded region: a cancellation that lands while the
+      // plan loads must still find the pending owner, and the screen stays
+      // initializing until the session is actually on it.
+      if ((await this.#adoptSession(result, sessionGeneration)) === null) return;
     } catch (error) {
       if (sessionGeneration !== this.#sessionGeneration) return;
       this.#state.error = this.#parseAndReportError(
@@ -571,14 +574,15 @@ export class FlowAIBuilderDriver {
         this.#notify();
       }
     }
-    if ((await this.#adoptSession(result, sessionGeneration)) === null) return;
     await this.loadDraftSessions();
   }
 
   /** Publish a session only once everything a send reads is loaded: the plan
    *  it may be scoped to. A session on screen before that is sendable with a
    *  half-built context, and any notify in between (a model list arriving)
-   *  would publish that state. Models are display data and load afterwards. */
+   *  would publish that state. Models are display data and load afterwards.
+   *  A plan that cannot be loaded is a failed adoption (the error propagates
+   *  to the caller's own recovery), never a published planless session. */
   async #adoptSession(
     result: AIBuilderSession,
     sessionGeneration: number
@@ -599,16 +603,12 @@ export class FlowAIBuilderDriver {
     return owner;
   }
 
-  async #fetchPlan(planId: string): Promise<FlowAIBuilderState["currentPlan"]> {
-    try {
-      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.plan, {
-        method: "get",
-        params: { path: { plan_id: planId } }
-      })) as ProposedPlan;
-      return this.#normalizePlan(result);
-    } catch {
-      return null;
-    }
+  async #fetchPlan(planId: string): Promise<ProposedPlan> {
+    const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.plan, {
+      method: "get",
+      params: { path: { plan_id: planId } }
+    })) as ProposedPlan;
+    return this.#normalizePlan(result);
   }
 
   async discardSession(sessionId: string): Promise<void> {
@@ -1819,12 +1819,16 @@ export class FlowAIBuilderDriver {
       return true;
     }
 
-    const plan = await this.#fetchPlan(latestPlanId);
+    let plan: ProposedPlan;
+    try {
+      plan = await this.#fetchPlan(latestPlanId);
+    } catch {
+      // A refresh leaves the current plan as-is if the read fails.
+      return this.#ownsSession(owner);
+    }
     if (!this.#ownsSession(owner) || this.#state.session?.latest_plan_id !== latestPlanId) {
       return false;
     }
-    // Leave the current plan as-is if recovery fails.
-    if (plan === null) return true;
     this.#state.currentPlan = plan;
     this.#notify();
     return true;

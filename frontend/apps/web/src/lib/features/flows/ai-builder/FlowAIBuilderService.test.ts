@@ -208,8 +208,7 @@ describe("FlowAIBuilderService", () => {
     service.setSavedFlowStepScope(scope);
     expect(service.activeStepTransportContext).toEqual(scope.editContext);
 
-    // A replacement is published before its bootstrap finishes, and can be
-    // sent to in that window: the step it must not inherit is this one.
+    // The step a replacement session must not inherit is this one.
     service.seedState({ session: session("s-fresh") as never });
     expect(service.savedFlowStepScope).toBeNull();
     expect(service.activeStepTransportContext).toBeNull();

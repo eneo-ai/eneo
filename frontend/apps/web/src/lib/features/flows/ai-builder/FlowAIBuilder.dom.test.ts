@@ -1036,7 +1036,8 @@ describe("FlowAIBuilder discovery screens", () => {
             })
           ]
         })
-      ]
+      ],
+      plans: { [PLAN_ID]: PLAN_RESPONSE }
     });
     const { stream } = makeStream();
     renderShell({ fetch, stream, resumeSessionId: "s-1" });
@@ -2544,6 +2545,31 @@ describe("FlowAIBuilder edit host contract", () => {
     });
   });
 
+  it("drops the saved-step placeholder with the context when the chip is dismissed", async () => {
+    const { fetch } = makeFetch({ created: editSession() });
+    const { stream } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    await builder().focusSavedFlowStep(SAVED_STEP_SCOPE);
+    expect(await screen.findByText(SAVED_STEP_LABEL)).toBeTruthy();
+    screen.getByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() });
+
+    await fireEvent.click(screen.getByRole("button", { name: m.ai_builder_edit_context_clear() }));
+
+    await waitFor(() => expect(screen.queryByText(SAVED_STEP_LABEL)).toBeNull());
+    expect(
+      screen.queryByRole("textbox", { name: m.ai_builder_saved_step_prompt_placeholder() })
+    ).toBeNull();
+    expect(service().savedFlowStepScope).toBeNull();
+  });
+
   it("delivers a cold saved-step launch to the composer once the session exists", async () => {
     // The flow editor calls in right after mounting the host, before the
     // session round-trip has finished; the focus must wait for the real composer.
@@ -2852,13 +2878,13 @@ describe("FlowAIBuilder edit host contract", () => {
     expect(calls[0]!.body).toMatchObject({ edit_context: SAVED_STEP_SCOPE.editContext });
   });
 
-  it("treats a plan-only resumed edit session as ongoing before its plan has loaded", async () => {
+  it("treats a plan-only resumed edit session as ongoing from the session fact", async () => {
     let releaseCreate!: () => void;
     const held = new Promise<void>((resolve) => {
       releaseCreate = resolve;
     });
-    // Empty conversation but a latest plan: the plan fetch happens after the
-    // session is published, so the launch decision must read the session fact.
+    // Empty conversation but a latest plan: the launch decision must read the
+    // session fact, not the hydrated plan.
     const planOnly = makeSession({
       session_id: "e-plan-only",
       target_kind: "edit",

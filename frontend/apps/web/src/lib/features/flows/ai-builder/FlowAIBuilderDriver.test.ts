@@ -786,6 +786,64 @@ describe("FlowAIBuilderDriver", () => {
     ).toHaveLength(0);
   });
 
+  it("does not publish a created session whose plan cannot be loaded", async () => {
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return makeSession({ session_id: "session-2", latest_plan_id: "plan-9" });
+      }
+      if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") {
+        throw new Error("plan unavailable");
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    await expect(driver.createSession("edit")).rejects.toThrow("plan unavailable");
+
+    expect(driver.state.session).toBeNull();
+    expect(driver.state.currentPlan).toBeNull();
+    expect(driver.state.error).not.toBeNull();
+  });
+
+  it("keeps a pending resume cancellable while its plan is still loading", async () => {
+    const sessionId = "session-shared";
+    const activeSnapshot = makeSession({ session_id: sessionId, latest_plan_id: "plan-9" });
+    const delayedCancellation = Promise.withResolvers<void>();
+    const heldPlan = Promise.withResolvers<unknown>();
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path.endsWith("/cancel")) return await delayedCancellation.promise;
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return activeSnapshot;
+      if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") return await heldPlan.promise;
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: activeSnapshot,
+      draftSessions: [makeDraft({ session_id: sessionId })]
+    });
+
+    const cancellation = driver.discardSession(sessionId);
+    const resume = driver.resumeSession(sessionId);
+    await vi.waitFor(() =>
+      expect(fetch.mock.calls.some(([path]) => path.endsWith("/plans/{plan_id}"))).toBe(true)
+    );
+    expect(driver.state.isInitializing).toBe(true);
+    delayedCancellation.resolve();
+    await cancellation;
+    heldPlan.resolve(makePlan({ plan_id: "plan-9", status: "approved" }));
+    await resume;
+
+    expect(driver.state.session).toBeNull();
+    expect(driver.state.draftSessions).toEqual([]);
+  });
+
   it("reuses edit session creation as resume-first and refreshes recovered plan state", async () => {
     const fetch = vi
       .fn()
